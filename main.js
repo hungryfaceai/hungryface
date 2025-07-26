@@ -8,7 +8,7 @@ let faceLandmarker;
 let runningMode = "IMAGE";
 let enableWebcamButton;
 let webcamRunning = false;
-const videoWidth = 480;
+const videoWidth = 1024;
 
 document.addEventListener("DOMContentLoaded", () => {
   const demosSection = document.getElementById("demos");
