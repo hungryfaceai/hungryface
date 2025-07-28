@@ -186,9 +186,39 @@ async function runStreamingAudioClassification() {
       "(" +
       categories[1].score.toFixed(3) +
       ")\n" +
+
       categories[2].categoryName +
       "(" +
       categories[2].score.toFixed(3) +
+      ")\n" +
+      categories[3].categoryName +
+      "(" +
+      categories[3].score.toFixed(3) +
+      ")\n" + 
+      categories[4].categoryName +
+      "(" +
+      categories[4].score.toFixed(3) +
+      ")\n" + 
+      categories[5].categoryName +
+      "(" +
+      categories[5].score.toFixed(3) +
+      ")\n" +
+      categories[6].categoryName +
+      "(" +
+      categories[6].score.toFixed(3) +
+      ")\n" + 
+      categories[7].categoryName +
+      "(" +
+      categories[7].score.toFixed(3) +
+      ")\n" +         
+      categories[8].categoryName +
+      "(" +
+      categories[8].score.toFixed(3) +
+      ")\n" + 
+      
+      categories[9].categoryName +
+      "(" +
+      categories[9].score.toFixed(3) +
       ")";
   };
 
