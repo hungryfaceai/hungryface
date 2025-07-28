@@ -4,6 +4,34 @@
 import vision from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
 const { FaceLandmarker, FilesetResolver, DrawingUtils } = vision;
 
+let expressionModel;
+const classes = ["happy", "sad"]; // 🔁 Customize as needed
+
+async function loadExpressionModel() {
+  expressionModel = await tf.loadLayersModel("model_tfjs/model.json");
+  console.log("✅ Expression model loaded.");
+}
+loadExpressionModel();
+
+// --- Prediction smoothing ---
+const predictionBuffer = [];
+const SMOOTHING_WINDOW = 10; // last N frames
+
+function smoothPredictions(newPreds) {
+  predictionBuffer.push(newPreds);
+  if (predictionBuffer.length > SMOOTHING_WINDOW) {
+    predictionBuffer.shift(); // remove oldest
+  }
+
+  const summed = Array(newPreds.length).fill(0);
+  for (const preds of predictionBuffer) {
+    preds.forEach((val, idx) => (summed[idx] += val));
+  }
+
+  const averaged = summed.map(val => val / predictionBuffer.length);
+  return averaged;
+}
+
 let faceLandmarker;
 let runningMode = "IMAGE";
 let enableWebcamButton;
@@ -12,7 +40,6 @@ const videoWidth = 1024;
 
 document.addEventListener("DOMContentLoaded", () => {
   const demosSection = document.getElementById("demos");
-  const imageBlendShapes = document.getElementById("image-blend-shapes");
   const videoBlendShapes = document.getElementById("video-blend-shapes");
   const video = document.getElementById("webcam");
   const canvasElement = document.getElementById("output_canvas");
@@ -35,7 +62,6 @@ document.addEventListener("DOMContentLoaded", () => {
       numFaces: 1
     });
 
-    // Make the demo visible once loaded
     demosSection.classList.remove("invisible");
   }
 
@@ -98,43 +124,35 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (results.faceLandmarks) {
       for (const landmarks of results.faceLandmarks) {
-		/*
-        drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_TESSELATION, {
-          color: "#C0C0C070", lineWidth: 1
-        });
-        drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE, {
-          color: "#FF3030"
-        });
-        drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW, {
-          color: "#FF3030"
-        });
-        drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_LEFT_EYE, {
-          color: "#30FF30"
-        });
-        drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW, {
-          color: "#30FF30"
-        });
-        drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, {
-          color: "#E0E0E0"
-        });
-        drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_LIPS, {
-          color: "#E0E0E0"
-        });
-        drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_RIGHT_IRIS, {
-          color: "#FF3030"
-        });
-        drawingUtils.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_LEFT_IRIS, {
-          color: "#30FF30"
-        });
-		*/
-		drawingUtils.drawLandmarks(landmarks, {
+        drawingUtils.drawLandmarks(landmarks, {
           color: "#00FF00",
-          radius: 0.5 // Matches Python cv2.circle radius=1
+          radius: 0.5
         });
       }
     }
 
     drawBlendShapes(videoBlendShapes, results.faceBlendshapes);
+
+    // --- Run expression model with smoothing ---
+    if (results.faceBlendshapes && results.faceBlendshapes.length > 0 && expressionModel) {
+      const blendshapes = results.faceBlendshapes[0].categories.map(c => c.score);
+      const inputTensor = tf.tensor(blendshapes, [1, 52, 1]); // or [1, 52] if needed
+
+      const prediction = expressionModel.predict(inputTensor);
+      prediction.array().then((preds) => {
+        const smoothed = smoothPredictions(preds[0]);
+        const maxIndex = smoothed.indexOf(Math.max(...smoothed));
+        const label = classes[maxIndex];
+        const confidence = smoothed[maxIndex];
+
+        // --- Overlay label on canvas ---
+        canvasCtx.font = "24px Arial";
+        canvasCtx.fillStyle = "rgba(0, 0, 0, 0.6)";
+        canvasCtx.fillRect(10, 10, 280, 36);
+        canvasCtx.fillStyle = "#00FF00";
+        canvasCtx.fillText(`Expression: ${label} (${(confidence * 100).toFixed(1)}%)`, 20, 36);
+      });
+    }
 
     if (webcamRunning) {
       window.requestAnimationFrame(predictWebcam);
