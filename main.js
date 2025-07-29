@@ -8,8 +8,12 @@ let expressionModel;
 const classes = ["happy", "sad"]; // 🔁 Customize as needed
 
 async function loadExpressionModel() {
-  expressionModel = await tf.loadLayersModel("model_tfjs/model.json");
-  console.log("✅ Expression model loaded.");
+  try {
+    expressionModel = await tf.loadLayersModel("model_tfjs/model.json");
+    console.log("✅ Expression model loaded OK.");
+  } catch (err) {
+    console.error("❌ Failed to load model:", err);
+  }
 }
 loadExpressionModel();
 
@@ -66,6 +70,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   createFaceLandmarker();
+listCameras(); //added this line
 
   function hasGetUserMedia() {
     return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
@@ -77,6 +82,24 @@ document.addEventListener("DOMContentLoaded", () => {
   } else {
     console.warn("getUserMedia() is not supported by your browser");
   }
+  //added:
+document.getElementById("startCamera").addEventListener("click", async () => {
+  const deviceId = document.getElementById("cameraSelect").value;
+  const constraints = {
+    video: { deviceId: { exact: deviceId } }
+  };
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    const video = document.getElementById("webcam");
+    video.srcObject = stream;
+    video.play();
+  } catch (err) {
+    console.error("Error accessing camera:", err);
+  }
+});
+
+//end added  
 
   function enableCam() {
     if (!faceLandmarker) {
@@ -88,7 +111,18 @@ document.addEventListener("DOMContentLoaded", () => {
     enableWebcamButton.querySelector(".mdc-button__label").innerText =
       webcamRunning ? "DISABLE PREDICTIONS" : "ENABLE WEBCAM";
 
-    const constraints = { video: true };
+    const constraints = { video: true }; //access the front camera
+/*navigator.mediaDevices.getUserMedia({
+  video: { facingMode: { exact: "environment" } }
+})
+.then((stream) => {
+  video.srcObject = stream;
+  video.play();
+})
+.catch((err) => {
+  console.error("Could not access back camera:", err);
+});*/ //access the back camera
+	
 
     navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
       video.srcObject = stream;
@@ -101,12 +135,28 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function predictWebcam() {
     const ratio = video.videoHeight / video.videoWidth;
+	/*
     video.style.width = videoWidth + "px";
     video.style.height = videoWidth * ratio + "px";
+	
     canvasElement.style.width = videoWidth + "px";
     canvasElement.style.height = videoWidth * ratio + "px";
     canvasElement.width = video.videoWidth;
     canvasElement.height = video.videoHeight;
+	*/
+const width = video.videoWidth;
+const height = video.videoHeight;
+
+// Match video display size to actual resolution
+video.style.width = width + "px";
+video.style.height = height + "px";
+
+// Match canvas display size and internal pixel buffer
+canvasElement.style.width = width + "px";
+canvasElement.style.height = height + "px";
+canvasElement.width = width;
+canvasElement.height = height;
+
 
     if (runningMode === "IMAGE") {
       runningMode = "VIDEO";
@@ -134,7 +184,8 @@ document.addEventListener("DOMContentLoaded", () => {
     drawBlendShapes(videoBlendShapes, results.faceBlendshapes);
 
     // --- Run expression model with smoothing ---
-    if (results.faceBlendshapes && results.faceBlendshapes.length > 0 && expressionModel) {
+    /*
+	if (results.faceBlendshapes && results.faceBlendshapes.length > 0 && expressionModel) {
       const blendshapes = results.faceBlendshapes[0].categories.map(c => c.score);
       const inputTensor = tf.tensor(blendshapes, [1, 52, 1]); // or [1, 52] if needed
 
@@ -153,6 +204,39 @@ document.addEventListener("DOMContentLoaded", () => {
         canvasCtx.fillText(`Expression: ${label} (${(confidence * 100).toFixed(1)}%)`, 20, 36);
       });
     }
+	*/
+	if (results.faceBlendshapes && results.faceBlendshapes.length > 0 && expressionModel) {
+  const blendshapes = results.faceBlendshapes[0].categories.map(c => c.score);
+  const inputTensor = tf.tensor(blendshapes, [1, 52, 1]); // or [1, 52] if needed
+  const prediction = expressionModel.predict(inputTensor);
+  const preds = await prediction.data(); // await added here
+  const smoothed = smoothPredictions(Array.from(preds));
+  const maxIndex = smoothed.indexOf(Math.max(...smoothed));
+  const label = classes[maxIndex];
+  const confidence = smoothed[maxIndex];
+
+//console.log("Running model prediction");
+//console.log("Blendshapes:", blendshapes);
+//console.log("Input tensor shape:", inputTensor.shape);
+
+canvasCtx.font = "24px Arial";
+canvasCtx.textBaseline = "top";
+canvasCtx.fillStyle = "rgba(0, 0, 0, 0.6)";
+canvasCtx.fillRect(10, 10, 320, 40); // background box
+
+canvasCtx.fillStyle = "#00FF00";
+console.log(`Expression: ${label} (${(confidence * 100).toFixed(1)}%)`);
+canvasCtx.fillText(`Expression: ${label} (${(confidence * 100).toFixed(1)}%)`, 20, 20); // not working..
+document.getElementById("expression-label").textContent =
+  `DOM: ${label} (${(confidence * 100).toFixed(1)}%)`;
+
+  //console.log("Raw model output:", preds);
+//canvasCtx.fillStyle = "red"; //debug
+//canvasCtx.font = "bold 24px monospace"; //debug
+//canvasCtx.fillText("CANVAS DRAWING WORKS", 100, 100); //debug
+
+  }
+
 
     if (webcamRunning) {
       window.requestAnimationFrame(predictWebcam);
@@ -178,4 +262,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
     el.innerHTML = htmlMaker;
   }
+
+//added:
+  async function listCameras() {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoInputs = devices.filter(device => device.kind === "videoinput");
+
+    const select = document.getElementById("cameraSelect");
+	select.innerHTML = ""; // clear previous
+    videoInputs.forEach(device => {
+      const option = document.createElement("option");
+      option.value = device.deviceId;
+      option.text = device.label || `Camera ${select.length + 1}`;
+      select.appendChild(option);
+    });
+  }
+  
 });
