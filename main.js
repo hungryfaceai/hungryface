@@ -109,7 +109,7 @@ document.getElementById("startCamera").addEventListener("click", async () => {
 
     webcamRunning = !webcamRunning;
     enableWebcamButton.querySelector(".mdc-button__label").innerText =
-      webcamRunning ? "DISABLE PREDICTIONS" : "ENABLE WEBCAM";
+      webcamRunning ? "DISABLE PREDICTIONS" : "ENABLE PREDICTIONS";
 
     const constraints = { video: true }; //access the front camera
 /*navigator.mediaDevices.getUserMedia({
