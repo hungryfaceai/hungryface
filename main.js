@@ -116,7 +116,7 @@ document.getElementById("startCamera").addEventListener("click", async () => {
 	  
     //const constraints = { video: true }; //access the front camera
     const constraints = {
-      video: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true // 🔧 CHANGED
+      video: { deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined } // 🔧 CHANGED
     };	  
 /*navigator.mediaDevices.getUserMedia({
   video: { facingMode: { exact: "environment" } }
