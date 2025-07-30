@@ -292,8 +292,8 @@ canvasCtx.fillStyle = "rgba(0, 0, 0, 0.6)";
 canvasCtx.fillRect(10, 10, 320, 40); // background box
 
 canvasCtx.fillStyle = "#00FF00";
-console.log(`Expression: ${label} (${(confidence * 100).toFixed(1)}%)`);
-canvasCtx.fillText(`Expression: ${label} (${(confidence * 100).toFixed(1)}%)`, 20, 20); // not working..
+console.log(`Expression: ${label} (${(confidence * 100).toFixed(0)}%)`);
+canvasCtx.fillText(`Expression: ${label} (${(confidence * 100).toFixed(0)}%)`, 20, 20); // not working..
 document.getElementById("expression-label").textContent =
   `DOM: ${label} (${(confidence * 100).toFixed(1)}%)`;
 
