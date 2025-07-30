@@ -332,11 +332,20 @@ document.getElementById("expression-label").textContent =
 
 //added:
   async function listCameras() {
+    const select = document.getElementById("cameraSelect");
+    if (isIOS()) {
+      // iOS often hides camera labels — prefill with standard options
+      select.innerHTML = `
+        <option value="user">Front Camera (iOS)</option>
+        <option value="back">Back Camera (iOS)</option>
+      `;
+      return; // Skip device enumeration on iOS
+    }	  
     const devices = await navigator.mediaDevices.enumerateDevices();
     const videoInputs = devices.filter(device => device.kind === "videoinput");
 
-    const select = document.getElementById("cameraSelect");
-	select.innerHTML = ""; // clear previous
+    //const select = document.getElementById("cameraSelect");
+    select.innerHTML = ""; // clear previous
     videoInputs.forEach(device => {
       const option = document.createElement("option");
       option.value = device.deviceId;
