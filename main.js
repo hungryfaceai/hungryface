@@ -111,7 +111,13 @@ document.getElementById("startCamera").addEventListener("click", async () => {
     enableWebcamButton.querySelector(".mdc-button__label").innerText =
       webcamRunning ? "DISABLE PREDICTIONS" : "ENABLE PREDICTIONS";
 
-    const constraints = { video: true }; //access the front camera
+    const video = document.getElementById("webcam"); // ADDED
+    const selectedDeviceId = document.getElementById("cameraSelect").value; // ADDED
+	  
+    //const constraints = { video: true }; //access the front camera
+    const constraints = {
+      video: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true // 🔧 CHANGED
+    };	  
 /*navigator.mediaDevices.getUserMedia({
   video: { facingMode: { exact: "environment" } }
 })
@@ -124,9 +130,16 @@ document.getElementById("startCamera").addEventListener("click", async () => {
 });*/ //access the back camera
 	
 
+    /*navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
+      video.srcObject = stream;
+      video.addEventListener("loadeddata", predictWebcam);
+    });
+  }*/
     navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
       video.srcObject = stream;
       video.addEventListener("loadeddata", predictWebcam);
+    }).catch((err) => { // 🔧 ADDED
+      console.error("Could not access selected camera:", err); // 🔧 ADDED
     });
   }
 
