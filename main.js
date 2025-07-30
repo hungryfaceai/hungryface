@@ -42,6 +42,31 @@ let enableWebcamButton;
 let webcamRunning = false;
 const videoWidth = 1024;
 
+//added:
+function isIOS() {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+function getCameraConstraints() {
+  const selected = document.getElementById("cameraSelect").value;
+
+  if (isIOS()) {
+    const facingMode = selected.includes("back") ? { exact: "environment" } : "user";
+    return { video: { facingMode } };
+  }
+
+  return { video: selected ? { deviceId: { exact: selected } } : true };
+}
+
+function applyVideoMirroring(video, isFrontFacing) {
+  const transformStyle = isFrontFacing ? "rotateY(180deg)" : "none";
+  video.style.transform = transformStyle;
+
+  const canvas = document.getElementById("output_canvas");
+  canvas.style.transform = transformStyle;
+}
+//
+
 document.addEventListener("DOMContentLoaded", () => {
   const demosSection = document.getElementById("demos");
   const videoBlendShapes = document.getElementById("video-blend-shapes");
@@ -70,7 +95,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   createFaceLandmarker();
-listCameras(); //added this line
+  listCameras(); //added this line
 
   function hasGetUserMedia() {
     return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
@@ -83,7 +108,8 @@ listCameras(); //added this line
     console.warn("getUserMedia() is not supported by your browser");
   }
   //added:
-document.getElementById("startCamera").addEventListener("click", async () => {
+	
+/*document.getElementById("startCamera").addEventListener("click", async () => {
   const deviceId = document.getElementById("cameraSelect").value;
   const constraints = {
     video: { deviceId: { exact: deviceId } }
@@ -98,10 +124,11 @@ document.getElementById("startCamera").addEventListener("click", async () => {
     console.error("Error accessing camera:", err);
   }
 });
-
 //end added  
+*/
 
-  function enableCam() {
+  
+  /*function enableCam() {
     if (!faceLandmarker) {
       console.log("Wait! faceLandmarker not loaded yet.");
       return;
@@ -118,23 +145,6 @@ document.getElementById("startCamera").addEventListener("click", async () => {
     const constraints = {
       video: { deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined } // 🔧 CHANGED
     };	  
-/*navigator.mediaDevices.getUserMedia({
-  video: { facingMode: { exact: "environment" } }
-})
-.then((stream) => {
-  video.srcObject = stream;
-  video.play();
-})
-.catch((err) => {
-  console.error("Could not access back camera:", err);
-});*/ //access the back camera
-	
-
-    /*navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
-      video.srcObject = stream;
-      video.addEventListener("loadeddata", predictWebcam);
-    });
-  }*/
     navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
       video.srcObject = stream;
       video.addEventListener("loadeddata", predictWebcam);
@@ -142,7 +152,34 @@ document.getElementById("startCamera").addEventListener("click", async () => {
       console.error("Could not access selected camera:", err); // 🔧 ADDED
     });
   }
+  */
+	
+function enableCam() {
+  if (!faceLandmarker) {
+    console.log("Wait! faceLandmarker not loaded yet.");
+    return;
+  }
 
+  webcamRunning = !webcamRunning;
+  enableWebcamButton.querySelector(".mdc-button__label").innerText =
+    webcamRunning ? "DISABLE PREDICTIONS" : "ENABLE PREDICTIONS";
+
+  const video = document.getElementById("webcam");
+  const constraints = getCameraConstraints();
+
+  navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
+    video.srcObject = stream;
+    video.addEventListener("loadeddata", predictWebcam);
+
+    const isFront = constraints.video.facingMode === "user" ||
+                    document.getElementById("cameraSelect").value.includes("front");
+    applyVideoMirroring(video, isFront);
+  }).catch((err) => {
+    console.error("Could not access selected camera:", err);
+  });
+}
+
+	
   let lastVideoTime = -1;
   let results = undefined;
 
