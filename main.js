@@ -127,6 +127,23 @@ document.addEventListener("DOMContentLoaded", () => {
 //end added  
 */
 
+document.getElementById("startCamera").addEventListener("click", async () => {
+  const video = document.getElementById("webcam");
+  const constraints = getCameraConstraints();
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = stream;
+    video.play();
+
+    const isFront = constraints.video.facingMode === "user" ||
+                    document.getElementById("cameraSelect").value.includes("front");
+    applyVideoMirroring(video, isFront);
+  } catch (err) {
+    console.error("Error accessing camera:", err);
+  }
+});
+	
   
   /*function enableCam() {
     if (!faceLandmarker) {
