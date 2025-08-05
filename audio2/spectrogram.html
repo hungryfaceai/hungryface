@@ -2,11 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Live Spectrogram from Microphone</title>
+  <title>Live Spectrogram with Feature Selection</title>
   <script src="https://cdn.jsdelivr.net/npm/meyda/dist/web/meyda.min.js"></script>
   <style>
     body {
       font-family: sans-serif;
+      padding: 20px;
     }
     canvas {
       border: 1px solid black;
@@ -16,58 +17,18 @@
   </style>
 </head>
 <body>
-  <h1>🎤 Live Spectrogram from Microphone</h1>
+  <h1>🎤 Live Audio Spectrogram</h1>
+  <label for="feature">Choose Spectrogram Feature: </label>
+  <select id="feature">
+    <option value="mfcc" selected>MFCC (Perceptual)</option>
+    <option value="amplitudeSpectrum">Amplitude Spectrum (Raw FFT)</option>
+    <option value="powerSpectrum">Power Spectrum (Energy)</option>
+  </select>
   <button id="start">Start Microphone</button>
+
   <canvas id="spectrogram" width="800" height="256"></canvas>
 
   <script>
     const canvas = document.getElementById('spectrogram');
     const ctx = canvas.getContext('2d');
     const canvasWidth = canvas.width;
-    const canvasHeight = canvas.height;
-    const melBands = 40;  // Number of frequency bins to draw
-    let x = 0; // Horizontal position on canvas
-
-    let meydaAnalyzer;
-
-    document.getElementById('start').addEventListener('click', async () => {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const audioCtx = new AudioContext({ sampleRate: 16000 }); // Match YAMNet sample rate
-      const source = audioCtx.createMediaStreamSource(stream);
-
-      meydaAnalyzer = Meyda.createMeydaAnalyzer({
-        audioContext: audioCtx,
-        source: source,
-        bufferSize: 512,
-        hopSize: 256,
-        windowingFunction: 'hamming',
-        featureExtractors: ['mfcc'],  // You could change to 'amplitudeSpectrum'
-        numberOfMFCCCoefficients: melBands,
-        callback: (features) => {
-          if (!features || !features.mfcc) return;
-          drawFrame(features.mfcc);
-        }
-      });
-
-      meydaAnalyzer.start();
-    });
-
-    function drawFrame(mfcc) {
-      const barWidth = 1;
-
-      // Shift image left if we're at the edge
-      if (x >= canvasWidth) {
-        const imageData = ctx.getImageData(barWidth, 0, canvasWidth - barWidth, canvasHeight);
-        ctx.putImageData(imageData, 0, 0);
-        x = canvasWidth - barWidth;
-        ctx.clearRect(x, 0, barWidth, canvasHeight);
-      }
-
-      for (let i = 0; i < melBands; i++) {
-        const value = mfcc[i];
-        const norm = Math.min(1, Math.max(0, (value + 100) / 100)); // Normalize
-        const intensity = Math.floor(norm * 255);
-        const y = canvasHeight - (i / melBands) * canvasHeight;
-
-        ctx.fillStyle = `rgb(${intensity}, ${intensity / 2}, 0)`;
-        ctx.fillRect(x, y, barWidth, ca
