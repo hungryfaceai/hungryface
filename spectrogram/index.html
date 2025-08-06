@@ -95,7 +95,20 @@
     let audioCtx, source, stream;
     let analyzers = {}, contexts = {}, canvases = {}, xPositions = {};
 
-    function createCanvas(id, title, featureName) {
+    function getDisplayName(featureName) {
+      switch (featureName) {
+        case 'mfcc':
+          return 'Mel-frequency cepstral coefficients';
+        case 'amplitudeSpectrum':
+          return 'Amplitude Spectrum';
+        case 'powerSpectrum':
+          return 'Power Spectrum';
+        default:
+          return featureName;
+      }
+    }
+
+    function createCanvas(id, title) {
       const wrapper = document.createElement('div');
       wrapper.className = 'spectrogram-section';
 
@@ -103,40 +116,14 @@
       label.className = 'title';
       label.innerText = title;
 
-      const layout = document.createElement('div');
-      layout.style.display = 'flex';
-      layout.style.alignItems = 'flex-start';
-
-      const yAxis = document.createElement('div');
-      yAxis.style.width = '30px';
-      yAxis.style.height = canvasHeight + 'px';
-      yAxis.style.display = featureName === 'mfcc' ? 'flex' : 'none';
-      yAxis.style.flexDirection = 'column';
-      yAxis.style.justifyContent = 'space-between';
-      yAxis.style.color = '#aaa';
-      yAxis.style.fontSize = '10px';
-      yAxis.style.paddingRight = '5px';
-      yAxis.style.userSelect = 'none';
-
-      if (featureName === 'mfcc') {
-        for (let i = 0; i < 13; i++) {
-          const tick = document.createElement('div');
-          tick.innerText = i;
-          yAxis.appendChild(tick);
-        }
-      }
-
       const canvas = document.createElement('canvas');
       canvas.id = id;
       canvas.width = canvasWidth;
       canvas.height = canvasHeight;
       canvas.style.backgroundColor = 'black';
 
-      layout.appendChild(yAxis);
-      layout.appendChild(canvas);
-
       wrapper.appendChild(label);
-      wrapper.appendChild(layout);
+      wrapper.appendChild(canvas);
       container.appendChild(wrapper);
 
       return canvas;
@@ -157,26 +144,21 @@
         ctx.clearRect(x, 0, barWidth, canvasHeight);
       }
 
-      if (featureName === 'mfcc') {
-        ctx.strokeStyle = 'deepskyblue';
-        ctx.lineWidth = 1;
-        for (let i = 0; i < numBands; i++) {
-          const norm = Math.min(1, Math.max(0, (spectrum[i] + 100) / 100));
-          const y = canvasHeight - norm * canvasHeight;
-          ctx.beginPath();
-          ctx.moveTo(x, y);
-          ctx.lineTo(x + barWidth, y);
-          ctx.stroke();
+      for (let i = 0; i < numBands; i++) {
+        let norm;
+        if (featureName === 'mfcc') {
+          norm = Math.min(1, Math.max(0, (spectrum[i] + 100) / 100));
+        } else {
+          norm = Math.min(1, Math.max(0, Math.log10(spectrum[i] + 1) / 3));
         }
-        ctx.fillStyle = 'rgba(0, 0, 50, 0.1)';
-        ctx.fillRect(x, 0, barWidth, canvasHeight);
-      } else {
-        for (let i = 0; i < numBands; i++) {
-          const norm = Math.min(1, Math.max(0, Math.log10(spectrum[i] + 1) / 3));
-          const intensity = Math.floor(norm * 255);
-          const y = canvasHeight - (i / numBands) * canvasHeight;
 
-          let color;
+        const intensity = Math.floor(norm * 255);
+        const y = canvasHeight - ((i + 1) / numBands) * canvasHeight;
+
+        let color;
+        if (featureName === 'mfcc') {
+          color = `rgb(0, 0, ${intensity})`; // Blue shading
+        } else {
           switch (colormap) {
             case 'grayscale':
               color = `rgb(${intensity}, ${intensity}, ${intensity})`;
@@ -192,10 +174,10 @@
               color = `rgb(${r}, ${g}, ${b})`;
               break;
           }
-
-          ctx.fillStyle = color;
-          ctx.fillRect(x, y, barWidth, canvasHeight / numBands);
         }
+
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y, barWidth, canvasHeight / numBands);
       }
 
       return x + barWidth;
@@ -225,7 +207,7 @@
       }
 
       const runFeature = (featureName) => {
-        const canvas = createCanvas(`canvas-${featureName}`, featureName, featureName);
+        const canvas = createCanvas(`canvas-${featureName}`, getDisplayName(featureName));
         const ctx = canvas.getContext('2d');
         resetCanvas(ctx);
         contexts[featureName] = ctx;
