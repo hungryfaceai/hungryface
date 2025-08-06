@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Live Spectrogram with Feature Selection</title>
+  <title>Live Spectrogram with Color Selection</title>
   <script src="https://cdn.jsdelivr.net/npm/meyda/dist/web/meyda.min.js"></script>
   <style>
     body {
@@ -14,29 +14,43 @@
       display: block;
       margin-top: 10px;
     }
+    label {
+      margin-right: 10px;
+    }
   </style>
 </head>
 <body>
   <h1>🎤 Live Audio Spectrogram</h1>
-  <label for="feature">Choose Spectrogram Feature: </label>
+
+  <label for="feature">Feature:</label>
   <select id="feature">
     <option value="mfcc" selected>MFCC (Perceptual)</option>
     <option value="amplitudeSpectrum">Amplitude Spectrum (Raw FFT)</option>
     <option value="powerSpectrum">Power Spectrum (Energy)</option>
   </select>
+
+  <label for="colormap">Colormap:</label>
+  <select id="colormap">
+    <option value="grayscale">Grayscale</option>
+    <option value="rainbow">Rainbow (HSL)</option>
+    <option value="heat">Heatmap (Red/Blue)</option>
+  </select>
+
   <button id="start">Start Microphone</button>
 
   <canvas id="spectrogram" width="800" height="256"></canvas>
 
   <script>
     const canvas = document.getElementById('spectrogram');
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const canvasWidth = canvas.width;
     const canvasHeight = canvas.height;
     const barWidth = 1;
 
-    let audioCtx, meydaAnalyzer, source, currentFeature = 'mfcc';
+    let audioCtx, meydaAnalyzer, source;
     let x = 0;
+    let currentFeature = 'mfcc';
+    let currentColormap = 'grayscale';
 
     const resetCanvas = () => {
       x = 0;
@@ -46,12 +60,15 @@
     document.getElementById('feature').addEventListener('change', (e) => {
       currentFeature = e.target.value;
       resetCanvas();
-
       if (meydaAnalyzer && meydaAnalyzer.isRunning) {
         meydaAnalyzer.stop();
         meydaAnalyzer.setFeatures([currentFeature]);
         meydaAnalyzer.start();
       }
+    });
+
+    document.getElementById('colormap').addEventListener('change', (e) => {
+      currentColormap = e.target.value;
     });
 
     document.getElementById('start').addEventListener('click', async () => {
@@ -107,7 +124,25 @@
         const intensity = Math.floor(norm * 255);
         const y = canvasHeight - (i / numBands) * canvasHeight;
 
-        ctx.fillStyle = `rgb(${intensity}, ${intensity / 2}, 0)`;
+        // 🎨 Colormap switch
+        let color;
+        switch (currentColormap) {
+          case 'grayscale':
+            color = `rgb(${intensity}, ${intensity}, ${intensity})`;
+            break;
+          case 'rainbow':
+            const hue = 240 - (intensity / 255) * 240; // blue to red
+            color = `hsl(${hue}, 100%, 50%)`;
+            break;
+          case 'heat':
+            const r = intensity;
+            const g = Math.floor(intensity * 0.2);
+            const b = 255 - intensity;
+            color = `rgb(${r}, ${g}, ${b})`;
+            break;
+        }
+
+        ctx.fillStyle = color;
         ctx.fillRect(x, y, barWidth, canvasHeight / numBands);
       }
 
