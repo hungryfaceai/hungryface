@@ -2,140 +2,53 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Live Spectrogram Viewer</title>
+  <title>MFCC Inferno-Like Spectrogram</title>
   <script src="https://cdn.jsdelivr.net/npm/meyda/dist/web/meyda.min.js"></script>
   <style>
     body {
       font-family: sans-serif;
       padding: 20px;
-      background-color: white;
-      color: #000;
     }
-
     canvas {
-      border: 1px solid #666;
-      background-color: black;
+      border: 1px solid #333;
       display: block;
+      margin-top: 15px;
+      background-color: black;
     }
-
-    .spectrogram-section {
-      margin-top: 20px;
-    }
-
-    .title {
-      font-weight: bold;
-      margin-bottom: 5px;
-    }
-
-    .controls {
-      margin-bottom: 15px;
+    button {
+      padding: 10px 16px;
+      font-size: 16px;
     }
   </style>
 </head>
 <body>
-  <h1>🎤 Live Spectrogram Viewer</h1>
-
-  <div class="controls">
-    <label for="displayMode">Display Mode:</label>
-    <select id="displayMode">
-      <option value="single">Single Feature</option>
-      <option value="all" selected>All Features</option>
-    </select>
-
-    <label for="feature">Single Feature:</label>
-    <select id="feature" disabled>
-      <option value="mfcc">MFCC (Perceptual)</option>
-      <option value="amplitudeSpectrum">Amplitude Spectrum</option>
-      <option value="powerSpectrum" selected>Power Spectrum</option>
-    </select>
-
-    <label for="colormap">Colormap:</label>
-    <select id="colormap">
-      <option value="grayscale">Grayscale</option>
-      <option value="rainbow" selected>Rainbow (HSL)</option>
-      <option value="heat">Heatmap</option>
-    </select>
-
-    <label for="bufferSize">Buffer Size:</label>
-    <select id="bufferSize">
-      <option value="256">256</option>
-      <option value="512" selected>512</option>
-      <option value="1024">1024</option>
-      <option value="2048">2048</option>
-    </select>
-
-    <label for="hopSize">Hop Size:</label>
-    <select id="hopSize">
-      <option value="128">128</option>
-      <option value="256" selected>256</option>
-      <option value="512">512</option>
-      <option value="1024">1024</option>
-    </select>
-
-    <button id="start">Start Microphone</button>
-  </div>
-
-  <div id="spectrograms"></div>
+  <h1>🔥 MFCC Spectrogram (Inferno-Like)</h1>
+  <button id="start">Start Microphone</button>
+  <canvas id="mfccCanvas" width="800" height="256"></canvas>
 
   <script>
-    const canvasWidth = 800;
-    const canvasHeight = 256;
+    const canvas = document.getElementById('mfccCanvas');
+    const ctx = canvas.getContext('2d');
     const barWidth = 1;
+    const canvasWidth = canvas.width;
+    const canvasHeight = canvas.height;
 
-    const features = ['mfcc', 'amplitudeSpectrum', 'powerSpectrum'];
+    let x = 0;
 
-    const displayModeEl = document.getElementById('displayMode');
-    const featureEl = document.getElementById('feature');
-    const colormapEl = document.getElementById('colormap');
-    const bufferSizeEl = document.getElementById('bufferSize');
-    const hopSizeEl = document.getElementById('hopSize');
-    const startButton = document.getElementById('start');
-    const container = document.getElementById('spectrograms');
-
-    let audioCtx, source, stream;
-    let analyzers = {}, contexts = {}, canvases = {}, xPositions = {};
-
-    function getDisplayName(featureName) {
-      switch (featureName) {
-        case 'mfcc':
-          return 'Mel-frequency cepstral coefficients';
-        case 'amplitudeSpectrum':
-          return 'Amplitude Spectrum';
-        case 'powerSpectrum':
-          return 'Power Spectrum';
-        default:
-          return featureName;
-      }
-    }
-
-    function createCanvas(id, title) {
-      const wrapper = document.createElement('div');
-      wrapper.className = 'spectrogram-section';
-
-      const label = document.createElement('div');
-      label.className = 'title';
-      label.innerText = title;
-
-      const canvas = document.createElement('canvas');
-      canvas.id = id;
-      canvas.width = canvasWidth;
-      canvas.height = canvasHeight;
-      canvas.style.backgroundColor = 'black';
-
-      wrapper.appendChild(label);
-      wrapper.appendChild(canvas);
-      container.appendChild(wrapper);
-
-      return canvas;
-    }
-
-    function resetCanvas(ctx) {
+    function resetCanvas() {
       ctx.fillStyle = 'black';
       ctx.fillRect(0, 0, canvasWidth, canvasHeight);
     }
 
-    function drawFrame(ctx, x, spectrum, featureName, colormap) {
-      const numBands = spectrum.length;
+    function infernoColor(intensity) {
+      const r = Math.min(255, intensity * 4);
+      const g = Math.min(255, intensity * 2);
+      const b = Math.min(80, intensity * 0.4);
+      return `rgb(${r}, ${g}, ${b})`;
+    }
+
+    function drawMFCCFrame(mfcc) {
+      const numBands = mfcc.length;
 
       if (x >= canvasWidth) {
         const imageData = ctx.getImageData(barWidth, 0, canvasWidth - barWidth, canvasHeight);
@@ -145,104 +58,39 @@
       }
 
       for (let i = 0; i < numBands; i++) {
-        let norm;
-        if (featureName === 'mfcc') {
-          norm = Math.min(1, Math.max(0, (spectrum[i] + 100) / 100));
-        } else {
-          norm = Math.min(1, Math.max(0, Math.log10(spectrum[i] + 1) / 3));
-        }
-
+        const norm = Math.min(1, Math.max(0, (mfcc[i] + 100) / 100));
         const intensity = Math.floor(norm * 255);
-        const y = canvasHeight - ((i + 1) / numBands) * canvasHeight;
-
-        let color;
-        if (featureName === 'mfcc') {
-          color = `rgb(0, 0, ${intensity})`; // Blue shading
-        } else {
-          switch (colormap) {
-            case 'grayscale':
-              color = `rgb(${intensity}, ${intensity}, ${intensity})`;
-              break;
-            case 'rainbow':
-              const hue = 240 - (intensity / 255) * 240;
-              color = `hsl(${hue}, 100%, 50%)`;
-              break;
-            case 'heat':
-              const r = intensity;
-              const g = Math.floor(intensity * 0.2);
-              const b = 255 - intensity;
-              color = `rgb(${r}, ${g}, ${b})`;
-              break;
-          }
-        }
-
+        const y = (i / numBands) * canvasHeight;  // ⬅️ origin='lower' style
+        const color = infernoColor(intensity);
         ctx.fillStyle = color;
         ctx.fillRect(x, y, barWidth, canvasHeight / numBands);
       }
 
-      return x + barWidth;
+      x += barWidth;
     }
 
-    displayModeEl.addEventListener('change', (e) => {
-      featureEl.disabled = e.target.value !== 'single';
-    });
+    document.getElementById('start').addEventListener('click', async () => {
+      resetCanvas();
 
-    startButton.addEventListener('click', async () => {
-      const mode = displayModeEl.value;
-      const selectedFeature = featureEl.value;
-      const colormap = colormapEl.value;
-      const bufferSize = parseInt(bufferSizeEl.value);
-      const hopSize = parseInt(hopSizeEl.value);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const audioCtx = new AudioContext({ sampleRate: 16000 });
+      const source = audioCtx.createMediaStreamSource(stream);
 
-      container.innerHTML = '';
-      contexts = {};
-      canvases = {};
-      xPositions = {};
-      analyzers = {};
-
-      if (!audioCtx) {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioCtx = new AudioContext({ sampleRate: 16000 });
-        source = audioCtx.createMediaStreamSource(stream);
-      }
-
-      const runFeature = (featureName) => {
-        const canvas = createCanvas(`canvas-${featureName}`, getDisplayName(featureName));
-        const ctx = canvas.getContext('2d');
-        resetCanvas(ctx);
-        contexts[featureName] = ctx;
-        xPositions[featureName] = 0;
-
-        const analyzer = Meyda.createMeydaAnalyzer({
-          audioContext: audioCtx,
-          source: source,
-          bufferSize: bufferSize,
-          hopSize: hopSize,
-          windowingFunction: 'hamming',
-          featureExtractors: [featureName],
-          callback: (features) => {
-            const data = features[featureName];
-            if (data) {
-              xPositions[featureName] = drawFrame(
-                contexts[featureName],
-                xPositions[featureName],
-                data,
-                featureName,
-                colormap
-              );
-            }
+      const analyzer = Meyda.createMeydaAnalyzer({
+        audioContext: audioCtx,
+        source: source,
+        bufferSize: 512,
+        hopSize: 256,
+        windowingFunction: 'hamming',
+        featureExtractors: ['mfcc'],
+        callback: (features) => {
+          if (features && features.mfcc) {
+            drawMFCCFrame(features.mfcc);
           }
-        });
+        }
+      });
 
-        analyzer.start();
-        analyzers[featureName] = analyzer;
-      };
-
-      if (mode === 'single') {
-        runFeature(selectedFeature);
-      } else {
-        features.forEach(runFeature);
-      }
+      analyzer.start();
     });
   </script>
 </body>
