@@ -13,7 +13,7 @@
   <link rel="icon" href="data:,">
 </head>
 <body>
-  <h1>Cat vs Dog Audio Classifier v10</h1>
+  <h1>Cat vs Dog Audio Classifier v11</h1>
   <input type="file" id="audio-upload" accept=".wav" />
   <p id="status">Please upload a .wav file</p>
   <p id="prediction"></p>
@@ -23,7 +23,6 @@
       const MODEL_URL = './tfjs_model_audio/model.json';
       const classNames = ['dog', 'cat'];
 
-      // Resample audio to 16kHz mono using Web Audio API
       async function resampleTo16kHz(file) {
         const originalCtx = new (window.AudioContext || window.webkitAudioContext)();
         const arrayBuffer = await file.arrayBuffer();
@@ -50,33 +49,55 @@
 
         try {
           const waveform = await resampleTo16kHz(file);
-          //console.log(waveform.slice(0, 10)); // log first 10 values
-          //console.log(typeof waveform[0]);    // check type of values
           const audioTensor = tf.tensor(waveform); // 1D tensor
-          const model = await tf.loadGraphModel(MODEL_URL);
 
-          // Determine correct input name
-          const inputName = model.inputs[0].name.split(':')[0]; // e.g., 'serving_default_audio'
+          const model = await tf.loadGraphModel(MODEL_URL);
+          const inputName = model.inputs[0].name.split(':')[0];
+
+          console.log('✅ Model inputs:', model.inputs);
+          console.log('✅ Running model.execute with input:', inputName, audioTensor.shape);
 
           const result = model.execute({ [inputName]: audioTensor });
-          console.log('result =', result);
-          const resultData = await result; // result is a dictionary
-          
-          const probsTensor = resultData['probs'];
-          const probs = await probsTensor.data();
-          
-          const predictedIndex = resultData['label_id'] 
-            ? (await resultData['label_id'].data())[0] 
-            : probs.indexOf(Math.max(...probs)); // fallback
-          
-          const prediction = classNames[predictedIndex];
 
+          console.log('✅ Raw model output:', result);
+
+          let probs, labelId;
+
+          if (Array.isArray(result)) {
+            console.log('⚠️ Model returned array of tensors');
+            result.forEach((t, i) => console.log(`Tensor[${i}] shape:`, t.shape));
+            probs = await result[0].data();
+            labelId = (await result[1].data())[0];
+          } else if (result instanceof tf.Tensor) {
+            console.log('⚠️ Model returned single tensor:', result.shape);
+            if (result.size === 0) throw new Error("Model output tensor is empty.");
+            probs = await result.data();
+            labelId = probs.indexOf(Math.max(...probs));
+          } else if (typeof result === 'object') {
+            console.log('⚠️ Model returned object:', Object.keys(result));
+            const probsTensor = result['probs'];
+            const labelTensor = result['label_id'];
+
+            if (!probsTensor || probsTensor.size === 0) throw new Error("Missing or empty 'probs'");
+            if (!labelTensor || labelTensor.size === 0) throw new Error("Missing or empty 'label_id'");
+
+            probs = await probsTensor.data();
+            labelId = (await labelTensor.data())[0];
+          } else {
+            throw new Error("❌ Unrecognized model output format");
+          }
+
+          console.log('✅ Probabilities:', probs);
+          console.log('✅ Predicted label ID:', labelId);
+
+          const prediction = classNames[labelId] ?? `Unknown (${labelId})`;
 
           document.getElementById('prediction').innerText =
-            `Prediction: ${prediction} (dog: ${probs[0].toFixed(3)}, cat: ${probs[1].toFixed(3)})`;
+            `Prediction: ${prediction} (dog: ${probs[0]?.toFixed(3)}, cat: ${probs[1]?.toFixed(3)})`;
           document.getElementById('status').innerText = 'Done';
+
         } catch (err) {
-          console.error(err);
+          console.error('🚨 Error:', err);
           document.getElementById('status').innerText = 'Error processing audio.';
         }
       });
