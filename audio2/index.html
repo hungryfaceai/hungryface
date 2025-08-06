@@ -13,7 +13,7 @@
   <link rel="icon" href="data:,">
 </head>
 <body>
-  <h1>Cat vs Dog Audio Classifier v5</h1>
+  <h1>Cat vs Dog Audio Classifier v6</h1>
   <input type="file" id="audio-upload" accept=".wav" />
   <p id="status">Please upload a .wav file</p>
   <p id="prediction"></p>
@@ -50,11 +50,13 @@
 
         try {
           const waveform = await resampleTo16kHz(file);
-
+          const audioTensor = tf.tensor(waveform); // 1D tensor
           const model = await tf.loadGraphModel(MODEL_URL);
-          //const audioTensor = tf.tensor(waveform).expandDims(0); // shape [1, num_samples]
-          const audioTensor = tf.tensor(waveform); // shape [num_samples]
-          const result = model.predict(audioTensor);
+
+          // Determine correct input name
+          const inputName = model.inputs[0].name.split(':')[0]; // e.g., 'serving_default_audio'
+
+          const result = model.execute({ [inputName]: audioTensor });
           const probs = await result.data();
 
           const predictedIndex = probs.indexOf(Math.max(...probs));
