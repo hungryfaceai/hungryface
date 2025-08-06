@@ -5,25 +5,27 @@
   <title>Cat vs Dog Audio Classifier</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <style>
-    body {
-      font-family: sans-serif;
-      padding: 20px;
-    }
+    body { font-family: sans-serif; padding: 20px; }
   </style>
   <link rel="icon" href="data:,">
 </head>
 <body>
-  <h1>Cat vs Dog Audio Classifier v11</h1>
+  <h1>Cat vs Dog Audio Classifier v12</h1>
   <input type="file" id="audio-upload" accept=".wav" />
   <p id="status">Please upload a .wav file</p>
   <p id="prediction"></p>
 
   <script type="module">
+    console.log("📦 Script loaded");
+
     window.addEventListener('DOMContentLoaded', async () => {
+      console.log("🚀 DOM fully loaded");
+
       const MODEL_URL = './tfjs_model_audio/model.json';
       const classNames = ['dog', 'cat'];
 
       async function resampleTo16kHz(file) {
+        console.log("🎧 Resampling audio...");
         const originalCtx = new (window.AudioContext || window.webkitAudioContext)();
         const arrayBuffer = await file.arrayBuffer();
         const decoded = await originalCtx.decodeAudioData(arrayBuffer);
@@ -42,62 +44,55 @@
       }
 
       document.getElementById('audio-upload').addEventListener('change', async (e) => {
+        console.log("📂 File input changed");
+
         const file = e.target.files[0];
-        if (!file) return;
+        if (!file) {
+          console.warn("⚠️ No file selected");
+          return;
+        }
 
         document.getElementById('status').innerText = 'Processing...';
 
         try {
           const waveform = await resampleTo16kHz(file);
+          console.log("✅ Got waveform:", waveform.length, "samples");
           const audioTensor = tf.tensor(waveform); // 1D tensor
+          console.log("📊 Created tensor:", audioTensor.shape);
 
           const model = await tf.loadGraphModel(MODEL_URL);
-          const inputName = model.inputs[0].name.split(':')[0];
+          console.log("✅ Model loaded");
 
-          console.log('✅ Model inputs:', model.inputs);
-          console.log('✅ Running model.execute with input:', inputName, audioTensor.shape);
+          const inputName = model.inputs[0].name.split(':')[0];
+          console.log("📥 Input name:", inputName);
 
           const result = model.execute({ [inputName]: audioTensor });
+          console.log("📤 Model.execute() returned:", result);
 
-          console.log('✅ Raw model output:', result);
-
-          let probs, labelId;
-
-          if (Array.isArray(result)) {
-            console.log('⚠️ Model returned array of tensors');
-            result.forEach((t, i) => console.log(`Tensor[${i}] shape:`, t.shape));
-            probs = await result[0].data();
-            labelId = (await result[1].data())[0];
-          } else if (result instanceof tf.Tensor) {
-            console.log('⚠️ Model returned single tensor:', result.shape);
-            if (result.size === 0) throw new Error("Model output tensor is empty.");
-            probs = await result.data();
-            labelId = probs.indexOf(Math.max(...probs));
-          } else if (typeof result === 'object') {
-            console.log('⚠️ Model returned object:', Object.keys(result));
-            const probsTensor = result['probs'];
-            const labelTensor = result['label_id'];
-
-            if (!probsTensor || probsTensor.size === 0) throw new Error("Missing or empty 'probs'");
-            if (!labelTensor || labelTensor.size === 0) throw new Error("Missing or empty 'label_id'");
-
-            probs = await probsTensor.data();
-            labelId = (await labelTensor.data())[0];
-          } else {
-            throw new Error("❌ Unrecognized model output format");
+          // Safely inspect and log the result before using
+          if (!result) {
+            throw new Error("❌ model.execute() returned undefined/null");
           }
 
-          console.log('✅ Probabilities:', probs);
-          console.log('✅ Predicted label ID:', labelId);
+          if (Array.isArray(result)) {
+            console.log('📦 Result is an array of tensors:');
+            result.forEach((t, i) => console.log(`  - Tensor[${i}] shape:`, t.shape));
+          } else if (result instanceof tf.Tensor) {
+            console.log('📦 Result is a single tensor:', result.shape);
+          } else if (typeof result === 'object') {
+            console.log('📦 Result is an object:', Object.keys(result));
+            Object.entries(result).forEach(([k, v]) => {
+              console.log(`  - ${k}: shape =`, v.shape);
+            });
+          } else {
+            throw new Error("❌ Unrecognized result format");
+          }
 
-          const prediction = classNames[labelId] ?? `Unknown (${labelId})`;
-
-          document.getElementById('prediction').innerText =
-            `Prediction: ${prediction} (dog: ${probs[0]?.toFixed(3)}, cat: ${probs[1]?.toFixed(3)})`;
-          document.getElementById('status').innerText = 'Done';
+          // Process the result (keep your current logic below)
+          // ...
 
         } catch (err) {
-          console.error('🚨 Error:', err);
+          console.error("🚨 Error during classification:", err);
           document.getElementById('status').innerText = 'Error processing audio.';
         }
       });
