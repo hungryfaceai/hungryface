@@ -15,6 +15,7 @@
       margin-top: 10px;
     }
   </style>
+  <link rel="icon" href="data:,">
 </head>
 <body>
   <h1>Cat vs Dog Audio Classifier</h1>
@@ -25,23 +26,30 @@
 
   <script type="module">
     window.addEventListener('DOMContentLoaded', async () => {
-      const { createFFmpeg, fetchFile } = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/+esm');
-
       const MODEL_URL = './tfjs_model_audio/model.json';
       const classNames = ['dog', 'cat'];
       const canvas = document.getElementById('spectrogram');
       const ctx = canvas.getContext('2d');
-      const ffmpeg = createFFmpeg({ log: false });
 
-      const resampleTo16kMono = async (file) => {
-        if (!ffmpeg.isLoaded()) await ffmpeg.load();
-        ffmpeg.FS('writeFile', 'input.wav', await fetchFile(file));
-        await ffmpeg.run('-i', 'input.wav', '-ar', '16000', '-ac', '1', '-f', 'wav', 'output.wav');
-        const data = ffmpeg.FS('readFile', 'output.wav');
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-        const decoded = await audioCtx.decodeAudioData(data.buffer);
-        return decoded.getChannelData(0);
-      };
+      // ✅ In-browser resampling using Web Audio API
+      async function resampleInBrowser(file, targetSampleRate = 16000) {
+        const originalCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const arrayBuffer = await file.arrayBuffer();
+        const decoded = await originalCtx.decodeAudioData(arrayBuffer);
+
+        if (decoded.sampleRate === targetSampleRate) {
+          return decoded.getChannelData(0); // already 16kHz
+        }
+
+        const duration = decoded.duration;
+        const offlineCtx = new OfflineAudioContext(1, duration * targetSampleRate, targetSampleRate);
+        const source = offlineCtx.createBufferSource();
+        source.buffer = decoded;
+        source.connect(offlineCtx.destination);
+        source.start(0);
+        const rendered = await offlineCtx.startRendering();
+        return rendered.getChannelData(0); // Float32Array
+      }
 
       function drawSpectrogram(waveform, sampleRate = 16000) {
         const bufferSize = 512;
@@ -97,11 +105,11 @@
         document.getElementById('status').innerText = 'Processing audio...';
 
         try {
-          const waveform = await resampleTo16kMono(file);
+          const waveform = await resampleInBrowser(file);
           drawSpectrogram(waveform);
 
           const model = await tf.loadGraphModel(MODEL_URL);
-          const audioTensor = tf.tensor(waveform).expandDims(0); // [1, num_samples]
+          const audioTensor = tf.tensor(waveform).expandDims(0);
           const result = model.predict(audioTensor);
           const probs = await result.data();
 
@@ -110,11 +118,3 @@
             `Prediction: ${prediction} (dog: ${probs[0].toFixed(3)}, cat: ${probs[1].toFixed(3)})`;
           document.getElementById('status').innerText = 'Done';
         } catch (err) {
-          console.error(err);
-          document.getElementById('status').innerText = 'Error processing file.';
-        }
-      });
-    });
-  </script>
-</body>
-</html>
