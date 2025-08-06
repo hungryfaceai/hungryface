@@ -4,19 +4,31 @@
   <meta charset="UTF-8">
   <title>Cat vs Dog Audio Classifier</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <style>
-    body {
-      font-family: sans-serif;
-      padding: 20px;
-    }
-  </style>
+  <link rel="stylesheet" href="style.css">
   <link rel="icon" href="data:,">
 </head>
 <body>
-  <h1>Cat vs Dog Audio Classifier v18</h1>
+  <h1>Cat vs Dog Audio Classifier v19</h1>
   <input type="file" id="audio-upload" accept=".wav" />
   <p id="status">Please upload a .wav file</p>
   <p id="prediction"></p>
+
+  <div id="confidence-bars">
+    <div>
+      <label>Dog</label>
+      <div class="bar-container">
+        <div id="bar-dog" class="bar"></div>
+        <span id="label-dog" class="bar-label">0%</span>
+      </div>
+    </div>
+    <div>
+      <label>Cat</label>
+      <div class="bar-container">
+        <div id="bar-cat" class="bar"></div>
+        <span id="label-cat" class="bar-label">0%</span>
+      </div>
+    </div>
+  </div>
 
   <script type="module">
     console.log("📦 Script loaded");
@@ -67,7 +79,7 @@
         try {
           const waveform = await resampleTo16kHz(file);
           console.log("✅ Got waveform:", waveform.length, "samples");
-          const audioTensor = tf.tensor(waveform); // 1D tensor
+          const audioTensor = tf.tensor(waveform);
           console.log("📊 Created tensor:", audioTensor.shape);
 
           const model = await tf.loadGraphModel(MODEL_URL);
@@ -82,15 +94,11 @@
           let probs;
 
           if (Array.isArray(result)) {
-            console.log('📦 Result is an array of tensors');
-            result.forEach((t, i) => console.log(`  - Tensor[${i}] shape:`, t.shape));
-            probs = await result[0].data(); // assuming first tensor is probs
+            probs = await result[0].data();
           } else if (result instanceof tf.Tensor) {
-            console.log('📦 Result is a single tensor');
             if (result.size === 0) throw new Error("Model output tensor is empty.");
             probs = await result.data();
           } else if (typeof result === 'object') {
-            console.log('📦 Result is an object:', Object.keys(result));
             const probsTensor = result['probs'];
             if (!probsTensor || probsTensor.size === 0) throw new Error("Missing or empty 'probs'");
             probs = await probsTensor.data();
@@ -107,6 +115,16 @@
           document.getElementById('prediction').innerText =
             `Prediction: ${prediction} (dog: ${probs[0]?.toFixed(3)}, cat: ${probs[1]?.toFixed(3)})`;
           document.getElementById('status').innerText = 'Done';
+
+          // ✅ Update confidence bars
+          const percentDog = (probs[0] * 100).toFixed(1);
+          const percentCat = (probs[1] * 100).toFixed(1);
+
+          document.getElementById('bar-dog').style.width = `${percentDog}%`;
+          document.getElementById('bar-cat').style.width = `${percentCat}%`;
+
+          document.getElementById('label-dog').innerText = `${percentDog}%`;
+          document.getElementById('label-cat').innerText = `${percentCat}%`;
 
         } catch (err) {
           console.error("🚨 Error during classification:", err);
