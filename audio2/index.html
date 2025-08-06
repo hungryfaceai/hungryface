@@ -13,7 +13,7 @@
   <link rel="icon" href="data:,">
 </head>
 <body>
-  <h1>Cat vs Dog Audio Classifier v7</h1>
+  <h1>Cat vs Dog Audio Classifier v8</h1>
   <input type="file" id="audio-upload" accept=".wav" />
   <p id="status">Please upload a .wav file</p>
   <p id="prediction"></p>
@@ -50,8 +50,8 @@
 
         try {
           const waveform = await resampleTo16kHz(file);
-          console.log(waveform.slice(0, 10)); // log first 10 values
-          console.log(typeof waveform[0]);    // check type of values
+          //console.log(waveform.slice(0, 10)); // log first 10 values
+          //console.log(typeof waveform[0]);    // check type of values
           const audioTensor = tf.tensor(waveform); // 1D tensor
           const model = await tf.loadGraphModel(MODEL_URL);
 
@@ -59,10 +59,17 @@
           const inputName = model.inputs[0].name.split(':')[0]; // e.g., 'serving_default_audio'
 
           const result = model.execute({ [inputName]: audioTensor });
-          const probs = await result.data();
-
-          const predictedIndex = probs.indexOf(Math.max(...probs));
+          const resultData = await result; // result is a dictionary
+          
+          const probsTensor = resultData['probs'];
+          const probs = await probsTensor.data();
+          
+          const predictedIndex = resultData['label_id'] 
+            ? (await resultData['label_id'].data())[0] 
+            : probs.indexOf(Math.max(...probs)); // fallback
+          
           const prediction = classNames[predictedIndex];
+
 
           document.getElementById('prediction').innerText =
             `Prediction: ${prediction} (dog: ${probs[0].toFixed(3)}, cat: ${probs[1].toFixed(3)})`;
