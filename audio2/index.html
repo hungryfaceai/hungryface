@@ -5,12 +5,15 @@
   <title>Cat vs Dog Audio Classifier</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <style>
-    body { font-family: sans-serif; padding: 20px; }
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+    }
   </style>
   <link rel="icon" href="data:,">
 </head>
 <body>
-  <h1>Cat vs Dog Audio Classifier v13</h1>
+  <h1>Cat vs Dog Audio Classifier</h1>
   <input type="file" id="audio-upload" accept=".wav" />
   <p id="status">Please upload a .wav file</p>
   <p id="prediction"></p>
@@ -48,21 +51,18 @@
         console.error("❌ Could not find #audio-upload input element");
         return;
       }
-      
+
       input.addEventListener('change', async (e) => {
         console.log("📂 File input changed");
-      
+
         const file = e.target.files?.[0];
         if (!file) {
           console.warn("⚠️ No file selected");
           return;
         }
-      
+
         console.log("📄 File selected:", file.name, file.type);
         document.getElementById('status').innerText = 'Processing...';
-      
-        // Continue with waveform logic...
-
 
         try {
           const waveform = await resampleTo16kHz(file);
@@ -79,27 +79,34 @@
           const result = model.execute({ [inputName]: audioTensor });
           console.log("📤 Model.execute() returned:", result);
 
-          // Safely inspect and log the result before using
-          if (!result) {
-            throw new Error("❌ model.execute() returned undefined/null");
-          }
+          let probs;
 
           if (Array.isArray(result)) {
-            console.log('📦 Result is an array of tensors:');
+            console.log('📦 Result is an array of tensors');
             result.forEach((t, i) => console.log(`  - Tensor[${i}] shape:`, t.shape));
+            probs = await result[0].data(); // assuming first tensor is probs
           } else if (result instanceof tf.Tensor) {
-            console.log('📦 Result is a single tensor:', result.shape);
+            console.log('📦 Result is a single tensor');
+            if (result.size === 0) throw new Error("Model output tensor is empty.");
+            probs = await result.data();
           } else if (typeof result === 'object') {
             console.log('📦 Result is an object:', Object.keys(result));
-            Object.entries(result).forEach(([k, v]) => {
-              console.log(`  - ${k}: shape =`, v.shape);
-            });
+            const probsTensor = result['probs'];
+            if (!probsTensor || probsTensor.size === 0) throw new Error("Missing or empty 'probs'");
+            probs = await probsTensor.data();
           } else {
-            throw new Error("❌ Unrecognized result format");
+            throw new Error("❌ Unrecognized model output format");
           }
 
-          // Process the result (keep your current logic below)
-          // ...
+          const labelId = probs.indexOf(Math.max(...probs));
+          const prediction = classNames[labelId] ?? `Unknown (${labelId})`;
+
+          console.log('✅ Probabilities:', probs);
+          console.log('✅ Predicted label ID:', labelId);
+
+          document.getElementById('prediction').innerText =
+            `Prediction: ${prediction} (dog: ${probs[0]?.toFixed(3)}, cat: ${probs[1]?.toFixed(3)})`;
+          document.getElementById('status').innerText = 'Done';
 
         } catch (err) {
           console.error("🚨 Error during classification:", err);
