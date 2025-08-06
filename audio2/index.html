@@ -43,16 +43,26 @@
         return rendered.getChannelData(0);
       }
 
-      document.getElementById('audio-upload').addEventListener('change', async (e) => {
+      const input = document.getElementById('audio-upload');
+      if (!input) {
+        console.error("❌ Could not find #audio-upload input element");
+        return;
+      }
+      
+      input.addEventListener('change', async (e) => {
         console.log("📂 File input changed");
-
-        const file = e.target.files[0];
+      
+        const file = e.target.files?.[0];
         if (!file) {
           console.warn("⚠️ No file selected");
           return;
         }
-
+      
+        console.log("📄 File selected:", file.name, file.type);
         document.getElementById('status').innerText = 'Processing...';
+      
+        // Continue with waveform logic...
+
 
         try {
           const waveform = await resampleTo16kHz(file);
