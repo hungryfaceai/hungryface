@@ -8,13 +8,16 @@
     body {
       font-family: sans-serif;
       padding: 20px;
+      background-color: #111;
+      color: #eee;
     }
     canvas {
-      border: 1px solid black;
+      border: 1px solid #666;
       display: block;
       margin-top: 10px;
+      background-color: black;
     }
-    label {
+    label, select {
       margin-right: 10px;
     }
   </style>
@@ -32,7 +35,7 @@
   <label for="colormap">Colormap:</label>
   <select id="colormap">
     <option value="grayscale">Grayscale</option>
-    <option value="rainbow">Rainbow (HSL)</option>
+    <option value="rainbow" selected>Rainbow (HSL)</option>
     <option value="heat">Heatmap (Red/Blue)</option>
   </select>
 
@@ -50,11 +53,12 @@
     let audioCtx, meydaAnalyzer, source;
     let x = 0;
     let currentFeature = 'mfcc';
-    let currentColormap = 'grayscale';
+    let currentColormap = 'rainbow';
 
     const resetCanvas = () => {
       x = 0;
-      ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
     };
 
     document.getElementById('feature').addEventListener('change', (e) => {
@@ -72,11 +76,8 @@
     });
 
     document.getElementById('start').addEventListener('click', async () => {
-      console.log("Button clicked");
-
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        console.log("Microphone access granted");
 
         audioCtx = new AudioContext({ sampleRate: 16000 });
         source = audioCtx.createMediaStreamSource(stream);
@@ -124,14 +125,13 @@
         const intensity = Math.floor(norm * 255);
         const y = canvasHeight - (i / numBands) * canvasHeight;
 
-        // 🎨 Colormap switch
         let color;
         switch (currentColormap) {
           case 'grayscale':
             color = `rgb(${intensity}, ${intensity}, ${intensity})`;
             break;
           case 'rainbow':
-            const hue = 240 - (intensity / 255) * 240; // blue to red
+            const hue = 240 - (intensity / 255) * 240;
             color = `hsl(${hue}, 100%, 50%)`;
             break;
           case 'heat':
@@ -148,6 +148,9 @@
 
       x += barWidth;
     }
+
+    // Initialize canvas with black background
+    resetCanvas();
   </script>
 </body>
 </html>
