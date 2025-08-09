@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Live Baby Cry Detector (YAMNet • TFJS)</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- TensorFlow.js (WebGL/WASM backends auto-select) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.18.0/dist/tf.min.js"></script>
+  <!-- Chart.js for the live plot -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Live Baby Cry Detector</h1>
+    <p class="sub">YAMNet (TFJS) • Real-time mic inference</p>
+  </header>
+
+  <main>
+    <section class="controls">
+      <div class="row">
+        <button id="btnStart" class="primary">Start</button>
+        <button id="btnStop" class="ghost" disabled>Stop</button>
+        <span id="status" class="status">Idle</span>
+      </div>
+
+      <div class="grid">
+        <label>
+          <span>SR_TARGET (Hz)</span>
+          <input id="SR_TARGET" type="number" min="8000" step="1000" value="16000" />
+        </label>
+
+        <label>
+          <span>FRAME_LEN_S</span>
+          <input id="FRAME_LEN_S" type="number" min="0.1" step="0.01" value="0.96" />
+        </label>
+
+        <label>
+          <span>HOP_S</span>
+          <input id="HOP_S" type="number" min="0.01" step="0.01" value="0.48" />
+        </label>
+
+        <label>
+          <span>SMOOTH_WIN</span>
+          <input id="SMOOTH_WIN" type="number" min="1" step="1" value="5" />
+        </label>
+
+        <label>
+          <span>THRESH</span>
+          <input id="THRESH" type="number" min="0" max="1.5" step="0.01" value="0.25" />
+        </label>
+
+        <label>
+          <span>PLOT_WINDOW_S</span>
+          <input id="PLOT_WINDOW_S" type="number" min="5" step="1" value="60" />
+        </label>
+      </div>
+
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <label class="wide">
+          <span>YAMNet (TFJS) URL</span>
+          <input id="MODEL_URL" type="url"
+                 value="https://tfhub.dev/google/tfjs-model/yamnet/tfjs/1" />
+        </label>
+        <label class="wide">
+          <span>Class map CSV</span>
+          <input id="LABELS_URL" type="url"
+                 value="https://storage.googleapis.com/audioset/yamnet/yamnet_class_map.csv" />
+        </label>
+        <label class="wide">
+          <span>Include classes (comma-separated)</span>
+          <input id="INCLUDE_CLASSES" type="text"
+                 value="Baby cry, infant cry" />
+        </label>
+      </details>
+    </section>
+
+    <section class="plot">
+      <canvas id="chart" height="160"></canvas>
+      <div class="legend">
+        <span class="key raw"></span> cry_score (raw)
+        <span class="key sm"></span> smoothed (moving avg)
+        <span class="key thr"></span> threshold
+      </div>
+    </section>
+
+    <section class="logwrap">
+      <pre id="log"></pre>
+    </section>
+  </main>
+
+  <footer>
+    © 2025 Fishex Ltd. All rights reserved.
+  </footer>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>
