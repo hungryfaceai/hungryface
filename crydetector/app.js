@@ -1,8 +1,7 @@
-/* app.js — adds a real-time YAMNet-style log-mel spectrogram
-   - 64 mel bins, ~25 ms window, 10 ms hop, 512-pt FFT, 125..7500 Hz
-   - drawn from the SAME 0.96 s window used for YAMNet inference
-   - heatmap palette: low→panel, mid→blue, high→red
-   - existing cry chart (with ON/OFF lines) and spectrum upgrades retained
+/* app.js — OFF threshold line added to cry chart
+   - Cry chart now shows ON (orange) and OFF (lighter orange) dashed lines.
+   - Spectrum enhancements retained (dB scale, log-x, band shading, toggles, peak).
+   - Hysteresis + hold controls continue to drive alert logic.
 */
 
 const els = {
@@ -11,7 +10,6 @@ const els = {
   status: null,
   chartCanvas: null,
   chartSpectrumCanvas: null,
-  melCanvas: null,
   inputs: {},
   showRawSpec: null,
   showSmSpec: null,
@@ -24,7 +22,6 @@ function bindElements() {
   els.status   = document.getElementById('status');
   els.chartCanvas = document.getElementById('chart');
   els.chartSpectrumCanvas = document.getElementById('chartSpectrum');
-  els.melCanvas = document.getElementById('melCanvas');
   els.showRawSpec = document.getElementById('showRawSpec');
   els.showSmSpec  = document.getElementById('showSmSpec');
   els.peakReadout = document.getElementById('peakReadout');
@@ -63,8 +60,7 @@ const state = {
   lastPos: 0,
   chart: null,
   spectrumChart: null,
-
-  /* Spectrum buffers */
+  // Spectrum buffers
   specRawDb: [],
   specSmDb: [],
   specFreqs: [],
@@ -72,30 +68,14 @@ const state = {
   specStartIdx: 0,
   specEndIdx: 0,
   specLastUpdate: 0,
-
-  /* Peak */
+  // Peak
   peakFreq: null,
   peakDb: null,
-
-  /* Alert state */
+  // Alert state
   alertOn: false,
   alertUntilMs: 0,
-
-  /* Mel-spec precompute */
-  melFilters: null,      // array of arrays [{k, w}, ...] per mel bin
-  melWin: null,          // Hann window (winLength)
-  fftN: 512,
-  winLength: 400,        // ~25 ms @ 16 kHz
-  hopLength: 160,        // 10 ms
-  nMels: 64,
-  melFmin: 125,
-  melFmax: 7500,
-  bitrev: null,          // bit-reversal indices for FFT
-  twiddleCos: null,
-  twiddleSin: null,
 };
 
-/* ===== Utils ===== */
 function splitClasses(text) {
   return String(text || '').split(/[;\n\r]+/).map(s => s.trim()).filter(Boolean);
 }
@@ -113,9 +93,6 @@ function getParams() {
     ALERT_OFF_DELTA: Math.max(0, parseFloat(els.inputs.ALERT_OFF_DELTA?.value ?? '0.1') || 0.1),
     ALERT_HOLD_MS: Math.max(0, parseInt(els.inputs.ALERT_HOLD_MS?.value, 10) || 1500),
   };
-}
-function formatClock(ms) {
-  return new Date(ms).toLocaleTimeString(undefined, { hour12: false });
 }
 
 /* ===== CSV + LABELS ===== */
@@ -156,11 +133,16 @@ function findCryIdxs(labels, includeDisplayNames) {
   return Array.from(new Set(idxs));
 }
 
-/* ===== Charts (cry + spectrum) ===== */
-const RAW_COLOR = '#60a5fa';
-const SMOOTH_COLOR = '#ef4444';
-const THRESH_ON_COLOR  = '#f97316';
-const THRESH_OFF_COLOR = '#fb923c';
+/* ===== Time formatting ===== */
+function formatClock(ms) {
+  return new Date(ms).toLocaleTimeString(undefined, { hour12: false });
+}
+
+/* ===== Charts (explicit colors) ===== */
+const RAW_COLOR = '#60a5fa';    // blue
+const SMOOTH_COLOR = '#ef4444'; // red
+const THRESH_ON_COLOR  = '#f97316'; // orange
+const THRESH_OFF_COLOR = '#fb923c'; // lighter orange
 
 function setupChart() {
   if (state.chart) state.chart.destroy();
@@ -190,20 +172,25 @@ const spectrumOverlay = {
   afterDatasetsDraw(chart) {
     const { ctx, chartArea, scales } = chart;
     if (!chart.$peakFreq) return;
-    // 300–3000 Hz band shading
+
+    // Band shading 300–3000 Hz
     const x1 = scales.x.getPixelForValue(300);
     const x2 = scales.x.getPixelForValue(3000);
     ctx.save();
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.08)'; // subtle red fill
     const left = Math.min(x1, x2);
     const width = Math.abs(x2 - x1);
     ctx.fillRect(left, chartArea.top, width, chartArea.bottom - chartArea.top);
+
     // Peak marker
     const xp = scales.x.getPixelForValue(chart.$peakFreq);
     ctx.strokeStyle = '#ef4444';
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 2]);
-    ctx.beginPath(); ctx.moveTo(xp, chartArea.top); ctx.lineTo(xp, chartArea.bottom); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(xp, chartArea.top);
+    ctx.lineTo(xp, chartArea.bottom);
+    ctx.stroke();
     ctx.restore();
   }
 };
@@ -222,7 +209,7 @@ function setupSpectrumChart(freqs) {
     options: {
       animation: false,
       plugins: { legend: { display: false } },
-      parsing: false,
+      parsing: false, // we pass {x,y}
       scales: {
         x: {
           type: 'logarithmic',
@@ -232,12 +219,18 @@ function setupSpectrumChart(freqs) {
           ticks: {
             callback: (val) => {
               const nice = [20,50,100,200,500,1000,2000,5000,8000];
-              if (nice.includes(Math.round(val))) return val >= 1000 ? (val/1000)+'k' : val;
+              if (nice.includes(Math.round(val))) {
+                return val >= 1000 ? (val/1000)+'k' : val;
+              }
               return '';
             }
           }
         },
-        y: { min: -100, max: 0, title: { display: true, text: 'Power (dBFS)' } }
+        y: {
+          min: -100,
+          max: 0,
+          title: { display: true, text: 'Power (dBFS)' }
+        }
       },
       elements: { line: { fill: false } }
     },
@@ -247,18 +240,23 @@ function setupSpectrumChart(freqs) {
 
 function updateChartWindow(params) {
   const { PLOT_WINDOW_S } = params;
-  const tMs = state.timesMs, r = state.cryRaw, s = state.crySm;
+  const tMs = state.timesMs;
+  const r = state.cryRaw;
+  const s = state.crySm;
 
   let cut = 0;
   if (tMs.length) {
-    const startMs = tMs[tMs.length - 1] - (PLOT_WINDOW_S * 1000);
+    const last = tMs[tMs.length - 1];
+    const startMs = last - (PLOT_WINDOW_S * 1000);
     const idx = tMs.findIndex(v => v >= startMs);
     cut = idx >= 0 ? idx : 0;
   }
+
   const labels = tMs.slice(cut).map(formatClock);
   const raw = r.slice(cut);
   const sm = s.slice(cut);
 
+  // ON & OFF thresholds
   const onVal  = Math.max(0, (params.THRESH || 0) + (params.ALERT_ON_EXTRA || 0));
   const offVal = Math.max(0, onVal - (params.ALERT_OFF_DELTA || 0));
   const thrOn  = new Array(labels.length).fill(onVal);
@@ -271,8 +269,10 @@ function updateChartWindow(params) {
   state.chart.data.datasets[3].data = thrOff;
 
   if (raw.length || sm.length) {
-    const all = raw.concat(sm, [onVal, offVal]);
-    const ymin = Math.min(...all), ymax = Math.max(...all), pad = 0.05;
+    const all = raw.concat(sm);
+    const ymin = Math.min(...all, onVal, offVal);
+    const ymax = Math.max(...all, onVal, offVal);
+    const pad = 0.05;
     state.chart.options.scales.y.min = Math.min(0, ymin - pad);
     state.chart.options.scales.y.max = Math.min(1.5, ymax + pad);
   }
@@ -281,26 +281,32 @@ function updateChartWindow(params) {
 
 function updateSpectrumChartVisibility() {
   if (!state.spectrumChart) return;
-  state.spectrumChart.data.datasets[0].hidden = !els.showRawSpec?.checked;
-  state.spectrumChart.data.datasets[1].hidden = !els.showSmSpec?.checked;
+  const showRaw = !!els.showRawSpec?.checked;
+  const showSm  = !!els.showSmSpec?.checked;
+  state.spectrumChart.data.datasets[0].hidden = !showRaw;
+  state.spectrumChart.data.datasets[1].hidden = !showSm;
   state.spectrumChart.update();
 }
 
 function updateSpectrumChart() {
   if (!state.spectrumChart) return;
-  const raw = [], sm = [];
+
+  const raw = [];
+  const sm  = [];
   for (let i = state.specStartIdx; i <= state.specEndIdx; i++) {
     const f = state.specFreqs[i];
     raw.push({ x: f, y: state.specRawDb[i] });
     sm.push({ x: f, y: state.specSmDb[i] });
   }
+
   state.spectrumChart.data.datasets[0].data = raw;
   state.spectrumChart.data.datasets[1].data = sm;
 
-  // Peak (from smoothed)
+  // Peak (from smoothed data)
   let maxDb = -Infinity, maxIdx = -1;
   for (let i = state.specStartIdx; i <= state.specEndIdx; i++) {
-    const v = state.specSmDb[i]; if (v > maxDb) { maxDb = v; maxIdx = i; }
+    const v = state.specSmDb[i];
+    if (v > maxDb) { maxDb = v; maxIdx = i; }
   }
   if (maxIdx >= 0) {
     state.peakFreq = state.specFreqs[maxIdx];
@@ -314,18 +320,25 @@ function updateSpectrumChart() {
     state.spectrumChart.$peakFreq = null;
     if (els.peakReadout) els.peakReadout.textContent = 'Peak: —';
   }
+
   state.spectrumChart.update();
 }
 
 function setAlert(on) { document.body.classList.toggle('alert', !!on); }
+
+/* ===== Hysteresis + hold decision ===== */
 function shouldAlert(smoothed, nowMs, params) {
   const onThresh  = (params.THRESH || 0) + (params.ALERT_ON_EXTRA || 0);
   const offThresh = Math.max(0, onThresh - (params.ALERT_OFF_DELTA || 0));
+
   if (state.alertOn) {
     if (nowMs < state.alertUntilMs) return true;
     return smoothed >= offThresh;
   } else {
-    if (smoothed >= onThresh) { state.alertUntilMs = nowMs + (params.ALERT_HOLD_MS || 0); return true; }
+    if (smoothed >= onThresh) {
+      state.alertUntilMs = nowMs + (params.ALERT_HOLD_MS || 0);
+      return true;
+    }
     return false;
   }
 }
@@ -334,204 +347,17 @@ function shouldAlert(smoothed, nowMs, params) {
 function concatFloat32(a, b) { const out = new Float32Array(a.length + b.length); out.set(a, 0); out.set(b, a.length); return out; }
 function resampleLinear(x, fromSr, toSr) {
   if (fromSr === toSr) return x;
-  const ratio = toSr / fromSr, n = Math.max(1, Math.round(x.length * ratio)), out = new Float32Array(n);
+  const ratio = toSr / fromSr;
+  const n = Math.max(1, Math.round(x.length * ratio));
+  const out = new Float32Array(n);
   const dx = (x.length - 1) / (n - 1);
-  for (let i=0;i<n;i++){ const pos=i*dx, i0=Math.floor(pos), i1=Math.min(i0+1, x.length-1), frac=pos-i0; out[i]=x[i0]*(1-frac)+x[i1]*frac; }
+  for (let i = 0; i < n; i++) {
+    const pos = i * dx, i0 = Math.floor(pos), i1 = Math.min(i0+1, x.length-1), frac = pos - i0;
+    out[i] = x[i0]*(1-frac) + x[i1]*frac;
+  }
   return out;
 }
-function movingAvgTail(arr, k) { if (!arr.length) return 0; const start=Math.max(0, arr.length-k); let sum=0; for (let i=start;i<arr.length;i++) sum+=arr[i]; return sum/(arr.length-start); }
-
-/* ===== FFT & Mel precompute ===== */
-function initFFT(n) {
-  // bit-reversal
-  const bitrev = new Uint32Array(n);
-  let bits = 0; while ((1<<bits) < n) bits++;
-  for (let i=0;i<n;i++){
-    let x=i, y=0;
-    for (let b=0;b<bits;b++){ y=(y<<1)|(x&1); x>>=1; }
-    bitrev[i]=y;
-  }
-  // twiddles per stage: store cos/sin for each half-size (k)
-  const twiddleCos = [], twiddleSin = [];
-  for (let m=2; m<=n; m<<=1){
-    const half = m>>1, step = Math.PI/half;
-    const cosArr = new Float32Array(half), sinArr = new Float32Array(half);
-    for (let k=0;k<half;k++){ const ang = -k*step; cosArr[k]=Math.cos(ang); sinArr[k]=Math.sin(ang); }
-    twiddleCos.push(cosArr); twiddleSin.push(sinArr);
-  }
-  return { bitrev, twiddleCos, twiddleSin };
-}
-function fftRadix2(re, im, n, bitrev, twC, twS){
-  // bit-reverse copy
-  for (let i=0;i<n;i++){
-    const j = bitrev[i];
-    if (j>i){ const tr=re[i]; re[i]=re[j]; re[j]=tr; const ti=im[i]; im[i]=im[j]; im[j]=ti; }
-  }
-  // stages
-  let stage = 0;
-  for (let m=2; m<=n; m<<=1){
-    const half = m>>1, cosArr = twC[stage], sinArr = twS[stage];
-    for (let i=0;i<n;i+=m){
-      for (let k=0;k<half;k++){
-        const tcos = cosArr[k], tsin = sinArr[k];
-        const j = i + k, l = j + half;
-        const ur = re[j], ui = im[j];
-        const vr = re[l]*tcos - im[l]*tsin;
-        const vi = re[l]*tsin + im[l]*tcos;
-        re[j] = ur + vr; im[j] = ui + vi;
-        re[l] = ur - vr; im[l] = ui - vi;
-      }
-    }
-    stage++;
-  }
-}
-function hannWindow(N){ const w=new Float32Array(N); for(let n=0;n<N;n++){ w[n]=0.5*(1-Math.cos(2*Math.PI*n/(N-1))); } return w; }
-function hz2mel(f){ return 2595*Math.log10(1+f/700); }
-function mel2hz(m){ return 700*(Math.pow(10, m/2595)-1); }
-function buildMelFilters(sr, nFft, nMels, fMin, fMax){
-  const nSpec = nFft/2 + 1;
-  const mMin = hz2mel(fMin), mMax = hz2mel(fMax);
-  const mPts = new Float32Array(nMels+2);
-  for(let i=0;i<mPts.length;i++) mPts[i] = mMin + (i*(mMax-mMin)/(nMels+1));
-  const fPts = new Float32Array(nMels+2);
-  for(let i=0;i<fPts.length;i++) fPts[i] = mel2hz(mPts[i]);
-  const bPts = new Int32Array(nMels+2);
-  for(let i=0;i<bPts.length;i++) bPts[i] = Math.floor((nFft+1)*fPts[i]/sr);
-
-  // Sparse filters: for each mel bin, store [{k, w}, ...]
-  const filters = new Array(nMels);
-  for(let m=1;m<=nMels;m++){
-    const a=bPts[m-1], b=bPts[m], c=bPts[m+1];
-    const list = [];
-    for(let k=a;k<b;k++){
-      if (k>=0 && k<nSpec){
-        list.push({k, w:(k-a)/(b-a+1e-9)});
-      }
-    }
-    for(let k=b;k<=c;k++){
-      if (k>=0 && k<nSpec){
-        list.push({k, w:(c-k)/(c-b+1e-9)});
-      }
-    }
-    filters[m-1]=list;
-  }
-  return filters;
-}
-
-/* ===== Log-mel spectrogram ===== */
-function computeLogMelSpectrogram(window16k) {
-  // Uses state.winLength (400), state.hopLength (160), state.fftN (512),
-  // state.melFilters (64), Hann window, returns {db: frames x nMels, minDb, maxDb}
-  const x = window16k;
-  const N = x.length;
-  const { winLength, hopLength, fftN, melFilters, melFmin, melFmax } = state;
-  if (!state.melWin) state.melWin = hannWindow(winLength);
-  if (!state.bitrev) {
-    const { bitrev, twiddleCos, twiddleSin } = initFFT(fftN);
-    state.bitrev = bitrev; state.twiddleCos = twiddleCos; state.twiddleSin = twiddleSin;
-  }
-
-  const nFrames = 1 + Math.floor((N - winLength) / hopLength);
-  const nSpec = fftN/2 + 1;
-  const nMels = melFilters.length;
-  const melDb = new Array(nFrames);
-  let globalMax = -Infinity;
-
-  // Buffers
-  const re = new Float32Array(fftN);
-  const im = new Float32Array(fftN);
-
-  for (let f = 0; f < nFrames; f++) {
-    const start = f*hopLength;
-    re.fill(0); im.fill(0);
-    // copy + window
-    for (let i=0;i<winLength;i++){ re[i] = x[start+i] * state.melWin[i]; }
-
-    // FFT
-    fftRadix2(re, im, fftN, state.bitrev, state.twiddleCos, state.twiddleSin);
-
-    // Power spectrum
-    const pow = new Float32Array(nSpec);
-    for (let k=0;k<nSpec;k++){ const pr=re[k], pi=im[k]; pow[k] = pr*pr + pi*pi; }
-
-    // Apply mel filters
-    const mel = new Float32Array(nMels);
-    for (let m=0;m<nMels;m++){
-      let s = 0; const filt = melFilters[m];
-      for (let p=0;p<filt.length;p++){ const {k,w}=filt[p]; s += w * pow[k]; }
-      mel[m] = s + 1e-10; // add epsilon
-    }
-
-    // Convert to dB (relative to max within frame)
-    let maxE = 1e-10; for (let m=0;m<nMels;m++) if (mel[m]>maxE) maxE = mel[m];
-    const frameDb = new Float32Array(nMels);
-    for (let m=0;m<nMels;m++){
-      const db = 10 * Math.log10(mel[m]/maxE); // normalize per-frame (0 dB max)
-      frameDb[m] = Math.max(-80, Math.min(0, db));
-      if (frameDb[m] > globalMax) globalMax = frameDb[m];
-    }
-    melDb[f] = frameDb; // note: index = time, value = [mel]
-  }
-
-  return { db: melDb, minDb: -80, maxDb: 0 };
-}
-
-function drawMelSpectrogram(melObj) {
-  const { db, minDb, maxDb } = melObj;
-  if (!els.melCanvas) return;
-  const ctx = els.melCanvas.getContext('2d');
-  const W = els.melCanvas.width  || els.melCanvas.getBoundingClientRect().width  || 800;
-  const H = els.melCanvas.height || els.melCanvas.getBoundingClientRect().height || 160;
-  // force canvas bitmap to layout width for crispness
-  els.melCanvas.width = Math.floor(W);
-  els.melCanvas.height = Math.floor(H);
-
-  const nFrames = db.length;
-  if (!nFrames) return;
-  const nMels = db[0].length;
-
-  const cellW = Math.max(1, Math.floor(W / nFrames));
-  const cellH = Math.max(1, Math.floor(H / nMels));
-
-  // Colors
-  const low = hexToRgb(getCss('--spec-low'));
-  const mid = hexToRgb(getCss('--spec-mid'));
-  const high= hexToRgb(getCss('--spec-high'));
-
-  // Draw each time x mel cell
-  for (let f=0; f<nFrames; f++) {
-    const col = db[f]; // Float32Array (nMels)
-    for (let m=0; m<nMels; m++) {
-      // YAMNet displays low freqs at bottom → invert y
-      const y = H - (m+1)*cellH;
-      // normalize dB [-80..0] → [0..1]
-      const norm = (col[m] - minDb) / (maxDb - minDb);
-      const rgb = rampRgb(norm, low, mid, high);
-      ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-      ctx.fillRect(f*cellW, y, cellW, cellH);
-    }
-  }
-}
-
-/* ===== Color helpers for spectrogram ===== */
-function getCss(varName){ return getComputedStyle(document.documentElement).getPropertyValue(varName).trim(); }
-function hexToRgb(hex){
-  const h = hex.replace('#','');
-  const bigint = parseInt(h,16);
-  return h.length===6 ? [(bigint>>16)&255, (bigint>>8)&255, bigint&255] : [0,0,0];
-}
-function lerp(a,b,t){ return Math.round(a + (b-a)*t); }
-function rampRgb(t, low, mid, high){
-  // piecewise: [0..0.5] low→mid, [0.5..1] mid→high
-  const u = Math.max(0, Math.min(1, t));
-  if (u <= 0.5){
-    const tt = u/0.5;
-    return [ lerp(low[0], mid[0], tt), lerp(low[1], mid[1], tt), lerp(low[2], mid[2], tt) ];
-  } else {
-    const tt = (u-0.5)/0.5;
-    return [ lerp(mid[0], high[0], tt), lerp(mid[1], high[1], tt), lerp(mid[2], high[2], tt) ];
-  }
-}
+function movingAvgTail(arr, k) { if (!arr.length) return 0; const start = Math.max(0, arr.length-k); let sum=0; for (let i=start;i<arr.length;i++) sum+=arr[i]; return sum/(arr.length-start); }
 
 /* ===== YAMNet inference (1-D input) ===== */
 function getModelInputName() {
@@ -557,9 +383,14 @@ async function inferCryScore16k(wave16k, cryIdxs) {
   // 1-D tensor ([-1])
   const t1d = tf.tensor1d(x);
   let out;
-  try { const feed = {}; feed[getModelInputName()] = t1d; out = await state.model.executeAsync(feed); }
-  catch { out = await state.model.executeAsync(t1d); }
-  finally { t1d.dispose(); }
+  try {
+    const feed = {}; feed[getModelInputName()] = t1d;
+    out = await state.model.executeAsync(feed);
+  } catch {
+    out = await state.model.executeAsync(t1d);
+  } finally {
+    t1d.dispose();
+  }
 
   // scores: [num_patches, 521]
   let scores;
@@ -584,7 +415,7 @@ async function inferCryScore16k(wave16k, cryIdxs) {
     return summed.dataSync()[0];
   });
   scores.dispose();
-  return { score, x }; // return aligned window too (for mel)
+  return score;
 }
 
 /* ===== Model + labels ===== */
@@ -599,8 +430,16 @@ async function ensureModelAndLabels() {
   }
   const { INCLUDE_CLASSES } = getParams();
   state.cryIdxs = findCryIdxs(state.labelList, INCLUDE_CLASSES);
-  if (state.cryIdxs.length === 0) throw new Error('No matching classes found. Use ";" or new lines as separators.');
+  if (state.cryIdxs.length === 0) {
+    throw new Error('No matching classes found. Use ";" or new lines as separators.');
+  }
   setStatus('Ready');
+}
+
+function makeScriptProcessor(ctx, onAudio) {
+  const sp = ctx.createScriptProcessor(4096, 1, 1);
+  sp.onaudioprocess = (e) => onAudio(new Float32Array(e.inputBuffer.getChannelData(0)));
+  return sp;
 }
 
 /* ===== Start / Stop ===== */
@@ -617,14 +456,20 @@ async function start() {
 
     // Reset buffers/plot/alert
     state.ring16k = new Float32Array(0);
-    state.timesSec = []; state.timesMs = [];
-    state.cryRaw = []; state.crySm = []; state.lastPos = 0;
-    state.alertOn = false; state.alertUntilMs = 0;
-    setupChart(); setAlert(false);
+    state.timesSec = [];
+    state.timesMs = [];
+    state.cryRaw = [];
+    state.crySm = [];
+    state.lastPos = 0;
+    state.alertOn = false;
+    state.alertUntilMs = 0;
+    setupChart();
+    setAlert(false);
 
     // Audio
     const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
-    state.audioCtx = ctx; await ctx.resume();
+    state.audioCtx = ctx;
+    await ctx.resume();
 
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, noiseSuppression: false, echoCancellation: false, autoGainControl: false },
@@ -635,9 +480,10 @@ async function start() {
     const src = ctx.createMediaStreamSource(stream);
     const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
 
-    // Spectrum analyser
+    // Analyser for spectrum
     const analyser = ctx.createAnalyser();
-    analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.0;
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.0; // we smooth ourselves
     state.analyser = analyser;
 
     // Wire graph/audio paths
@@ -659,28 +505,28 @@ async function start() {
       processor.port.onmessage = (ev) => onAudioChunk(ev.data, ctx.sampleRate);
       src.connect(processor).connect(sink);
     } catch {
-      processor = ctx.createScriptProcessor(4096, 1, 1);
-      processor.onaudioprocess = (e) => onAudioChunk(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate);
+      processor = makeScriptProcessor(ctx, (chunk) => onAudioChunk(chunk, ctx.sampleRate));
       src.connect(processor).connect(sink);
     }
     state.processor = processor;
 
-    // Prepare spectrum chart
-    const binCount = analyser.frequencyBinCount;
-    const nyquist = ctx.sampleRate / 2, fMax = Math.min(8000, nyquist);
+    // Prepare spectrum arrays (limit to ≤ 8 kHz or device Nyquist if lower)
+    const binCount = analyser.frequencyBinCount; // fftSize/2
+    state.specBinCountAll = binCount;
+    const nyquist = ctx.sampleRate / 2;
+    const fMax = Math.min(8000, nyquist);
     state.specFreqs = new Array(binCount);
     for (let i = 0; i < binCount; i++) state.specFreqs[i] = i * ctx.sampleRate / analyser.fftSize;
-    state.specStartIdx = 0; while (state.specStartIdx < binCount && state.specFreqs[state.specStartIdx] < 20) state.specStartIdx++;
-    state.specEndIdx = binCount - 1; while (state.specEndIdx > 0 && state.specFreqs[state.specEndIdx] > fMax) state.specEndIdx--;
+    // choose index range within [20 Hz, fMax]
+    state.specStartIdx = 0;
+    while (state.specStartIdx < binCount && state.specFreqs[state.specStartIdx] < 20) state.specStartIdx++;
+    state.specEndIdx = binCount - 1;
+    while (state.specEndIdx > 0 && state.specFreqs[state.specEndIdx] > fMax) state.specEndIdx--;
+
     state.specRawDb = new Array(binCount).fill(-100);
     state.specSmDb  = new Array(binCount).fill(-100);
-    setupSpectrumChart(state.specFreqs.slice(state.specStartIdx, state.specEndIdx + 1));
 
-    // Mel filterbank precompute (SR_TARGET assumed 16 kHz)
-    const { SR_TARGET } = getParams();
-    state.melFilters = buildMelFilters(SR_TARGET, state.fftN, state.nMels, state.melFmin, state.melFmax);
-    state.melWin = hannWindow(state.winLength);
-    state.bitrev = null; state.twiddleCos = null; state.twiddleSin = null; // rebuild in compute if needed
+    setupSpectrumChart(state.specFreqs.slice(state.specStartIdx, state.specEndIdx + 1));
 
     // Spectrum loop (~10 Hz)
     state.specLastUpdate = 0;
@@ -688,7 +534,8 @@ async function start() {
       if (!state.running || !state.analyser) return;
       if (ts - state.specLastUpdate > 100) {
         const buf = new Float32Array(binCount);
-        state.analyser.getFloatFrequencyData(buf);
+        state.analyser.getFloatFrequencyData(buf); // dBFS
+        // clamp + EMA smoothing in dB domain
         for (let i = state.specStartIdx; i <= state.specEndIdx; i++) {
           const db = Math.max(-100, Math.min(0, buf[i]));
           state.specRawDb[i] = db;
@@ -701,7 +548,7 @@ async function start() {
     }
     spectrumRaf = requestAnimationFrame(spectrumTick);
 
-    // Toggles
+    // Toggle bindings
     els.showRawSpec?.addEventListener('change', updateSpectrumChartVisibility);
     els.showSmSpec?.addEventListener('change', updateSpectrumChartVisibility);
     updateSpectrumChartVisibility();
@@ -728,7 +575,8 @@ async function stop() {
   try { if (state.audioCtx) await state.audioCtx.close(); } catch {}
   try { state.mediaStream?.getTracks().forEach(t => t.stop()); } catch {}
   if (spectrumRaf) cancelAnimationFrame(spectrumRaf);
-  state.running = false; state.analyser = null;
+  state.running = false;
+  state.analyser = null;
   els.btnStart && (els.btnStart.disabled = false);
   els.btnStop  && (els.btnStop.disabled  = true);
   setStatus('Stopped');
@@ -757,11 +605,8 @@ async function onAudioChunk(chunkFloat32, deviceSr) {
       w = pad;
     }
 
-    let score = 0, aligned = w;
-    try {
-      const res = await inferCryScore16k(w, state.cryIdxs);
-      score = res.score; aligned = res.x;
-    } catch {}
+    let score = 0;
+    try { score = await inferCryScore16k(w, state.cryIdxs); } catch {}
 
     state.cryRaw.push(score);
     state.crySm.push(movingAvgTail(state.cryRaw, params.SMOOTH_WIN));
@@ -776,17 +621,12 @@ async function onAudioChunk(chunkFloat32, deviceSr) {
     const smoothed = state.crySm[state.crySm.length - 1];
     const nowMs = Date.now();
     const alert = shouldAlert(smoothed, nowMs, params);
-    state.alertOn = alert; setAlert(alert);
-
-    // NEW: compute + draw log-mel spectrogram for this 0.96 s window
-    try {
-      const mel = computeLogMelSpectrogram(aligned);
-      drawMelSpectrogram(mel);
-    } catch {}
+    state.alertOn = alert;
+    setAlert(alert);
 
     state.lastPos += frameHop16k;
 
-    // Periodic trimming
+    // Periodic trimming to bound memory
     if (state.timesSec.length % 400 === 0) {
       const keepFrom = Math.max(0, state.timesSec.length - Math.ceil(params.PLOT_WINDOW_S / params.HOP_S) - 10);
       if (keepFrom > 0) {
@@ -817,6 +657,7 @@ document.addEventListener('DOMContentLoaded', () => {
     els.inputs[k]?.addEventListener('change', () => updateChartWindow(getParams()));
   });
 
+  // Spectrum toggles may be clicked before start; wire them now
   els.showRawSpec?.addEventListener('change', updateSpectrumChartVisibility);
   els.showSmSpec?.addEventListener('change', updateSpectrumChartVisibility);
 
