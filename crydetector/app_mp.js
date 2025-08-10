@@ -100,13 +100,13 @@ function getParams() {
     FRAME_LEN_S: parseFloat(els.inputs.FRAME_LEN_S?.value) || 0.96,
     HOP_S: parseFloat(els.inputs.HOP_S?.value) || 0.48,
     SMOOTH_WIN: Math.max(1, parseInt(els.inputs.SMOOTH_WIN?.value, 10) || 5),
-    THRESH: parseFloat(els.inputs.THRESH?.value) || 0.25,
+    THRESH: parseFloat(els.inputs.THRESH?.value) || 0.15,
     PLOT_WINDOW_S: Math.max(5, parseFloat(els.inputs.PLOT_WINDOW_S?.value) || 60),
     MODEL_URL: (els.inputs.MODEL_URL?.value || './yamnet.tflite').trim(),
     INCLUDE_CLASSES: splitClasses(els.inputs.INCLUDE_CLASSES?.value),
     ALERT_ON_EXTRA: parseFloat(els.inputs.ALERT_ON_EXTRA?.value ?? '0') || 0,
     ALERT_OFF_DELTA: Math.max(0, parseFloat(els.inputs.ALERT_OFF_DELTA?.value ?? '0.1') || 0.1),
-    ALERT_HOLD_MS: Math.max(0, parseInt(els.inputs.ALERT_HOLD_MS?.value, 10) || 1500),
+    ALERT_HOLD_MS: Math.max(0, parseInt(els.inputs.ALERT_HOLD_MS?.value, 10) || 3000),
   };
 }
 function formatClock(ms) {
