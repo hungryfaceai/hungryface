@@ -4,11 +4,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Live Baby Cry Detector (YAMNet • TFJS)</title>
-  <link rel="stylesheet" href="styles.css" />
-  <link rel="icon" href="data:," /><!-- avoid /favicon.ico 404 -->
-  <!-- TensorFlow.js -->
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="./styles.css" />
+
+  <!-- Tiny data-URI favicon to avoid /favicon.ico 404 -->
+  <link rel="icon" href="data:," />
+
+  <!-- Libs -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.18.0/dist/tf.min.js"></script>
-  <!-- Chart.js for the live plot -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -59,6 +63,7 @@
 
       <details class="advanced">
         <summary>Advanced</summary>
+
         <label class="wide">
           <span>YAMNet (TFJS) URL</span>
           <input id="MODEL_URL" type="url"
@@ -69,21 +74,74 @@
           <span>Include classes (comma-separated)</span>
           <textarea id="INCLUDE_CLASSES" rows="2" spellcheck="false">Baby cry, infant cry; Crying, sobbing; Whimper</textarea>
         </label>
+
         <p class="muted small">
-          Enter <em>display_name</em> values exactly as in <code>class_map.csv</code>.
+          Enter <em>display_name</em> values exactly as in <code>class_map.csv</code> (stored next to this file).
           Separate multiple classes with <strong>semicolons ;</strong> or <strong>new lines</strong>.
-          <u>Do not</u> use commas to separate classes; commas can appear inside a single display name (e.g., <code>"Narration, monologue"</code>).
+          <u>Do not</u> use commas to separate classes; commas can appear inside a single display name
+          (e.g., <code>"Narration, monologue"</code>).
+        </p>
+
+        <div class="grid-adv">
+          <label>
+            <span>ON extra (adds to THRESH)</span>
+            <input id="ALERT_ON_EXTRA" type="number" step="0.01" value="0.00" />
+          </label>
+          <label>
+            <span>OFF delta (below ON)</span>
+            <input id="ALERT_OFF_DELTA" type="number" min="0" step="0.01" value="0.10" />
+          </label>
+          <label>
+            <span>HOLD time (ms)</span>
+            <input id="ALERT_HOLD_MS" type="number" min="0" step="100" value="1500" />
+          </label>
+        </div>
+        <p class="muted small">
+          The background turns red when the smoothed score crosses the <strong>ON threshold</strong> (= THRESH + ON extra),
+          and stays red until it falls below <strong>OFF threshold</strong> (= ON threshold − OFF delta) and the hold time has elapsed.
         </p>
       </details>
     </section>
 
+    <!-- Cry score chart -->
     <section class="plot">
       <canvas id="chart" height="160"></canvas>
       <div class="legend">
         <span class="key raw"></span> cry_score (raw)
         <span class="key sm"></span> smoothed (moving avg)
-        <span class="key thr"></span> threshold
+        <span class="key thr-on"></span> threshold (ON)
+        <span class="key thr-off"></span> threshold (OFF)
       </div>
     </section>
 
-    <section class="logwrap">
+    <!-- Power spectrum chart -->
+    <section class="plot">
+      <canvas id="chartSpectrum" height="160"></canvas>
+      <div class="legend">
+        <span class="key raw"></span> spectrum (raw)
+        <span class="key sm"></span> spectrum (smoothed)
+      </div>
+      <div class="toggles">
+        <label><input type="checkbox" id="showRawSpec" checked> Show raw spectrum</label>
+        <label><input type="checkbox" id="showSmSpec" checked> Show smoothed spectrum</label>
+      </div>
+      <div id="peakReadout" class="peak">Peak: —</div>
+    </section>
+
+    <!-- NEW: Log-mel spectrogram (YAMNet-style) -->
+    <section class="plot">
+      <canvas id="melCanvas" height="160"></canvas>
+      <div class="legend">
+        Log-mel spectrogram (64 mels, ~25 ms win, 10 ms hop)
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    © 2025 Fishex Ltd. All rights reserved.
+  </footer>
+
+  <!-- App code -->
+  <script src="./app.js"></script>
+</body>
+</html>
