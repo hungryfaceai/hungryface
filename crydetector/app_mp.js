@@ -1,8 +1,7 @@
-// app_mp.js (ES module) — MediaPipe Tasks Audio @0.10.0
-// - Uses AudioClassifier.classify(Float32Array, sampleRate)
-// - Keeps your UI, spectrum chart, thresholds, hysteresis/hold logic
-// - Expects class_map.csv next to index.html
-// - Make sure the script tag in index.html is: <script src="./app_mp.js" type="module"></script>
+// app_mp.js — MediaPipe Tasks Audio @0.10.0 with per-class bars on the upper chart
+// - Bars show each included class's score per hop (grouped per time tick)
+// - Lines still show cry_score (raw) and smoothed, with ON/OFF thresholds
+// - Keep class_map.csv next to index.html
 
 import audio from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0";
 const { FilesetResolver, AudioClassifier } = audio;
@@ -62,6 +61,7 @@ const state = {
   // Labels + mapping
   labelList: [],
   cryIdxs: [],
+  cryNames: [],         // display names of included classes (same order as cryIdxs)
 
   // Series / plotting
   ring16k: new Float32Array(0),
@@ -70,6 +70,7 @@ const state = {
   timesMs: [],
   cryRaw: [],
   crySm: [],
+  classSeries: [],      // Array< Array<number> >, per-class time series (aligned with times)
   chart: null,
   spectrumChart: null,
 
@@ -100,18 +101,27 @@ function getParams() {
     FRAME_LEN_S: parseFloat(els.inputs.FRAME_LEN_S?.value) || 0.96,
     HOP_S: parseFloat(els.inputs.HOP_S?.value) || 0.48,
     SMOOTH_WIN: Math.max(1, parseInt(els.inputs.SMOOTH_WIN?.value, 10) || 5),
-    THRESH: parseFloat(els.inputs.THRESH?.value) || 0.15,
+    THRESH: parseFloat(els.inputs.THRESH?.value) || 0.15,         // default changed as you requested
     PLOT_WINDOW_S: Math.max(5, parseFloat(els.inputs.PLOT_WINDOW_S?.value) || 60),
     MODEL_URL: (els.inputs.MODEL_URL?.value || './yamnet.tflite').trim(),
     INCLUDE_CLASSES: splitClasses(els.inputs.INCLUDE_CLASSES?.value),
     ALERT_ON_EXTRA: parseFloat(els.inputs.ALERT_ON_EXTRA?.value ?? '0') || 0,
     ALERT_OFF_DELTA: Math.max(0, parseFloat(els.inputs.ALERT_OFF_DELTA?.value ?? '0.1') || 0.1),
-    ALERT_HOLD_MS: Math.max(0, parseInt(els.inputs.ALERT_HOLD_MS?.value, 10) || 3000),
+    ALERT_HOLD_MS: Math.max(0, parseInt(els.inputs.ALERT_HOLD_MS?.value, 10) || 3000), // default changed
   };
 }
 function formatClock(ms) {
   return new Date(ms).toLocaleTimeString(undefined, { hour12: false });
 }
+function concatFloat32(a, b) { const out = new Float32Array(a.length + b.length); out.set(a, 0); out.set(b, a.length); return out; }
+function resampleLinear(x, fromSr, toSr) {
+  if (fromSr === toSr) return x;
+  const ratio = toSr / fromSr, n = Math.max(1, Math.round(x.length * ratio)), out = new Float32Array(n);
+  const dx = (x.length - 1) / (n - 1);
+  for (let i=0;i<n;i++){ const pos=i*dx, i0=Math.floor(pos), i1=Math.min(i0+1, x.length-1), frac=pos-i0; out[i]=x[i0]*(1-frac)+x[i1]*frac; }
+  return out;
+}
+function movingAvgTail(arr, k) { if (!arr.length) return 0; const start=Math.max(0, arr.length-k); let sum=0; for (let i=start;i<arr.length;i++) sum+=arr[i]; return sum/(arr.length-start); }
 
 /* ---------- CSV + labels ---------- */
 async function loadLocalClassMap() {
@@ -152,40 +162,123 @@ function findCryIdxs(labels, includeDisplayNames) {
 }
 
 /* ---------- Charts ---------- */
-const RAW_COLOR = '#60a5fa';       // blue
-const SMOOTH_COLOR = '#ef4444';    // red
-const THRESH_ON_COLOR  = '#f97316'; // orange
-const THRESH_OFF_COLOR = '#fb923c'; // light orange
+const RAW_COLOR = '#60a5fa';       // blue line (raw cry score)
+const SMOOTH_COLOR = '#ef4444';    // red line (smoothed cry score)
+const THRESH_ON_COLOR  = '#f97316'; // orange dashed
+const THRESH_OFF_COLOR = '#fb923c'; // light orange dashed
+
+// pleasant distinct bar colors
+const BAR_COLORS = [
+  '#22c55e', '#a78bfa', '#f59e0b', '#06b6d4', '#eab308', '#f472b6', '#10b981', '#8b5cf6'
+];
+function barColor(i){ return BAR_COLORS[i % BAR_COLORS.length]; }
 
 function setupChart() {
   if (state.chart) state.chart.destroy();
   const ctx = els.chartCanvas.getContext('2d');
+
+  // base datasets: thresholds (bars draw under lines), then lines last (order higher)
+  const datasets = [
+    { label: 'cry_score (raw)',      type: 'line', data: [], borderColor: RAW_COLOR,   borderWidth: 2, pointRadius: 0, tension: 0.15, order: 10 },
+    { label: 'cry_score (smoothed)', type: 'line', data: [], borderColor: SMOOTH_COLOR, borderWidth: 2, pointRadius: 0, tension: 0.15, order: 11 },
+    { label: 'threshold (ON)',       type: 'line', data: [], borderColor: THRESH_ON_COLOR,  borderWidth: 1, pointRadius: 0, borderDash: [6,4], order: 9 },
+    { label: 'threshold (OFF)',      type: 'line', data: [], borderColor: THRESH_OFF_COLOR, borderWidth: 1, pointRadius: 0, borderDash: [2,2], order: 9 }
+  ];
+
+  // add one bar dataset per included class
+  state.classSeries = state.cryIdxs.map(() => []); // reset per-class series
+  state.cryNames.forEach((name, i) => {
+    datasets.unshift({
+      label: name,
+      type: 'bar',
+      data: [],
+      backgroundColor: hexWithAlpha(barColor(i), 0.55),
+      borderColor: barColor(i),
+      borderWidth: 1,
+      barPercentage: 0.8,
+      categoryPercentage: 0.7,
+      order: 1, // bars drawn first, lines on top
+    });
+  });
+
   state.chart = new Chart(ctx, {
-    type: 'line',
-    data: { labels: [], datasets: [
-      { label: 'cry_score (raw)', data: [], borderColor: RAW_COLOR,   borderWidth: 2, pointRadius: 0, tension: 0.15 },
-      { label: 'cry_score (smoothed)', data: [], borderColor: SMOOTH_COLOR, borderWidth: 2, pointRadius: 0, tension: 0.15 },
-      { label: 'threshold (ON)',  data: [], borderColor: THRESH_ON_COLOR,  borderWidth: 1, pointRadius: 0, borderDash: [6,4] },
-      { label: 'threshold (OFF)', data: [], borderColor: THRESH_OFF_COLOR, borderWidth: 1, pointRadius: 0, borderDash: [2,2] }
-    ]},
+    type: 'bar', // mixed chart: bars + lines (dataset.type overrides)
+    data: { labels: [], datasets },
     options: {
       animation: false,
       plugins: { legend: { display: false } },
       scales: {
         x: { title: { display: true, text: 'Time' } },
-        y: { title: { display: true, text: 'Cry score' }, suggestedMin: 0, suggestedMax: 1.0 }
+        y: { title: { display: true, text: 'Score' }, min: 0, max: 1.5 } // allow >1 (multi-label sums)
       },
       elements: { line: { fill: false } }
     }
   });
 }
 
+function hexWithAlpha(hex, alpha=0.5){
+  // convert #rrggbb → rgba()
+  const h = hex.replace('#','');
+  const r = parseInt(h.substring(0,2),16);
+  const g = parseInt(h.substring(2,4),16);
+  const b = parseInt(h.substring(4,6),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function updateChartWindow(params) {
+  const { PLOT_WINDOW_S } = params;
+  const tMs = state.timesMs;
+
+  let cut = 0;
+  if (tMs.length) {
+    const startMs = tMs[tMs.length - 1] - (PLOT_WINDOW_S * 1000);
+    const idx = tMs.findIndex(v => v >= startMs);
+    cut = idx >= 0 ? idx : 0;
+  }
+
+  const labels = tMs.slice(cut).map(formatClock);
+  const raw = state.cryRaw.slice(cut);
+  const sm  = state.crySm.slice(cut);
+
+  // thresholds
+  const onVal  = Math.max(0, (params.THRESH || 0) + (params.ALERT_ON_EXTRA || 0));
+  const offVal = Math.max(0, onVal - (params.ALERT_OFF_DELTA || 0));
+  const thrOn  = new Array(labels.length).fill(onVal);
+  const thrOff = new Array(labels.length).fill(offVal);
+
+  // map datasets by label
+  const ds = state.chart.data.datasets;
+  let cursor = 0;
+  // class bars first (we added them with unshift, so they are at the front)
+  for (let i = 0; i < state.classSeries.length; i++, cursor++) {
+    ds[cursor].data = state.classSeries[i].slice(cut);
+  }
+  // then lines
+  ds[cursor++].data = raw;    // cry raw
+  ds[cursor++].data = sm;     // cry smoothed
+  ds[cursor++].data = thrOn;  // ON
+  ds[cursor++].data = thrOff; // OFF
+
+  state.chart.data.labels = labels;
+
+  // y range: include bars + lines + thresholds
+  const allVals = raw.concat(sm, thrOn, thrOff, ...state.classSeries.map(s => s.slice(cut)));
+  if (allVals.length) {
+    const ymin = Math.min(...allVals);
+    const ymax = Math.max(...allVals);
+    const pad = 0.05;
+    state.chart.options.scales.y.min = Math.min(0, ymin - pad);
+    state.chart.options.scales.y.max = Math.min(1.5, ymax + pad);
+  }
+  state.chart.update();
+}
+
+/* ---------- Spectrum chart (unchanged) ---------- */
 const spectrumOverlay = {
   id: 'spectrumOverlay',
   afterDatasetsDraw(chart) {
     const { ctx, chartArea, scales } = chart;
     if (!chart.$peakFreq) return;
-    // Shade 300–3000 Hz band
     const x1 = scales.x.getPixelForValue(300);
     const x2 = scales.x.getPixelForValue(3000);
     ctx.save();
@@ -193,7 +286,6 @@ const spectrumOverlay = {
     const left = Math.min(x1, x2);
     const width = Math.abs(x2 - x1);
     ctx.fillRect(left, chartArea.top, width, chartArea.bottom - chartArea.top);
-    // Peak marker
     const xp = scales.x.getPixelForValue(chart.$peakFreq);
     ctx.strokeStyle = '#ef4444';
     ctx.lineWidth = 1;
@@ -208,12 +300,10 @@ function setupSpectrumChart(freqs) {
   const ctx = els.chartSpectrumCanvas.getContext('2d');
   state.spectrumChart = new Chart(ctx, {
     type: 'line',
-    data: {
-      datasets: [
-        { label: 'spectrum (raw)', data: [], borderColor: RAW_COLOR,   borderWidth: 2, pointRadius: 0, tension: 0 },
-        { label: 'spectrum (smoothed)', data: [], borderColor: SMOOTH_COLOR, borderWidth: 2, pointRadius: 0, tension: 0 }
-      ]
-    },
+    data: { datasets: [
+      { label: 'spectrum (raw)', data: [], borderColor: '#60a5fa', borderWidth: 2, pointRadius: 0, tension: 0 },
+      { label: 'spectrum (smoothed)', data: [], borderColor: '#ef4444', borderWidth: 2, pointRadius: 0, tension: 0 }
+    ]},
     options: {
       animation: false,
       plugins: { legend: { display: false } },
@@ -240,41 +330,6 @@ function setupSpectrumChart(freqs) {
   });
 }
 
-function updateChartWindow(params) {
-  const { PLOT_WINDOW_S } = params;
-  const tMs = state.timesMs, r = state.cryRaw, s = state.crySm;
-
-  let cut = 0;
-  if (tMs.length) {
-    const startMs = tMs[tMs.length - 1] - (PLOT_WINDOW_S * 1000);
-    const idx = tMs.findIndex(v => v >= startMs);
-    cut = idx >= 0 ? idx : 0;
-  }
-
-  const labels = tMs.slice(cut).map(formatClock);
-  const raw = r.slice(cut);
-  const sm = s.slice(cut);
-
-  const onVal  = Math.max(0, (params.THRESH || 0) + (params.ALERT_ON_EXTRA || 0));
-  const offVal = Math.max(0, onVal - (params.ALERT_OFF_DELTA || 0));
-  const thrOn  = new Array(labels.length).fill(onVal);
-  const thrOff = new Array(labels.length).fill(offVal);
-
-  state.chart.data.labels = labels;
-  state.chart.data.datasets[0].data = raw;
-  state.chart.data.datasets[1].data = sm;
-  state.chart.data.datasets[2].data = thrOn;
-  state.chart.data.datasets[3].data = thrOff;
-
-  if (raw.length || sm.length) {
-    const all = raw.concat(sm, [onVal, offVal]);
-    const ymin = Math.min(...all), ymax = Math.max(...all), pad = 0.05;
-    state.chart.options.scales.y.min = Math.min(0, ymin - pad);
-    state.chart.options.scales.y.max = Math.min(1.5, ymax + pad);
-  }
-  state.chart.update();
-}
-
 function updateSpectrumChartVisibility() {
   if (!state.spectrumChart) return;
   state.spectrumChart.data.datasets[0].hidden = !els.showRawSpec?.checked;
@@ -293,7 +348,6 @@ function updateSpectrumChart() {
   state.spectrumChart.data.datasets[0].data = raw;
   state.spectrumChart.data.datasets[1].data = sm;
 
-  // Peak
   let maxDb = -Infinity, maxIdx = -1;
   for (let i = state.specStartIdx; i <= state.specEndIdx; i++) {
     const v = state.specSmDb[i]; if (v > maxDb) { maxDb = v; maxIdx = i; }
@@ -330,17 +384,6 @@ function shouldAlert(smoothed, nowMs, params) {
   }
 }
 
-/* ---------- Audio helpers ---------- */
-function concatFloat32(a, b) { const out = new Float32Array(a.length + b.length); out.set(a, 0); out.set(b, a.length); return out; }
-function resampleLinear(x, fromSr, toSr) {
-  if (fromSr === toSr) return x;
-  const ratio = toSr / fromSr, n = Math.max(1, Math.round(x.length * ratio)), out = new Float32Array(n);
-  const dx = (x.length - 1) / (n - 1);
-  for (let i=0;i<n;i++){ const pos=i*dx, i0=Math.floor(pos), i1=Math.min(i0+1, x.length-1), frac=pos-i0; out[i]=x[i0]*(1-frac)+x[i1]*frac; }
-  return out;
-}
-function movingAvgTail(arr, k) { if (!arr.length) return 0; const start=Math.max(0, arr.length-k); let sum=0; for (let i=start;i<arr.length;i++) sum+=arr[i]; return sum/(arr.length-start); }
-
 /* ---------- MediaPipe setup + inference ---------- */
 async function ensureMPClassifierAndLabels() {
   if (!state.mpFileset) {
@@ -348,12 +391,15 @@ async function ensureMPClassifierAndLabels() {
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0/wasm"
     );
   }
+  // Use options so we can request lots of categories (avoid top-k truncation)
   if (!state.mpClassifier) {
-    const { MODEL_URL, SR_TARGET } = getParams();
-    // Use createFromModelPath; classification is synchronous
-    state.mpClassifier = await AudioClassifier.createFromModelPath(state.mpFileset, MODEL_URL);
-    // Some versions let you set sampleRate via classify(..., sampleRate)
-    state.mpClassifier.__sampleRate = SR_TARGET;
+    const { MODEL_URL } = getParams();
+    state.mpClassifier = await AudioClassifier.createFromOptions(state.mpFileset, {
+      baseOptions: { modelAssetPath: MODEL_URL },
+      runningMode: 'AUDIO_CLIP',
+      maxResults: 521,       // cover all YAMNet classes
+      scoreThreshold: 0.0
+    });
   }
   if (!state.labelList.length) {
     setStatus('Loading class_map.csv…');
@@ -361,26 +407,36 @@ async function ensureMPClassifierAndLabels() {
   }
   const { INCLUDE_CLASSES } = getParams();
   state.cryIdxs = findCryIdxs(state.labelList, INCLUDE_CLASSES);
+  state.cryNames = state.cryIdxs.map(i => state.labelList[i] || `Class ${i}`);
   if (state.cryIdxs.length === 0) throw new Error('No matching classes found. Use ";" or new lines as separators.');
   setStatus('Ready');
 }
 
-// Classify a 0.96 s 16kHz mono clip with MediaPipe (Float32Array path)
-function classifyCryScoreMP(window16k) {
-  const sr = state.mpClassifier.__sampleRate || 16000;
-  const results = state.mpClassifier.classify(window16k, sr); // synchronous
-  if (!results || !results.length) return 0;
+function classifyPerClass(window16k, sr) {
+  // Returns { sum, perClass: number[] } aligned with state.cryIdxs
+  const results = state.mpClassifier.classify(window16k, sr); // sync
+  const perMap = new Map(); // idx -> sum over chunks
+  let chunks = 0;
 
-  // Average across returned chunks; sum selected indices per chunk
-  let total = 0, chunks = 0;
-  for (const res of results) {
+  for (const res of results || []) {
     const head = res.classifications && res.classifications[0];
     const cats = head?.categories || [];
-    let sumChunk = 0;
-    for (const c of cats) if (state.cryIdxs.includes(c.index)) sumChunk += c.score;
-    total += sumChunk; chunks += 1;
+    // Build a quick lookup for this chunk
+    const chunkMap = new Map();
+    for (const c of cats) chunkMap.set(c.index, c.score);
+
+    // accumulate only for selected classes; missing treated as 0
+    for (const idx of state.cryIdxs) {
+      const prev = perMap.get(idx) || 0;
+      perMap.set(idx, prev + (chunkMap.get(idx) || 0));
+    }
+    chunks += 1;
   }
-  return chunks ? (total / chunks) : 0;
+
+  const denom = chunks || 1;
+  const perClass = state.cryIdxs.map(idx => (perMap.get(idx) || 0) / denom);
+  const sum = perClass.reduce((a,b)=>a+b,0);
+  return { sum, perClass };
 }
 
 /* ---------- Start / Stop ---------- */
@@ -400,6 +456,7 @@ async function start() {
     state.timesMs = [];
     state.cryRaw = [];
     state.crySm = [];
+    state.classSeries = state.cryIdxs.map(() => []);
     state.alertOn = false;
     state.alertUntilMs = 0;
     setupChart();
@@ -489,7 +546,7 @@ async function start() {
     els.btnStart && (els.btnStart.disabled = true);
     els.btnStop  && (els.btnStop.disabled  = false);
     setStatus(`Listening @ ${ctx.sampleRate.toFixed(0)} Hz (MediaPipe)`);
-  } catch (e) {
+  } catch {
     setStatus('Start failed');
     try { state.processor?.disconnect(); } catch {}
     try { if (state.audioCtx && state.audioCtx.state !== 'closed') await state.audioCtx.close(); } catch {}
@@ -536,24 +593,30 @@ async function onAudioChunk(chunkFloat32, deviceSr) {
       w = pad;
     }
 
-    // Classify (Float32Array path)
-    let score = 0;
+    // Classify: get per-class and summed scores
+    let sum = 0, per = [];
     try {
-      // Ensure exact length expected by model (~0.96 s); our window is already right-aligned; pass as-is
-      score = classifyCryScoreMP(w);
-    } catch {
-      // keep score = 0 on failure
-    }
+      const res = classifyPerClass(w, params.SR_TARGET);
+      sum = res.sum; per = res.perClass;
+    } catch {}
 
-    state.cryRaw.push(score);
+    // push series
+    state.cryRaw.push(sum);
     state.crySm.push(movingAvgTail(state.cryRaw, params.SMOOTH_WIN));
+    // ensure per-class arrays exist (in case INCLUDE_CLASSES changed mid-run)
+    if (!state.classSeries.length || state.classSeries.length !== per.length) {
+      state.classSeries = per.map(() => []);
+    }
+    per.forEach((v, i) => state.classSeries[i].push(v));
 
+    // time axes
     state.timesSec.push(state.timesSec.length * params.HOP_S);
     const nextMs = state.timesMs.length ? (state.timesMs[state.timesMs.length - 1] + hopMs) : Date.now();
     state.timesMs.push(nextMs);
 
     updateChartWindow(params);
 
+    // Alert (hysteresis + hold)
     const smoothed = state.crySm[state.crySm.length - 1];
     const nowMs = Date.now();
     const alert = shouldAlert(smoothed, nowMs, params);
@@ -569,6 +632,7 @@ async function onAudioChunk(chunkFloat32, deviceSr) {
         state.timesMs  = state.timesMs.slice(keepFrom);
         state.cryRaw   = state.cryRaw.slice(keepFrom);
         state.crySm    = state.crySm.slice(keepFrom);
+        state.classSeries = state.classSeries.map(arr => arr.slice(keepFrom));
       }
       const minNeeded = state.lastPos - frameLen16k - frameHop16k;
       if (minNeeded > 0) {
