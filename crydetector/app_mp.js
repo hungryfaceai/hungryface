@@ -179,10 +179,10 @@ function setupChart() {
 
   // base datasets: thresholds (bars draw under lines), then lines last (order higher)
   const datasets = [
-    { label: 'cry_score (raw)',      type: 'line', data: [], borderColor: RAW_COLOR,   borderWidth: 2, pointRadius: 0, tension: 0.15, order: 10 },
-    { label: 'cry_score (smoothed)', type: 'line', data: [], borderColor: SMOOTH_COLOR, borderWidth: 2, pointRadius: 0, tension: 0.15, order: 11 },
-    { label: 'threshold (ON)',       type: 'line', data: [], borderColor: THRESH_ON_COLOR,  borderWidth: 1, pointRadius: 0, borderDash: [6,4], order: 9 },
-    { label: 'threshold (OFF)',      type: 'line', data: [], borderColor: THRESH_OFF_COLOR, borderWidth: 1, pointRadius: 0, borderDash: [2,2], order: 9 }
+    { label: 'score',      type: 'line', data: [], borderColor: RAW_COLOR,   borderWidth: 2, pointRadius: 0, tension: 0.15, order: 10 },
+    { label: 'smoothed', type: 'line', data: [], borderColor: SMOOTH_COLOR, borderWidth: 2, pointRadius: 0, tension: 0.15, order: 11 },
+    { label: 'thres ON',       type: 'line', data: [], borderColor: THRESH_ON_COLOR,  borderWidth: 1, pointRadius: 0, borderDash: [6,4], order: 9 },
+    { label: 'thresh OFF',      type: 'line', data: [], borderColor: THRESH_OFF_COLOR, borderWidth: 1, pointRadius: 0, borderDash: [2,2], order: 9 }
   ];
 
   // add one bar dataset per included class
