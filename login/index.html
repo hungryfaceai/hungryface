@@ -2,233 +2,56 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Auth – Login / Register</title>
-  <!-- TailwindCSS CDN for quick styling -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HungryFace — Sign in</title>
+  <link rel="icon" href="data:," />
   <style>
+    :root { color-scheme: dark; }
     html, body { height: 100%; }
-  </style>
-</head>
-<body class="min-h-full bg-gray-50 text-gray-900">
-  <main class="mx-auto max-w-md p-6">
-    <div class="mt-10 rounded-2xl bg-white p-6 shadow-lg">
-      <h1 class="mb-1 text-2xl font-semibold">Welcome</h1>
-      <p class="mb-6 text-sm text-gray-500">Create an account or sign in with email & password. No Google account required.</p>
-
-      <!-- Tabs -->
-      <div class="mb-6 flex rounded-xl bg-gray-100 p-1 text-sm">
-        <button id="tab-login" class="w-1/2 rounded-lg px-3 py-2 font-medium transition active-tab">Sign in</button>
-        <button id="tab-register" class="w-1/2 rounded-lg px-3 py-2 font-medium transition">Create account</button>
-      </div>
-
-      <!-- Login form -->
-      <form id="login-form" class="space-y-3">
-        <div>
-          <label class="mb-1 block text-sm">Email</label>
-          <input id="login-email" type="email" required class="w-full rounded-xl border border-gray-300 px-3 py-2 outline-none ring-0 focus:border-gray-400" placeholder="you@example.com" />
-        </div>
-        <div>
-          <div class="flex items-center justify-between">
-            <label class="mb-1 block text-sm">Password</label>
-            <button id="reset-password" type="button" class="text-xs text-blue-600 hover:underline">Forgot?</button>
-          </div>
-          <input id="login-password" type="password" required minlength="6" class="w-full rounded-xl border border-gray-300 px-3 py-2 outline-none ring-0 focus:border-gray-400" placeholder="••••••••" />
-        </div>
-        <button class="w-full rounded-xl bg-gray-900 px-3 py-2 font-medium text-white transition hover:bg-black disabled:opacity-60" id="login-btn" type="submit">Sign in</button>
-        <p id="login-error" class="hidden rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"></p>
-      </form>
-
-      <!-- Register form -->
-      <form id="register-form" class="hidden space-y-3">
-        <div>
-          <label class="mb-1 block text-sm">Email</label>
-          <input id="reg-email" type="email" required class="w-full rounded-xl border border-gray-300 px-3 py-2 outline-none ring-0 focus:border-gray-400" placeholder="you@example.com" />
-        </div>
-        <div>
-          <label class="mb-1 block text-sm">Password <span class="text-gray-400">(min 6 chars)</span></label>
-          <input id="reg-password" type="password" required minlength="6" class="w-full rounded-xl border border-gray-300 px-3 py-2 outline-none ring-0 focus:border-gray-400" placeholder="Create a password" />
-        </div>
-        <button class="w-full rounded-xl bg-gray-900 px-3 py-2 font-medium text-white transition hover:bg-black disabled:opacity-60" id="register-btn" type="submit">Create account</button>
-        <p id="register-error" class="hidden rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"></p>
-      </form>
-
-      <!-- Authenticated area -->
-      <section id="authed" class="mt-4 hidden">
-        <div class="rounded-xl bg-green-50 p-4 text-green-800">
-          <p class="text-sm">Signed in as <span id="user-email" class="font-medium"></span></p>
-        </div>
-        <div class="mt-4 grid gap-2">
-          <button id="copy-token" class="rounded-xl border px-3 py-2 text-sm">Copy ID token</button>
-          <button id="call-backend" class="rounded-xl border px-3 py-2 text-sm">Call backend on Render</button>
-          <button id="sign-out" class="rounded-xl bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-black">Sign out</button>
-          <p id="backend-response" class="hidden rounded-lg bg-gray-100 px-3 py-2 text-sm"></p>
-        </div>
-      </section>
-    </div>
-
-    <p class="mt-6 text-center text-xs text-gray-500">This page uses Firebase Authentication (email/password only). You control which providers are enabled.</p>
-  </main>
-
-  <script type="module">
-    // --- 1) Configure Firebase ---
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import {
-      getAuth,
-      setPersistence,
-      browserLocalPersistence,
-      onAuthStateChanged,
-      createUserWithEmailAndPassword,
-      signInWithEmailAndPassword,
-      sendPasswordResetEmail,
-      signOut
-    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-
-    // TODO: replace with your project's values from Firebase Console > Project settings > General - DONE
-
-    const firebaseConfig = {
-      apiKey: "AIzaSyBUQDNX5ItDQsrReCUdWwwKW4YB7YGjC1I",
-      authDomain: "hungryface-53740.firebaseapp.com",
-      projectId: "hungryface-53740",
-      storageBucket: "hungryface-53740.firebasestorage.app",
-      messagingSenderId: "499156831119",
-      appId: "1:499156831119:web:872ec2614b79acb09719fa",
-      measurementId: "G-7QG5RCK7SZ"
-    };
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    await setPersistence(auth, browserLocalPersistence); // keep user signed in across reloads
-
-    // --- 2) UI helpers ---
-    const $ = (id) => document.getElementById(id);
-    const show = (el) => el.classList.remove("hidden");
-    const hide = (el) => el.classList.add("hidden");
-    const setActiveTab = (tab) => {
-      const loginTab = $("tab-login");
-      const registerTab = $("tab-register");
-      const loginForm = $("login-form");
-      const registerForm = $("register-form");
-      [loginTab, registerTab].forEach((b) => b.classList.remove("bg-white", "shadow", "active-tab"));
-      if (tab === "login") {
-        loginTab.classList.add("bg-white", "shadow");
-        hide(registerForm); show(loginForm);
-      } else {
-        registerTab.classList.add("bg-white", "shadow");
-        hide(loginForm); show(registerForm);
-      }
-    };
-
-    $("tab-login").addEventListener("click", () => setActiveTab("login"));
-    $("tab-register").addEventListener("click", () => setActiveTab("register"));
-
-    // --- 3) Auth state handling ---
-    const authed = $("authed");
-    const userEmail = $("user-email");
-
-    onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        userEmail.textContent = user.email || "(no email)";
-        show(authed);
-      } else {
-        hide(authed);
-      }
-    });
-
-    // --- 4) Register ---
-    $("register-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      hide($("register-error"));
-      const email = $("reg-email").value.trim();
-      const pass = $("reg-password").value;
-      $("register-btn").disabled = true;
-      try {
-        await createUserWithEmailAndPassword(auth, email, pass);
-        // User is auto-signed-in; the state listener will update UI.
-      } catch (err) {
-        const msg = (err && err.message) ? err.message : String(err);
-        const pretty = msg
-          .replace("Firebase:", "")
-          .replace("(auth/", "(")
-          .trim();
-        const box = $("register-error");
-        box.textContent = pretty; show(box);
-      } finally {
-        $("register-btn").disabled = false;
-      }
-    });
-
-    // --- 5) Login ---
-    $("login-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      hide($("login-error"));
-      const email = $("login-email").value.trim();
-      const pass = $("login-password").value;
-      $("login-btn").disabled = true;
-      try {
-        await signInWithEmailAndPassword(auth, email, pass);
-      } catch (err) {
-        const msg = (err && err.message) ? err.message : String(err);
-        const pretty = msg
-          .replace("Firebase:", "")
-          .replace("(auth/", "(")
-          .trim();
-        const box = $("login-error");
-        box.textContent = pretty; show(box);
-      } finally {
-        $("login-btn").disabled = false;
-      }
-    });
-
-    // --- 6) Reset password ---
-    $("reset-password").addEventListener("click", async () => {
-      const email = $("login-email").value.trim();
-      if (!email) { alert("Enter your email above first."); return; }
-      try {
-        await sendPasswordResetEmail(auth, email);
-        alert("Password reset email sent.");
-      } catch (err) {
-        alert((err && err.message) ? err.message : String(err));
-      }
-    });
-
-    // --- 7) Copy ID token ---
-    $("copy-token").addEventListener("click", async () => {
-      const user = auth.currentUser;
-      if (!user) return alert("Not signed in");
-      const token = await user.getIdToken(/* forceRefresh */ true);
-      await navigator.clipboard.writeText(token);
-      alert("ID token copied to clipboard");
-    });
-
-    // --- 8) Call your backend on Render ---
-    const RENDER_API_URL = "https://hungryface.onrender.com/protected"; // TODO: replace with your endpoint - DONE
-    $("call-backend").addEventListener("click", async () => {
-      const out = $("backend-response");
-      out.textContent = ""; hide(out);
-      const user = auth.currentUser;
-      if (!user) return alert("Not signed in");
-      const token = await user.getIdToken();
-      try {
-        const res = await fetch(RENDER_API_URL, {
-          method: "GET",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const text = await res.text();
-        out.textContent = `Status ${res.status}: ${text}`;
-        show(out);
-      } catch (err) {
-        out.textContent = `Request failed: ${err}`;
-        show(out);
-      }
-    });
-
-    // --- 9) Sign out ---
-    $("sign-out").addEventListener("click", async () => {
-      await signOut(auth);
-    });
-
-    // Default active tab
-    setActiveTab("login");
-  </script>
-</body>
-</html>
+    body {
+      margin: 0;
+      background: #000;               /* black background */
+      color: #fff;                    /* white text */
+      font: 16px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      display: grid;
+      place-items: center;
+    }
+    .card {
+      width: min(92vw, 420px);
+      background: #111;
+      border: 1px solid #222;
+      border-radius: 16px;
+      padding: 28px;
+      box-shadow: 0 8px 30px rgba(0,0,0,.4);
+    }
+    h1 {
+      margin: 0 0 4px;
+      font-size: 24px;
+      letter-spacing: .2px;
+    }
+    p.sub { margin: 0 0 20px; color: #9ca3af; font-size: 14px; }
+    label { display: block; font-size: 13px; color: #cbd5e1; margin: 14px 0 6px; }
+    input {
+      width: 100%;
+      background: #0b0b0b;
+      color: #fff;
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 12px 12px;
+      outline: none;
+    }
+    input:focus { border-color: #3b82f6; }
+    .row { display: flex; gap: 10px; margin-top: 18px; }
+    button {
+      appearance: none;
+      border: 1px solid #2a2a2a;
+      background: #1a1a1a;
+      color: #fff;
+      border-radius: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+      flex: 1;
+    }
+    button.primary { background: #2563eb; border-color: #2563eb; }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    .msg { margin-top: 14px
