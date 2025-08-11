@@ -644,6 +644,7 @@ async function onAudioChunk(chunkFloat32, deviceSr) {
 }
 
 /* ---------- Wire up ---------- */
+/*
 document.addEventListener('DOMContentLoaded', () => {
   bindElements();
   els.btnStart && (els.btnStart.disabled = false);
@@ -661,3 +662,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
   setStatus('Page ready. Click Start.');
 });
+*/
+
+/* ---------- Wire up (works even if script loads after DOMContentLoaded) ---------- */
+function init() {
+  bindElements();
+  els.btnStart && (els.btnStart.disabled = false);
+  els.btnStop  && (els.btnStop.disabled  = true);
+
+  els.btnStart?.addEventListener('click', start);
+  els.btnStop?.addEventListener('click', stop);
+
+  Object.keys(els.inputs).forEach(k => {
+    els.inputs[k]?.addEventListener('change', () => updateChartWindow(getParams()));
+  });
+
+  els.showRawSpec?.addEventListener('change', updateSpectrumChartVisibility);
+  els.showSmSpec?.addEventListener('change', updateSpectrumChartVisibility);
+
+  setStatus('Page ready. Click Start.');
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+
