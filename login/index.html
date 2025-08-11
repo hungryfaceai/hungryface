@@ -16,33 +16,35 @@
       display: grid;
       place-items: center;
     }
-    /* Top-right logo */
-    .logo {
-      position: fixed;
-      top: 16px;
-      right: 16px;
-      height: 44px;                   /* tweak as you like */
-      width: auto;
-      border-radius: 10px;
-      box-shadow: 0 4px 18px rgba(0,0,0,.45);
-      user-select: none;
-      -webkit-user-drag: none;
-    }
-
     .card {
       width: min(92vw, 420px);
       background: #111;
       border: 1px solid #222;
       border-radius: 16px;
-      padding: 28px;
+      padding: 24px 24px 28px;
       box-shadow: 0 8px 30px rgba(0,0,0,.4);
     }
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between; /* title left, logo right */
+      gap: 12px;
+      margin-bottom: 6px;
+    }
     h1 {
-      margin: 0 0 4px;
+      margin: 0;
       font-size: 24px;
       letter-spacing: .2px;
     }
-    p.sub { margin: 0 0 20px; color: #9ca3af; font-size: 14px; }
+    .logo {
+      height: 40px;                  /* tweak as you like */
+      width: auto;
+      border-radius: 8px;
+      box-shadow: 0 4px 18px rgba(0,0,0,.45);
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+    p.sub { margin: 0 0 18px; color: #9ca3af; font-size: 14px; }
     label { display: block; font-size: 13px; color: #cbd5e1; margin: 14px 0 6px; }
     input {
       width: 100%;
@@ -55,6 +57,17 @@
     }
     input:focus { border-color: #3b82f6; }
     .row { display: flex; gap: 10px; margin-top: 18px; }
+    .small-actions {
+      margin-top: 10px;
+      display: flex;
+      justify-content: flex-end;
+    }
+    .link {
+      color: #93c5fd;
+      text-decoration: none;
+      font-size: 13px;
+    }
+    .link:hover { text-decoration: underline; }
     button {
       appearance: none;
       border: 1px solid #2a2a2a;
@@ -69,14 +82,16 @@
     button:disabled { opacity: .6; cursor: not-allowed; }
     .msg { margin-top: 14px; min-height: 20px; font-size: 13px; }
     .msg.error { color: #fca5a5; }
+    .msg.ok { color: #86efac; }
   </style>
 </head>
 <body>
-  <!-- Logo (absolute path from repo root) -->
-  <img class="logo" src="/hungryface/logo.jpg" alt="HungryFace logo" />
-
   <div class="card">
-    <h1>HungryFace</h1>
+    <div class="card-head">
+      <h1>HungryFace</h1>
+      <!-- Logo from repo root -->
+      <img class="logo" src="/hungryface/logo.jpg" alt="HungryFace logo" />
+    </div>
     <p class="sub">Sign in to continue</p>
 
     <form id="loginForm">
@@ -91,6 +106,10 @@
         <button id="btnCreate" type="button">Create account</button>
       </div>
 
+      <div class="small-actions">
+        <a id="forgot" href="#" class="link">Forgot password?</a>
+      </div>
+
       <div id="msg" class="msg"></div>
     </form>
   </div>
@@ -103,7 +122,8 @@
       setPersistence,
       browserLocalPersistence,
       signInWithEmailAndPassword,
-      createUserWithEmailAndPassword
+      createUserWithEmailAndPassword,
+      sendPasswordResetEmail
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
     // --- Your Firebase config ---
@@ -133,11 +153,16 @@
     const msg  = document.getElementById("msg");
     const btnSignIn = document.getElementById("btnSignIn");
     const btnCreate = document.getElementById("btnCreate");
+    const forgot = document.getElementById("forgot");
 
     function showError(e) {
       console.error(e);
       msg.className = "msg error";
       msg.textContent = e?.message || "Something went wrong.";
+    }
+    function showOk(text) {
+      msg.className = "msg ok";
+      msg.textContent = text;
     }
     function clearMsg() {
       msg.className = "msg";
@@ -182,6 +207,23 @@
         showError(err);
       } finally {
         setBusy(false);
+      }
+    });
+
+    // Forgot password
+    forgot.addEventListener("click", async (e) => {
+      e.preventDefault();
+      clearMsg();
+      const email = document.getElementById("email").value.trim();
+      if (!email) {
+        showError({ message: "Enter your email above, then click ‘Forgot password?’" });
+        return;
+      }
+      try {
+        await sendPasswordResetEmail(auth, email);
+        showOk("Password reset email sent. Check your inbox.");
+      } catch (err) {
+        showError(err);
       }
     });
   </script>
