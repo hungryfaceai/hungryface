@@ -140,6 +140,76 @@
   </footer>
 
   <!-- App code (MediaPipe version) -->
-  <script src="./private_assets/app_mp_secure.js" type="module"></script>
+  <!-- <script src="./private_assets/app_mp.js" type="module"></script> THIS IS NOT PROTECTED -->
+
+  <!-- THIS IS: -->
+  <!-- Secure loader: fetch protected JS from Render only after Firebase login -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  
+    // 1) Your Firebase config
+    const firebaseConfig = {
+      /* paste your firebaseConfig here */
+    };
+  
+    // 2) Init + persist
+    const app  = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    await setPersistence(auth, browserLocalPersistence);
+  
+    // 3) Gate + lazy-load secure code from Render
+    const gate = document.createElement("div");
+    gate.style.position = "fixed"; gate.style.inset = 0; gate.style.display = "grid";
+    gate.style.placeItems = "center"; gate.style.fontFamily = "system-ui, sans-serif";
+    gate.textContent = "Checking login…";
+    document.body.appendChild(gate);
+  
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        // Not signed in → send to your login page
+        window.location.href = "/hungryface/login/";
+        return;
+      }
+      try {
+        const token = await user.getIdToken();
+        const url   = "https://hungryface.onrender.com/assets/crydetector/app_mp_secure.js";
+  
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store"
+        });
+        if (!res.ok) throw new Error(`Secure script fetch failed: ${res.status} ${await res.text()}`);
+  
+        // If app_mp_secure.js is an ES module, import it via a Blob URL
+        const js    = await res.text();
+        const blob  = new Blob([js], { type: "text/javascript" });
+        const modURL = URL.createObjectURL(blob);
+  
+        try {
+          const mod = await import(modURL);
+          // Optional: call an exported entry if you have one
+          if (typeof mod.start === "function") {
+            await mod.start({ auth, user, MPTasksAudio: window.MPTasksAudio });
+          } else if (typeof mod.default === "function") {
+            await mod.default({ auth, user, MPTasksAudio: window.MPTasksAudio });
+          }
+        } catch {
+          // Fallback for non-module scripts
+          new Function(js)();
+        } finally {
+          URL.revokeObjectURL(modURL);
+        }
+      } catch (err) {
+        console.error(err);
+        gate.textContent = "Access error. Check console and reload.";
+        return;
+      }
+      // Success → remove gate
+      gate.remove();
+    });
+  </script>
+
+  
 </body>
 </html>
