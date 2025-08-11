@@ -206,7 +206,7 @@ function setupChart() {
     data: { labels: [], datasets },
     options: {
       animation: false,
-      plugins: { legend: { display: false } },
+      plugins: { legend: { display: true, labels: { useLineStyle: true } } },
       scales: {
         x: { title: { display: true, text: 'Time' } },
         y: { title: { display: true, text: 'Score' }, min: 0, max: 1.5 } // allow >1 (multi-label sums)
