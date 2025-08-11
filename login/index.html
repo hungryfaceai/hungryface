@@ -54,4 +54,123 @@
     }
     button.primary { background: #2563eb; border-color: #2563eb; }
     button:disabled { opacity: .6; cursor: not-allowed; }
-    .msg { margin-top: 14px
+    .msg { margin-top: 14px; min-height: 20px; font-size: 13px; }
+    .msg.error { color: #fca5a5; }
+    .foot { margin-top: 14px; color:#9ca3af; font-size:12px; text-align:center; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>HungryFace</h1>
+    <p class="sub">Sign in to continue</p>
+
+    <form id="loginForm">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" required />
+
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required />
+
+      <div class="row">
+        <button id="btnSignIn" class="primary" type="submit">Sign in</button>
+        <button id="btnCreate" type="button">Create account</button>
+      </div>
+
+      <div id="msg" class="msg"></div>
+    </form>
+
+    <div class="foot">You’ll be redirected after sign-in.</div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import {
+      getAuth,
+      onAuthStateChanged,
+      setPersistence,
+      browserLocalPersistence,
+      signInWithEmailAndPassword,
+      createUserWithEmailAndPassword
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+    // --- Your Firebase config ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyBUQDNX5ItDQsrReCUdWwwKW4YB7YGjC1I",
+      authDomain: "hungryface-53740.firebaseapp.com",
+      projectId: "hungryface-53740",
+      storageBucket: "hungryface-53740.firebasestorage.app",
+      messagingSenderId: "499156831119",
+      appId: "1:499156831119:web:872ec2614b79acb09719fa",
+      measurementId: "G-7QG5RCK7SZ"
+    };
+
+    // --- Init + persistence ---
+    const app  = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    await setPersistence(auth, browserLocalPersistence);
+
+    // --- Where to go after login (supports ?next=...) ---
+    const DEFAULT_NEXT = "/hungryface/crydetector/";
+    const params = new URLSearchParams(location.search);
+    const next = params.get("next") || sessionStorage.getItem("next") || DEFAULT_NEXT;
+    sessionStorage.setItem("next", next);
+
+    // --- Elements ---
+    const form = document.getElementById("loginForm");
+    const msg  = document.getElementById("msg");
+    const btnSignIn = document.getElementById("btnSignIn");
+    const btnCreate = document.getElementById("btnCreate");
+
+    function showError(e) {
+      console.error(e);
+      msg.className = "msg error";
+      msg.textContent = e?.message || "Something went wrong.";
+    }
+    function clearMsg() {
+      msg.className = "msg";
+      msg.textContent = "";
+    }
+    function setBusy(b) {
+      btnSignIn.disabled = b; btnCreate.disabled = b;
+    }
+
+    // Redirect immediately if already signed in
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        window.location.replace(next);
+      }
+    });
+
+    // Email/password sign-in
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      clearMsg(); setBusy(true);
+      const email = document.getElementById("email").value.trim();
+      const pass  = document.getElementById("password").value;
+      try {
+        await signInWithEmailAndPassword(auth, email, pass);
+        window.location.replace(next);
+      } catch (err) {
+        showError(err);
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    // Create account
+    btnCreate.addEventListener("click", async () => {
+      clearMsg(); setBusy(true);
+      const email = document.getElementById("email").value.trim();
+      const pass  = document.getElementById("password").value;
+      try {
+        await createUserWithEmailAndPassword(auth, email, pass);
+        window.location.replace(next);
+      } catch (err) {
+        showError(err);
+      } finally {
+        setBusy(false);
+      }
+    });
+  </script>
+</body>
+</html>
