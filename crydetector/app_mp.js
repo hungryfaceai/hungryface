@@ -181,8 +181,8 @@ function setupChart() {
   const datasets = [
     { label: 'score',      type: 'line', data: [], borderColor: RAW_COLOR,   borderWidth: 2, pointRadius: 0, tension: 0.15, order: 10 },
     { label: 'smoothed', type: 'line', data: [], borderColor: SMOOTH_COLOR, borderWidth: 2, pointRadius: 0, tension: 0.15, order: 11 },
-    { label: 'thresh ON',       type: 'line', data: [], borderColor: THRESH_ON_COLOR,  borderWidth: 1, pointRadius: 0, borderDash: [6,4], order: 9 },
-    { label: 'thresh OFF',      type: 'line', data: [], borderColor: THRESH_OFF_COLOR, borderWidth: 1, pointRadius: 0, borderDash: [2,2], order: 9 }
+    { label: 'thresh ON',       type: 'line', data: [], borderColor: THRESH_ON_COLOR, backgroundColor: THRESH_ON_COLOR, borderWidth: 1, pointRadius: 0, borderDash: [6,4], order: 9 },
+    { label: 'thresh OFF',      type: 'line', data: [], borderColor: THRESH_OFF_COLOR, backgroundColor: THRESH_OFF_COLOR, borderWidth: 1, pointRadius: 0, borderDash: [2,2], order: 9 }
   ];
 
   // add one bar dataset per included class
@@ -206,7 +206,7 @@ function setupChart() {
     data: { labels: [], datasets },
     options: {
       animation: false,
-      plugins: { legend: { display: true, labels: { useLineStyle: true } } },
+      plugins: { legend: { display: false } },
       scales: {
         x: { title: { display: true, text: 'Time' } },
         y: { title: { display: true, text: 'Score' }, min: 0, max: 1.5 } // allow >1 (multi-label sums)
