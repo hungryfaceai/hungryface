@@ -144,6 +144,7 @@
 
   <!-- THIS IS: -->
   <!-- Secure loader: fetch protected JS from Render only after Firebase login -->
+  <!--
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import { getAuth, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
@@ -215,6 +216,136 @@
       gate.remove();
     });
   </script>
+  -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import {
+    getAuth,
+    onAuthStateChanged,
+    setPersistence,
+    browserLocalPersistence,
+    signOut
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+  // --- Firebase config (yours) ---
+  const firebaseConfig = {
+    apiKey: "AIzaSyBUQDNX5ItDQsrReCUdWwwKW4YB7YGjC1I",
+    authDomain: "hungryface-53740.firebaseapp.com",
+    projectId: "hungryface-53740",
+    storageBucket: "hungryface-53740.firebasestorage.app",
+    messagingSenderId: "499156831119",
+    appId: "1:499156831119:web:872ec2614b79acb09719fa",
+    measurementId: "G-7QG5RCK7SZ"
+  };
+
+  // --- Init + persistence ---
+  const app  = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  await setPersistence(auth, browserLocalPersistence);
+
+  // --- Little overlay while we check auth ---
+  const gate = document.createElement("div");
+  Object.assign(gate.style, {
+    position: "fixed", inset: 0, display: "grid",
+    placeItems: "center", fontFamily: "system-ui, sans-serif",
+    background: "transparent", zIndex: 9999
+  });
+  gate.textContent = "Checking login…";
+  document.body.appendChild(gate);
+
+  // Helper: show user badge (expects #userBox markup in header)
+  function showUserBadge(user) {
+    const box   = document.getElementById("userBox");
+    const name  = document.getElementById("userName");
+    const img   = document.getElementById("userAvatar");
+    const init  = document.getElementById("userInitials");
+
+    if (!box || !name || !img || !init) return;
+
+    const friendlyName =
+      user.displayName ||
+      (user.email ? user.email.split("@")[0] : user.uid.slice(0, 6));
+
+    name.textContent = friendlyName;
+
+    if (user.photoURL) {
+      img.src = user.photoURL;
+      img.style.display  = "block";
+      init.style.display = "none";
+    } else {
+      const initials = (user.displayName?.match(/\b\w/g) || [friendlyName[0] || "U"])
+                        .slice(0, 2).join("").toUpperCase();
+      init.textContent   = initials;
+      init.style.display = "inline-flex";
+      img.style.display  = "none";
+    }
+    box.style.display = "inline-flex";
+
+    // Sign out
+    const btn = document.getElementById("signOut");
+    if (btn && !btn._wired) {
+      btn._wired = true;
+      btn.addEventListener("click", async () => {
+        await signOut(auth);
+        window.location.href = "/hungryface/login/";
+      });
+    }
+  }
+
+  onAuthStateChanged(auth, async (user) => {
+    if (!user) {
+      window.location.href = "/hungryface/login/";
+      return;
+    }
+
+    try {
+      // Show who’s signed in
+      showUserBadge(user);
+
+      // Fetch secured app code from Render (exact filename!)
+      const token = await user.getIdToken();
+      const SECURE_URL = "https://hungryface.onrender.com/assets/crydetector/app_mp.js?v=" + Date.now();
+
+      const res = await fetch(SECURE_URL, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store"
+      });
+      if (!res.ok) throw new Error(`secure fetch ${res.status}: ${await res.text()}`);
+
+      const js = await res.text();
+
+      // Prefer ESM (Blob import), fall back to classic script
+      try {
+        const blob = new Blob([js], { type: "text/javascript" });
+        const modURL = URL.createObjectURL(blob);
+        const mod = await import(modURL);
+        URL.revokeObjectURL(modURL);
+
+        // If your module exports a starter, call it
+        if (typeof mod.start === "function") {
+          await mod.start({ auth, user, MPTasksAudio: window.MPTasksAudio });
+        } else if (typeof mod.default === "function") {
+          await mod.default({ auth, user, MPTasksAudio: window.MPTasksAudio });
+        }
+      } catch (e) {
+        console.warn("[secure] module import failed, executing as script", e);
+        new Function(js)();
+        // If you build an IIFE that exposes window.CryApp.start, call it:
+        if (window.CryApp?.start) {
+          await window.CryApp.start({ MPTasksAudio: window.MPTasksAudio });
+        }
+      }
+    } catch (err) {
+      console.error("[secure] load error", err);
+      gate.textContent = "Access error. See console.";
+      return;
+    }
+
+    // All good — remove the overlay
+    gate.remove();
+  });
+</script>
+  
 
   
 </body>
