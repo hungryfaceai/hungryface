@@ -181,7 +181,7 @@ function setupChart() {
   const datasets = [
     { label: 'score',      type: 'line', data: [], borderColor: RAW_COLOR,   borderWidth: 2, pointRadius: 0, tension: 0.15, order: 10 },
     { label: 'smoothed', type: 'line', data: [], borderColor: SMOOTH_COLOR, borderWidth: 2, pointRadius: 0, tension: 0.15, order: 11 },
-    { label: 'thres ON',       type: 'line', data: [], borderColor: THRESH_ON_COLOR,  borderWidth: 1, pointRadius: 0, borderDash: [6,4], order: 9 },
+    { label: 'thresh ON',       type: 'line', data: [], borderColor: THRESH_ON_COLOR,  borderWidth: 1, pointRadius: 0, borderDash: [6,4], order: 9 },
     { label: 'thresh OFF',      type: 'line', data: [], borderColor: THRESH_OFF_COLOR, borderWidth: 1, pointRadius: 0, borderDash: [2,2], order: 9 }
   ];
 
