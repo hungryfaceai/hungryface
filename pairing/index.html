@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Offline WebRTC QR Pairing</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.min.js"></script>
+<style>
+body { font-family: sans-serif; padding: 1em; }
+video { width: 100%; max-width: 300px; }
+canvas { display: none; }
+#qr { margin: 1em 0; }
+</style>
+</head>
+<body>
+<h1>Offline WebRTC QR Pairing</h1>
+
+<button id="createOfferBtn">Create Offer (Offerer)</button>
+<button id="startScannerBtn">Start Scanner</button>
+<div id="qr"></div>
+
+<video id="remoteVideo" autoplay playsinline></video>
+
+<pre id="fingerprint"></pre>
+<pre id="sas"></pre>
+
+<canvas id="scanCanvas"></canvas>
+<video id="scanVideo" autoplay playsinline style="display:none;"></video>
+
+<script>
+let pc = new RTCPeerConnection({ iceServers: [] });
+let localStream;
+let remoteVideo = document.getElementById("remoteVideo");
+let qrDiv = document.getElementById("qr");
+let scanVideo = document.getElementById("scanVideo");
+let scanCanvas = document.getElementById("scanCanvas");
+let ctx = scanCanvas.getContext("2d");
+
+navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+  .then(stream => {
+    localStream = stream;
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+  });
+
+pc.ontrack = event => {
+  remoteVideo.srcObject = event.streams[0];
+};
+
+function getFingerprint() {
+  return pc.getConfiguration().certificates?.[0]?.getFingerprints?.()[0]?.value || "Fingerprint not available";
+}
+
+function sasFromFingerprint(fp) {
+  let words = fp.replace(/:/g, "").slice(0,8);
+  return words.match(/.{1,4}/g).join(" ");
+}
+
+async function createOffer() {
+  let offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  await new Promise(r => setTimeout(r, 500)); // wait for ICE
+  let sdp = JSON.stringify(pc.localDescription);
+  let compressed = LZString.compressToBase64(sdp);
+  qrDiv.innerHTML = "";
+  QRCode.toCanvas(document.createElement("canvas"), compressed, (err, canvas) => {
+    if (!err) qrDiv.appendChild(canvas);
+  });
+}
+
+function startScanner() {
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+    .then(stream => {
+      scanVideo.srcObject = stream;
+      requestAnimationFrame(scanLoop);
+    });
+}
+
+function scanLoop() {
+  scanCanvas.width = scanVideo.videoWidth;
+  scanCanvas.height = scanVideo.videoHeight;
+  ctx.drawImage(scanVideo, 0, 0, scanCanvas.width, scanCanvas.height);
+  let imgData = ctx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+  let code = jsQR(imgData.data, imgData.width, imgData.height);
+  if (code) {
+    handleScannedData(code.data);
+    return;
+  }
+  requestAnimationFrame(scanLoop);
+}
+
+async function handleScannedData(data) {
+  let sdp = LZString.decompressFromBase64(data);
+  let desc = JSON.parse(sdp);
+  if (desc.type === "offer") {
+    await pc.setRemoteDescription(desc);
+    let answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    await new Promise(r => setTimeout(r, 500));
+    let compressed = LZString.compressToBase64(JSON.stringify(pc.localDescription));
+    qrDiv.innerHTML = "";
+    QRCode.toCanvas(document.createElement("canvas"), compressed, (err, canvas) => {
+      if (!err) qrDiv.appendChild(canvas);
+    });
+  } else if (desc.type === "answer") {
+    await pc.setRemoteDescription(desc);
+    let fp = getFingerprint();
+    document.getElementById("fingerprint").textContent = "DTLS Fingerprint: " + fp;
+    document.getElementById("sas").textContent = "SAS: " + sasFromFingerprint(fp);
+  }
+}
+
+document.getElementById("createOfferBtn").onclick = createOffer;
+document.getElementById("startScannerBtn").onclick = startScanner;
+</script>
+</body>
+</html>
