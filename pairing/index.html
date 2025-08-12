@@ -1,117 +1,92 @@
 <!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>Offline WebRTC QR Pairing</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.min.js"></script>
+<html lang="en">
+<meta charset="utf-8">
+<title>Offline WebRTC QR Pairing (Self-contained)</title>
 <style>
-body { font-family: sans-serif; padding: 1em; }
-video { width: 100%; max-width: 300px; }
-canvas { display: none; }
-#qr { margin: 1em 0; }
+  body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:16px;max-width:900px;margin:auto}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .card{border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin:10px 0}
+  .btn{border:1px solid #e5e7eb;background:#f8fafc;border-radius:10px;padding:8px 12px;cursor:pointer}
+  .muted{color:#6b7280}
+  textarea{width:100%;min-height:130px}
+  img.qr{width:240px;height:240px;border:1px solid #e5e7eb;border-radius:12px}
+  code{background:#f1f5f9;padding:2px 6px;border-radius:6px}
 </style>
-</head>
-<body>
+
 <h1>Offline WebRTC QR Pairing</h1>
+<div class="row">
+  <button class="btn" id="btnOffer">I am the Offerer</button>
+  <button class="btn" id="btnAnswer">I am the Answerer</button>
+  <label class="row"><input type="checkbox" id="toggleCam"> Share camera & mic</label>
+  <div id="status" class="muted">Idle</div>
+</div>
 
-<button id="createOfferBtn">Create Offer (Offerer)</button>
-<button id="startScannerBtn">Start Scanner</button>
-<div id="qr"></div>
+<div id="offerUI" class="card" style="display:none">
+  <h3>Offerer</h3>
+  <div class="row">
+    <button class="btn" id="createOffer">Create Offer</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <img id="offerQR" class="qr" alt="Offer QR" style="display:none">
+    <div id="offerHint" class="muted" style="display:none">Show this QR to the Answerer.</div>
+  </div>
+  <details style="margin-top:8px">
+    <summary class="muted">Copy/paste fallback (offer SDP)</summary>
+    <textarea id="offerSDP" readonly></textarea>
+    <div style="margin-top:6px"><button class="btn" id="copyOffer">Copy SDP</button></div>
+  </details>
+  <div class="muted" style="margin-top:6px">Then scan the Answer QR (below) or paste the answer SDP.</div>
+  <textarea id="answerPaste" placeholder="Paste answer SDP here to finish (fallback)"></textarea>
+  <div class="row"><button class="btn" id="applyAnswer">Apply Answer</button></div>
+</div>
 
-<video id="remoteVideo" autoplay playsinline></video>
+<div id="answerUI" class="card" style="display:none">
+  <h3>Answerer</h3>
+  <div class="muted">Paste the Offerer’s SDP (from their QR or clipboard), then create your Answer.</div>
+  <textarea id="offerPaste" placeholder="Paste offer SDP here"></textarea>
+  <div class="row">
+    <button class="btn" id="makeAnswer">Make Answer</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <img id="answerQR" class="qr" alt="Answer QR" style="display:none">
+    <div id="answerHint" class="muted" style="display:none">Show this QR to the Offerer.</div>
+  </div>
+  <details style="margin-top:8px">
+    <summary class="muted">Copy/paste fallback (answer SDP)</summary>
+    <textarea id="answerSDP" readonly></textarea>
+    <div style="margin-top:6px"><button class="btn" id="copyAnswer">Copy SDP</button></div>
+  </details>
+</div>
 
-<pre id="fingerprint"></pre>
-<pre id="sas"></pre>
+<div id="mediaUI" class="card" style="display:none">
+  <div class="row" style="gap:16px">
+    <div>
+      <div class="muted">You</div>
+      <video id="localVideo" autoplay playsinline muted style="width:320px;height:240px;background:#000;border-radius:8px"></video>
+    </div>
+    <div>
+      <div class="muted">Peer</div>
+      <video id="remoteVideo" autoplay playsinline style="width:320px;height:240px;background:#000;border-radius:8px"></video>
+    </div>
+  </div>
+</div>
 
-<canvas id="scanCanvas"></canvas>
-<video id="scanVideo" autoplay playsinline style="display:none;"></video>
+<div id="verifyUI" class="card" style="display:none">
+  <h3>Verify</h3>
+  <div class="muted">DTLS fingerprint (compare on both devices)</div>
+  <div id="fingerprint" style="font-family:ui-monospace,monospace"></div>
+  <div class="muted" style="margin-top:6px">Short authentication string</div>
+  <div id="sas" style="font-family:ui-monospace,monospace;font-weight:600"></div>
+</div>
 
+<!-- --- LZ-String (MIT) minimal for URI encoding --- -->
 <script>
-let pc = new RTCPeerConnection({ iceServers: [] });
-let localStream;
-let remoteVideo = document.getElementById("remoteVideo");
-let qrDiv = document.getElementById("qr");
-let scanVideo = document.getElementById("scanVideo");
-let scanCanvas = document.getElementById("scanCanvas");
-let ctx = scanCanvas.getContext("2d");
-
-navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-  .then(stream => {
-    localStream = stream;
-    stream.getTracks().forEach(track => pc.addTrack(track, stream));
-  });
-
-pc.ontrack = event => {
-  remoteVideo.srcObject = event.streams[0];
-};
-
-function getFingerprint() {
-  return pc.getConfiguration().certificates?.[0]?.getFingerprints?.()[0]?.value || "Fingerprint not available";
-}
-
-function sasFromFingerprint(fp) {
-  let words = fp.replace(/:/g, "").slice(0,8);
-  return words.match(/.{1,4}/g).join(" ");
-}
-
-async function createOffer() {
-  let offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  await new Promise(r => setTimeout(r, 500)); // wait for ICE
-  let sdp = JSON.stringify(pc.localDescription);
-  let compressed = LZString.compressToBase64(sdp);
-  qrDiv.innerHTML = "";
-  QRCode.toCanvas(document.createElement("canvas"), compressed, (err, canvas) => {
-    if (!err) qrDiv.appendChild(canvas);
-  });
-}
-
-function startScanner() {
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-    .then(stream => {
-      scanVideo.srcObject = stream;
-      requestAnimationFrame(scanLoop);
-    });
-}
-
-function scanLoop() {
-  scanCanvas.width = scanVideo.videoWidth;
-  scanCanvas.height = scanVideo.videoHeight;
-  ctx.drawImage(scanVideo, 0, 0, scanCanvas.width, scanCanvas.height);
-  let imgData = ctx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
-  let code = jsQR(imgData.data, imgData.width, imgData.height);
-  if (code) {
-    handleScannedData(code.data);
-    return;
-  }
-  requestAnimationFrame(scanLoop);
-}
-
-async function handleScannedData(data) {
-  let sdp = LZString.decompressFromBase64(data);
-  let desc = JSON.parse(sdp);
-  if (desc.type === "offer") {
-    await pc.setRemoteDescription(desc);
-    let answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    await new Promise(r => setTimeout(r, 500));
-    let compressed = LZString.compressToBase64(JSON.stringify(pc.localDescription));
-    qrDiv.innerHTML = "";
-    QRCode.toCanvas(document.createElement("canvas"), compressed, (err, canvas) => {
-      if (!err) qrDiv.appendChild(canvas);
-    });
-  } else if (desc.type === "answer") {
-    await pc.setRemoteDescription(desc);
-    let fp = getFingerprint();
-    document.getElementById("fingerprint").textContent = "DTLS Fingerprint: " + fp;
-    document.getElementById("sas").textContent = "SAS: " + sasFromFingerprint(fp);
-  }
-}
-
-document.getElementById("createOfferBtn").onclick = createOffer;
-document.getElementById("startScannerBtn").onclick = startScanner;
+/*! LZ-String | MIT | https://github.com/pieroxy/lz-string */
+var LZString=function(){function o(o,r){if(!t[o]){t[o]={};for(var n=0;n<o.length;n++)t[o][o.charAt(n)]=n}return t[o][r]}var r=String.fromCharCode,n="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-$",e={},t={},i={compressToEncodedURIComponent:function(o){return i._compress(o,6,function(o){return n.charAt(o)})},decompressFromEncodedURIComponent:function(r){return null==r?"":""==r?null:i._decompress(r.length,32,function(e){return o(n,r.charAt(e))})},_compress:function(o,n,e){if(null==o)return"";var t,i,s={},p={},u="",a="",c="",l=2,f=3,h=2,d=[],m=0,v=0;for(i=0;i<o.length;i+=1)if(u=o.charAt(i),Object.prototype.hasOwnProperty.call(s,u)||(s[u]=f++,p[u]=!0),a=c+u,Object.prototype.hasOwnProperty.call(s,a))c=a;else{if(Object.prototype.hasOwnProperty.call(p,c)){if(c.charCodeAt(0)<256){for(t=0;t<h;t++)m<<=1,v==n-1?(v=0,d.push(e(m)),m=0):v++;for(i=c.charCodeAt(0),t=0;t<8;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1}else{for(i=1,t=0;t<h;t++)m=m<<1|i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i=0;for(i=c.charCodeAt(0),t=0;t<16;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1}l--,0==l&&(l=Math.pow(2,h),h++),delete p[c]}else for(i=s[c],t=0;t<h;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1;l--,0==l&&(l=Math.pow(2,h),h++),s[a]=f++,c=String(u)}if(""!==c){if(Object.prototype.hasOwnProperty.call(p,c)){if(c.charCodeAt(0)<256){for(t=0;t<h;t++)m<<=1,v==n-1?(v=0,d.push(e(m)),m=0):v++;for(i=c.charCodeAt(0),t=0;t<8;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1}else{for(i=1,t=0;t<h;t++)m=m<<1|i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i=0;for(i=c.charCodeAt(0),t=0;t<16;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1}l--,0==l&&(l=Math.pow(2,h),h++),delete p[c]}else for(i=s[c],t=0;t<h;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1;l--,0==l&&(l=Math.pow(2,h),h++),m<<=1,v==n-1?(v=0,d.push(e(m)),m=0):v++;for(i=2,t=0;t<h;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1}return d.join("")},_decompress:function(o,r,n){var e,t,i,s,p,u,a,c,l,f,h=[],d=4,m=4,v=3,w="",A=[],C={val:n(0),position:r,index:1};for(e=0;e<3;e+=1)h[e]=e;for(i=0,f=Math.pow(2,2),l=1;l!=f;)p=C.val&C.position,C.position>>=1,0==C.position&&(C.position=r,C.val=n(C.index++)),i|=(p>0?1:0)*l,l<<=1;switch(i){case 0:for(i=0,f=Math.pow(2,8),l=1;l!=f;)p=C.val&C.position,C.position>>=1,0==C.position&&(C.position=r,C.val=n(C.index++)),i|=(p>0?1:0)*l,l<<=1;u=r(i);break;case 1:for(i=0,f=Math.pow(2,16),l=1;l!=f;)p=C.val&C.position,C.position=r,C.val=n(C.index++),i|=(p>0?1:0)*l,l<<=1;u=r(i);break;case 2:return""}for(h[3]=u,a=u,c=w;!0;){if(C.index>o)return"";for(i=0,f=Math.pow(2,v),l=1;l!=f;)p=C.val&C.position,C.position>>=1,0==C.position&&(C.position=r,C.val=n(C.index++)),i|=(p>0?1:0)*l,l<<=1;switch(t=i){case 0:for(i=0,f=Math.pow(2,8),l=1;l!=f;)p=C.val&C.position,C.position>>=1,0==C.position&&(C.position=r,C.val=n(C.index++)),i|=(p>0?1:0)*l,l<<=1;h[m++]=r(i),t=m-1,d--;break;case 1:for(i=0,f=Math.pow(2,16),l=1;l!=f;)p=C.val&C.position,C.position>>=1,0==C.position&&(C.position=r,C.val=n(C.index++)),i|=(p>0?1:0)*l,l<<=1;h[m++]=r(i),t=m-1,d--;break;case 2:return A.join("") }if(0==d&&(d=Math.pow(2,v),v++),h[t])w=h[t];else{if(t!==m)return null;w=a+a.charAt(0)}A.push(w),h[m++]=a+w.charAt(0),a=w,0==--d&&(d=Math.pow(2,v),v++)}}
+;return i}();
 </script>
-</body>
-</html>
+
+<!-- --- Minimal QR generator (inline) --- -->
+<script>
+/*! QRCode.js (MIT, trimmed) by Kazuhiko Arase */
+(function(){function QR8bitByte(t){this.mode=4,this.data=t,this.parsedData=[];for(var e=0,i=this.data.length;e<i;e++){var r=[],n=this.data.charCodeAt(e);n>65535?(r[0]=240|(1835008&n)>>>18,r[1]=128|(258048&n)>>>12,r[2]=128|(4032&n)>>>6,r[3]=128|63&n):n>2047?(r[0]=224|(61440&n)>>>12,r[1]=128|(4032&n)>>>6,r[2]=128|63&n):n>127?(r[0]=192|(1984&n)>>>6,r[1]=128|63&n):r[0]=n,this.parsedData.push(r)}this.parsedData=Array.prototype.concat.apply([],this.parsedData),this.parsedData.length!=this.data.length&&(this.parsedData.unshift(239,187,191))}QR8bitByte.prototype={getLength:function(){return this.parsedData.length},wr
