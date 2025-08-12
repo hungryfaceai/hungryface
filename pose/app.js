@@ -289,29 +289,6 @@ async function listCameras() {
   }
 }
 
-/* ---------- Start / switch camera ---------- */
-async function startOrSwitchCamera() {
-  const constraints = getCameraConstraints();
-  const isFront = inferIsFrontFromSelection(constraints);
-
-  await stopCurrentStream();
-
-  const stream = await navigator.mediaDevices.getUserMedia(constraints);
-  currentStream = stream;
-  video.srcObject = stream;
-
-  await new Promise(resolve => {
-    const onLoaded = () => { video.removeEventListener("loadedmetadata", onLoaded); resolve(); };
-    video.addEventListener("loadedmetadata", onLoaded, { once: true });
-  });
-
-  if (video.videoWidth && video.videoHeight) {
-    stage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
-  }
-  resizeToStage();
-  applyVideoMirroring(isFront);
-}
-
 /* ---------- Predict loop ---------- */
 let lastVideoTime = -1;
 
@@ -388,34 +365,25 @@ async function predictWebcam() {
   }
 }
 
-/* ---------- Drawing mode buttons ---------- */
-function enableDrawing() {
-  if (!drawingMode) {
-    polygonPoints = [];
-    polygonClosed = false;
-    drawingMode = true;
-    hoveredPointIndex = -1; draggingPointIndex = -1; isDragging = false;
-    outsideFrames = 0; insideFrames = 0; isOutsideState = false;
-    document.body.style.backgroundColor = "";
-    drawPolygonBtn.querySelector(".mdc-button__label").innerText = "FINISH DRAWING";
-  } else {
-    drawingMode = false;
-    if (polygonPoints.length >= 3) polygonClosed = true;
-    drawPolygonBtn.querySelector(".mdc-button__label").innerText = "DRAW ZONE";
-  }
-}
-
-function clearPolygon() {
-  setDefaultPolygon();
-  outsideFrames = insideFrames = 0; isOutsideState = false;
-  document.body.style.backgroundColor = "";
-}
-
 /* ---------- Pointer Events (works on iOS/Android/Desktop) ---------- */
 let activePointerId = null;
 
+// NEW: helper to release captures & clear interaction state
+function resetInteractionState() {
+  try {
+    if (activePointerId != null) {
+      canvasElement.releasePointerCapture?.(activePointerId);
+    }
+  } catch {}
+  activePointerId = null;
+  isDragging = false;
+  draggingPointIndex = -1;
+  hoveredPointIndex = -1;
+  lastTapPos = null;
+  lastTapTime = 0;
+}
+
 function onPointerDown(e) {
-  // Ensure we can prevent default (avoid scroll/zoom) on mobile Safari
   e.preventDefault();
 
   const pos = getCanvasCoordsFromClientXY(e.clientX, e.clientY);
@@ -468,14 +436,62 @@ function onPointerUpOrCancel(e) {
 }
 
 function attachPointerEvents() {
-  // Use pointer events with passive: false so preventDefault works on mobile
   canvasElement.addEventListener("pointerdown", onPointerDown, { passive: false });
   canvasElement.addEventListener("pointermove", onPointerMove, { passive: false });
   canvasElement.addEventListener("pointerup", onPointerUpOrCancel, { passive: false });
   canvasElement.addEventListener("pointercancel", onPointerUpOrCancel, { passive: false });
-
-  // Context menu is irrelevant on mobile; still prevent accidental long-press
   canvasElement.addEventListener("contextmenu", (e) => e.preventDefault());
+}
+
+/* ---------- Drawing mode buttons ---------- */
+function enableDrawing() {
+  if (!drawingMode) {
+    polygonPoints = [];
+    polygonClosed = false;
+    drawingMode = true;
+    hoveredPointIndex = -1; draggingPointIndex = -1; isDragging = false;
+    outsideFrames = 0; insideFrames = 0; isOutsideState = false;
+    document.body.style.backgroundColor = "";
+    drawPolygonBtn.querySelector(".mdc-button__label").innerText = "FINISH DRAWING";
+  } else {
+    drawingMode = false;
+    if (polygonPoints.length >= 3) polygonClosed = true;
+    drawPolygonBtn.querySelector(".mdc-button__label").innerText = "DRAW ZONE";
+  }
+}
+
+function clearPolygon() {
+  // NEW: release any pointer capture so buttons work immediately after toggles
+  resetInteractionState();
+  setDefaultPolygon();
+  outsideFrames = insideFrames = 0; isOutsideState = false;
+  document.body.style.backgroundColor = "";
+}
+
+/* ---------- Start / switch camera ---------- */
+async function startOrSwitchCamera() {
+  const constraints = getCameraConstraints();
+  const isFront = inferIsFrontFromSelection(constraints);
+
+  await stopCurrentStream();
+
+  const stream = await navigator.mediaDevices.getUserMedia(constraints);
+  currentStream = stream;
+  video.srcObject = stream;
+
+  await new Promise(resolve => {
+    const onLoaded = () => { video.removeEventListener("loadedmetadata", onLoaded); resolve(); };
+    video.addEventListener("loadedmetadata", onLoaded, { once: true });
+  });
+
+  if (video.videoWidth && video.videoHeight) {
+    stage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+  }
+  resizeToStage();
+  applyVideoMirroring(isFront);
+
+  // NEW: ensure canvas doesn't keep an old pointer capture after switching
+  resetInteractionState();
 }
 
 /* ---------- Events ---------- */
