@@ -15,10 +15,15 @@
     label { display:block; margin-bottom: 6px; }
     select { padding: 8px; }
     .status { margin-left: 6px; font-weight: 600; }
+    .notice { background:#e7f3ff; border:1px solid #b6e0ff; padding:8px 10px; border-radius:6px; font-size:13px; }
   </style>
 </head>
 <body>
   <h1>Sender (Answerer, iPhone)</h1>
+
+  <div class="notice">
+    Keep this page in the foreground and the screen unlocked. On iPhone, the camera stops if the device locks or you switch apps.
+  </div>
 
   <div class="row">
     <label>Camera:</label>
@@ -30,7 +35,7 @@
 
   <div class="row">
     <button id="start">Start camera & mic</button>
-    <span class="small">Requires HTTPS on iPhone.</span>
+    <span class="small">Requires HTTPS.</span>
     <span class="status" id="pcState">Idle</span>
   </div>
 
@@ -49,7 +54,7 @@
   <textarea id="answer" placeholder="Answer will appear here" readonly></textarea>
 
   <script>
-    let pc = null, localStream = null;
+    let pc = null, localStream = null, wakeLock = null;
     const startBtn = document.getElementById('start');
     const acceptOfferBtn = document.getElementById('acceptOffer');
     const copyAnswerBtn = document.getElementById('copyAnswer');
@@ -59,7 +64,21 @@
     const pcState = document.getElementById('pcState');
     const cameraFacing = document.getElementById('cameraFacing');
 
-    function setStatus(s) { pcState.textContent = s; }
+    const setStatus = (s) => pcState.textContent = s;
+
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+          wakeLock.addEventListener('release', () => {});
+          document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible') {
+              try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+            }
+          });
+        }
+      } catch {}
+    }
 
     function createPC() {
       pc = new RTCPeerConnection({
@@ -71,34 +90,57 @@
       pc.onconnectionstatechange = () => setStatus(pc.connectionState);
     }
 
-    async function startCapture() {
+    async function getMedia() {
       const facingMode = cameraFacing.value;
-      localStream = await navigator.mediaDevices.getUserMedia({
+      return navigator.mediaDevices.getUserMedia({
         video: {
           facingMode,
           width: { ideal: 1280 }, height: { ideal: 720 },
           frameRate: { ideal: 30, max: 30 }
         },
-        audio: {
-          echoCancellation: true, noiseSuppression: true, autoGainControl: true
-        }
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
       });
-      localVideo.srcObject = localStream;
-      acceptOfferBtn.disabled = false;
     }
 
-    function waitForIceGatheringComplete(pc) {
+    async function startCapture() {
+      localStream = await getMedia();
+      localVideo.srcObject = localStream;
+
+      // Reacquire tracks if they end (e.g., device sleeps)
+      localStream.getTracks().forEach(track => {
+        track.onended = async () => {
+          try {
+            const newStream = await getMedia();
+            const senders = pc ? pc.getSenders() : [];
+            for (const newTrack of newStream.getTracks()) {
+              const sender = senders.find(s => s.track && s.track.kind === newTrack.kind);
+              if (sender) await sender.replaceTrack(newTrack);
+              else if (pc) pc.addTrack(newTrack, newStream);
+            }
+            localStream = newStream;
+            localVideo.srcObject = localStream;
+          } catch (e) {
+            console.warn('Reacquire media failed:', e);
+          }
+        };
+      });
+
+      acceptOfferBtn.disabled = false;
+      requestWakeLock();
+    }
+
+    const waitForIceGatheringComplete = (pc) => {
       if (pc.iceGatheringState === 'complete') return Promise.resolve();
       return new Promise(resolve => {
-        function check() {
+        const check = () => {
           if (pc.iceGatheringState === 'complete') {
             pc.removeEventListener('icegatheringstatechange', check);
             resolve();
           }
-        }
+        };
         pc.addEventListener('icegatheringstatechange', check);
       });
-    }
+    };
 
     async function acceptOfferAndAnswer() {
       const val = offerTA.value.trim();
@@ -116,7 +158,7 @@
         return;
       }
 
-      // Add tracks so our answer advertises sendonly
+      // Attach tracks so the answer is sendonly
       localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
       const answer = await pc.createAnswer();
