@@ -3,13 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WebRTC Sender (Answerer, iPhone) + E2EE</title>
+  <title>WebRTC Sender (Answerer, iPhone)</title>
   <link rel="icon" href="data:,">
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 16px; }
     video { width: 100%; max-height: 60vh; background: #000; border-radius: 8px; }
     textarea { width: 100%; height: 140px; }
-    input[type="text"], input[type="password"] { padding: 8px; }
     button { padding: 10px 14px; margin: 6px 4px 6px 0; }
     .row { margin: 12px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .small { font-size: 12px; color: #666; }
@@ -20,7 +19,7 @@
   </style>
 </head>
 <body>
-  <h1>Sender (Answerer, iPhone) + E2EE</h1>
+  <h1>Sender (Answerer, iPhone)</h1>
 
   <div class="notice">
     Keep this page in the foreground and the screen unlocked. On iPhone, the camera stops if the device locks or you switch apps.
@@ -32,11 +31,6 @@
       <option value="environment" selected>Back camera</option>
       <option value="user">Front camera</option>
     </select>
-  </div>
-
-  <div class="row">
-    <label class="small">Room: <input id="room" type="text" value="room1"></label>
-    <label class="small">Secret: <input id="secret" type="password" placeholder="same as laptop"></label>
   </div>
 
   <div class="row">
@@ -69,8 +63,6 @@
     const localVideo = document.getElementById('local');
     const pcState = document.getElementById('pcState');
     const cameraFacing = document.getElementById('cameraFacing');
-    const roomInput = document.getElementById('room');
-    const secretInput = document.getElementById('secret');
 
     const setStatus = (s) => pcState.textContent = s;
 
@@ -78,6 +70,7 @@
       try {
         if ('wakeLock' in navigator) {
           wakeLock = await navigator.wakeLock.request('screen');
+          wakeLock.addEventListener('release', () => {});
           document.addEventListener('visibilitychange', async () => {
             if (document.visibilityState === 'visible') {
               try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
@@ -100,7 +93,11 @@
     async function getMedia() {
       const facingMode = cameraFacing.value;
       return navigator.mediaDevices.getUserMedia({
-        video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } },
+        video: {
+          facingMode,
+          width: { ideal: 1280 }, height: { ideal: 720 },
+          frameRate: { ideal: 30, max: 30 }
+        },
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
       });
     }
@@ -119,11 +116,12 @@
               const sender = senders.find(s => s.track && s.track.kind === newTrack.kind);
               if (sender) await sender.replaceTrack(newTrack);
               else if (pc) pc.addTrack(newTrack, newStream);
-              await maybeApplySenderE2EE(sender || pc.getSenders().find(s => s.track === newTrack), newTrack.kind);
             }
             localStream = newStream;
             localVideo.srcObject = localStream;
-          } catch (e) { console.warn('Reacquire media failed:', e); }
+          } catch (e) {
+            console.warn('Reacquire media failed:', e);
+          }
         };
       });
 
@@ -144,79 +142,9 @@
       });
     };
 
-    // ---------- E2EE helpers (legacy path for Chrome) ----------
-    const MAGIC = new Uint8Array([0x45,0x32,0x45,0x45,0x31]); // "E2EE1"
-    async function deriveKey(secret, room) {
-      const enc = new TextEncoder();
-      const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "PBKDF2" }, false, ["deriveKey"]);
-      const salt = enc.encode("webrtc-e2ee:" + room);
-      return crypto.subtle.deriveKey(
-        { name: "PBKDF2", salt, iterations: 100_000, hash: "SHA-256" },
-        keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt","decrypt"]
-      );
-    }
-    async function ivSalt(kind, role, room) {
-      const enc = new TextEncoder();
-      const data = enc.encode("iv:" + room + ":" + kind + ":" + role);
-      const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
-      return hash.slice(0, 4);
-    }
-    function ivFrom(ts, salt4) {
-      const iv = new Uint8Array(12);
-      iv.set(salt4, 0);
-      const view = new DataView(iv.buffer, 4, 8);
-      const big = BigInt(Math.floor(ts || 0));
-      view.setBigUint64(0, big, false);
-      return iv;
-    }
-    async function makeTransformStream({ secret, room, role, kind }) {
-      const key = await deriveKey(secret, room);
-      const salt4 = await ivSalt(kind, role, room);
-      return new TransformStream({
-        transform: async (frame, controller) => {
-          try {
-            const ts = (frame.timestamp ?? 0);
-            const iv = ivFrom(ts, salt4);
-            const data = new Uint8Array(frame.data);
-            if (role === 'sender') {
-              const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, data));
-              const out = new Uint8Array(MAGIC.length + ct.length);
-              out.set(MAGIC, 0); out.set(ct, MAGIC.length);
-              frame.data = out.buffer;
-            } else {
-              if (data.length < MAGIC.length) { controller.enqueue(frame); return; }
-              let ok = true; for (let i=0;i<MAGIC.length;i++) if (data[i]!==MAGIC[i]) { ok=false; break; }
-              if (!ok) { controller.enqueue(frame); return; }
-              const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data.slice(MAGIC.length)));
-              frame.data = pt.buffer;
-            }
-          } catch (_) { /* pass-through on error */ }
-          controller.enqueue(frame);
-        }
-      });
-    }
-    async function maybeApplySenderE2EE(sender, kind) {
-      const secret = secretInput.value.trim(); if (!secret || !sender) return;
-      const room = roomInput.value.trim() || 'default';
-      try {
-        if ('RTCRtpScriptTransform' in window && 'transform' in RTCRtpSender.prototype) {
-          const worker = new Worker('e2ee-worker.js');
-          sender.transform = new RTCRtpScriptTransform(worker, { secret, room, role: 'sender', kind });
-        } else if (sender.createEncodedStreams) {
-          const { readable, writable } = sender.createEncodedStreams();
-          const ts = await makeTransformStream({ secret, room, role:'sender', kind });
-          readable.pipeThrough(ts).pipeTo(writable);
-        }
-      } catch (e) {
-        console.warn('Sender E2EE not applied:', e);
-      }
-    }
-    // -----------------------------------------------------------
-
     async function acceptOfferAndAnswer() {
       const val = offerTA.value.trim();
       if (!val) return alert('Paste the Offer JSON first.');
-      if (!secretInput.value.trim()) return alert('Enter the Secret (must match the laptop).');
       if (!pc) createPC();
 
       let remote;
@@ -230,11 +158,8 @@
         return;
       }
 
-      // Attach tracks and apply E2EE on each sender
-      localStream.getTracks().forEach(async t => {
-        const sender = pc.addTrack(t, localStream);
-        await maybeApplySenderE2EE(sender, t.kind);
-      });
+      // Attach tracks so the answer is sendonly
+      localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -247,7 +172,10 @@
     startBtn.onclick = async () => {
       startBtn.disabled = true;
       try { await startCapture(); }
-      catch (e) { startBtn.disabled = false; alert('Failed to start camera/mic: ' + e.message); }
+      catch (e) {
+        startBtn.disabled = false;
+        alert('Failed to start camera/mic: ' + e.message);
+      }
     };
 
     acceptOfferBtn.onclick = acceptOfferAndAnswer;
