@@ -3,13 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WebRTC Sender (iPhone)</title>
+  <title>WebRTC Sender (Answerer, iPhone)</title>
+  <link rel="icon" href="data:,">
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 16px; }
     video { width: 100%; max-height: 60vh; background: #000; border-radius: 8px; }
     textarea { width: 100%; height: 140px; }
     button { padding: 10px 14px; margin: 6px 4px 6px 0; }
-    .row { margin: 12px 0; }
+    .row { margin: 12px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .small { font-size: 12px; color: #666; }
     label { display:block; margin-bottom: 6px; }
     select { padding: 8px; }
@@ -17,7 +18,7 @@
   </style>
 </head>
 <body>
-  <h1>Sender (iPhone)</h1>
+  <h1>Sender (Answerer, iPhone)</h1>
 
   <div class="row">
     <label>Camera:</label>
@@ -28,30 +29,30 @@
   </div>
 
   <div class="row">
-    <button id="start">Start camera</button>
+    <button id="start">Start camera & mic</button>
     <span class="small">Requires HTTPS on iPhone.</span>
+    <span class="status" id="pcState">Idle</span>
   </div>
 
   <video id="local" playsinline muted autoplay></video>
 
   <div class="row">
-    <button id="makeOffer" disabled>Create Offer</button>
-    <button id="copyOffer" disabled>Copy Offer</button>
+    <label for="offer" class="small">Paste Offer (from laptop):</label>
+    <textarea id="offer" placeholder='{"type":"offer","sdp":"..."}'></textarea>
   </div>
-  <textarea id="offer" placeholder="Offer will appear here" readonly></textarea>
 
   <div class="row">
-    <button id="acceptAnswer" disabled>Accept Answer</button>
-    <span class="status" id="pcState">Idle</span>
+    <button id="acceptOffer" disabled>Accept Offer & Create Answer</button>
+    <button id="copyAnswer" disabled>Copy Answer</button>
   </div>
-  <textarea id="answer" placeholder="Paste Answer here"></textarea>
+
+  <textarea id="answer" placeholder="Answer will appear here" readonly></textarea>
 
   <script>
-    let pc, localStream;
+    let pc = null, localStream = null;
     const startBtn = document.getElementById('start');
-    const makeOfferBtn = document.getElementById('makeOffer');
-    const copyOfferBtn = document.getElementById('copyOffer');
-    const acceptAnswerBtn = document.getElementById('acceptAnswer');
+    const acceptOfferBtn = document.getElementById('acceptOffer');
+    const copyAnswerBtn = document.getElementById('copyAnswer');
     const offerTA = document.getElementById('offer');
     const answerTA = document.getElementById('answer');
     const localVideo = document.getElementById('local');
@@ -62,9 +63,10 @@
 
     function createPC() {
       pc = new RTCPeerConnection({
-        iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
+        iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
+        sdpSemantics: 'unified-plan',
+        bundlePolicy: 'max-bundle'
       });
-
       pc.oniceconnectionstatechange = () => setStatus(pc.iceConnectionState);
       pc.onconnectionstatechange = () => setStatus(pc.connectionState);
     }
@@ -77,12 +79,12 @@
           width: { ideal: 1280 }, height: { ideal: 720 },
           frameRate: { ideal: 30, max: 30 }
         },
-        // TEMP: disable audio to test extmap collision hypothesis
-        audio: false
+        audio: {
+          echoCancellation: true, noiseSuppression: true, autoGainControl: true
+        }
       });
       localVideo.srcObject = localStream;
-      makeOfferBtn.disabled = false;
-      acceptAnswerBtn.disabled = false;
+      acceptOfferBtn.disabled = false;
     }
 
     function waitForIceGatheringComplete(pc) {
@@ -98,26 +100,31 @@
       });
     }
 
-    async function makeOffer() {
+    async function acceptOfferAndAnswer() {
+      const val = offerTA.value.trim();
+      if (!val) return alert('Paste the Offer JSON first.');
       if (!pc) createPC();
 
-      // Add tracks before creating the offer
+      let remote;
+      try {
+        remote = JSON.parse(val);
+        if (remote.type !== 'offer') throw new Error('Pasted JSON is not an SDP offer');
+        await pc.setRemoteDescription(remote);
+      } catch (e) {
+        console.error('setRemoteDescription(offer) failed', e);
+        alert('setRemoteDescription (offer) failed: ' + (e?.message || e));
+        return;
+      }
+
+      // Add tracks so our answer advertises sendonly
       localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
-      const offer = await pc.createOffer({});
-      await pc.setLocalDescription(offer);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
       await waitForIceGatheringComplete(pc);
 
-      offerTA.value = JSON.stringify(pc.localDescription);
-      copyOfferBtn.disabled = false;
-    }
-
-    async function acceptAnswer() {
-      const val = answerTA.value.trim();
-      if (!val) return alert('Paste the Answer JSON first.');
-      const desc = JSON.parse(val);
-      await pc.setRemoteDescription(desc);
-      setStatus('Remote description set; connecting…');
+      answerTA.value = JSON.stringify(pc.localDescription);
+      copyAnswerBtn.disabled = false;
     }
 
     startBtn.onclick = async () => {
@@ -125,13 +132,16 @@
       try { await startCapture(); }
       catch (e) {
         startBtn.disabled = false;
-        alert('Failed to start camera: ' + e.message);
+        alert('Failed to start camera/mic: ' + e.message);
       }
     };
 
-    makeOfferBtn.onclick = makeOffer;
-    copyOfferBtn.onclick = () => { offerTA.select(); document.execCommand('copy'); };
-    acceptAnswerBtn.onclick = acceptAnswer;
+    acceptOfferBtn.onclick = acceptOfferAndAnswer;
+
+    copyAnswerBtn.onclick = async () => {
+      try { await navigator.clipboard.writeText(answerTA.value); }
+      catch { answerTA.select(); document.execCommand('copy'); }
+    };
   </script>
 </body>
 </html>
