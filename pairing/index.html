@@ -89,4 +89,132 @@ var LZString=function(){function o(o,r){if(!t[o]){t[o]={};for(var n=0;n<o.length
 <!-- --- Minimal QR generator (inline) --- -->
 <script>
 /*! QRCode.js (MIT, trimmed) by Kazuhiko Arase */
-(function(){function QR8bitByte(t){this.mode=4,this.data=t,this.parsedData=[];for(var e=0,i=this.data.length;e<i;e++){var r=[],n=this.data.charCodeAt(e);n>65535?(r[0]=240|(1835008&n)>>>18,r[1]=128|(258048&n)>>>12,r[2]=128|(4032&n)>>>6,r[3]=128|63&n):n>2047?(r[0]=224|(61440&n)>>>12,r[1]=128|(4032&n)>>>6,r[2]=128|63&n):n>127?(r[0]=192|(1984&n)>>>6,r[1]=128|63&n):r[0]=n,this.parsedData.push(r)}this.parsedData=Array.prototype.concat.apply([],this.parsedData),this.parsedData.length!=this.data.length&&(this.parsedData.unshift(239,187,191))}QR8bitByte.prototype={getLength:function(){return this.parsedData.length},wr
+(function(){function QR8bitByte(t){this.mode=4,this.data=t,this.parsedData=[];for(var e=0,i=this.data.length;e<i;e++){var r=[],n=this.data.charCodeAt(e);n>65535?(r[0]=240|(1835008&n)>>>18,r[1]=128|(258048&n)>>>12,r[2]=128|(4032&n)>>>6,r[3]=128|63&n):n>2047?(r[0]=224|(61440&n)>>>12,r[1]=128|(4032&n)>>>6,r[2]=128|63&n):n>127?(r[0]=192|(1984&n)>>>6,r[1]=128|63&n):r[0]=n,this.parsedData.push(r)}this.parsedData=Array.prototype.concat.apply([],this.parsedData),this.parsedData.length!=this.data.length&&(this.parsedData.unshift(239,187,191))}QR8bitByte.prototype={getLength:function(){return this.parsedData.length},write:function(t){for(var e=0;e<this.parsedData.length;e++)t.put(this.parsedData[e],8)}};var QRUtil={PATTERN_POSITION_TABLE:[[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50],[6,30,54],[6,32,58],[6,34,62],[6,26,46,66],[6,26,48,70],[6,26,50,74],[6,30,54,78],[6,30,56,82],[6,30,58,86],[6,34,62,90],[6,28,50,72,94],[6,26,50,74,98],[6,30,54,78,102],[6,28,54,80,106],[6,32,58,84,110],[6,30,58,86,114],[6,34,62,90,118],[6,26,50,74,98,122],[6,30,54,78,102,126],[6,26,54,82,110,138],[6,30,56,86,114,142],[6,34,60,86,118,146],[6,30,58,86,114,142,170]],G15:1335,G18:7973,G15_MASK:21522,getBCHDigit:function(t){for(var e=0;0!=t;)e++,t>>>=1;return e},getBCHTypeInfo:function(t){for(var e=t<<10;QRUtil.getBCHDigit(e)-QRUtil.getBCHDigit(QRUtil.G15)>=0;)e^=QRUtil.G15<<QRUtil.getBCHDigit(e)-QRUtil.getBCHDigit(QRUtil.G15);return t<<10|e},getBCHTypeNumber:function(t){for(var e=t<<12;QRUtil.getBCHDigit(e)-QRUtil.getBCHDigit(QRUtil.G18)>=0;)e^=QRUtil.G18<<QRUtil.getBCHDigit(e)-QRUtil.getBCHDigit(QRUtil.G18);return t<<12|e},getPatternPosition:function(t){return QRUtil.PATTERN_POSITION_TABLE[t-1]},getMask:function(t,e,i){switch(t){case 0:return(e+i)%2==0;case 1:return e%2==0;case 2:return i%3==0;case 3:return(e+i)%3==0;case 4:return(Math.floor(e/2)+Math.floor(i/3))%2==0;case 5:return e*i%2+e*i%3==0;case 6:return(e*i%2+e*i%3)%2==0;case 7:return(e*i%3+Math.floor(e+i)%2)%2==0;default:throw"bad maskPattern:"+t}},getErrorCorrectPolynomial:function(t){for(var e=new QRPolynomial([1],0),i=0;i<t;i++)e=e.multiply(new QRPolynomial([1,QRMath.gexp(i)],0));return e},getLengthInBits:function(t,e){if(1<=e&&e<10)switch(t){case 1:return 10;case 2:return 9;case 4:case 8:return 8;default:throw"mode:"+t}else if(e<27)switch(t){case 1:return 12;case 2:return 11;case 4:case 8:return 16;default:throw"mode:"+t}else{if(!(e<41))throw"mode:"+t;switch(t){case 1:return 14;case 2:return 13;case 4:case 8:return 16;default:throw"mode:"+t}}},getLostPoint:function(t){for(var e=t.getModuleCount(),i=0,r=0;r<e;r++)for(var n=0;n<e;n++){for(var o=0,u=t.isDark(r,n),a=-1;a<=1;a++)if(!(r+a<0||e<=r+a))for(var s=-1;s<=1;s++)n+s<0||e<=n+s||0==a&&0==s||u==t.isDark(r+a,n+s)&&o++;o>5&&(i+=3+o-5)}for(r=0;r<e-1;r++)for(n=0;n<e-1;n++){var h=0;t.isDark(r,n)&&h++,t.isDark(r+1,n)&&h++,t.isDark(r,n+1)&&h++,t.isDark(r+1,n+1)&&h++,(0==h||4==h)&&(i+=3)}for(r=0;r<e;r++)for(n=0;n<e-6;n++)t.isDark(r,n)&&!t.isDark(r,n+1)&&t.isDark(r,n+2)&&t.isDark(r,n+3)&&t.isDark(r,n+4)&&!t.isDark(r,n+5)&&t.isDark(r,n+6)&&(i+=40);for(n=0;n<e;n++){for(var c=0,f=0;f<e;f++)t.isDark(f,n)&&c++;i+=10*Math.abs(100*c/e-50)/5}return i}},QRMath={glog:function(t){if(t<1)throw"glog("+t+")";return QRMath.LOG_TABLE[t]},gexp:function(t){for(;t<0;)t+=255;for(;t>=256;)t-=255;return QRMath.EXP_TABLE[t]},EXP_TABLE:new Array(256),LOG_TABLE:new Array(256)};for(var i=0;i<8;i++)QRMath.EXP_TABLE[i]=1<<i;for(i=8;i<256;i++)QRMath.EXP_TABLE[i]=QRMath.EXP_TABLE[i-4]^QRMath.EXP_TABLE[i-5]^QRMath.EXP_TABLE[i-6]^QRMath.EXP_TABLE[i-8];for(i=0;i<255;i++)QRMath.LOG_TABLE[QRMath.EXP_TABLE[i]]=i;function QRPolynomial(t,e){if(void 0==t.length)throw t.length+"/"+e;for(var i=0;i<t.length&&0==t[i];)i++;this.num=new Array(t.length-i+e);for(var r=0;r<t.length-i;r++)this.num[r]=t[r+i]}QRPolynomial.prototype={get:function(t){return this.num[t]},getLength:function(){return this.num.length},multiply:function(t){for(var e=new Array(this.getLength()+t.getLength()-1),i=0;i<this.getLength();i++)for(var r=0;r<t.getLength();r++)e[i+r]^=QRMath.gexp(QRMath.glog(this.get(i))+QRMath.glog(t.get(r)));return new QRPolynomial(e,0)},mod:function(t){if(this.getLength()-t.getLength()<0)return this;for(var e=QRMath.glog(this.get(0))-QRMath.glog(t.get(0)),i=new Array(this.getLength()),r=0;r<this.getLength();r++)i[r]=this.get(r);for(r=0;r<t.getLength();r++)i[r]^=QRMath.gexp(QRMath.glog(t.get(r))+e);return new QRPolynomial(i,0).mod(t)},};function QRRSBlock(t,e){this.totalCount=t,this.dataCount=e}QRRSBlock.getRSBlocks=function(t,e){return QRRSBlock.RS_BLOCK_TABLE[4*(t-1)+({1:1,0:0,3:3,2:2}[e])]},QRRSBlock.RS_BLOCK_TABLE=[1,26,19,1,26,16,1,26,13,1,26,9,1,44,34,1,44,28,1,44,22,1,44,16,1,70,55,1,70,44,2,35,17,2,35,13,2,35,9,1,100,80,2,50,32,2,50,24,4,25,9,2,50,9,1,134,108,2,67,43,2,33,15,2,33,11,2,33,9,2,33,9,1,86,68,2,43,27,4,43,19,2,43,15,3,58,13,2,32,9,4,39,13,4,26,9,4,33,11,2,32,14,4,26,13,4,26,9,4,26,9,2,42,14,6,58,14,6,32,10,6,26,10,6,26,10,2,42,12,8,32,12,8,27,12,10,24,12,12,12,12,12,12,12,12,12,12],function QRBitBuffer(){this.buffer=[],this.length=0}QRBitBuffer.prototype={get:function(t){return 1==(1&this.buffer[t>>>3]>>>7-t%8)},put:function(t,e){for(var i=0;i<e;i++)this.putBit(1==(1&t>>>e-i-1))},putBit:function(t){var e=this.length>>>3;this.buffer.length<=e&&this.buffer.push(0),t&&(this.buffer[e]|=128>>>this.length%8),this.length++}};function QRCode(t,e){this.typeNumber=t,this.errorCorrectLevel=e,this.modules=null,this.moduleCount=0,this.dataList=[]}QRCode.prototype={addData:function(t){this.dataList.push(new QR8bitByte(t))},isDark:function(t,e){if(null==this.modules)throw"QR Code not made yet";return this.modules[t][e]},getModuleCount:function(){return this.moduleCount},make:function(){this.makeImpl(!1,this.getBestMaskPattern())},makeImpl:function(t,e){this.moduleCount=4*this.typeNumber+17,this.modules=new Array(this.moduleCount);for(var i=0;i<this.moduleCount;i++){this.modules[i]=new Array(this.moduleCount);for(var r=0;r<this.moduleCount;r++)this.modules[i][r]=null}this.setupPositionProbePattern(0,0),this.setupPositionProbePattern(this.moduleCount-7,0),this.setupPositionProbePattern(0,this.moduleCount-7),this.setupPositionAdjustPattern(),this.setupTimingPattern(),this.setupTypeInfo(t,e),this.typeNumber>=7&&this.setupTypeNumber(t),this.mapData(QRCode.createData(this.typeNumber,this.errorCorrectLevel,this.dataList),e)},setupPositionProbePattern:function(t,e){for(var i=-1;i<=7;i++)if(!(t+i<=-1||this.moduleCount<=t+i))for(var r=-1;r<=7;r++)e+r<=-1||this.moduleCount<=e+r||(this.modules[t+i][e+r]=i>=0&&i<=6&&(0==r||6==r)||r>=0&&r<=6&&(0==i||6==i)||i>=2&&i<=4&&r>=2&&r<=4)},getBestMaskPattern:function(){for(var t=0,e=0,i=0;i<8;i++){this.makeImpl(!0,i);var r=QRUtil.getLostPoint(this);(0==i||t>r)&&(t=r,e=i)}return e},createImgTag:function(t,e){t=t||2,e=void 0===e?4:e;var i=this.getModuleCount()*t+2*e,r=i,n=document.createElement("img");return n.width=i,n.height=r,n.src=this.createDataURL(t,e),n},createDataURL:function(t,e){var i=this.getModuleCount()*t+2*e,r=i,n=document.createElement("canvas"),o=n.getContext("2d"),u=o.createImageData(i,r),a=this.getModuleCount();for(var s=0;s<r;s++)for(var h=0;h<i;h++){var c=e,f=e,p=!1,l=Math.floor((h-c)/t),d=Math.floor((s-f)/t);l>=0&&d>=0&&l<a&&d<a&&(p=this.isDark(l,d));var g=4*(h+s*i);u.data[g+0]=p?0:255;u.data[g+1]=p?0:255;u.data[g+2]=p?0:255;u.data[g+3]=255}o.putImageData(u,0,0);return n.toDataURL("image/png")}},QRCode.createData=function(t,e,i){for(var r=new QRBitBuffer,n=0;n<i.length;n++){var o=i[n];r.put(o.mode,4),r.put(o.getLength(),QRUtil.getLengthInBits(o.mode,t)),o.write(r)}for(var u=QRCode.getRSBlocks(t,e),a=0,n=0;n<u.length;n++)a+=u[n].dataCount;if(r.length>8*a)throw"code length overflow. ("+r.length+">"+8*a+")";for(r.length+4<=8*a&&r.put(0,4);r.length%8!=0;)r.putBit(!1);for(var s=[],h=0;h<a-r.length/8;h++)s.push(h%2?17:236);return QRCode.createBytes(r,u,s)},QRCode.createBytes=function(t,e,i){for(var r=0,n=0,o=0;o<e.length;o++)r+=e[o].dataCount,n+=e[o].totalCount;for(var u=new Array(n),a=0,o=0;o<e.length;o++){for(var s=e[o].dataCount,h=e[o].totalCount-s,c=0;c<s;c++)u[a++]=255;for(;c<h;c++)u[a++]=0}for(var f=0,p=0,l=0;l<e.length;l++)for(c=0;c<e[l].dataCount;c++)u[p++]=t.buffer[f++];return u};window.QRGen=function(text){var q=new QRCode(8,0);q.addData(text);q.make();return q.createImgTag(6,2);};})();
+</script>
+
+<script>
+// ---------- helpers ----------
+const $ = id => document.getElementById(id);
+const setStatus = (s) => $('status').textContent = s;
+const parseFingerprint = (sdp) => {
+  if (!sdp) return "";
+  const m = sdp.match(/a=fingerprint:\s*([A-Z0-9]+)\s*([0-9A-F:]+)/i);
+  return m ? (m[1].toUpperCase()+" "+m[2].toUpperCase()) : "";
+};
+async function waitIceComplete(pc){
+  if (pc.iceGatheringState === 'complete') return;
+  await new Promise(res=>{
+    const fn=()=>{ if(pc.iceGatheringState==='complete'){ pc.removeEventListener('icegatheringstatechange',fn); res(); } };
+    pc.addEventListener('icegatheringstatechange',fn);
+  });
+}
+async function sasFromFingerprints(localFp, remoteFp){
+  const words=["apple","breeze","copper","delta","ember","forest","galaxy","harbor","ivory","jungle","krypton","lemon","meteor","nectar","onyx","papaya","quartz","rocket","saffron","topaz","ultra","velvet","willow","xenon","yonder","zephyr","amber","blossom","coral","dahlia","echo","fable","ginger","hazel","indigo","jasper","kiwi","lotus","maple","nylon","olive","pearl","quince","raven","sunset","tango","umbra","violet","wattle","xerox","yarrow","zinnia"];
+  const data=new TextEncoder().encode(`${localFp}|${remoteFp}`);
+  const buf=await crypto.subtle.digest('SHA-256',data);
+  const arr=new Uint8Array(buf);
+  const idx=[arr[0],arr[8],arr[16],arr[24]].map(b=>b%words.length);
+  return idx.map(i=>words[i]).join('-');
+}
+
+// ---------- state ----------
+let role = null;
+let pc = null;
+let localStream = null;
+let remoteStream = null;
+
+// ---------- UI wiring ----------
+$('btnOffer').onclick = ()=>{ role='offerer'; $('offerUI').style.display='block'; $('answerUI').style.display='none'; setStatus('Offerer selected'); };
+$('btnAnswer').onclick = ()=>{ role='answerer'; $('answerUI').style.display='block'; $('offerUI').style.display='none'; setStatus('Answerer selected'); };
+
+$('copyOffer').onclick = ()=> navigator.clipboard.writeText($('offerSDP').value);
+$('copyAnswer').onclick = ()=> navigator.clipboard.writeText($('answerSDP').value);
+
+// ---------- WebRTC setup ----------
+async function createPeer(){
+  pc = new RTCPeerConnection({ iceServers: [] });
+  pc.onconnectionstatechange = ()=> setStatus('Peer connection: '+pc.connectionState);
+  pc.ontrack = (ev)=>{
+    if (!$('mediaUI').style.display || $('mediaUI').style.display==='none') $('mediaUI').style.display='block';
+    if (!remoteStream) remoteStream = new MediaStream();
+    remoteStream.addTrack(ev.track);
+    $('remoteVideo').srcObject = remoteStream;
+  };
+  if ($('toggleCam').checked) {
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
+      $('localVideo').srcObject = localStream;
+      $('mediaUI').style.display='block';
+      localStream.getTracks().forEach(t=>pc.addTrack(t, localStream));
+    } catch (e) {
+      alert('Camera/mic error: '+e.message);
+    }
+  }
+  return pc;
+}
+
+// ---------- Offerer flow ----------
+$('createOffer').onclick = async ()=>{
+  try{
+    setStatus('Creating offer…');
+    await createPeer();
+    const offer = await pc.createOffer({ offerToReceiveAudio:true, offerToReceiveVideo:true });
+    await pc.setLocalDescription(offer);
+    // wait for full ICE so the whole thing fits in one QR / paste blob
+    await waitIceComplete(pc);
+    const desc = pc.localDescription;
+    const sdp = desc.sdp;
+    $('offerSDP').value = sdp || '';
+    const payload = LZString.compressToEncodedURIComponent(JSON.stringify({ type: desc.type, sdp: sdp }));
+    const img = QRGen(payload);
+    const el = $('offerQR'); el.src = img.src; el.style.display='block';
+    $('offerHint').style.display='block';
+    $('verifyUI').style.display='block';
+    $('fingerprint').textContent = parseFingerprint(sdp);
+  }catch(e){
+    console.error(e);
+    alert('Create offer failed: '+e.message);
+  }
+};
+
+$('applyAnswer').onclick = async ()=>{
+  try{
+    const txt = $('answerPaste').value.trim();
+    if (!txt) return alert('Paste the answer SDP first.');
+    const desc = new RTCSessionDescription({ type:'answer', sdp: txt });
+    await pc.setRemoteDescription(desc);
+    const localFp = parseFingerprint(pc.localDescription?.sdp||'');
+    const remoteFp = parseFingerprint(txt);
+    $('sas').textContent = await sasFromFingerprints(localFp, remoteFp);
+    setStatus('Answer applied. Connecting…');
+  }catch(e){
+    alert('Apply answer failed: '+e.message);
+  }
+};
+
+// ---------- Answerer flow ----------
+$('makeAnswer').onclick = async ()=>{
+  try{
+    const offerSdp = $('offerPaste').value.trim();
+    if (!offerSdp) return alert('Paste the offer SDP first.');
+    setStatus('Processing offer…');
+    await createPeer();
+    await pc.setRemoteDescription(new RTCSessionDescription({ type:'offer', sdp: offerSdp }));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    await waitIceComplete(pc);
+    const sdp = pc.localDescription.sdp;
+    $('answerSDP').value = sdp || '';
+    const payload = LZString.compressToEncodedURIComponent(JSON.stringify({ type:'answer', sdp }));
+    const img = QRGen(payload);
+    const el = $('answerQR'); el.src = img.src; el.style.display='block';
+    $('answerHint').style.display='block';
+    $('verifyUI').style.display='block';
+    $('fingerprint').textContent = parseFingerprint(sdp);
+  }catch(e){
+    console.error(e);
+    alert('Make answer failed: '+e.message);
+  }
+};
+</script>
+</html>
