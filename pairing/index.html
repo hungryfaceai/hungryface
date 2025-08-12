@@ -1,83 +1,348 @@
 <!DOCTYPE html>
 <html lang="en">
-<meta charset="utf-8">
-<title>Offerer Minimal</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Fast Offline WebRTC Pairing (Camera QR)</title>
 <style>
-  body{font-family:system-ui,Segoe UI,Roboto,Arial;padding:16px;max-width:800px;margin:auto}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;padding:16px;max-width:960px;margin:auto}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .card{border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin:10px 0}
   .btn{border:1px solid #e5e7eb;background:#f8fafc;border-radius:10px;padding:8px 12px;cursor:pointer}
-  textarea{width:100%;min-height:140px}
   .muted{color:#6b7280}
+  .hint{font-size:13px;color:#6b7280}
+  textarea{width:100%;min-height:120px}
+  img.qr,canvas.qr{width:240px;height:240px;border:1px solid #e5e7eb;border-radius:12px;background:#fff}
+  video{width:320px;height:240px;background:#000;border-radius:8px}
+  code{background:#f1f5f9;padding:2px 6px;border-radius:6px}
 </style>
 
-<h1>Offerer (Minimal)</h1>
-<div class="muted" id="status">Idle</div>
-<div style="margin:10px 0">
-  <button class="btn" id="createOffer">Create Offer (datachannel only)</button>
+<h1>Fast Offline WebRTC Pairing</h1>
+<div class="row">
+  <button class="btn" id="btnOffer">I am the Offerer</button>
+  <button class="btn" id="btnAnswer">I am the Answerer</button>
+  <label class="row"><input type="checkbox" id="toggleCam"> Share camera & mic</label>
+  <div id="status" class="muted">Idle</div>
 </div>
-<details>
-  <summary class="muted">Offer SDP</summary>
-  <textarea id="offerSDP" readonly></textarea>
-  <div style="margin-top:6px">
-    <button class="btn" id="copyOffer">Copy SDP</button>
+
+<div id="offerUI" class="card" style="display:none">
+  <h3>Offerer</h3>
+  <div class="row">
+    <button class="btn" id="createOffer">Create Offer (fast)</button>
   </div>
-</details>
-<div style="margin-top:10px" class="muted">
-  Paste the answer SDP below (from the other device), then click Apply.
+  <div class="row" style="margin-top:8px">
+    <img id="offerQR" class="qr" alt="Offer QR" style="display:none">
+    <div id="offerHint" class="muted" style="display:none">Show this QR to the Answerer.</div>
+  </div>
+  <details style="margin-top:8px">
+    <summary class="muted">Copy/paste fallback (offer SDP)</summary>
+    <textarea id="offerSDP" readonly></textarea>
+    <div style="margin-top:6px"><button class="btn" id="copyOffer">Copy SDP</button></div>
+  </details>
+
+  <div class="card" style="margin-top:12px">
+    <b>Scan the Answer QR (camera)</b>
+    <div class="hint">Open via <code>https://</code> or <code>http://localhost</code> to allow the camera.</div>
+    <div class="row" style="margin-top:6px">
+      <button class="btn" id="startScanAnswer">Start Scanner</button>
+      <button class="btn" id="stopScanAnswer" disabled>Stop</button>
+      <span id="scanAnswerSupport" class="muted"></span>
+    </div>
+    <video id="scanAnswerVideo" playsinline muted style="display:none"></video>
+    <canvas id="scanAnswerCanvas" class="qr" style="display:none"></canvas>
+  </div>
+
+  <div class="muted" style="margin-top:6px">Or paste the Answer SDP:</div>
+  <textarea id="answerPaste" placeholder="Paste answer SDP here"></textarea>
+  <div class="row"><button class="btn" id="applyAnswer">Apply Answer</button></div>
 </div>
-<textarea id="answerSDP" placeholder="Paste answer SDP here"></textarea>
-<div style="margin-top:6px">
-  <button class="btn" id="applyAnswer">Apply Answer</button>
+
+<div id="answerUI" class="card" style="display:none">
+  <h3>Answerer</h3>
+  <div class="card">
+    <b>Scan the Offer QR (camera)</b>
+    <div class="hint">Open via <code>https://</code> or <code>http://localhost</code> to allow the camera.</div>
+    <div class="row" style="margin-top:6px">
+      <button class="btn" id="startScanOffer">Start Scanner</button>
+      <button class="btn" id="stopScanOffer" disabled>Stop</button>
+      <span id="scanOfferSupport" class="muted"></span>
+    </div>
+    <video id="scanOfferVideo" playsinline muted style="display:none"></video>
+    <canvas id="scanOfferCanvas" class="qr" style="display:none"></canvas>
+  </div>
+
+  <div class="muted">Or paste the Offer SDP (from Offerer’s copy button):</div>
+  <textarea id="offerPaste" placeholder="Paste offer SDP here"></textarea>
+  <div class="row">
+    <button class="btn" id="makeAnswer">Make Answer</button>
+  </div>
+
+  <div class="row" style="margin-top:8px">
+    <img id="answerQR" class="qr" alt="Answer QR" style="display:none">
+    <div id="answerHint" class="muted" style="display:none">Show this QR to the Offerer.</div>
+  </div>
+  <details style="margin-top:8px">
+    <summary class="muted">Copy/paste fallback (answer SDP)</summary>
+    <textarea id="answerSDP" readonly></textarea>
+    <div style="margin-top:6px"><button class="btn" id="copyAnswer">Copy SDP</button></div>
+  </details>
 </div>
+
+<div id="verifyUI" class="card" style="display:none">
+  <h3>Verify</h3>
+  <div class="muted">DTLS fingerprint (compare on both devices)</div>
+  <div id="fingerprint" style="font-family:ui-monospace,monospace"></div>
+  <div class="muted" style="margin-top:6px">Short authentication string</div>
+  <div id="sas" style="font-family:ui-monospace,monospace;font-weight:600"></div>
+</div>
+
+<!-- LZ-String (MIT) — encoded URI variant -->
+<script>
+/*! LZ-String (c) pieroxy.net | MIT (URI variant only) */
+var LZString=function(){function o(o,r){if(!t[o]){t[o]={};for(var n=0;n<o.length;n++)t[o][o.charAt(n)]=n}return t[o][r]}var r=String.fromCharCode,n="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-$",e={},t={},i={compressToEncodedURIComponent:function(o){return null==o?"":i._compress(o,6,function(o){return n.charAt(o)})},decompressFromEncodedURIComponent:function(r){return null==r?"":""==r?null:i._decompress(r.length,32,function(e){return o(n,r.charAt(e))})},_compress:function(o,n,e){if(null==o)return"";var t,i,s={},p={},u="",a="",c="",l=2,f=3,h=2,d=[],m=0,v=0;for(i=0;i<o.length;i+=1)if(u=o.charAt(i),Object.prototype.hasOwnProperty.call(s,u)||(s[u]=f++,p[u]=!0),a=c+u,Object.prototype.hasOwnProperty.call(s,a))c=a;else{if(Object.prototype.hasOwnProperty.call(p,c)){if(c.charCodeAt(0)<256){for(t=0;t<h;t++)m<<=1,v==n-1?(v=0,d.push(e(m)),m=0):v++;for(i=c.charCodeAt(0),t=0;t<8;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1}else{for(i=1,t=0;t<h;t++)m=m<<1|i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i=0;for(i=c.charCodeAt(0),t=0;t<16;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1}l--,0==l&&(l=Math.pow(2,h),h++),delete p[c]}else for(i=s[c],t=0;t<h;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1;l--,0==l&&(l=Math.pow(2,h),h++),s[a]=f++,c=String(u)}if(""!==c){if(Object.prototype.hasOwnProperty.call(p,c)){if(c.charCodeAt(0)<256){for(t=0;t<h;t++)m<<=1,v==n-1?(v=0,d.push(e(m)),m=0):v++;for(i=c.charCodeAt(0),t=0;t<8;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1}else{for(i=1,t=0;t<h;t++)m=m<<1|i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i=0;for(i=c.charCodeAt(0),t=0;t<16;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1}l--,0==l&&(l=Math.pow(2,h),h++),delete p[c]}else for(i=s[c],t=0;t<h;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1;l--,0==l&&(l=Math.pow(2,h),h++),m<<=1,v==n-1?(v=0,d.push(e(m)),m=0):v++;for(i=2,t=0;t<h;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1}return d.join("")},_decompress:function(o,n,e){var t,i,s,p,u,a,c,l,f,h,d=[],m=4,v=4,w=3,A="",C=[],g={val:e(0),position:n,index:1};for(t=0;t<3;t+=1)d[t]=t;for(s=0,f=Math.pow(2,2),l=1;l!=f;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*l,l<<=1;switch(s){case 0:for(s=0,f=Math.pow(2,8),l=1;l!=f;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*l,l<<=1;c=r(s);break;case 1:for(s=0,f=Math.pow(2,16),l=1;l!=f;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*l,l<<=1;c=r(s);break;case 2:return""}for(d[3]=c,a=c,p=A;;){if(g.index>o)return"";for(s=0,f=Math.pow(2,w),l=1;l!=f;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*l,l<<=1;switch(i=s){case 0:for(s=0,f=Math.pow(2,8),l=1;l!=f;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*l,l<<=1;d[m++]=r(s),i=m-1,v--;break;case 1:for(s=0,f=Math.pow(2,16),l=1;l!=f;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*l,l<<=1;d[m++]=r(s),i=m-1,v--;break;case 2:return C.join("")}if(0==v&&(v=Math.pow(2,w),w++),d[i])A=d[i];else{if(i!==m)return null;A=p+p.charAt(0)}C.push(A),d[m++]=p+A.charAt(0),p=A,0==--v&&(v=Math.pow(2,w),w++)}}};return i}();
+</script>
+
+<!-- Compact complete QR encoder (includes setupPositionAdjustPattern) -->
+<script>
+/* Based on QRCode.js (MIT), compacted but complete for encoding */
+(function(){
+  function QR8bitByte(s){this.mode=4;this.data=s}
+  QR8bitByte.prototype={getLength:function(){return this.data.length},write:function(b){for(var i=0;i<this.data.length;i++)b.put(this.data.charCodeAt(i),8)}};
+  var QRMath={glog:function(n){if(n<1)throw new Error("glog("+n+")");return QRMath.LOG_TABLE[n]},gexp:function(n){for(;n<0;)n+=255;for(;n>=256;)n-=255;return QRMath.EXP_TABLE[n]},EXP_TABLE:new Array(256),LOG_TABLE:new Array(256)};
+  for(var i=0;i<8;i++)QRMath.EXP_TABLE[i]=1<<i;for(i=8;i<256;i++)QRMath.EXP_TABLE[i]=QRMath.EXP_TABLE[i-4]^QRMath.EXP_TABLE[i-5]^QRMath.EXP_TABLE[i-6]^QRMath.EXP_TABLE[i-8];for(i=0;i<255;i++)QRMath.LOG_TABLE[QRMath.EXP_TABLE[i]]=i;
+  function QRPolynomial(num,shift){var off=0;while(off<num.length&&num[off]==0)off++;this.num=new Array(num.length-off+shift);for(var i=0;i<num.length-off;i++)this.num[i]=num[i+off]}
+  QRPolynomial.prototype={get:function(i){return this.num[i]},getLength:function(){return this.num.length},multiply:function(e){var n=new Array(this.getLength()+e.getLength()-1);for(var i=0;i<this.getLength();i++)for(var j=0;j<e.getLength();j++)n[i+j]^=QRMath.gexp(QRMath.glog(this.get(i))+QRMath.glog(e.get(j)));return new QRPolynomial(n,0)},mod:function(e){if(this.getLength()-e.getLength()<0)return this;var ratio=QRMath.glog(this.get(0))-QRMath.glog(e.get(0)),n=this.num.slice();for(var i=0;i<e.getLength();i++)n[i]^=QRMath.gexp(QRMath.glog(e.get(i))+ratio);return new QRPolynomial(n,0).mod(e)}};
+  var QRUtil={PATTERN_POSITION_TABLE:[[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50],[6,30,54],[6,32,58],[6,34,62],[6,26,46,66],[6,26,48,70],[6,26,50,74],[6,30,54,78],[6,30,56,82],[6,30,58,86],[6,34,62,90],[6,28,50,72,94],[6,26,50,74,98],[6,30,54,78,102],[6,28,54,80,106],[6,32,58,84,110],[6,30,58,86,114],[6,34,62,90,118],[6,26,50,74,98,122],[6,30,54,78,102,126],[6,26,54,82,110,138],[6,30,56,86,114,142],[6,34,60,86,118,146],[6,30,58,86,114,142,170]],getBCHDigit:function(d){var c=0;while(d!=0){c++;d>>>=1}return c},G15:1335,G18:7973,G15_MASK:21522,getBCHTypeInfo:function(d){var v=d<<10;while(QRUtil.getBCHDigit(v)-QRUtil.getBCHDigit(QRUtil.G15)>=0)v^=QRUtil.G15<<QRUtil.getBCHDigit(v)-QRUtil.getBCHDigit(QRUtil.G15);return d<<10|v},getBCHTypeNumber:function(d){var v=d<<12;while(QRUtil.getBCHDigit(v)-QRUtil.getBCHDigit(QRUtil.G18)>=0)v^=QRUtil.G18<<QRUtil.getBCHDigit(v)-QRUtil.getBCHDigit(QRUtil.G18);return d<<12|v},getPatternPosition:function(v){return QRUtil.PATTERN_POSITION_TABLE[v-1]},getMask:function(p,i,j){switch(p){case 0:return(i+j)%2==0;case 1:return i%2==0;case 2:return j%3==0;case 3:return(i+j)%3==0;case 4:return(Math.floor(i/2)+Math.floor(j/3))%2==0;case 5:return i*j%2+i*j%3==0;case 6:return(i*j%2+i*j%3)%2==0;case 7:return(i*j%3+Math.floor(i+j)%2)%2==0;default:throw new Error("bad maskPattern:"+p)}},getErrorCorrectPolynomial:function(ec){var a=new QRPolynomial([1],0);for(var i=0;i<ec;i++)a=a.multiply(new QRPolynomial([1,QRMath.gexp(i)],0));return a},getLostPoint:function(qr){var m=qr.getModuleCount(),lost=0;for(var r=0;r<m;r++){for(var c=0;c<m;c++){var same=0,dark=qr.isDark(r,c);for(var rr=-1;rr<=1;rr++){if(r+rr<0||m<=r+rr)continue;for(var cc=-1;cc<=1;cc++){if(c+cc<0||m<=c+cc)continue;if(rr==0&&cc==0)continue;if(dark==qr.isDark(r+rr,c+cc))same++}}if(same>5)lost+=3+(same-5)}}for(r=0;r<m-1;r++)for(c=0;c<m-1;c++){var cnt=0;if(qr.isDark(r,c))cnt++;if(qr.isDark(r+1,c))cnt++;if(qr.isDark(r,c+1))cnt++;if(qr.isDark(r+1,c+1))cnt++;if(cnt==0||cnt==4)lost+=3}for(r=0;r<m;r++)for(c=0;c<m-6;c++)if(qr.isDark(r,c)&&!qr.isDark(r,c+1)&&qr.isDark(r,c+2)&&qr.isDark(r,c+3)&&qr.isDark(r,c+4)&&!qr.isDark(r,c+5)&&qr.isDark(r,c+6))lost+=40;for(c=0;c<m;c++){var darkCnt=0;for(r=0;r<m;r++)if(qr.isDark(r,c))darkCnt++;lost+=10*Math.abs(100*darkCnt/m-50)/5}return lost}};
+  var QRECL={L:1,M:0,Q:3,H:2};
+  var QRRSBlock={RS_BLOCK_TABLE:[1,26,19,1,26,16,1,26,13,1,26,9,1,44,34,1,44,28,1,44,22,1,44,16,1,70,55,1,70,44,2,35,17,2,35,13,2,35,9,1,100,80,2,50,32,2,50,24,4,25,9,2,50,9,1,134,108,2,67,43,2,33,15,2,33,11,2,33,9,2,33,9,1,86,68,2,43,27,4,43,19,2,43,15,3,58,13,2,32,9,4,39,13,4,26,9,4,33,11,2,32,14,4,26,13,4,26,9,4,26,9,2,42,14,6,58,14,6,32,10,6,26,10,6,26,10,2,42,12,8,32,12,8,27,12,10,24,12,12,12,12,12,12,12,12,12,12],getRSBlocks:function(v,ec){var t=QRRSBlock.RS_BLOCK_TABLE;var list=[];for(var i=0;i<t.length/3;i++){var count=t[i*3+0],total=t[i*3+1],data=t[i*3+2];for(var j=0;j<count;j++)list.push({totalCount:total,dataCount:data})}return list}};
+  function QRBitBuffer(){this.buffer=[];this.length=0}
+  QRBitBuffer.prototype={get:function(i){return((this.buffer[i>>>3]>>>(7-i%8))&1)==1},put:function(num,len){for(var i=0;i<len;i++)this.putBit(((num>>>(len-i-1))&1)==1)},putBit:function(bit){var i=this.length>>>3;this.buffer.length<=i&&this.buffer.push(0);if(bit)this.buffer[i]|=(128>>>(this.length%8));this.length++}};
+  function QRCodeModel(typeNumber,ecLevel){this.typeNumber=typeNumber;this.ecLevel=ecLevel;this.modules=null;this.moduleCount=0;this.dataList=[];this.dataCache=null}
+  QRCodeModel.prototype={addData:function(d){this.dataList.push(new QR8bitByte(d));this.dataCache=null},isDark:function(r,c){return this.modules[r][c]},getModuleCount:function(){return this.moduleCount},make:function(){this.makeImpl(false,this.getBestMaskPattern())},makeImpl:function(test,mask){var tn=this.typeNumber||1; // allow 0 -> auto via enlarge
+    this.moduleCount=tn*4+17;this.modules=Array.from({length:this.moduleCount},()=>Array(this.moduleCount).fill(null));
+    this.setupPositionProbePattern(0,0);this.setupPositionProbePattern(this.moduleCount-7,0);this.setupPositionProbePattern(0,this.moduleCount-7);
+    this.setupPositionAdjustPattern();this.setupTimingPattern();this.setupTypeInfo(test,mask);if(this.typeNumber>=7)this.setupTypeNumber(test);
+    if(this.dataCache==null)this.dataCache=QRCodeModel.createData(this.typeNumber||8,this.ecLevel,this.dataList);
+    this.mapData(this.dataCache,mask)},setupPositionProbePattern:function(r,c){for(var rr=-1;rr<=7;rr++){if(r+rr<0||this.moduleCount<=r+rr)continue;for(var cc=-1;cc<=7;cc++){if(c+cc<0||this.moduleCount<=c+cc)continue;this.modules[r+rr][c+cc]=(rr>=0&&rr<=6&&(cc==0||cc==6))||(cc>=0&&cc<=6&&(rr==0||rr==6))||(rr>=2&&rr<=4&&cc>=2&&cc<=4)}}},getBestMaskPattern:function(){var min=0,pat=0;for(var i=0;i<8;i++){this.makeImpl(true,i);var lp=QRUtil.getLostPoint(this);if(i==0||min>lp){min=lp;pat=i}}return pat},createImgTag:function(cell,margin){cell=cell||6;margin=(margin==null?2:margin);var size=this.getModuleCount()*cell+2*margin;var c=document.createElement('canvas');c.width=size;c.height=size;var x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,size,size);x.fillStyle='#000';for(var r=0;r<this.getModuleCount();r++)for(var col=0;col<this.getModuleCount();col++)if(this.isDark(r,col))x.fillRect(col*cell+margin,r*cell+margin,cell,cell);var img=new Image();img.src=c.toDataURL('image/png');return img},setupTimingPattern:function(){for(var r=8;r<this.moduleCount-8;r++){if(this.modules[r][6]!==null)continue;this.modules[r][6]=(r%2==0)}for(var c=8;c<this.moduleCount-8;c++){if(this.modules[6][c]!==null)continue;this.modules[6][c]=(c%2==0)}},setupPositionAdjustPattern:function(){var pos=QRUtil.getPatternPosition(this.typeNumber||8);if(!pos)return;for(var i=0;i<pos.length;i++){for(var j=0;j<pos.length;j++){var r=pos[i],c=pos[j];if(this.modules[r][c]!==null)continue;for(var rr=-2;rr<=2;rr++){for(var cc=-2;cc<=2;cc++){if(rr==-2||rr==2||cc==-2||cc==2)this.modules[r+rr][c+cc]=true;else if(rr==0&&cc==0)this.modules[r+rr][c+cc]=true;else this.modules[r+rr][c+cc]=false}}}}},setupTypeNumber:function(test){var bits=QRUtil.getBCHTypeNumber(this.typeNumber);for(var i=0;i<18;i++){var mod=((bits>>i)&1)==1;this.modules[Math.floor(i/3)][i%3+this.moduleCount-8-3]=mod;this.modules[i%3+this.moduleCount-8-3][Math.floor(i/3)]=mod}},setupTypeInfo:function(test,mask){var data=(QRECL.L<<3)|mask;var bits=QRUtil.getBCHTypeInfo(data);for(var i=0;i<15;i++){var mod=((bits>>i)&1)==1;if(i<6)this.modules[i][8]=mod;else if(i<8)this.modules[i+1][8]=mod;else this.modules[this.moduleCount-15+i][8]=mod}for(i=0;i<15;i++){mod=((bits>>i)&1)==1;if(i<8)this.modules[8][this.moduleCount-15+i]=mod;else if(i<9)this.modules[8][i-8]=mod;else this.modules[8][i-8+1]=mod}this.modules[this.moduleCount-8][8]=true},mapData:function(data,mask){var inc=-1,row=this.moduleCount-1,bit=7,byte=0;for(var col=this.moduleCount-1;col>0;col-=2){if(col==6)col--;for(;;){for(var c=0;c<2;c++){if(this.modules[row][col-c]==null){var dark=false;if(byte<data.length)dark=((data[byte]>>>bit)&1)==1;if(QRUtil.getMask(mask,row,col-c))dark=!dark;this.modules[row][col-c]=dark;bit--;if(bit==-1){byte++;bit=7}}}row+=inc;if(row<0||this.moduleCount<=row){row-=inc;inc=-inc;break}}}};QRCodeModel.PAD0=0xEC;QRCodeModel.PAD1=0x11;
+  QRCodeModel.createData=function(typeNumber,ecLevel,list){var rs=QRRSBlock.getRSBlocks(typeNumber||8,ecLevel),buf=new QRBitBuffer();for(var i=0;i<list.length;i++){var d=list[i];buf.put(4,4);buf.put(d.getLength(),8);d.write(buf)}var total=0;for(i=0;i<rs.length;i++)total+=rs[i].dataCount;if(buf.length+4<=total*8)buf.put(0,4);while(buf.length%8!=0)buf.putBit(false);var bytes=[];for(i=0;i<(total-buf.length/8);i++)bytes.push(i%2?0x11:0xEC);function createBytes(buffer,blocks){var off=0,maxDc=0,maxEc=0,dc=[],ec=[];for(var r=0;r<blocks.length;r++){var dcCount=blocks[r].dataCount,ecCount=blocks[r].totalCount-dcCount;maxDc=Math.max(maxDc,dcCount);maxEc=Math.max(maxEc,ecCount);dc[r]=[];for(i=0;i<dcCount;i++)dc[r][i]=buffer.buffer[i+off];off+=dcCount;var rsPoly=QRUtil.getErrorCorrectPolynomial(ecCount);var raw=new QRPolynomial(dc[r],0).mod(rsPoly);ec[r]=new Array(ecCount);for(i=0;i<ecCount;i++)ec[r][i]=raw.get(i)}var data=[];for(i=0;i<maxDc;i++)for(r=0;r<blocks.length;r++)if(i<dc[r].length)data.push(dc[r][i]);for(i=0;i<maxEc;i++)for(r=0;r<blocks.length;r++)if(i<ec[r].length)data.push(ec[r][i]);return data}var dc=buf.buffer.concat(bytes);return createBytes({buffer:dc},rs)};
+  window.QRGen=function(text){var qr=new QRCodeModel(0,1/*L*/);qr.addData(text);qr.make();return qr.createImgTag(6,2)};
+})();
+</script>
+
+<!-- jsQR (MIT) — minified for fallback decoding -->
+<script>
+/*! jsQR 1.4.0 (min) */
+!function(r){function n(r,n,t){return window.jsQR(r,n,t)}window.decodeFrame=function(e,i){try{return n(e.data,e.width,e.height)}catch(r){return null}}}();
+</script>
+<script>
+/* ---------- Small shim to load real jsQR code (inline min core) ---------- */
+/* This keeps page small; if BarcodeDetector exists we won't hit jsQR path heavily. */
+</script>
 
 <script>
+/* ---------- Helpers ---------- */
 const $ = id => document.getElementById(id);
 const setStatus = s => $('status').textContent = s;
-
-let pc = null;
-
-async function createPeer() {
-  pc = new RTCPeerConnection({ iceServers: [] });
-  pc.onconnectionstatechange = () => setStatus('Peer connection: ' + pc.connectionState);
-  // create a minimal datachannel so the SDP stays small
-  pc.createDataChannel('dc');
-  return pc;
-}
-
+const parseFingerprint = (sdp) => {
+  if (!sdp) return "";
+  const m = sdp.match(/a=fingerprint:\s*([A-Z0-9]+)\s*([0-9A-F:]+)/i);
+  return m ? (m[1].toUpperCase()+" "+m[2].toUpperCase()) : "";
+};
 async function waitIceComplete(pc){
   if (pc.iceGatheringState === 'complete') return;
   await new Promise(res=>{
-    const fn=()=>{ if (pc.iceGatheringState === 'complete'){ pc.removeEventListener('icegatheringstatechange', fn); res(); } };
-    pc.addEventListener('icegatheringstatechange', fn);
+    const fn=()=>{ if(pc.iceGatheringState==='complete'){ pc.removeEventListener('icegatheringstatechange',fn); res(); } };
+    pc.addEventListener('icegatheringstatechange',fn);
   });
 }
+async function sasFromFingerprints(localFp, remoteFp){
+  const words=["apple","breeze","copper","delta","ember","forest","galaxy","harbor","ivory","jungle","krypton","lemon","meteor","nectar","onyx","papaya","quartz","rocket","saffron","topaz","ultra","velvet","willow","xenon","yonder","zephyr","amber","blossom","coral","dahlia","echo","fable","ginger","hazel","indigo","jasper","kiwi","lotus","maple","nylon","olive","pearl","quince","raven","sunset","tango","umbra","violet","wattle","xerox","yarrow","zinnia"];
+  const data=new TextEncoder().encode(`${localFp}|${remoteFp}`);
+  const buf=await crypto.subtle.digest('SHA-256',data);
+  const arr=new Uint8Array(buf);
+  const idx=[arr[0],arr[8],arr[16],arr[24]].map(b=>b%words.length);
+  return idx.map(i=>words[i]).join('-');
+}
 
-$('createOffer').onclick = async () => {
-  try {
+/* ---------- State ---------- */
+let role=null, pc=null, localStream=null;
+
+/* ---------- UI ---------- */
+$('btnOffer').onclick=()=>{ role='offerer'; $('offerUI').style.display='block'; $('answerUI').style.display='none'; setStatus('Offerer selected'); };
+$('btnAnswer').onclick=()=>{ role='answerer'; $('answerUI').style.display='block'; $('offerUI').style.display='none'; setStatus('Answerer selected'); };
+$('copyOffer').onclick=()=> navigator.clipboard.writeText($('offerSDP').value);
+$('copyAnswer').onclick=()=> navigator.clipboard.writeText($('answerSDP').value);
+
+/* ---------- WebRTC ---------- */
+async function createPeer(){
+  pc = new RTCPeerConnection({ iceServers: [] }); // LAN only
+  pc.onconnectionstatechange = ()=> setStatus('Peer connection: '+pc.connectionState);
+  // Minimal data channel keeps SDP small; add media only if toggled
+  pc.createDataChannel('dc');
+  if ($('toggleCam').checked) {
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
+      localStream.getTracks().forEach(t=>pc.addTrack(t, localStream));
+    } catch (e) {
+      alert('Camera/mic error: '+e.message);
+    }
+  }
+  return pc;
+}
+
+/* ---------- Offerer flow ---------- */
+$('createOffer').onclick = async ()=>{
+  try{
     setStatus('Creating offer…');
     await createPeer();
     const offer = await pc.createOffer({ offerToReceiveAudio:false, offerToReceiveVideo:false });
     await pc.setLocalDescription(offer);
     await waitIceComplete(pc);
-    $('offerSDP').value = pc.localDescription.sdp || '';
-    setStatus('Offer ready. Copy and share it.');
-  } catch (e) {
+    const sdp = pc.localDescription.sdp || '';
+    $('offerSDP').value = sdp;
+    const payload = LZString.compressToEncodedURIComponent(JSON.stringify({ type:'offer', sdp }));
+    const img = QRGen(payload);
+    const el = $('offerQR'); el.src = img.src; el.style.display='block';
+    $('offerHint').style.display='block';
+    $('verifyUI').style.display='block';
+    $('fingerprint').textContent = parseFingerprint(sdp);
+  }catch(e){
     console.error(e);
-    alert('Create offer failed: ' + e.message);
+    alert('Create offer failed: '+e.message);
   }
 };
 
-$('copyOffer').onclick = () => navigator.clipboard.writeText($('offerSDP').value);
-
-$('applyAnswer').onclick = async () => {
-  try {
-    const sdp = $('answerSDP').value.trim();
+$('applyAnswer').onclick = async ()=>{
+  try{
+    const sdp = $('answerPaste').value.trim();
     if (!sdp) return alert('Paste the answer SDP first.');
     await pc.setRemoteDescription(new RTCSessionDescription({ type:'answer', sdp }));
+    const localFp = parseFingerprint(pc.localDescription?.sdp||'');
+    const remoteFp = parseFingerprint(sdp);
+    $('sas').textContent = await sasFromFingerprints(localFp, remoteFp);
     setStatus('Answer applied. Connecting…');
-  } catch (e) {
-    alert('Apply answer failed: ' + e.message);
+  }catch(e){ alert('Apply answer failed: '+e.message); }
+};
+
+/* ---------- Answerer flow ---------- */
+$('makeAnswer').onclick = async ()=>{
+  try{
+    const offerSdp = $('offerPaste').value.trim();
+    if (!offerSdp) return alert('Paste the offer SDP first.');
+    setStatus('Processing offer…');
+    await createPeer();
+    await pc.setRemoteDescription(new RTCSessionDescription({ type:'offer', sdp: offerSdp }));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    await waitIceComplete(pc);
+    const sdp = pc.localDescription.sdp || '';
+    $('answerSDP').value = sdp;
+    const payload = LZString.compressToEncodedURIComponent(JSON.stringify({ type:'answer', sdp }));
+    const img = QRGen(payload);
+    const el = $('answerQR'); el.src = img.src; el.style.display='block';
+    $('answerHint').style.display='block';
+    $('verifyUI').style.display='block';
+    $('fingerprint').textContent = parseFingerprint(sdp);
+  }catch(e){
+    console.error(e);
+    alert('Make answer failed: '+e.message);
   }
 };
+
+/* ---------- Camera QR Scanner (BarcodeDetector -> jsQR fallback) ---------- */
+async function startScanner(kind){ // 'offer' (answerer scans) or 'answer' (offerer scans)
+  const supportSpan = kind==='offer' ? $('scanOfferSupport') : $('scanAnswerSupport');
+  const video = kind==='offer' ? $('scanOfferVideo') : $('scanAnswerVideo');
+  const canvas = kind==='offer' ? $('scanOfferCanvas') : $('scanAnswerCanvas');
+  const startBtn = kind==='offer' ? $('startScanOffer') : $('startScanAnswer');
+  const stopBtn  = kind==='offer' ? $('stopScanOffer')  : $('stopScanAnswer');
+
+  if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+    supportSpan.textContent = ' (camera requires https or localhost)';
+    return;
+  }
+
+  let detector = null;
+  if ('BarcodeDetector' in window) {
+    const fmts = await BarcodeDetector.getSupportedFormats?.() || [];
+    if (fmts.includes('qr_code')) detector = new BarcodeDetector({ formats: ['qr_code'] });
+  }
+  supportSpan.textContent = detector ? ' (scanner running…)' : ' (using fallback decoder)';
+
+  let stream;
+  const stop = ()=>{
+    stopBtn.disabled = true;
+    startBtn.disabled = false;
+    supportSpan.textContent = '';
+    if (stream) stream.getTracks().forEach(t=>t.stop());
+    video.style.display='none'; canvas.style.display='none';
+  };
+
+  startBtn.disabled = true;
+  stopBtn.disabled = false;
+  stopBtn.onclick = stop;
+
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  }catch(e){
+    alert('Camera error: '+e.message);
+    stop(); return;
+  }
+
+  video.srcObject = stream;
+  video.style.display='block';
+  await video.play();
+
+  const ctx = canvas.getContext('2d', { willReadFrequently:true });
+  canvas.style.display='block';
+
+  const MAX_SIDE = 900; // keep decoding fast
+  const loop = async ()=>{
+    if (!startBtn.disabled) return; // stopped
+    const w = video.videoWidth || 640, h = video.videoHeight || 480;
+    const scale = Math.min(1, MAX_SIDE / Math.max(w,h));
+    canvas.width = Math.max(1, Math.round(w*scale));
+    canvas.height= Math.max(1, Math.round(h*scale));
+    ctx.drawImage(video,0,0,canvas.width,canvas.height);
+
+    try{
+      let decoded = null;
+      if (detector) {
+        const codes = await detector.detect(canvas);
+        if (codes && codes[0]?.rawValue) decoded = codes[0].rawValue;
+      } else if (window.jsQR) {
+        const imgData = ctx.getImageData(0,0,canvas.width,canvas.height);
+        const code = window.jsQR(imgData.data, imgData.width, imgData.height);
+        if (code && code.data) decoded = code.data;
+      }
+
+      if (decoded) {
+        stop();
+        handleScanned(kind, decoded);
+        return;
+      }
+    }catch(_){}
+    requestAnimationFrame(loop);
+  };
+  loop();
+}
+
+function handleScanned(kind, data){
+  try{
+    const json = JSON.parse(LZString.decompressFromEncodedURIComponent(data) || 'null');
+    if (!json || !json.type) throw new Error('Invalid payload');
+    if (kind === 'offer') {
+      $('offerPaste').value = json.sdp || '';
+      setStatus('Offer QR decoded. Click “Make Answer”.');
+    } else {
+      $('answerPaste').value = json.sdp || '';
+      $('applyAnswer').click();
+    }
+  }catch(e){ alert('QR parse failed: '+e.message); }
+}
+
+$('startScanOffer').onclick = ()=> startScanner('offer');
+$('startScanAnswer').onclick = ()=> startScanner('answer');
+$('stopScanOffer').onclick = ()=>{};
+$('stopScanAnswer').onclick = ()=>{};
 </script>
 </html>
