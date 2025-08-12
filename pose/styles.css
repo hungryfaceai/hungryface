@@ -37,26 +37,34 @@ section {
 .stage {
   position: relative;
   width: 100%;
-  max-width: 1280px;
+  max-width: 1280px;      /* tweak as needed */
   margin-top: 12px;
-  aspect-ratio: 16 / 9; /* updated at runtime to the real ratio */
+  aspect-ratio: 16 / 9;   /* updated at runtime to the real ratio */
   background: #000;
   overflow: hidden;
 
-  /* Important for iOS/Android: let canvas receive taps without scrolling/zooming */
+  /* important for iOS/Android: allow canvas to get gestures */
   touch-action: none;
 }
 
+/* Keep video & canvas stacked and routed correctly for input */
 #stage > video,
 #stage > canvas {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  touch-action: none; /* prevent page pan/zoom while drawing/dragging */
+  touch-action: none;
+  will-change: transform;
 }
 
-.output_canvas,
+/* ✅ Fix (1): video never steals taps; canvas is on top */
 #stage > video {
-  will-change: transform;
+  z-index: 1;
+  pointer-events: none;   /* video won't intercept touches/clicks */
+}
+
+#stage > canvas {
+  z-index: 2;
+  pointer-events: auto;   /* canvas gets all interactions */
 }
