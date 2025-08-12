@@ -3,131 +3,98 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WebRTC Sender (Answerer, iPhone)</title>
+  <title>WebRTC Receiver (Offerer) + MediaPipe Pose</title>
   <link rel="icon" href="data:,">
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 16px; }
-    video { width: 100%; max-height: 60vh; background: #000; border-radius: 8px; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 12px; max-width: 980px; margin: 0 auto; }
+
+    /* IMPORTANT: canvas is transparent so you see the video underneath */
+    video { width: 100%; max-height: 70vh; background: #000; border-radius: 8px; display: block; }
+    canvas { width: 100%; max-height: 70vh; background: transparent; border-radius: 8px; display: block; }
+
     textarea { width: 100%; height: 140px; }
     button { padding: 10px 14px; margin: 6px 4px 6px 0; }
     .row { margin: 12px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .status { font-weight: 600; }
+    .overwrap { position: relative; }
+    #overlay { position: absolute; left:0; top:0; pointer-events: none; z-index: 1; }
     .small { font-size: 12px; color: #666; }
-    label { display:block; margin-bottom: 6px; }
-    select { padding: 8px; }
-    .status { margin-left: 6px; font-weight: 600; }
-    .notice { background:#e7f3ff; border:1px solid #b6e0ff; padding:8px 10px; border-radius:6px; font-size:13px; }
+    label.small { user-select: none; }
+    .notice { background:#fff3cd; border:1px solid #ffe69c; padding:8px 10px; border-radius:6px; font-size:13px; }
   </style>
 </head>
 <body>
-  <h1>Sender (Answerer, iPhone)</h1>
+  <div class="grid">
+    <h1>Laptop (Offerer) + Pose</h1>
 
-  <div class="notice">
-    Keep this page in the foreground and the screen unlocked. On iPhone, the camera stops if the device locks or you switch apps.
+    <div class="row">
+      <button id="createOffer">Create Offer</button>
+      <button id="copyOffer" disabled>Copy Offer</button>
+      <label class="small"><input type="checkbox" id="wantAudio" checked> Offer to receive audio</label>
+      <button id="reconnect" disabled>Reconnect</button>
+      <button id="reset">Reset</button>
+      <span class="status" id="pcState">Idle</span>
+    </div>
+
+    <textarea id="offer" placeholder="Offer will appear here" readonly></textarea>
+
+    <div class="row">
+      <label for="answer" class="small">Paste Answer (from iPhone):</label>
+      <textarea id="answer" placeholder='{"type":"answer","sdp":"..."}'></textarea>
+      <button id="acceptAnswer">Accept Answer</button>
+    </div>
+
+    <div id="reconnNotice" class="notice" style="display:none;">
+      Connection dropped — I created a new Offer (ICE restart). Copy it to the iPhone and press “Accept Offer & Create Answer”.
+    </div>
+
+    <div class="row">
+      <button id="enableAudio" disabled>Enable Audio (if blocked)</button>
+      <span class="small">Browsers may block autoplay with sound until you click.</span>
+    </div>
+
+    <div class="overwrap">
+      <video id="remote" playsinline autoplay></video>
+      <canvas id="overlay"></canvas>
+    </div>
+
+    <div class="row small" id="perf"></div>
   </div>
 
-  <div class="row">
-    <label>Camera:</label>
-    <select id="cameraFacing">
-      <option value="environment" selected>Back camera</option>
-      <option value="user">Front camera</option>
-    </select>
-  </div>
+  <script type="module">
+    import { FilesetResolver, PoseLandmarker, DrawingUtils }
+      from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
 
-  <div class="row">
-    <button id="start">Start camera & mic</button>
-    <span class="small">Requires HTTPS.</span>
-    <span class="status" id="pcState">Idle</span>
-  </div>
+    // --- Elements
+    const el = (id) => document.getElementById(id);
+    const createOfferBtn = el('createOffer');
+    const copyOfferBtn = el('copyOffer');
+    const acceptAnswerBtn = el('acceptAnswer');
+    const reconnectBtn = el('reconnect');
+    const resetBtn = el('reset');
+    const offerTA = el('offer');
+    const answerTA = el('answer');
+    const pcState = el('pcState');
+    const wantAudio = el('wantAudio');
+    const notice = el('reconnNotice');
+    const video = el('remote');
+    const overlay = el('overlay');
+    const ctx = overlay.getContext('2d');
+    const enableAudioBtn = el('enableAudio');
+    const perf = el('perf');
 
-  <video id="local" playsinline muted autoplay></video>
+    // --- State
+    let pc = null;
+    let landmarker = null;
+    let drawingUtils = null;
+    let lastT = performance.now();
+    let inferenceRunning = false;
+    let disconnectTimer = null;
+    let needPoseReset = false;
 
-  <div class="row">
-    <label for="offer" class="small">Paste Offer (from laptop):</label>
-    <textarea id="offer" placeholder='{"type":"offer","sdp":"..."}'></textarea>
-  </div>
-
-  <div class="row">
-    <button id="acceptOffer" disabled>Accept Offer & Create Answer</button>
-    <button id="copyAnswer" disabled>Copy Answer</button>
-  </div>
-
-  <textarea id="answer" placeholder="Answer will appear here" readonly></textarea>
-
-  <script>
-    let pc = null, localStream = null, wakeLock = null;
-    const startBtn = document.getElementById('start');
-    const acceptOfferBtn = document.getElementById('acceptOffer');
-    const copyAnswerBtn = document.getElementById('copyAnswer');
-    const offerTA = document.getElementById('offer');
-    const answerTA = document.getElementById('answer');
-    const localVideo = document.getElementById('local');
-    const pcState = document.getElementById('pcState');
-    const cameraFacing = document.getElementById('cameraFacing');
-
+    // --- Helpers
     const setStatus = (s) => pcState.textContent = s;
-
-    async function requestWakeLock() {
-      try {
-        if ('wakeLock' in navigator) {
-          wakeLock = await navigator.wakeLock.request('screen');
-          wakeLock.addEventListener('release', () => {});
-          document.addEventListener('visibilitychange', async () => {
-            if (document.visibilityState === 'visible') {
-              try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
-            }
-          });
-        }
-      } catch {}
-    }
-
-    function createPC() {
-      pc = new RTCPeerConnection({
-        iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
-        sdpSemantics: 'unified-plan',
-        bundlePolicy: 'max-bundle'
-      });
-      pc.oniceconnectionstatechange = () => setStatus(pc.iceConnectionState);
-      pc.onconnectionstatechange = () => setStatus(pc.connectionState);
-    }
-
-    async function getMedia() {
-      const facingMode = cameraFacing.value;
-      return navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode,
-          width: { ideal: 1280 }, height: { ideal: 720 },
-          frameRate: { ideal: 30, max: 30 }
-        },
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-      });
-    }
-
-    async function startCapture() {
-      localStream = await getMedia();
-      localVideo.srcObject = localStream;
-
-      // Reacquire tracks if they end (e.g., device sleeps)
-      localStream.getTracks().forEach(track => {
-        track.onended = async () => {
-          try {
-            const newStream = await getMedia();
-            const senders = pc ? pc.getSenders() : [];
-            for (const newTrack of newStream.getTracks()) {
-              const sender = senders.find(s => s.track && s.track.kind === newTrack.kind);
-              if (sender) await sender.replaceTrack(newTrack);
-              else if (pc) pc.addTrack(newTrack, newStream);
-            }
-            localStream = newStream;
-            localVideo.srcObject = localStream;
-          } catch (e) {
-            console.warn('Reacquire media failed:', e);
-          }
-        };
-      });
-
-      acceptOfferBtn.disabled = false;
-      requestWakeLock();
-    }
 
     const waitForIceGatheringComplete = (pc) => {
       if (pc.iceGatheringState === 'complete') return Promise.resolve();
@@ -142,47 +109,207 @@
       });
     };
 
-    async function acceptOfferAndAnswer() {
-      const val = offerTA.value.trim();
-      if (!val) return alert('Paste the Offer JSON first.');
-      if (!pc) createPC();
-
-      let remote;
-      try {
-        remote = JSON.parse(val);
-        if (remote.type !== 'offer') throw new Error('Pasted JSON is not an SDP offer');
-        await pc.setRemoteDescription(remote);
-      } catch (e) {
-        console.error('setRemoteDescription(offer) failed', e);
-        alert('setRemoteDescription (offer) failed: ' + (e?.message || e));
-        return;
-      }
-
-      // Attach tracks so the answer is sendonly
-      localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      await waitForIceGatheringComplete(pc);
-
-      answerTA.value = JSON.stringify(pc.localDescription);
-      copyAnswerBtn.disabled = false;
+    function resizeOverlayToVideo() {
+      const dpr = window.devicePixelRatio || 1;
+      const w = video.videoWidth | 0;
+      const h = video.videoHeight | 0;
+      if (!w || !h) return;
+      overlay.style.width = w + "px";
+      overlay.style.height = h + "px";
+      overlay.width = Math.floor(w * dpr);
+      overlay.height = Math.floor(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
-    startBtn.onclick = async () => {
-      startBtn.disabled = true;
-      try { await startCapture(); }
-      catch (e) {
-        startBtn.disabled = false;
-        alert('Failed to start camera/mic: ' + e.message);
+    async function initPose() {
+      if (landmarker) return;
+      const fileset = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      );
+      landmarker = await PoseLandmarker.createFromOptions(fileset, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
+          delegate: "GPU"
+        },
+        runningMode: "video",
+        numPoses: 1,
+        minPoseDetectionConfidence: 0.4,
+        minPosePresenceConfidence: 0.4,
+        minTrackingConfidence: 0.4
+      });
+      drawingUtils = new DrawingUtils(ctx);
+    }
+
+    async function resetPoseGraph() {
+      try { await landmarker?.close?.(); } catch {}
+      landmarker = null;
+      await initPose();
+      lastT = performance.now();
+    }
+
+    function startInferenceLoop() {
+      if (inferenceRunning) return;
+      inferenceRunning = true;
+
+      const useVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+
+      const step = async () => {
+        try {
+          if (!landmarker) await initPose();
+          if (needPoseReset) { await resetPoseGraph(); needPoseReset = false; }
+
+          if (video.readyState < 2) {
+            scheduleNext();
+            return;
+          }
+
+          // Use monotonic clock to avoid timestamp regressions after reconnects
+          const tMs = performance.now();
+          const results = await landmarker.detectForVideo(video, tMs);
+
+          // FPS + draw
+          const now = performance.now();
+          const dt = now - lastT; lastT = now;
+          const fps = 1000 / dt;
+          perf.textContent = `Inference ~ ${fps.toFixed(1)} FPS`;
+
+          resizeOverlayToVideo();
+          ctx.clearRect(0, 0, overlay.width, overlay.height);
+          if (results.landmarks) for (const lm of results.landmarks) drawingUtils.drawLandmarks(lm);
+        } catch (e) {
+          const msg = String(e?.message || e || '');
+          if (msg.includes('timestamp') || msg.includes('WaitUntilIdle') || msg.includes('CalculatorGraph::Run')) {
+            console.warn('Pose graph reset due to timestamp error:', e);
+            needPoseReset = true;
+          } else {
+            console.error('Pose error:', e);
+          }
+        }
+        scheduleNext();
+      };
+
+      function scheduleNext() {
+        if (useVFC) video.requestVideoFrameCallback(() => step());
+        else requestAnimationFrame(step);
+      }
+
+      if (video.readyState >= 2) step();
+      else video.onloadedmetadata = () => step();
+    }
+
+    function setupPcEvents() {
+      pc.oniceconnectionstatechange = () => {
+        setStatus(pc.iceConnectionState);
+        if (pc.iceConnectionState === 'disconnected') {
+          clearTimeout(disconnectTimer);
+          disconnectTimer = setTimeout(() => triggerReconnect(), 5000);
+        } else if (pc.iceConnectionState === 'failed') {
+          triggerReconnect();
+        } else if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+          notice.style.display = 'none';
+          clearTimeout(disconnectTimer);
+        }
+      };
+      pc.onconnectionstatechange = () => setStatus(pc.connectionState);
+      pc.ontrack = (e) => {
+        video.srcObject = e.streams[0];
+        enableAudioBtn.disabled = false;
+        needPoseReset = true;               // reset pose graph on new stream/track
+        video.onloadedmetadata = () => {    // also when stream format changes
+          needPoseReset = true;
+        };
+      };
+    }
+
+    async function makeOffer({ iceRestart = false } = {}) {
+      try {
+        const offer = await pc.createOffer({ iceRestart });
+        await pc.setLocalDescription(offer);
+        await waitForIceGatheringComplete(pc);
+        offerTA.value = JSON.stringify(pc.localDescription);
+        copyOfferBtn.disabled = false;
+        reconnectBtn.disabled = false;
+        if (iceRestart) {
+          notice.style.display = '';
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      } catch (e) {
+        console.error('Create offer failed', e);
+        alert('Create offer failed: ' + (e?.message || e));
+      }
+    }
+
+    function triggerReconnect() {
+      if (!pc) return;
+      makeOffer({ iceRestart: true }); // user must paste new offer to the iPhone
+    }
+
+    // --- UI handlers
+    createOfferBtn.onclick = async () => {
+      createOfferBtn.disabled = true;
+      try {
+        pc = new RTCPeerConnection({
+          iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
+          sdpSemantics: 'unified-plan',
+          bundlePolicy: 'max-bundle'
+        });
+        pc.addTransceiver('video', { direction: 'recvonly' });
+        if (wantAudio.checked) pc.addTransceiver('audio', { direction: 'recvonly' });
+        setupPcEvents();
+        await makeOffer();
+      } catch (e) {
+        alert('Failed to start: ' + (e?.message || e));
+        createOfferBtn.disabled = false;
       }
     };
 
-    acceptOfferBtn.onclick = acceptOfferAndAnswer;
+    copyOfferBtn.onclick = async () => {
+      try { await navigator.clipboard.writeText(offerTA.value); }
+      catch { offerTA.select(); document.execCommand('copy'); }
+    };
 
-    copyAnswerBtn.onclick = async () => {
-      try { await navigator.clipboard.writeText(answerTA.value); }
-      catch { answerTA.select(); document.execCommand('copy'); }
+    reconnectBtn.onclick = () => triggerReconnect();
+
+    acceptAnswerBtn.onclick = async () => {
+      const val = answerTA.value.trim();
+      if (!val) return alert('Paste the Answer JSON first.');
+      try {
+        const desc = JSON.parse(val);
+        if (desc.type !== 'answer') throw new Error('Pasted JSON is not an SDP answer');
+        if (!pc || (pc.signalingState !== 'have-local-offer' && pc.signalingState !== 'stable')) {
+          throw new Error('Unexpected signalingState: ' + (pc?.signalingState || 'none'));
+        }
+        await pc.setRemoteDescription(desc);
+        await initPose();
+        startInferenceLoop();
+        notice.style.display = 'none';
+      } catch (e) {
+        console.error('Accept answer failed', e, { local: pc?.localDescription?.type, state: pc?.signalingState });
+        alert('Accept answer failed: ' + (e?.message || e));
+      }
+    };
+
+    enableAudioBtn.onclick = async () => {
+      try { await video.play(); enableAudioBtn.disabled = true; }
+      catch { alert('Autoplay blocked, click the page and try again.'); }
+    };
+
+    resetBtn.onclick = () => {
+      try { pc?.getSenders().forEach(s => s.track && s.track.stop()); } catch {}
+      try { pc?.close(); } catch {}
+      pc = null;
+      video.srcObject = null;
+      overlay.width = overlay.height = 0;
+      offerTA.value = '';
+      answerTA.value = '';
+      copyOfferBtn.disabled = true;
+      reconnectBtn.disabled = true;
+      createOfferBtn.disabled = false;
+      notice.style.display = 'none';
+      setStatus('Idle');
+      inferenceRunning = false;
+      // keep landmarker loaded for reuse
     };
   </script>
 </body>
