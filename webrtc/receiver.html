@@ -3,15 +3,17 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WebRTC Receiver (Offerer) + Pose + E2EE</title>
+  <title>WebRTC Receiver (Offerer) + MediaPipe Pose</title>
   <link rel="icon" href="data:,">
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 16px; }
     .grid { display: grid; grid-template-columns: 1fr; gap: 12px; max-width: 980px; margin: 0 auto; }
+
+    /* IMPORTANT: canvas is transparent so you see the video underneath */
     video { width: 100%; max-height: 70vh; background: #000; border-radius: 8px; display: block; }
     canvas { width: 100%; max-height: 70vh; background: transparent; border-radius: 8px; display: block; }
+
     textarea { width: 100%; height: 140px; }
-    input[type="text"], input[type="password"] { padding: 8px; }
     button { padding: 10px 14px; margin: 6px 4px 6px 0; }
     .row { margin: 12px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .status { font-weight: 600; }
@@ -24,12 +26,7 @@
 </head>
 <body>
   <div class="grid">
-    <h1>Laptop (Offerer) + Pose + E2EE</h1>
-
-    <div class="row">
-      <label class="small">Room: <input id="room" type="text" value="room1"></label>
-      <label class="small">Secret: <input id="secret" type="password" placeholder="same on phone"></label>
-    </div>
+    <h1>Laptop (Offerer) + Pose</h1>
 
     <div class="row">
       <button id="createOffer">Create Offer</button>
@@ -86,8 +83,6 @@
     const ctx = overlay.getContext('2d');
     const enableAudioBtn = el('enableAudio');
     const perf = el('perf');
-    const roomInput = el('room');
-    const secretInput = el('secret');
 
     // --- State
     let pc = null;
@@ -164,9 +159,12 @@
           if (!landmarker) await initPose();
           if (needPoseReset) { await resetPoseGraph(); needPoseReset = false; }
 
-          if (video.readyState < 2) { scheduleNext(); return; }
+          if (video.readyState < 2) {
+            scheduleNext();
+            return;
+          }
 
-          // Monotonic timestamp to avoid MP graph regressions after reconnects
+          // Use monotonic clock to avoid timestamp regressions after reconnects
           const tMs = performance.now();
           const results = await landmarker.detectForVideo(video, tMs);
 
@@ -200,75 +198,6 @@
       else video.onloadedmetadata = () => step();
     }
 
-    // ---------- E2EE helpers (legacy path for Chrome) ----------
-    const MAGIC = new Uint8Array([0x45,0x32,0x45,0x45,0x31]); // "E2EE1"
-    async function deriveKey(secret, room) {
-      const enc = new TextEncoder();
-      const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "PBKDF2" }, false, ["deriveKey"]);
-      const salt = enc.encode("webrtc-e2ee:" + room);
-      return crypto.subtle.deriveKey(
-        { name: "PBKDF2", salt, iterations: 100_000, hash: "SHA-256" },
-        keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt","decrypt"]
-      );
-    }
-    async function ivSalt(kind, role, room) {
-      const enc = new TextEncoder();
-      const data = enc.encode("iv:" + room + ":" + kind + ":" + role);
-      const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
-      return hash.slice(0, 4);
-    }
-    function ivFrom(ts, salt4) {
-      const iv = new Uint8Array(12);
-      iv.set(salt4, 0);
-      const view = new DataView(iv.buffer, 4, 8);
-      const big = BigInt(Math.floor(ts || 0));
-      view.setBigUint64(0, big, false);
-      return iv;
-    }
-    async function makeTransformStream({ secret, room, role, kind }) {
-      const key = await deriveKey(secret, room);
-      const salt4 = await ivSalt(kind, role, room);
-      return new TransformStream({
-        transform: async (frame, controller) => {
-          try {
-            const ts = (frame.timestamp ?? 0);
-            const iv = ivFrom(ts, salt4);
-            const data = new Uint8Array(frame.data);
-            if (role === 'sender') {
-              const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, data));
-              const out = new Uint8Array(MAGIC.length + ct.length);
-              out.set(MAGIC, 0); out.set(ct, MAGIC.length);
-              frame.data = out.buffer;
-            } else {
-              if (data.length < MAGIC.length) { controller.enqueue(frame); return; }
-              let ok = true; for (let i=0;i<MAGIC.length;i++) if (data[i]!==MAGIC[i]) { ok=false; break; }
-              if (!ok) { controller.enqueue(frame); return; }
-              const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data.slice(MAGIC.length)));
-              frame.data = pt.buffer;
-            }
-          } catch (_) { /* pass-through on error */ }
-          controller.enqueue(frame);
-        }
-      });
-    }
-    async function applyReceiverE2EE(receiver, kind) {
-      const secret = secretInput.value.trim(); if (!secret) return;
-      const room = roomInput.value.trim() || 'default';
-      try {
-        if ('RTCRtpScriptTransform' in window && 'transform' in RTCRtpReceiver.prototype) {
-          const worker = new Worker('e2ee-worker.js');
-          receiver.transform = new RTCRtpScriptTransform(worker, { secret, room, role: 'receiver', kind });
-        } else if (receiver.createEncodedStreams) {
-          const { readable, writable } = receiver.createEncodedStreams();
-          const ts = await makeTransformStream({ secret, room, role:'receiver', kind });
-          readable.pipeThrough(ts).pipeTo(writable);
-        }
-      } catch (e) {
-        console.warn('Receiver E2EE not applied:', e);
-      }
-    }
-    // -----------------------------------------------------------
-
     function setupPcEvents() {
       pc.oniceconnectionstatechange = () => {
         setStatus(pc.iceConnectionState);
@@ -283,13 +212,13 @@
         }
       };
       pc.onconnectionstatechange = () => setStatus(pc.connectionState);
-      pc.ontrack = async (e) => {
-        // Apply E2EE decrypt before playback
-        await applyReceiverE2EE(e.receiver, e.track.kind);
+      pc.ontrack = (e) => {
         video.srcObject = e.streams[0];
         enableAudioBtn.disabled = false;
-        needPoseReset = true;
-        video.onloadedmetadata = () => { needPoseReset = true; };
+        needPoseReset = true;               // reset pose graph on new stream/track
+        video.onloadedmetadata = () => {    // also when stream format changes
+          needPoseReset = true;
+        };
       };
     }
 
@@ -313,12 +242,11 @@
 
     function triggerReconnect() {
       if (!pc) return;
-      makeOffer({ iceRestart: true }); // user must paste new offer on the iPhone
+      makeOffer({ iceRestart: true }); // user must paste new offer to the iPhone
     }
 
     // --- UI handlers
     createOfferBtn.onclick = async () => {
-      if (!secretInput.value.trim()) { alert('Enter a Secret first (same on the phone) to enable E2EE.'); return; }
       createOfferBtn.disabled = true;
       try {
         pc = new RTCPeerConnection({
