@@ -346,3 +346,174 @@ async function predictWebcam() {
             const ay = pa.y * canvasElement.height;
             const bx = pb.x * canvasElement.width;
             const by = pb.y * canvasElement.height;
+            const aIn = pointInPolygon({ x: ax, y: ay }, polygonPoints);
+            const bIn = pointInPolygon({ x: bx, y: by }, polygonPoints);
+            if (!(aIn && bIn)) outsideLimbNames.push(limb.name);
+          }
+          for (const p of landmark) {
+            const x = p.x * canvasElement.width;
+            const y = p.y * canvasElement.height;
+            if (!pointInPolygon({ x, y }, polygonPoints)) { anyOutside = true; break; }
+          }
+        }
+      }
+
+      if (polygonClosed && polygonPoints.length >= 3) {
+        if (anyOutside) {
+          outsideFrames++; insideFrames = 0;
+          if (!isOutsideState && outsideFrames >= OUTSIDE_THRESHOLD_FRAMES) {
+            isOutsideState = true; document.body.style.backgroundColor = ALERT_BG;
+          }
+        } else {
+          insideFrames++; outsideFrames = 0;
+          if (isOutsideState && insideFrames >= INSIDE_THRESHOLD_FRAMES) {
+            isOutsideState = false; document.body.style.backgroundColor = "";
+          }
+        }
+      } else {
+        outsideFrames = insideFrames = 0; isOutsideState = false;
+        document.body.style.backgroundColor = "";
+        outsideLimbNames = [];
+      }
+
+      drawPolygonOverlay(canvasCtx);
+      drawLimbListOverlay(canvasCtx, Array.from(new Set(outsideLimbNames)));
+
+      canvasCtx.restore();
+    });
+  }
+
+  if (webcamRunning === true) {
+    window.requestAnimationFrame(predictWebcam);
+  }
+}
+
+/* ---------- Drawing mode buttons ---------- */
+function enableDrawing() {
+  if (!drawingMode) {
+    polygonPoints = [];
+    polygonClosed = false;
+    drawingMode = true;
+    hoveredPointIndex = -1; draggingPointIndex = -1; isDragging = false;
+    outsideFrames = 0; insideFrames = 0; isOutsideState = false;
+    document.body.style.backgroundColor = "";
+    drawPolygonBtn.querySelector(".mdc-button__label").innerText = "FINISH DRAWING";
+  } else {
+    drawingMode = false;
+    if (polygonPoints.length >= 3) polygonClosed = true;
+    drawPolygonBtn.querySelector(".mdc-button__label").innerText = "DRAW ZONE";
+  }
+}
+
+function clearPolygon() {
+  setDefaultPolygon();
+  outsideFrames = insideFrames = 0; isOutsideState = false;
+  document.body.style.backgroundColor = "";
+}
+
+/* ---------- Pointer Events (works on iOS/Android/Desktop) ---------- */
+let activePointerId = null;
+
+function onPointerDown(e) {
+  // Ensure we can prevent default (avoid scroll/zoom) on mobile Safari
+  e.preventDefault();
+
+  const pos = getCanvasCoordsFromClientXY(e.clientX, e.clientY);
+  activePointerId = e.pointerId;
+  canvasElement.setPointerCapture?.(e.pointerId);
+
+  if (drawingMode) {
+    // double-tap to close
+    const now = Date.now();
+    if (lastTapPos && (now - lastTapTime) < 350) {
+      const dx = pos.x - lastTapPos.x;
+      const dy = pos.y - lastTapPos.y;
+      if (dx*dx + dy*dy < (getHitRadiusCanvasPx() ** 2)) {
+        if (polygonPoints.length >= 3) {
+          polygonClosed = true;
+          drawingMode = false;
+          drawPolygonBtn.querySelector(".mdc-button__label").innerText = "DRAW ZONE";
+          lastTapPos = null;
+          return;
+        }
+      }
+    }
+    polygonPoints.push(pos);
+    lastTapTime = now;
+    lastTapPos = pos;
+  } else {
+    // start dragging a handle if any
+    const idx = findHandleIndexAt(pos);
+    if (idx !== -1) { isDragging = true; draggingPointIndex = idx; }
+  }
+}
+
+function onPointerMove(e) {
+  if (activePointerId !== e.pointerId) return;
+  const pos = getCanvasCoordsFromClientXY(e.clientX, e.clientY);
+
+  if (isDragging && draggingPointIndex !== -1) {
+    e.preventDefault();
+    polygonPoints[draggingPointIndex] = clampToCanvas(pos);
+  } else if (!drawingMode) {
+    hoveredPointIndex = findHandleIndexAt(pos);
+  }
+}
+
+function onPointerUpOrCancel(e) {
+  if (activePointerId !== e.pointerId) return;
+  isDragging = false; draggingPointIndex = -1;
+  activePointerId = null;
+  canvasElement.releasePointerCapture?.(e.pointerId);
+}
+
+function attachPointerEvents() {
+  // Use pointer events with passive: false so preventDefault works on mobile
+  canvasElement.addEventListener("pointerdown", onPointerDown, { passive: false });
+  canvasElement.addEventListener("pointermove", onPointerMove, { passive: false });
+  canvasElement.addEventListener("pointerup", onPointerUpOrCancel, { passive: false });
+  canvasElement.addEventListener("pointercancel", onPointerUpOrCancel, { passive: false });
+
+  // Context menu is irrelevant on mobile; still prevent accidental long-press
+  canvasElement.addEventListener("contextmenu", (e) => e.preventDefault());
+}
+
+/* ---------- Events ---------- */
+document.addEventListener("DOMContentLoaded", async () => {
+  enableWebcamButton = document.getElementById("webcamButton");
+  drawPolygonBtn = document.getElementById("drawPolygonBtn");
+  clearPolygonBtn = document.getElementById("clearPolygonBtn");
+  startCameraBtn = document.getElementById("startCamera");
+  cameraSelect = document.getElementById("cameraSelect");
+
+  attachPointerEvents();
+  await listCameras();
+
+  startCameraBtn.addEventListener("click", async () => {
+    try { await startOrSwitchCamera(); }
+    catch (err) { console.error("Could not access selected camera:", err); }
+  });
+
+  cameraSelect.addEventListener("change", async () => {
+    if (currentStream) {
+      try { await startOrSwitchCamera(); }
+      catch (err) { console.error("Switch camera failed:", err); }
+    }
+  });
+
+  enableWebcamButton.addEventListener("click", async () => {
+    if (!poseLandmarker) { console.log("Wait! poseLandmarker not loaded yet."); return; }
+    if (!currentStream) {
+      try { await startOrSwitchCamera(); } catch (e) { console.error("Camera start failed:", e); return; }
+    }
+
+    webcamRunning = !webcamRunning;
+    enableWebcamButton.querySelector(".mdc-button__label").innerText =
+      webcamRunning ? "DISABLE PREDICTIONS" : "ENABLE PREDICTIONS";
+
+    if (webcamRunning) predictWebcam();
+  });
+
+  drawPolygonBtn.addEventListener("click", enableDrawing);
+  clearPolygonBtn.addEventListener("click", clearPolygon);
+});
