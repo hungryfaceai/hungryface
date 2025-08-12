@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <meta charset="utf-8" />
-<title>Offline WebRTC QR Pairing (Self-contained)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Offline WebRTC QR Pairing + Scanner (Self-contained)</title>
 <style>
   body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;padding:16px;max-width:960px;margin:auto}
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -13,6 +13,7 @@
   img.qr,canvas.qr{width:240px;height:240px;border:1px solid #e5e7eb;border-radius:12px;background:#fff}
   video{width:320px;height:240px;background:#000;border-radius:8px}
   code{background:#f1f5f9;padding:2px 6px;border-radius:6px}
+  .hint{font-size:13px;color:#6b7280}
 </style>
 
 <h1>Offline WebRTC QR Pairing</h1>
@@ -37,18 +38,45 @@
     <textarea id="offerSDP" readonly></textarea>
     <div style="margin-top:6px"><button class="btn" id="copyOffer">Copy SDP</button></div>
   </details>
-  <div class="muted" style="margin-top:6px">Then paste the Answer SDP below (or scan the Answer QR if you’re on localhost/https).</div>
-  <textarea id="answerPaste" placeholder="Paste answer SDP here to finish (fallback)"></textarea>
+
+  <div class="card" style="margin-top:12px">
+    <b>Scan the Answer QR (if camera allowed)</b>
+    <div class="hint">Open this file via <code>http://localhost</code> to allow camera.</div>
+    <div class="row" style="margin-top:6px">
+      <button class="btn" id="startScanAnswer">Start Scanner</button>
+      <button class="btn" id="stopScanAnswer" disabled>Stop</button>
+      <span id="scanAnswerSupport" class="muted"></span>
+    </div>
+    <video id="scanAnswerVideo" playsinline muted style="display:none"></video>
+    <canvas id="scanAnswerCanvas" class="qr" style="display:none"></canvas>
+  </div>
+
+  <div class="muted" style="margin-top:6px">Or paste the Answer SDP below:</div>
+  <textarea id="answerPaste" placeholder="Paste answer SDP here (fallback)"></textarea>
   <div class="row"><button class="btn" id="applyAnswer">Apply Answer</button></div>
 </div>
 
 <div id="answerUI" class="card" style="display:none">
   <h3>Answerer</h3>
-  <div class="muted">Paste the Offerer’s SDP (from their QR → “Copy” → messenger → paste), then create your Answer.</div>
+
+  <div class="card">
+    <b>Scan the Offer QR (if camera allowed)</b>
+    <div class="hint">Open via <code>http://localhost</code> for camera access.</div>
+    <div class="row" style="margin-top:6px">
+      <button class="btn" id="startScanOffer">Start Scanner</button>
+      <button class="btn" id="stopScanOffer" disabled>Stop</button>
+      <span id="scanOfferSupport" class="muted"></span>
+    </div>
+    <video id="scanOfferVideo" playsinline muted style="display:none"></video>
+    <canvas id="scanOfferCanvas" class="qr" style="display:none"></canvas>
+  </div>
+
+  <div class="muted">Or paste the Offer SDP (from Offerer’s copy button):</div>
   <textarea id="offerPaste" placeholder="Paste offer SDP here"></textarea>
   <div class="row">
     <button class="btn" id="makeAnswer">Make Answer</button>
   </div>
+
   <div class="row" style="margin-top:8px">
     <img id="answerQR" class="qr" alt="Answer QR" style="display:none">
     <div id="answerHint" class="muted" style="display:none">Show this QR to the Offerer.</div>
@@ -81,16 +109,16 @@
   <div id="sas" style="font-family:ui-monospace,monospace;font-weight:600"></div>
 </div>
 
-<!-- LZ-String (MIT) — known-good minified build -->
+<!-- LZ-String (MIT) — inlined -->
 <script>
-/*! LZ-String (c) pieroxy.net | MIT | https://github.com/pieroxy/lz-string */
+/*! LZ-String (c) pieroxy.net | MIT */
 var LZString=function(){function o(o,r){if(!t[o]){t[o]={};for(var n=0;n<o.length;n++)t[o][o.charAt(n)]=n}return t[o][r]}var r=String.fromCharCode,n="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-$",e={},t={},i={compressToEncodedURIComponent:function(o){return null==o?"":i._compress(o,6,function(o){return n.charAt(o)})},decompressFromEncodedURIComponent:function(r){return null==r?"":""==r?null:i._decompress(r.length,32,function(e){return o(n,r.charAt(e))})},_compress:function(o,n,e){if(null==o)return"";var t,i,s={},p={},u="",a="",c="",l=2,f=3,h=2,d=[],m=0,v=0;for(i=0;i<o.length;i+=1)if(u=o.charAt(i),Object.prototype.hasOwnProperty.call(s,u)||(s[u]=f++,p[u]=!0),a=c+u,Object.prototype.hasOwnProperty.call(s,a))c=a;else{if(Object.prototype.hasOwnProperty.call(p,c)){if(c.charCodeAt(0)<256){for(t=0;t<h;t++)m<<=1,v==n-1?(v=0,d.push(e(m)),m=0):v++;for(i=c.charCodeAt(0),t=0;t<8;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1}else{for(i=1,t=0;t<h;t++)m=m<<1|i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i=0;for(i=c.charCodeAt(0),t=0;t<16;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1}l--,0==l&&(l=Math.pow(2,h),h++),delete p[c]}else for(i=s[c],t=0;t<h;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1;l--,0==l&&(l=Math.pow(2,h),h++),s[a]=f++,c=String(u)}if(""!==c){if(Object.prototype.hasOwnProperty.call(p,c)){if(c.charCodeAt(0)<256){for(t=0;t<h;t++)m<<=1,v==n-1?(v=0,d.push(e(m)),m=0):v++;for(i=c.charCodeAt(0),t=0;t<8;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1}else{for(i=1,t=0;t<h;t++)m=m<<1|i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i=0;for(i=c.charCodeAt(0),t=0;t<16;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1}l--,0==l&&(l=Math.pow(2,h),h++),delete p[c]}else for(i=s[c],t=0;t<h;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1;l--,0==l&&(l=Math.pow(2,h),h++),m<<=1,v==n-1?(v=0,d.push(e(m)),m=0):v++;for(i=2,t=0;t<h;t++)m=m<<1|1&i,v==n-1?(v=0,d.push(e(m)),m=0):v++,i>>=1}return d.join("")},_decompress:function(o,n,e){var t,i,s,p,u,a,c,l,f,h,d=[],m=4,v=4,w=3,A="",C=[],g={val:e(0),position:n,index:1};for(t=0;t<3;t+=1)d[t]=t;for(s=0,f=Math.pow(2,2),l=1;l!=f;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*l,l<<=1;switch(s){case 0:for(s=0,f=Math.pow(2,8),l=1;l!=f;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*l,l<<=1;c=r(s);break;case 1:for(s=0,f=Math.pow(2,16),l=1;l!=f;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*l,l<<=1;c=r(s);break;case 2:return""}for(d[3]=c,a=c,p=A;;){if(g.index>o)return"";for(s=0,f=Math.pow(2,w),l=1;l!=f;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*l,l<<=1;switch(i=s){case 0:for(s=0,f=Math.pow(2,8),l=1;l!=f;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*l,l<<=1;d[m++]=r(s),i=m-1,v--;break;case 1:for(s=0,f=Math.pow(2,16),l=1;l!=f;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*l,l<<=1;d[m++]=r(s),i=m-1,v--;break;case 2:return C.join("")}if(0==v&&(v=Math.pow(2,w),w++),d[i])A=d[i];else{if(i!==m)return null;A=p+p.charAt(0)}C.push(A),d[m++]=p+A.charAt(0),p=A,0==--v&&(v=Math.pow(2,w),w++)}}};return i}();
 </script>
 
-<!-- Minimal inline QR generator (QR Code) -->
+<!-- Minimal QR generator (inlined) -->
 <script>
-/*! QRCode.js (MIT, trimmed) by Kazuhiko Arase — minimal image tag generator */
-(function(){function QR8bitByte(t){this.mode=4,this.data=t}QR8bitByte.prototype={getLength:function(){return this.data.length},write:function(t){for(var e=0;e<this.data.length;e++)t.put(this.data.charCodeAt(e),8)}};var QRMath={glog:function(t){if(t<1)throw"glog("+t+")";return QRMath.LOG_TABLE[t]},gexp:function(t){for(;t<0;)t+=255;for(;t>=256;)t-=255;return QRMath.EXP_TABLE[t]},EXP_TABLE:new Array(256),LOG_TABLE:new Array(256)};for(var i=0;i<8;i++)QRMath.EXP_TABLE[i]=1<<i;for(i=8;i<256;i++)QRMath.EXP_TABLE[i]=QRMath.EXP_TABLE[i-4]^QRMath.EXP_TABLE[i-5]^QRMath.EXP_TABLE[i-6]^QRMath.EXP_TABLE[i-8];for(i=0;i<255;i++)QRMath.LOG_TABLE[QRMath.EXP_TABLE[i]]=i;function QRPolynomial(t,e){if(void 0==t.length)throw t.length+"/"+e;for(var i=0;i<t.length&&0==t[i];)i++;this.num=new Array(t.length-i+e);for(var r=0;r<t.length-i;r++)this.num[r]=t[r+i]}QRPolynomial.prototype={get:function(t){return this.num[t]},getLength:function(){return this.num.length},multiply:function(t){for(var e=new Array(this.getLength()+t.getLength()-1),i=0;i<this.getLength();i++)for(var r=0;r<t.getLength();r++)e[i+r]^=QRMath.gexp(QRMath.glog(this.get(i))+QRMath.glog(t.get(r)));return new QRPolynomial(e,0)},mod:function(t){if(this.getLength()-t.getLength()<0)return this;for(var e=QRMath.glog(this.get(0))-QRMath.glog(t.get(0)),i=new Array(this.getLength()),r=0;r<this.getLength();r++)i[r]=this.get(r);for(r=0;r<t.getLength();r++)i[r]^=QRMath.gexp(QRMath.glog(t.get(r))+e);return new QRPolynomial(i,0).mod(t)}};var QRUtil={PATTERN_POSITION_TABLE:[[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50],[6,30,54],[6,32,58],[6,34,62],[6,26,46,66],[6,26,48,70],[6,26,50,74],[6,30,54,78],[6,30,56,82],[6,30,58,86],[6,34,62,90],[6,28,50,72,94],[6,26,50,74,98],[6,30,54,78,102],[6,28,54,80,106],[6,32,58,84,110],[6,30,58,86,114],[6,34,62,90,118],[6,26,50,74,98,122],[6,30,54,78,102,126],[6,26,54,82,110,138],[6,30,56,86,114,142],[6,34,60,86,118,146],[6,30,58,86,114,142,170]],G15:1335,G18:7973,G15_MASK:21522,getBCHDigit:function(t){for(var e=0;0!=t;)e++,t>>>=1;return e},getBCHTypeInfo:function(t){for(var e=t<<10;QRUtil.getBCHDigit(e)-QRUtil.getBCHDigit(QRUtil.G15)>=0;)e^=QRUtil.G15<<QRUtil.getBCHDigit(e)-QRUtil.getBCHDigit(QRUtil.G15);return t<<10|e},getBCHTypeNumber:function(t){for(var e=t<<12;QRUtil.getBCHDigit(e)-QRUtil.getBCHDigit(QRUtil.G18)>=0;)e^=QRUtil.G18<<QRUtil.getBCHDigit(e)-QRUtil.getBCHDigit(QRUtil.G18);return t<<12|e},getMask:function(t,e,i){switch(t){case 0:return(e+i)%2==0;case 1:return e%2==0;case 2:return i%3==0;case 3:return(e+i)%3==0;case 4:return(Math.floor(e/2)+Math.floor(i/3))%2==0;case 5:return e*i%2+e*i%3==0;case 6:return(e*i%2+e*i%3)%2==0;case 7:return(e*i%3+Math.floor(e+i)%2)%2==0;default:throw"bad maskPattern:"+t}},getErrorCorrectPolynomial:function(t){for(var e=new QRPolynomial([1],0),i=0;i<t;i++)e=e.multiply(new QRPolynomial([1,QRMath.gexp(i)],0));return e},getLengthInBits:function(t,e){if(1<=e&&e<10)switch(t){case 1:return 10;case 2:return 9;case 4:case 8:return 8;default:throw"mode:"+t}else if(e<27)switch(t){case 1:return 12;case 2:return 11;case 4:case 8:return 16;default:throw"mode:"+t}else{if(!(e<41))throw"mode:"+t;switch(t){case 1:return 14;case 2:return 13;case 4:case 8:return 16;default:throw"mode:"+t}}},getLostPoint:function(t){for(var e=t.getModuleCount(),i=0,r=0;r<e;r++)for(var n=0;n<e;n++){for(var o=0,u=t.isDark(r,n),a=-1;a<=1;a++)if(!(r+a<0||e<=r+a))for(var s=-1;s<=1;s++)n+s<0||e<=n+s||0==a&&0==s||u==t.isDark(r+a,n+s)&&o++;o>5&&(i+=3+o-5)}for(r=0;r<e-1;r++)for(n=0;n<e-1;n++){var h=0;t.isDark(r,n)&&h++,t.isDark(r+1,n)&&h++,t.isDark(r,n+1)&&h++,t.isDark(r+1,n+1)&&h++,(0==h||4==h)&&(i+=3)}for(r=0;r<e;r++)for(n=0;n<e-6;n++)t.isDark(r,n)&&!t.isDark(r,n+1)&&t.isDark(r,n+2)&&t.isDark(r,n+3)&&t.isDark(r,n+4)&&!t.isDark(r,n+5)&&t.isDark(r,n+6)&&(i+=40);for(n=0;n<e;n++){for(var c=0,f=0;f<e;f++)t.isDark(f,n)&&c++;i+=10*Math.abs(100*c/e-50)/5}return i}};function QRRSBlock(t,e){this.totalCount=t,this.dataCount=e}QRRSBlock.getRSBlocks=function(t,e){return QRRSBlock.RS_BLOCK_TABLE[4*(t-1)+({1:1,0:0,3:3,2:2}[e])]},QRRSBlock.RS_BLOCK_TABLE=[1,26,19,1,26,16,1,26,13,1,26,9,1,44,34,1,44,28,1,44,22,1,44,16,1,70,55,1,70,44,2,35,17,2,35,13,2,35,9,1,100,80,2,50,32,2,50,24,4,25,9,2,50,9,1,134,108,2,67,43,2,33,15,2,33,11,2,33,9,2,33,9,1,86,68,2,43,27,4,43,19,2,43,15,3,58,13,2,32,9,4,39,13,4,26,9,4,33,11,2,32,14,4,26,13,4,26,9,4,26,9,2,42,14,6,58,14,6,32,10,6,26,10,6,26,10,2,42,12,8,32,12,8,27,12,10,24,12,12,12,12,12,12,12,12,12,12];function QRBitBuffer(){this.buffer=[],this.length=0}QRBitBuffer.prototype={get:function(t){return 1==(1&this.buffer[t>>>3]>>>7-t%8)},put:function(t,e){for(var i=0;i<e;i++)this.putBit(1==(1&t>>>e-i-1))},putBit:function(t){var e=this.length>>>3;this.buffer.length<=e&&this.buffer.push(0),t&&(this.buffer[e]|=128>>>this.length%8),this.length++}};function QRCode(t,e){this.typeNumber=t,this.errorCorrectLevel=e,this.modules=null,this.moduleCount=0,this.dataList=[]}QRCode.prototype={addData:function(t){this.dataList.push(new QR8bitByte(t))},isDark:function(t,e){if(null==this.modules)throw"QR Code not made yet";return this.modules[t][e]},getModuleCount:function(){return this.moduleCount},make:function(){this.makeImpl(!1,this.getBestMaskPattern())},makeImpl:function(t,e){this.moduleCount=4*this.typeNumber+17,this.modules=new Array(this.moduleCount);for(var i=0;i<this.moduleCount;i++){this.modules[i]=new Array(this.moduleCount);for(var r=0;r<this.moduleCount;r++)this.modules[i][r]=null}this.setupPositionProbePattern(0,0),this.setupPositionProbePattern(this.moduleCount-7,0),this.setupPositionProbePattern(0,this.moduleCount-7),this.setupPositionAdjustPattern(),this.setupTimingPattern(),this.setupTypeInfo(t,e),this.typeNumber>=7&&this.setupTypeNumber(t),this.mapData(QRCode.createData(this.typeNumber,this.errorCorrectLevel,this.dataList),e)},setupPositionProbePattern:function(t,e){for(var i=-1;i<=7;i++)if(!(t+i<=-1||this.moduleCount<=t+i))for(var r=-1;r<=7;r++)e+r<=-1||this.moduleCount<=e+r||(this.modules[t+i][e+r]=i>=0&&i<=6&&(0==r||6==r)||r>=0&&r<=6&&(0==i||6==i)||i>=2&&i<=4&&r>=2&&r<=4)},getBestMaskPattern:function(){for(var t=0,e=0,i=0;i<8;i++){this.makeImpl(!0,i);var r=QRUtil.getLostPoint(this);(0==i||t>r)&&(t=r,e=i)}return e},createImgTag:function(t,e){t=t||2,e=void 0===e?4:e;var i=this.getModuleCount()*t+2*e,r=i,n=document.createElement("img");return n.width=i,n.height=r,n.src=this.createDataURL(t,e),n},createDataURL:function(t,e){var i=this.getModuleCount()*t+2*e,r=i,n=document.createElement("canvas"),o=n.getContext("2d"),u=o.createImageData(i,r),a=this.getModuleCount();for(var s=0;s<r;s++)for(var h=0;h<i;h++){var c=e,f=e,p=!1,l=Math.floor((h-c)/t),d=Math.floor((s-f)/t);l>=0&&d>=0&&l<a&&d<a&&(p=this.isDark(l,d));var g=4*(h+s*i);u.data[g+0]=p?0:255;u.data[g+1]=p?0:255;u.data[g+2]=p?0:255;u.data[g+3]=255}o.putImageData(u,0,0);return n.toDataURL("image/png")}},QRCode.createData=function(t,e,i){for(var r=new QRBitBuffer,n=0;n<i.length;n++){var o=i[n];r.put(o.mode,4),r.put(o.getLength(),QRUtil.getLengthInBits(o.mode,t)),o.write(r)}for(var u=QRRSBlock.getRSBlocks(t,e),a=0,n=0;n<u.length;n++)a+=u[n].dataCount;if(r.length>8*a)throw"code length overflow. ("+r.length+">"+8*a+")";for(r.length+4<=8*a&&r.put(0,4);r.length%8!=0;)r.putBit(!1);for(var s=[],h=0;h<a-r.length/8;h++)s.push(h%2?17:236);return QRCode.createBytes(r,u,s)},QRCode.createBytes=function(t,e,i){for(var r=0,n=0,o=0;o<e.length;o++)r+=e[o].dataCount,n+=e[o].totalCount;for(var u=new Array(n),a=0,o=0;o<e.length;o++){for(var s=e[o].dataCount,h=e[o].totalCount-s,c=0;c<s;c++)u[a++]=255;for(;c<h;c++)u[a++]=0}for(var f=0,p=0,l=0;l<e.length;l++)for(c=0;c<e[l].dataCount;c++)u[p++]=t.buffer[f++];return u};window.QRGen=function(text){var q=new QRCode(8,0);q.addData(text);q.make();return q.createImgTag(6,2);};})();
+/*! QRCode.js (MIT, trimmed) — generates <img src="data:..."> */
+(function(){function QR8bitByte(t){this.mode=4,this.data=t}QR8bitByte.prototype={getLength:function(){return this.data.length},write:function(t){for(var e=0;e<this.data.length;e++)t.put(this.data.charCodeAt(e),8)}};var QRMath={glog:function(t){if(t<1)throw"glog("+t+")";return QRMath.LOG_TABLE[t]},gexp:function(t){for(;t<0;)t+=255;for(;t>=256;)t-=255;return QRMath.EXP_TABLE[t]},EXP_TABLE:new Array(256),LOG_TABLE:new Array(256)};for(var i=0;i<8;i++)QRMath.EXP_TABLE[i]=1<<i;for(i=8;i<256;i++)QRMath.EXP_TABLE[i]=QRMath.EXP_TABLE[i-4]^QRMath.EXP_TABLE[i-5]^QRMath.EXP_TABLE[i-6]^QRMath.EXP_TABLE[i-8];for(i=0;i<255;i++)QRMath.LOG_TABLE[QRMath.EXP_TABLE[i]]=i;function QRPolynomial(t,e){if(void 0==t.length)throw t.length+"/"+e;for(var i=0;i<t.length&&0==t[i];)i++;this.num=new Array(t.length-i+e);for(var r=0;r<t.length-i;r++)this.num[r]=t[r+i]}QRPolynomial.prototype={get:function(t){return this.num[t]},getLength:function(){return this.num.length},multiply:function(t){for(var e=new Array(this.getLength()+t.getLength()-1),i=0;i<this.getLength();i++)for(var r=0;r<t.getLength();r++)e[i+r]^=QRMath.gexp(QRMath.glog(this.get(i))+QRMath.glog(t.get(r)));return new QRPolynomial(e,0)},mod:function(t){if(this.getLength()-t.getLength()<0)return this;for(var e=QRMath.glog(this.get(0))-QRMath.glog(t.get(0)),i=new Array(this.getLength()),r=0;r<this.getLength();r++)i[r]=this.get(r);for(r=0;r<t.getLength();r++)i[r]^=QRMath.gexp(QRMath.glog(t.get(r))+e);return new QRPolynomial(i,0).mod(t)}};var QRUtil={PATTERN_POSITION_TABLE:[[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50],[6,30,54],[6,32,58],[6,34,62],[6,26,46,66],[6,26,48,70],[6,26,50,74],[6,30,54,78],[6,30,56,82],[6,30,58,86],[6,34,62,90],[6,28,50,72,94],[6,26,50,74,98],[6,30,54,78,102],[6,28,54,80,106],[6,32,58,84,110],[6,30,58,86,114],[6,34,62,90,118],[6,26,50,74,98,122],[6,30,54,78,102,126],[6,26,54,82,110,138],[6,30,56,86,114,142],[6,34,60,86,118,146],[6,30,58,86,114,142,170]],G15:1335,G18:7973,G15_MASK:21522,getBCHDigit:function(t){for(var e=0;0!=t;)e++,t>>>=1;return e},getBCHTypeInfo:function(t){for(var e=t<<10;QRUtil.getBCHDigit(e)-QRUtil.getBCHDigit(QRUtil.G15)>=0;)e^=QRUtil.G15<<QRUtil.getBCHDigit(e)-QRUtil.getBCHDigit(QRUtil.G15);return t<<10|e},getBCHTypeNumber:function(t){for(var e=t<<12;QRUtil.getBCHDigit(e)-QRUtil.getBCHDigit(QRUtil.G18)>=0;)e^=QRUtil.G18<<QRUtil.getBCHDigit(e)-QRUtil.getBCHDigit(QRUtil.G18);return t<<12|e},getLengthInBits:function(t,e){if(1<=e&&e<10)switch(t){case 1:return 10;case 2:return 9;case 4:case 8:return 8;default:throw"mode:"+t}else if(e<27)switch(t){case 1:return 12;case 2:return 11;case 4:case 8:return 16;default:throw"mode:"+t}else{if(!(e<41))throw"mode:"+t;switch(t){case 1:return 14;case 2:return 13;case 4:case 8:return 16;default:throw"mode:"+t}}},getLostPoint:function(t){for(var e=t.getModuleCount(),i=0,r=0;r<e;r++)for(var n=0;n<e;n++){for(var o=0,u=t.isDark(r,n),a=-1;a<=1;a++)if(!(r+a<0||e<=r+a))for(var s=-1;s<=1;s++)n+s<0||e<=n+s||0==a&&0==s||u==t.isDark(r+a,n+s)&&o++;o>5&&(i+=3+o-5)}for(r=0;r<e-1;r++)for(n=0;n<e-1;n++){var h=0;t.isDark(r,n)&&h++,t.isDark(r+1,n)&&h++,t.isDark(r,n+1)&&h++,t.isDark(r+1,n+1)&&h++,(0==h||4==h)&&(i+=3)}for(r=0;r<e;r++)for(n=0;n<e-6;n++)t.isDark(r,n)&&!t.isDark(r,n+1)&&t.isDark(r,n+2)&&t.isDark(r,n+3)&&t.isDark(r,n+4)&&!t.isDark(r,n+5)&&t.isDark(r,n+6)&&(i+=40);for(n=0;n<e;n++){for(var c=0,f=0;f<e;f++)t.isDark(f,n)&&c++;i+=10*Math.abs(100*c/e-50)/5}return i}};function QRRSBlock(t,e){this.totalCount=t,this.dataCount=e}QRRSBlock.getRSBlocks=function(t,e){return QRRSBlock.RS_BLOCK_TABLE[4*(t-1)+({1:1,0:0,3:3,2:2}[e])]},QRRSBlock.RS_BLOCK_TABLE=[1,26,19,1,26,16,1,26,13,1,26,9,1,44,34,1,44,28,1,44,22,1,44,16,1,70,55,1,70,44,2,35,17,2,35,13,2,35,9,1,100,80,2,50,32,2,50,24,4,25,9,2,50,9,1,134,108,2,67,43,2,33,15,2,33,11,2,33,9,2,33,9,1,86,68,2,43,27,4,43,19,2,43,15,3,58,13,2,32,9,4,39,13,4,26,9,4,33,11,2,32,14,4,26,13,4,26,9,4,26,9,2,42,14,6,58,14,6,32,10,6,26,10,6,26,10,2,42,12,8,32,12,8,27,12,10,24,12,12,12,12,12,12,12,12,12,12];function QRBitBuffer(){this.buffer=[],this.length=0}QRBitBuffer.prototype={get:function(t){return 1==(1&this.buffer[t>>>3]>>>7-t%8)},put:function(t,e){for(var i=0;i<e;i++)this.putBit(1==(1&t>>>e-i-1))},putBit:function(t){var e=this.length>>>3;this.buffer.length<=e&&this.buffer.push(0),t&&(this.buffer[e]|=128>>>this.length%8),this.length++}};function QRCode(t,e){this.typeNumber=t,this.errorCorrectLevel=e,this.modules=null,this.moduleCount=0,this.dataList=[]}QRCode.prototype={addData:function(t){this.dataList.push(new QR8bitByte(t))},isDark:function(t,e){if(null==this.modules)throw"QR Code not made yet";return this.modules[t][e]},getModuleCount:function(){return this.moduleCount},make:function(){this.makeImpl(!1,this.getBestMaskPattern())},makeImpl:function(t,e){this.moduleCount=4*this.typeNumber+17,this.modules=new Array(this.moduleCount);for(var i=0;i<this.moduleCount;i++){this.modules[i]=new Array(this.moduleCount);for(var r=0;r<this.moduleCount;r++)this.modules[i][r]=null}this.setupPositionProbePattern(0,0),this.setupPositionProbePattern(this.moduleCount-7,0),this.setupPositionProbePattern(0,this.moduleCount-7),this.setupPositionAdjustPattern(),this.setupTimingPattern(),this.setupTypeInfo(t,e),this.typeNumber>=7&&this.setupTypeNumber(t),this.mapData(QRCode.createData(this.typeNumber,this.errorCorrectLevel,this.dataList),e)},setupPositionProbePattern:function(t,e){for(var i=-1;i<=7;i++)if(!(t+i<=-1||this.moduleCount<=t+i))for(var r=-1;r<=7;r++)e+r<=-1||this.moduleCount<=e+r||(this.modules[t+i][e+r]=i>=0&&i<=6&&(0==r||6==r)||r>=0&&r<=6&&(0==i||6==i)||i>=2&&i<=4&&r>=2&&r<=4)},getBestMaskPattern:function(){for(var t=0,e=0,i=0;i<8;i++){this.makeImpl(!0,i);var r=QRUtil.getLostPoint(this);(0==i||t>r)&&(t=r,e=i)}return e},createImgTag:function(t,e){t=t||2,e=void 0===e?4:e;var i=this.getModuleCount()*t+2*e,r=i,n=document.createElement("img");return n.width=i,n.height=r,n.src=this.createDataURL(t,e),n},createDataURL:function(t,e){var i=this.getModuleCount()*t+2*e,r=i,n=document.createElement("canvas"),o=n.getContext("2d"),u=o.createImageData(i,r),a=this.getModuleCount();for(var s=0;s<r;s++)for(var h=0;h<i;h++){var c=e,f=e,p=!1,l=Math.floor((h-c)/t),d=Math.floor((s-f)/t);l>=0&&d>=0&&l<a&&d<a&&(p=this.isDark(l,d));var g=4*(h+s*i);u.data[g+0]=p?0:255;u.data[g+1]=p?0:255;u.data[g+2]=p?0:255;u.data[g+3]=255}o.putImageData(u,0,0);return n.toDataURL("image/png")}},QRCode.createData=function(t,e,i){for(var r=new QRBitBuffer,n=0;n<i.length;n++){var o=i[n];r.put(o.mode,4),r.put(o.getLength(),QRUtil.getLengthInBits(o.mode,t)),o.write(r)}for(var u=QRRSBlock.getRSBlocks(t,e),a=0,n=0;n<u.length;n++)a+=u[n].dataCount;if(r.length>8*a)throw"code length overflow. ("+r.length+">"+8*a+")";for(r.length+4<=8*a&&r.put(0,4);r.length%8!=0;)r.putBit(!1);for(var s=[],h=0;h<a-r.length/8;h++)s.push(h%2?17:236);return QRCode.createBytes(r,u,s)},QRCode.createBytes=function(t,e,i){for(var r=0,n=0,o=0;o<e.length;o++)r+=e[o].dataCount,n+=e[o].totalCount;for(var u=new Array(n),a=0,o=0;o<e.length;o++){for(var s=e[o].dataCount,h=e[o].totalCount-s,c=0;c<s;c++)u[a++]=255;for(;c<h;c++)u[a++]=0}for(var f=0,p=0,l=0;l<e.length;l++)for(c=0;c<e[l].dataCount;c++)u[p++]=t.buffer[f++];return u};window.QRGen=function(text){var q=new QRCode(8,0);q.addData(text);q.make();return q.createImgTag(6,2);};})();
 </script>
 
 <script>
@@ -158,11 +186,10 @@ $('createOffer').onclick = async ()=>{
     await createPeer();
     const offer = await pc.createOffer({ offerToReceiveAudio:true, offerToReceiveVideo:true });
     await pc.setLocalDescription(offer);
-    await waitIceComplete(pc); // bundle ICE so SDP fits in a single QR/paste
+    await waitIceComplete(pc); // bundle ICE
     const desc = pc.localDescription;
     const sdp = desc.sdp;
     $('offerSDP').value = sdp || '';
-    // compress + encode for QR
     const payload = LZString.compressToEncodedURIComponent(JSON.stringify({ type: desc.type, sdp: sdp }));
     const img = QRGen(payload);
     const el = $('offerQR'); el.src = img.src; el.style.display='block';
@@ -200,7 +227,6 @@ $('makeAnswer').onclick = async ()=>{
     await waitIceComplete(pc);
     const sdp = pc.localDescription.sdp;
     $('answerSDP').value = sdp || '';
-    // compress + encode for QR
     const payload = LZString.compressToEncodedURIComponent(JSON.stringify({ type:'answer', sdp }));
     const img = QRGen(payload);
     const el = $('answerQR'); el.src = img.src; el.style.display='block';
@@ -212,5 +238,98 @@ $('makeAnswer').onclick = async ()=>{
     alert('Make answer failed: '+e.message);
   }
 };
+
+/* ---------- QR Scanning (BarcodeDetector) ---------- */
+async function startScanner(kind){ // kind: 'offer' or 'answer'
+  const supportSpan = kind==='offer' ? $('scanOfferSupport') : $('scanAnswerSupport');
+  if (!('BarcodeDetector' in window)) {
+    supportSpan.textContent = ' (QR scanning not supported on this browser — use copy/paste)';
+    return;
+  }
+  const formats = await BarcodeDetector.getSupportedFormats?.() || [];
+  if (!formats.includes('qr_code')) {
+    supportSpan.textContent = ' (QR format not supported — use copy/paste)';
+    return;
+  }
+  supportSpan.textContent = ' (scanner running…)';
+
+  const video = kind==='offer' ? $('scanOfferVideo') : $('scanAnswerVideo');
+  const canvas = kind==='offer' ? $('scanOfferCanvas') : $('scanAnswerCanvas');
+  const startBtn = kind==='offer' ? $('startScanOffer') : $('startScanAnswer');
+  const stopBtn  = kind==='offer' ? $('stopScanOffer')  : $('stopScanAnswer');
+
+  let stream;
+  const detector = new BarcodeDetector({ formats: ['qr_code'] });
+
+  const stop = ()=>{
+    stopBtn.disabled = true;
+    startBtn.disabled = false;
+    supportSpan.textContent = '';
+    if (stream) stream.getTracks().forEach(t=>t.stop());
+    video.style.display='none'; canvas.style.display='none';
+  };
+
+  startBtn.disabled = true;
+  stopBtn.disabled = false;
+  stopBtn.onclick = stop;
+
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  }catch(e){
+    alert('Camera error: '+e.message);
+    stop();
+    return;
+  }
+
+  video.srcObject = stream;
+  video.style.display='block';
+  await video.play();
+
+  const ctx = canvas.getContext('2d');
+  canvas.style.display='block';
+
+  const loop = async ()=>{
+    if (startBtn.disabled === false) return; // stopped
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video,0,0,canvas.width,canvas.height);
+    try{
+      const bitmaps = [canvas.transferControlToOffscreen ? await createImageBitmap(canvas) : null];
+      // Prefer direct detect on canvas ImageData for compatibility
+      const codes = await detector.detect(canvas);
+      if (codes && codes[0]?.rawValue) {
+        const data = codes[0].rawValue;
+        stop();
+        handleScanned(kind, data);
+        return;
+      }
+    }catch(_){}
+    requestAnimationFrame(loop);
+  };
+  loop();
+}
+
+function handleScanned(kind, data){
+  try{
+    const json = JSON.parse(LZString.decompressFromEncodedURIComponent(data) || 'null');
+    if (!json || !json.type) throw new Error('Invalid payload');
+    if (kind === 'offer') {
+      // Answerer scanned offer: prefill and click makeAnswer
+      $('offerPaste').value = json.sdp || '';
+    } else {
+      // Offerer scanned answer: apply directly
+      $('answerPaste').value = json.sdp || '';
+      $('applyAnswer').click();
+    }
+  }catch(e){
+    alert('QR parse failed: '+e.message);
+  }
+}
+
+/* Wire buttons */
+$('startScanOffer').onclick = ()=> startScanner('offer');
+$('startScanAnswer').onclick = ()=> startScanner('answer');
+$('stopScanOffer').onclick = ()=>{}; // replaced inside startScanner
+$('stopScanAnswer').onclick = ()=>{};
 </script>
 </html>
