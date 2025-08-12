@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WebRTC Sender (iPhone)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 16px; }
+    video { width: 100%; max-height: 60vh; background: #000; border-radius: 8px; }
+    textarea { width: 100%; height: 140px; }
+    button { padding: 10px 14px; margin: 6px 4px 6px 0; }
+    .row { margin: 12px 0; }
+    .small { font-size: 12px; color: #666; }
+    label { display:block; margin-bottom: 6px; }
+    select { padding: 8px; }
+    .status { margin-left: 6px; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Sender (iPhone)</h1>
+
+  <div class="row">
+    <label>Camera:</label>
+    <select id="cameraFacing">
+      <option value="environment" selected>Back camera</option>
+      <option value="user">Front camera</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <button id="start">Start camera & mic</button>
+    <span class="small">Requires HTTPS on iPhone.</span>
+  </div>
+
+  <video id="local" playsinline muted autoplay></video>
+
+  <div class="row">
+    <button id="makeOffer" disabled>Create Offer</button>
+    <button id="copyOffer" disabled>Copy Offer</button>
+  </div>
+  <textarea id="offer" placeholder="Offer will appear here" readonly></textarea>
+
+  <div class="row">
+    <button id="acceptAnswer" disabled>Accept Answer</button>
+    <span class="status" id="pcState">Idle</span>
+  </div>
+  <textarea id="answer" placeholder="Paste Answer here"></textarea>
+
+  <script>
+    let pc, localStream;
+    const startBtn = document.getElementById('start');
+    const makeOfferBtn = document.getElementById('makeOffer');
+    const copyOfferBtn = document.getElementById('copyOffer');
+    const acceptAnswerBtn = document.getElementById('acceptAnswer');
+    const offerTA = document.getElementById('offer');
+    const answerTA = document.getElementById('answer');
+    const localVideo = document.getElementById('local');
+    const pcState = document.getElementById('pcState');
+    const cameraFacing = document.getElementById('cameraFacing');
+
+    function setStatus(s) { pcState.textContent = s; }
+
+    function createPC() {
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
+      });
+
+      pc.oniceconnectionstatechange = () => setStatus(pc.iceConnectionState);
+      pc.onconnectionstatechange = () => setStatus(pc.connectionState);
+    }
+
+    async function startCapture() {
+      const facingMode = cameraFacing.value;
+      localStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode,
+          width: { ideal: 1280 }, height: { ideal: 720 },
+          frameRate: { ideal: 30, max: 30 }
+        },
+        audio: {
+          echoCancellation: true, noiseSuppression: true, autoGainControl: true
+        }
+      });
+      localVideo.srcObject = localStream;
+      makeOfferBtn.disabled = false;
+      acceptAnswerBtn.disabled = false;
+    }
+
+    function waitForIceGatheringComplete(pc) {
+      if (pc.iceGatheringState === 'complete') return Promise.resolve();
+      return new Promise(resolve => {
+        function check() {
+          if (pc.iceGatheringState === 'complete') {
+            pc.removeEventListener('icegatheringstatechange', check);
+            resolve();
+          }
+        }
+        pc.addEventListener('icegatheringstatechange', check);
+      });
+    }
+
+    async function makeOffer() {
+      if (!pc) createPC();
+
+      // Add tracks before creating the offer
+      localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+
+      const offer = await pc.createOffer({});
+      await pc.setLocalDescription(offer);
+      await waitForIceGatheringComplete(pc);
+
+      offerTA.value = JSON.stringify(pc.localDescription);
+      copyOfferBtn.disabled = false;
+    }
+
+    async function acceptAnswer() {
+      const val = answerTA.value.trim();
+      if (!val) return alert('Paste the Answer JSON first.');
+      const desc = JSON.parse(val);
+      await pc.setRemoteDescription(desc);
+      setStatus('Remote description set; connecting…');
+    }
+
+    startBtn.onclick = async () => {
+      startBtn.disabled = true;
+      try { await startCapture(); }
+      catch (e) {
+        startBtn.disabled = false;
+        alert('Failed to start camera/mic: ' + e.message);
+      }
+    };
+
+    makeOfferBtn.onclick = makeOffer;
+    copyOfferBtn.onclick = () => {
+      offerTA.select();
+      document.execCommand('copy');
+    };
+    acceptAnswerBtn.onclick = acceptAnswer;
+  </script>
+</body>
+</html>
