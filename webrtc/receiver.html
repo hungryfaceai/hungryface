@@ -17,6 +17,7 @@
     #overlay { position: absolute; left:0; top:0; pointer-events: none; }
     .small { font-size: 12px; color: #666; }
     label.small { user-select: none; }
+    .notice { background:#fff3cd; border:1px solid #ffe69c; padding:8px 10px; border-radius:6px; font-size:13px; }
   </style>
 </head>
 <body>
@@ -27,6 +28,7 @@
       <button id="createOffer">Create Offer</button>
       <button id="copyOffer" disabled>Copy Offer</button>
       <label class="small"><input type="checkbox" id="wantAudio" checked> Offer to receive audio</label>
+      <button id="reconnect" disabled>Reconnect</button>
       <button id="reset">Reset</button>
       <span class="status" id="pcState">Idle</span>
     </div>
@@ -37,6 +39,10 @@
       <label for="answer" class="small">Paste Answer (from iPhone):</label>
       <textarea id="answer" placeholder='{"type":"answer","sdp":"..."}'></textarea>
       <button id="acceptAnswer">Accept Answer</button>
+    </div>
+
+    <div id="reconnNotice" class="notice" style="display:none;">
+      Connection dropped — I created a new Offer (ICE restart). Copy it to the iPhone and press “Accept Offer & Create Answer”.
     </div>
 
     <div class="row">
@@ -53,46 +59,51 @@
   </div>
 
   <script type="module">
-    import {
-      FilesetResolver,
-      PoseLandmarker,
-      DrawingUtils
-    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
+    import { FilesetResolver, PoseLandmarker, DrawingUtils }
+      from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
 
-    const createOfferBtn = document.getElementById('createOffer');
-    const copyOfferBtn = document.getElementById('copyOffer');
-    const acceptAnswerBtn = document.getElementById('acceptAnswer');
-    const offerTA = document.getElementById('offer');
-    const answerTA = document.getElementById('answer');
-    const pcState = document.getElementById('pcState');
-    const wantAudio = document.getElementById('wantAudio');
-    const resetBtn = document.getElementById('reset');
-    const video = document.getElementById('remote');
-    const overlay = document.getElementById('overlay');
+    // --- Elements
+    const el = (id) => document.getElementById(id);
+    const createOfferBtn = el('createOffer');
+    const copyOfferBtn = el('copyOffer');
+    const acceptAnswerBtn = el('acceptAnswer');
+    const reconnectBtn = el('reconnect');
+    const resetBtn = el('reset');
+    const offerTA = el('offer');
+    const answerTA = el('answer');
+    const pcState = el('pcState');
+    const wantAudio = el('wantAudio');
+    const notice = el('reconnNotice');
+    const video = el('remote');
+    const overlay = el('overlay');
     const ctx = overlay.getContext('2d');
-    const enableAudioBtn = document.getElementById('enableAudio');
-    const perf = document.getElementById('perf');
+    const enableAudioBtn = el('enableAudio');
+    const perf = el('perf');
 
+    // --- State
     let pc = null;
     let landmarker = null;
     let drawingUtils = null;
     let lastT = performance.now();
     let inferenceRunning = false;
+    let disconnectTimer = null;
+    let needPoseReset = false;
 
-    function setStatus(s) { pcState.textContent = s; }
+    // --- Helpers
+    const setStatus = (s) => pcState.textContent = s;
 
-    function waitForIceGatheringComplete(pc) {
+    const waitForIceGatheringComplete = (pc) => {
       if (pc.iceGatheringState === 'complete') return Promise.resolve();
       return new Promise(resolve => {
-        function check() {
+        const check = () => {
           if (pc.iceGatheringState === 'complete') {
             pc.removeEventListener('icegatheringstatechange', check);
             resolve();
           }
-        }
+        };
         pc.addEventListener('icegatheringstatechange', check);
       });
-    }
+    };
 
     function resizeOverlayToVideo() {
       const dpr = window.devicePixelRatio || 1;
@@ -126,46 +137,111 @@
       drawingUtils = new DrawingUtils(ctx);
     }
 
+    async function resetPoseGraph() {
+      try { await landmarker?.close?.(); } catch {}
+      landmarker = null;
+      await initPose();
+      lastT = performance.now();
+    }
+
     function startInferenceLoop() {
       if (inferenceRunning) return;
       inferenceRunning = true;
+
       const useVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
 
-      const step = async (tMs) => {
-        if (!landmarker || video.readyState < 2) {
-          if (useVFC) video.requestVideoFrameCallback((_now, meta) => step(meta.mediaTime * 1000));
-          else requestAnimationFrame(() => step(performance.now()));
-          return;
+      const step = async () => {
+        try {
+          if (!landmarker) await initPose();
+          if (needPoseReset) { await resetPoseGraph(); needPoseReset = false; }
+
+          if (video.readyState < 2) {
+            scheduleNext();
+            return;
+          }
+
+          // Use monotonic clock to avoid timestamp regressions after reconnects
+          const tMs = performance.now();
+          const results = await landmarker.detectForVideo(video, tMs);
+
+          // FPS + draw
+          const now = performance.now();
+          const dt = now - lastT; lastT = now;
+          const fps = 1000 / dt;
+          perf.textContent = `Inference ~ ${fps.toFixed(1)} FPS`;
+
+          resizeOverlayToVideo();
+          ctx.clearRect(0, 0, overlay.width, overlay.height);
+          if (results.landmarks) for (const lm of results.landmarks) drawingUtils.drawLandmarks(lm);
+        } catch (e) {
+          const msg = String(e?.message || e || '');
+          if (msg.includes('timestamp') || msg.includes('WaitUntilIdle') || msg.includes('CalculatorGraph::Run')) {
+            console.warn('Pose graph reset due to timestamp error:', e);
+            needPoseReset = true;
+          } else {
+            console.error('Pose error:', e);
+          }
         }
-
-        const results = await landmarker.detectForVideo(video, tMs);
-
-        const now = performance.now();
-        const dt = now - lastT; lastT = now;
-        const fps = 1000 / dt;
-        perf.textContent = `Inference ~ ${fps.toFixed(1)} FPS`;
-
-        resizeOverlayToVideo();
-        ctx.clearRect(0, 0, overlay.width, overlay.height);
-        if (results.landmarks) for (const lm of results.landmarks) drawingUtils.drawLandmarks(lm);
-
-        if (useVFC) video.requestVideoFrameCallback((_now, meta) => step(meta.mediaTime * 1000));
-        else requestAnimationFrame(() => step(performance.now()));
+        scheduleNext();
       };
 
-      const kickoff = () => {
-        resizeOverlayToVideo();
-        if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
-          video.requestVideoFrameCallback((_now, meta) => step(meta.mediaTime * 1000));
-        } else {
-          requestAnimationFrame(() => step(performance.now()));
-        }
-      };
+      function scheduleNext() {
+        if (useVFC) video.requestVideoFrameCallback(() => step());
+        else requestAnimationFrame(step);
+      }
 
-      if (video.readyState >= 2) kickoff();
-      else video.onloadedmetadata = kickoff;
+      if (video.readyState >= 2) step();
+      else video.onloadedmetadata = () => step();
     }
 
+    function setupPcEvents() {
+      pc.oniceconnectionstatechange = () => {
+        setStatus(pc.iceConnectionState);
+        if (pc.iceConnectionState === 'disconnected') {
+          clearTimeout(disconnectTimer);
+          disconnectTimer = setTimeout(() => triggerReconnect(), 5000);
+        } else if (pc.iceConnectionState === 'failed') {
+          triggerReconnect();
+        } else if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+          notice.style.display = 'none';
+          clearTimeout(disconnectTimer);
+        }
+      };
+      pc.onconnectionstatechange = () => setStatus(pc.connectionState);
+      pc.ontrack = (e) => {
+        video.srcObject = e.streams[0];
+        enableAudioBtn.disabled = false;
+        needPoseReset = true;               // reset pose graph on new stream/track
+        video.onloadedmetadata = () => {    // also when stream format changes
+          needPoseReset = true;
+        };
+      };
+    }
+
+    async function makeOffer({ iceRestart = false } = {}) {
+      try {
+        const offer = await pc.createOffer({ iceRestart });
+        await pc.setLocalDescription(offer);
+        await waitForIceGatheringComplete(pc);
+        offerTA.value = JSON.stringify(pc.localDescription);
+        copyOfferBtn.disabled = false;
+        reconnectBtn.disabled = false;
+        if (iceRestart) {
+          notice.style.display = '';
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      } catch (e) {
+        console.error('Create offer failed', e);
+        alert('Create offer failed: ' + (e?.message || e));
+      }
+    }
+
+    function triggerReconnect() {
+      if (!pc) return;
+      makeOffer({ iceRestart: true }); // user must paste new offer to the iPhone
+    }
+
+    // --- UI handlers
     createOfferBtn.onclick = async () => {
       createOfferBtn.disabled = true;
       try {
@@ -174,27 +250,12 @@
           sdpSemantics: 'unified-plan',
           bundlePolicy: 'max-bundle'
         });
-
-        // Receive media from iPhone
         pc.addTransceiver('video', { direction: 'recvonly' });
         if (wantAudio.checked) pc.addTransceiver('audio', { direction: 'recvonly' });
-
-        pc.oniceconnectionstatechange = () => setStatus(pc.iceConnectionState);
-        pc.onconnectionstatechange = () => setStatus(pc.connectionState);
-        pc.ontrack = (e) => {
-          video.srcObject = e.streams[0];
-          enableAudioBtn.disabled = false;
-        };
-
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        await waitForIceGatheringComplete(pc);
-
-        offerTA.value = JSON.stringify(pc.localDescription);
-        copyOfferBtn.disabled = false;
+        setupPcEvents();
+        await makeOffer();
       } catch (e) {
-        console.error('Create offer failed', e);
-        alert('Create offer failed: ' + (e?.message || e));
+        alert('Failed to start: ' + (e?.message || e));
         createOfferBtn.disabled = false;
       }
     };
@@ -204,18 +265,21 @@
       catch { offerTA.select(); document.execCommand('copy'); }
     };
 
+    reconnectBtn.onclick = () => triggerReconnect();
+
     acceptAnswerBtn.onclick = async () => {
       const val = answerTA.value.trim();
       if (!val) return alert('Paste the Answer JSON first.');
       try {
         const desc = JSON.parse(val);
         if (desc.type !== 'answer') throw new Error('Pasted JSON is not an SDP answer');
-        if (pc?.signalingState !== 'have-local-offer') {
-          throw new Error('Unexpected signalingState: ' + (pc?.signalingState || 'none') + ' (expected have-local-offer)');
+        if (!pc || (pc.signalingState !== 'have-local-offer' && pc.signalingState !== 'stable')) {
+          throw new Error('Unexpected signalingState: ' + (pc?.signalingState || 'none'));
         }
         await pc.setRemoteDescription(desc);
         await initPose();
         startInferenceLoop();
+        notice.style.display = 'none';
       } catch (e) {
         console.error('Accept answer failed', e, { local: pc?.localDescription?.type, state: pc?.signalingState });
         alert('Accept answer failed: ' + (e?.message || e));
@@ -236,7 +300,9 @@
       offerTA.value = '';
       answerTA.value = '';
       copyOfferBtn.disabled = true;
+      reconnectBtn.disabled = true;
       createOfferBtn.disabled = false;
+      notice.style.display = 'none';
       setStatus('Idle');
       inferenceRunning = false;
       // keep landmarker loaded for reuse
