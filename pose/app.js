@@ -23,9 +23,7 @@ const canvasCtx = canvasElement.getContext("2d");
 const drawingUtils = new DrawingUtils(canvasCtx);
 
 /* ---------- Mobile detection + camera helpers ---------- */
-function isIOS() {
-  return /iPhone|iPad|iPod/i.test(navigator.userAgent);
-}
+function isIOS() { return /iPhone|iPad|iPod/i.test(navigator.userAgent); }
 
 let currentStream = null;
 let isMirrored = true; // mirror front camera by default
@@ -34,28 +32,20 @@ function getCameraConstraints() {
   const selected = cameraSelect.value;
 
   if (isIOS()) {
-    // iOS: prefer facingMode because deviceId enumeration is unreliable
+    // iOS prefers facingMode over deviceId
     const facingMode = selected.includes("environment") ? { exact: "environment" } : "user";
     return { video: { facingMode } };
   }
-
-  // Other platforms: use deviceId if provided
-  return selected
-    ? { video: { deviceId: { exact: selected } } }
-    : { video: true };
+  return selected ? { video: { deviceId: { exact: selected } } } : { video: true };
 }
 
 function inferIsFrontFromSelection(constraints) {
   if (constraints?.video && "facingMode" in constraints.video) {
     return constraints.video.facingMode === "user";
   }
-  // For deviceId path, try to infer from option label
-  const opt = cameraSelect.selectedOptions[0];
-  const label = (opt?.textContent || "").toLowerCase();
-  if (label.includes("front")) return true;
+  const label = (cameraSelect.selectedOptions[0]?.textContent || "").toLowerCase();
   if (label.includes("back") || label.includes("rear") || label.includes("environment")) return false;
-  // Fallback: assume front when uncertain
-  return true;
+  return true; // default assume front
 }
 
 function applyVideoMirroring(isFront) {
@@ -66,9 +56,7 @@ function applyVideoMirroring(isFront) {
 }
 
 async function stopCurrentStream() {
-  try {
-    currentStream?.getTracks()?.forEach(t => t.stop());
-  } catch {}
+  try { currentStream?.getTracks()?.forEach(t => t.stop()); } catch {}
   currentStream = null;
 }
 
@@ -78,8 +66,7 @@ const INSIDE_THRESHOLD_FRAMES = 5;
 let outsideFrames = 0;
 let insideFrames = 0;
 let isOutsideState = false; // debounced
-// Match your preferred red; tweak alpha for strength
-const ALERT_BG = "rgba(157, 0, 0, 0.86)";
+const ALERT_BG = "rgba(239, 68, 68, 0.20)"; // Tailwind red-500 @ 20%
 
 /* ---------- Responsive canvas ---------- */
 let lastCanvasW = 0;
@@ -96,19 +83,15 @@ function resizeToStage() {
   const newH = Math.max(1, Math.round(rect.height * dpr));
   if (canvasElement.width === newW && canvasElement.height === newH) return;
 
-  // Scale polygon to new size to preserve shape
   const scaleX = lastCanvasW ? newW / lastCanvasW : 1;
   const scaleY = lastCanvasH ? newH / lastCanvasH : 1;
   if (polygonInitialized && (scaleX !== 1 || scaleY !== 1)) {
-    for (const p of polygonPoints) {
-      p.x *= scaleX; p.y *= scaleY;
-    }
+    for (const p of polygonPoints) { p.x *= scaleX; p.y *= scaleY; }
   }
 
   canvasElement.width = newW;
   canvasElement.height = newH;
-  lastCanvasW = newW;
-  lastCanvasH = newH;
+  lastCanvasW = newW; lastCanvasH = newH;
 
   if (!polygonInitialized && newW > 0 && newH > 0) {
     setDefaultPolygon();
@@ -116,13 +99,17 @@ function resizeToStage() {
   }
 }
 
-/* ---------- Polygon state (draggable) ---------- */
+/* ---------- Polygon state (pointer-friendly) ---------- */
 let polygonPoints = [];       // [{x,y} in canvas pixels]
 let polygonClosed = false;
 let drawingMode = false;
 let draggingPointIndex = -1;
 let hoveredPointIndex = -1;
 let isDragging = false;
+
+// double-tap detection (for iOS)
+let lastTapTime = 0;
+let lastTapPos = null;
 
 function setDefaultPolygon() {
   polygonPoints = [
@@ -142,10 +129,11 @@ function clampToCanvas(pt) {
   };
 }
 
-function getCanvasCoordsFromEvent(e) {
+// Pointer-coords with mirror + devicePixel scaling
+function getCanvasCoordsFromClientXY(clientX, clientY) {
   const rect = canvasElement.getBoundingClientRect();
-  const xVis = e.clientX - rect.left;
-  const yVis = e.clientY - rect.top;
+  const xVis = clientX - rect.left;
+  const yVis = clientY - rect.top;
   const scaleX = canvasElement.width / rect.width;
   const scaleY = canvasElement.height / rect.height;
   const x = isMirrored ? (rect.width - xVis) * scaleX : xVis * scaleX;
@@ -200,16 +188,11 @@ function drawPolygonOverlay(ctx) {
   ctx.restore();
 }
 
-// Draw readable overlay text (counter mirror only when needed)
 function drawLimbListOverlay(ctx, lines) {
   if (!lines?.length) return;
   ctx.save();
-  if (isMirrored) { // counter the CSS transform so text isn't flipped
-    ctx.translate(canvasElement.width, 0);
-    ctx.scale(-1, 1);
-  }
-  const padding = 8;
-  const lh = 16;
+  if (isMirrored) { ctx.translate(canvasElement.width, 0); ctx.scale(-1, 1); }
+  const padding = 8, lh = 16;
   ctx.font = "14px sans-serif";
   const title = "Outside zone";
   let maxW = ctx.measureText(title).width;
@@ -227,7 +210,7 @@ function drawLimbListOverlay(ctx, lines) {
   ctx.restore();
 }
 
-// Point-in-polygon (ray cast)
+// Point-in-polygon
 function pointInPolygon(point, poly) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -282,7 +265,6 @@ createPoseLandmarker();
 async function listCameras() {
   cameraSelect.innerHTML = "";
   if (isIOS()) {
-    // iOS: provide robust facingMode choices
     cameraSelect.innerHTML = `
       <option value="user">Front (iOS)</option>
       <option value="environment">Back (iOS)</option>
@@ -299,7 +281,6 @@ async function listCameras() {
     for (const dev of vids) {
       const opt = document.createElement("option");
       opt.value = dev.deviceId;
-      // After permissions, labels usually include "front"/"back"
       opt.text = dev.label || `Camera ${cameraSelect.length + 1}`;
       cameraSelect.appendChild(opt);
     }
@@ -319,7 +300,6 @@ async function startOrSwitchCamera() {
   currentStream = stream;
   video.srcObject = stream;
 
-  // When metadata is ready, set aspect ratio & resize canvas
   await new Promise(resolve => {
     const onLoaded = () => { video.removeEventListener("loadedmetadata", onLoaded); resolve(); };
     video.addEventListener("loadedmetadata", onLoaded, { once: true });
@@ -329,7 +309,6 @@ async function startOrSwitchCamera() {
     stage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
   }
   resizeToStage();
-
   applyVideoMirroring(isFront);
 }
 
@@ -360,7 +339,6 @@ async function predictWebcam() {
         drawingUtils.drawConnectors(landmark, PoseLandmarker.POSE_CONNECTIONS);
 
         if (polygonClosed && polygonPoints.length >= 3) {
-          // Per-limb outside list: both endpoints must be inside; else outside
           for (const limb of LIMBS) {
             const pa = landmark[limb.a], pb = landmark[limb.b];
             if (!pa || !pb) continue;
@@ -368,164 +346,3 @@ async function predictWebcam() {
             const ay = pa.y * canvasElement.height;
             const bx = pb.x * canvasElement.width;
             const by = pb.y * canvasElement.height;
-            const aIn = pointInPolygon({ x: ax, y: ay }, polygonPoints);
-            const bIn = pointInPolygon({ x: bx, y: by }, polygonPoints);
-            if (!(aIn && bIn)) outsideLimbNames.push(limb.name);
-          }
-          // Any landmark outside → background alert (debounced)
-          for (const p of landmark) {
-            const x = p.x * canvasElement.width;
-            const y = p.y * canvasElement.height;
-            if (!pointInPolygon({ x, y }, polygonPoints)) { anyOutside = true; break; }
-          }
-        }
-      }
-
-      // Debounce background
-      if (polygonClosed && polygonPoints.length >= 3) {
-        if (anyOutside) {
-          outsideFrames++; insideFrames = 0;
-          if (!isOutsideState && outsideFrames >= OUTSIDE_THRESHOLD_FRAMES) {
-            isOutsideState = true; document.body.style.backgroundColor = ALERT_BG;
-          }
-        } else {
-          insideFrames++; outsideFrames = 0;
-          if (isOutsideState && insideFrames >= INSIDE_THRESHOLD_FRAMES) {
-            isOutsideState = false; document.body.style.backgroundColor = "";
-          }
-        }
-      } else {
-        outsideFrames = insideFrames = 0; isOutsideState = false;
-        document.body.style.backgroundColor = "";
-        outsideLimbNames = [];
-      }
-
-      drawPolygonOverlay(canvasCtx);
-      drawLimbListOverlay(canvasCtx, Array.from(new Set(outsideLimbNames)));
-
-      canvasCtx.restore();
-    });
-  }
-
-  if (webcamRunning === true) {
-    window.requestAnimationFrame(predictWebcam);
-  }
-}
-
-/* ---------- Drawing mode buttons ---------- */
-function enableDrawing() {
-  if (!drawingMode) {
-    // Enter drawing mode → clear polygon and reset state
-    polygonPoints = [];
-    polygonClosed = false;
-    drawingMode = true;
-    hoveredPointIndex = -1; draggingPointIndex = -1; isDragging = false;
-    outsideFrames = 0; insideFrames = 0; isOutsideState = false;
-    document.body.style.backgroundColor = "";
-    drawPolygonBtn.querySelector(".mdc-button__label").innerText = "FINISH DRAWING";
-  } else {
-    drawingMode = false;
-    if (polygonPoints.length >= 3) polygonClosed = true;
-    drawPolygonBtn.querySelector(".mdc-button__label").innerText = "DRAW ZONE";
-  }
-}
-
-function clearPolygon() {
-  setDefaultPolygon();
-  outsideFrames = insideFrames = 0; isOutsideState = false;
-  document.body.style.backgroundColor = "";
-}
-
-/* ---------- Events ---------- */
-function attachPointerEvents() {
-  canvasElement.addEventListener("click", (e) => {
-    if (!drawingMode) return;
-    const p = getCanvasCoordsFromEvent(e);
-    polygonPoints.push(p);
-  });
-
-  canvasElement.addEventListener("dblclick", () => {
-    if (!drawingMode) return;
-    if (polygonPoints.length >= 3) {
-      polygonClosed = true; drawingMode = false;
-      drawPolygonBtn.querySelector(".mdc-button__label").innerText = "DRAW ZONE";
-    }
-  });
-
-  canvasElement.addEventListener("contextmenu", (e) => {
-    if (!drawingMode) return;
-    e.preventDefault(); polygonPoints.pop();
-  });
-
-  canvasElement.addEventListener("mousedown", (e) => {
-    if (drawingMode) return;
-    const pos = getCanvasCoordsFromEvent(e);
-    const idx = findHandleIndexAt(pos);
-    if (idx !== -1) { isDragging = true; draggingPointIndex = idx; }
-  });
-
-  window.addEventListener("mousemove", (e) => {
-    const pos = getCanvasCoordsFromEvent(e);
-    if (isDragging && draggingPointIndex !== -1) {
-      polygonPoints[draggingPointIndex] = clampToCanvas(pos);
-    } else if (!drawingMode) {
-      hoveredPointIndex = findHandleIndexAt(pos);
-    }
-  });
-
-  window.addEventListener("mouseup", () => {
-    isDragging = false; draggingPointIndex = -1;
-  });
-}
-
-/* ---------- Init ---------- */
-document.addEventListener("DOMContentLoaded", async () => {
-  enableWebcamButton = document.getElementById("webcamButton");
-  drawPolygonBtn = document.getElementById("drawPolygonBtn");
-  clearPolygonBtn = document.getElementById("clearPolygonBtn");
-  startCameraBtn = document.getElementById("startCamera");
-  cameraSelect = document.getElementById("cameraSelect");
-
-  attachPointerEvents();
-  await listCameras();
-
-  // Start/Switch camera
-  startCameraBtn.addEventListener("click", async () => {
-    try { await startOrSwitchCamera(); }
-    catch (err) { console.error("Could not access selected camera:", err); }
-  });
-
-  // If user changes selection while streaming, auto switch
-  cameraSelect.addEventListener("change", async () => {
-    if (currentStream) {
-      try { await startOrSwitchCamera(); }
-      catch (err) { console.error("Switch camera failed:", err); }
-    }
-  });
-
-  // Enable/disable predictions loop (will auto-start camera if none)
-  enableWebcamButton.addEventListener("click", async () => {
-    if (!poseLandmarker) { console.log("Wait! poseLandmarker not loaded yet."); return; }
-
-    // If no stream yet, start with current selection first
-    if (!currentStream) {
-      try { await startOrSwitchCamera(); } catch (e) {
-        console.error("Camera start failed:", e); return;
-      }
-    }
-
-    webcamRunning = !webcamRunning;
-    enableWebcamButton.querySelector(".mdc-button__label").innerText =
-      webcamRunning ? "DISABLE PREDICTIONS" : "ENABLE PREDICTIONS";
-
-    if (webcamRunning) {
-      predictWebcam();
-    } else {
-      // stopping loop is enough; stream stays active so user can switch cameras
-    }
-  });
-
-  // Drawing buttons
-  drawPolygonBtn.addEventListener("click", enableDrawing);
-  clearPolygonBtn.addEventListener("click", clearPolygon);
-});
