@@ -66,7 +66,7 @@ const INSIDE_THRESHOLD_FRAMES = 5;
 let outsideFrames = 0;
 let insideFrames = 0;
 let isOutsideState = false; // debounced
-const ALERT_BG = "rgba(239, 68, 68, 0.20)"; // Tailwind red-500 @ 20%
+const ALERT_BG = "rgba(157, 0, 0, 0.86)"; // Tailwind red-500 @ 20%
 
 /* ---------- Responsive canvas ---------- */
 let lastCanvasW = 0;
