@@ -13,6 +13,7 @@
       touch-action: manipulation;
     }
 
+    /* Setup card (before streaming) */
     #ui { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 20px; }
     .card {
       width: 100%; max-width: 520px;
@@ -35,18 +36,20 @@
     button:active { transform: scale(0.99); }
     .hint { opacity: .7; font-size: 13px; }
 
-    /* Local preview full screen during preview window */
+    /* Local video: auto-size full screen during preview window */
     video#local {
-      display: none;
+      display: none;               /* shown only during preview window */
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
       object-fit: cover; background: #000; z-index: 1;
     }
     body.previewing video#local { display: block; }
 
+    /* Blackout/peek after preview */
     body.blackout { background: #000; }
     body.peek     { background: #111; }
 
+    /* Status overlay (during preview or streaming) */
     .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; z-index: 2; }
     body.streaming .overlay, body.previewing .overlay { display: flex; }
     .status {
@@ -56,6 +59,7 @@
       text-align: center; white-space: pre-line;
     }
 
+    /* Fullscreen tap area to toggle peek AFTER preview ends */
     #tap { position: fixed; inset: 0; display: none; z-index: 3; }
     body.streaming #tap { display: block; }
   </style>
@@ -96,21 +100,25 @@
         <button id="startBtn">Start streaming</button>
       </div>
 
-      <p class="hint">After starting, the camera preview shows for N minutes (auto-sized). Then the screen goes black. Tap anywhere to “peek” until you press Stop streaming.</p>
+      <p class="hint">After starting, the camera preview shows immediately for N minutes (auto-sized). Then the screen goes black. Tap anywhere to “peek” until you press Stop streaming.</p>
     </div>
   </div>
 
+  <!-- tap layer + status overlay -->
   <div id="tap" aria-hidden="true"></div>
   <div class="overlay"><div class="status" id="status">Idle</div></div>
 
+  <!-- local preview (muted) -->
   <video id="local" playsinline autoplay muted></video>
 
   <script>
+    // ---- Config
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const qsRoom = new URLSearchParams(location.search).get('room');
     const roomInput = document.getElementById('room');
     if (qsRoom) roomInput.value = qsRoom;
 
+    // ---- Elements
     const videoOn   = document.getElementById('videoOn');
     const audioOn   = document.getElementById('audioOn');
     const cameraSel = document.getElementById('cameraSel');
@@ -121,6 +129,7 @@
     const ui        = document.getElementById('ui');
     const tap       = document.getElementById('tap');
 
+    // ---- State
     let ws = null, pc = null, localStream = null;
     const candidateQueue = [];
     let wakeLock = null;
@@ -168,7 +177,7 @@
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
-      // small hint: tell the encoder this is motion (can help on some devices)
+      // hint encoder this is motion (helps on some devices)
       const v = stream.getVideoTracks()[0];
       if (v && 'contentHint' in v) { try { v.contentHint = 'motion'; } catch {} }
 
@@ -208,7 +217,6 @@
       });
       pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate }); };
       pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
-
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 
@@ -255,10 +263,7 @@
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         send(answer);
-
-        await requestWakeLock();
-        beginPreviewWindow(Number(previewMinsInput.value) || 1);
-
+        // (Preview already running; keep going)
       } else if (msg.type === 'candidate' && msg.candidate) {
         try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch (err) { console.warn('ICE add failed', err); }
       }
@@ -274,8 +279,12 @@
         localStream = await getMedia();
         localVideo.srcObject = localStream;
 
+        // show preview immediately (don’t wait for receiver)
+        beginPreviewWindow(Number(previewMinsInput.value) || 1);
+
         await connectWS(room);
-        setStatus('Waiting for offer…');
+        setStatus('Waiting for receiver…');
+        await requestWakeLock();
 
         started = true;
         startBtn.textContent = 'Stop streaming';
@@ -310,6 +319,7 @@
       startBtn.textContent = 'Start streaming';
     }
 
+    // Tap to toggle peek AFTER preview ends (while streaming)
     function togglePeek() {
       if (!document.body.classList.contains('streaming')) return;
       const isPeek = document.body.classList.toggle('peek');
@@ -322,6 +332,7 @@
       togglePeek();
     });
 
+    // Clean up on unload
     window.addEventListener('beforeunload', stopStreaming);
     startBtn.addEventListener('click', startStreaming);
   </script>
