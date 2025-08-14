@@ -1,1 +1,211 @@
-bb
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Sender (iPhone) – Baby Monitor</title>
+  <style>
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      background: #000; color: #bbb; font-family: -apple-system, system-ui, sans-serif;
+      touch-action: manipulation;
+    }
+    .wrap { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 16px; }
+    .card {
+      width: 100%; max-width: 520px; background: #0a0a0a; border-radius: 14px;
+      padding: 18px; border: 1px solid #141414; box-sizing: border-box;
+    }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; }
+    label.switch { display: flex; align-items: center; gap: 10px; font-size: 16px; }
+    input[type="checkbox"] { width: 22px; height: 22px; }
+    input[type="text"] { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222; background:#0a0a0a; color:#ddd; }
+    button { width: 100%; padding: 14px 16px; border-radius: 12px; border: 0; background: #2a2a2a; color: #fff; font-size: 17px; font-weight: 600; }
+    button:active { transform: scale(0.99); }
+    .hint { opacity: .7; font-size: 13px; }
+
+    video { position: fixed; left: -9999px; top: -9999px; width:1px; height:1px; } /* hidden, keeps capture alive */
+
+    /* Blackout / peek */
+    .blackout { background: #000; }
+    .peek { background: #121212; }
+
+    .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; }
+    .blackout .overlay, .peek .overlay { display: flex; }
+    .status { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px; }
+    .taparea { position: fixed; inset: 0; display: none; }
+    .streaming .taparea { display: block; }
+  </style>
+</head>
+<body class="blackout">
+  <div class="wrap" id="ui">
+    <h2 style="margin:0 0 6px 0;">iPhone Sender</h2>
+
+    <div class="card">
+      <div class="row">
+        <label class="switch">
+          <input id="videoOn" type="checkbox" checked>
+          <span>Video ON</span>
+        </label>
+        <label class="switch">
+          <input id="audioOn" type="checkbox" checked>
+          <span>Audio ON</span>
+        </label>
+      </div>
+
+      <div class="row">
+        <input id="room" type="text" placeholder="Room (e.g., baby1)" value="baby1" autocomplete="off">
+      </div>
+
+      <div class="row">
+        <button id="startBtn">Start streaming</button>
+      </div>
+
+      <p class="hint">Screen goes fully black. Tap to “peek” (slightly brighter), tap again to return to full black.</p>
+    </div>
+  </div>
+
+  <div class="taparea" id="tap"></div>
+  <div class="overlay"><div class="status" id="status">Idle</div></div>
+
+  <video id="local" playsinline autoplay muted></video>
+
+  <script>
+    // --- Config: Render signaling
+    const WS_ENDPOINT = "wss://hungryface.onrender.com/ws";
+
+    // --- Elements
+    const $ = id => document.getElementById(id);
+    const ui = $('ui'), startBtn = $('startBtn'), roomInput = $('room');
+    const videoOn = $('videoOn'), audioOn = $('audioOn'), localVideo = $('local');
+    const statusEl = $('status'), tap = $('tap');
+
+    // --- State
+    let pc = null, ws = null, localStream = null, wakeLock = null;
+    let room = new URLSearchParams(location.search).get('room') || roomInput.value || 'baby1';
+
+    const setStatus = t => statusEl.textContent = t;
+
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+          document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible') {
+              try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+            }
+          });
+        }
+      } catch {}
+    }
+
+    async function getMedia() {
+      const constraints = {};
+      constraints.video = videoOn.checked ? {
+        facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 }
+      } : false;
+      constraints.audio = audioOn.checked ? {
+        echoCancellation: true, noiseSuppression: true, autoGainControl: true
+      } : false;
+      if (!constraints.video && !constraints.audio) throw new Error('Both video and audio are OFF.');
+      return navigator.mediaDevices.getUserMedia(constraints);
+    }
+
+    function createPC() {
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
+        sdpSemantics: 'unified-plan',
+        bundlePolicy: 'max-bundle'
+      });
+      pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
+      pc.onconnectionstatechange = () => setStatus('Conn: ' + pc.connectionState);
+      pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate }); };
+    }
+
+    function connectWS() {
+      return new Promise((resolve, reject) => {
+        const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
+        ws = new WebSocket(url);
+        ws.onopen = () => { send({ type: 'join', room }); resolve(); };
+        ws.onmessage = onSignal;
+        ws.onerror = reject;
+      });
+    }
+    function send(obj){ try{ ws && ws.readyState===WebSocket.OPEN && ws.send(JSON.stringify(obj)); }catch{} }
+
+    async function onSignal(evt) {
+      let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+      if (msg.type === 'offer') {
+        await pc.setRemoteDescription(msg);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        send(pc.localDescription);
+      } else if (msg.type === 'candidate' && msg.candidate) {
+        try { await pc.addIceCandidate(msg.candidate); } catch {}
+      }
+    }
+
+    async function startStreaming() {
+      try {
+        startBtn.disabled = true;
+        room = roomInput.value.trim() || room;
+        setStatus('Starting camera…');
+
+        localStream = await getMedia();
+        localVideo.srcObject = localStream;
+
+        createPC();
+        for (const track of localStream.getTracks()) pc.addTrack(track, localStream);
+
+        setStatus('Connecting…');
+        await connectWS();
+        setStatus('Waiting for offer…');
+
+        // Blackout monitor mode
+        document.body.classList.add('blackout', 'streaming');
+        ui.style.display = 'none';
+        await requestWakeLock();
+
+        // Track recovery
+        localStream.getTracks().forEach(track => {
+          track.onended = async () => {
+            try {
+              const s2 = await getMedia();
+              const senders = pc.getSenders();
+              for (const nt of s2.getTracks()) {
+                const sender = senders.find(s => s.track && s.track.kind === nt.kind);
+                if (sender) await sender.replaceTrack(nt);
+                else pc.addTrack(nt, s2);
+              }
+              localStream = s2; localVideo.srcObject = s2;
+            } catch {}
+          };
+        });
+      } catch (e) {
+        alert(e.message || e); setStatus('Idle'); startBtn.disabled = false;
+      }
+    }
+
+    // UI bindings
+    startBtn.addEventListener('click', startStreaming);
+
+    let peekOn = false;
+    function togglePeek(){
+      peekOn = !peekOn; document.body.classList.toggle('peek', peekOn);
+      document.body.classList.toggle('blackout', !peekOn);
+    }
+    tap.addEventListener('click', togglePeek);
+    document.body.addEventListener('click', (e) => {
+      if (!document.body.classList.contains('streaming')) return;
+      if (e.target === tap) return; togglePeek();
+    });
+
+    roomInput.addEventListener('change', () => {
+      const url = new URL(location.href);
+      url.searchParams.set('room', roomInput.value.trim() || 'baby1');
+      history.replaceState({}, '', url);
+    });
+  </script>
+</body>
+</html>
