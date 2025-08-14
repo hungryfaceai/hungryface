@@ -12,48 +12,29 @@
       background: #000; color: #bbb; font-family: -apple-system, system-ui, sans-serif;
       touch-action: manipulation;
     }
-    /* Container */
-    .wrap {
-      min-height: 100%; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; gap: 18px; padding: 16px;
-    }
-    /* Controls card */
+    .wrap { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 16px; }
     .card {
       width: 100%; max-width: 520px; background: #0a0a0a; border-radius: 14px;
-      padding: 18px; box-sizing: border-box; border: 1px solid #141414;
+      padding: 18px; border: 1px solid #141414; box-sizing: border-box;
     }
     .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; }
     label.switch { display: flex; align-items: center; gap: 10px; font-size: 16px; }
     input[type="checkbox"] { width: 22px; height: 22px; }
     input[type="text"] { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222; background:#0a0a0a; color:#ddd; }
-    button {
-      width: 100%; padding: 14px 16px; border-radius: 12px; border: 0;
-      background: #2a2a2a; color: #fff; font-size: 17px; font-weight: 600;
-    }
+    button { width: 100%; padding: 14px 16px; border-radius: 12px; border: 0; background: #2a2a2a; color: #fff; font-size: 17px; font-weight: 600; }
     button:active { transform: scale(0.99); }
     .hint { opacity: .7; font-size: 13px; }
 
-    /* Hidden video element just to keep camera running */
-    video { position: fixed; left: -9999px; top: -9999px; width:1px; height:1px; }
+    video { position: fixed; left: -9999px; top: -9999px; width:1px; height:1px; } /* hidden, keeps capture alive */
 
-    /* Blackout states */
+    /* Blackout / peek */
     .blackout { background: #000; }
-    .peek { background: #121212; } /* “more luminosity” but still black */
+    .peek { background: #121212; }
 
-    /* Overlay status in blackout/peek */
-    .overlay {
-      position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
-      pointer-events: none;
-    }
+    .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; }
     .blackout .overlay, .peek .overlay { display: flex; }
-    .status {
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.08);
-      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
-    }
-    .taparea {
-      position: fixed; inset: 0; display: none; /* enabled once streaming */
-    }
+    .status { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px; }
+    .taparea { position: fixed; inset: 0; display: none; }
     .streaming .taparea { display: block; }
   </style>
 </head>
@@ -81,37 +62,30 @@
         <button id="startBtn">Start streaming</button>
       </div>
 
-      <p class="hint">The screen will go fully black. Tap anywhere to “peek” (slightly brighter black); tap again to return to full blackout.</p>
-      <p class="hint">Requires the receiver page to be open on the laptop and in the same room.</p>
+      <p class="hint">Screen goes fully black. Tap to “peek” (slightly brighter), tap again to return to full black.</p>
     </div>
   </div>
 
-  <!-- Touch layer for blackout/peek -->
   <div class="taparea" id="tap"></div>
   <div class="overlay"><div class="status" id="status">Idle</div></div>
 
-  <!-- Hidden video to keep the capture alive -->
   <video id="local" playsinline autoplay muted></video>
 
   <script>
-    // ===== Elements
-    const $ = id => document.getElementById(id);
-    const ui = $('ui');
-    const startBtn = $('startBtn');
-    const roomInput = $('room');
-    const videoOn = $('videoOn');
-    const audioOn = $('audioOn');
-    const localVideo = $('local');
-    const statusEl = $('status');
-    const tap = $('tap');
+    // --- Config: Render signaling
+    const WS_ENDPOINT = "wss://hungryface.onrender.com/ws";
 
-    // ===== State
-    let pc = null, ws = null, localStream = null;
-    let wakeLock = null;
+    // --- Elements
+    const $ = id => document.getElementById(id);
+    const ui = $('ui'), startBtn = $('startBtn'), roomInput = $('room');
+    const videoOn = $('videoOn'), audioOn = $('audioOn'), localVideo = $('local');
+    const statusEl = $('status'), tap = $('tap');
+
+    // --- State
+    let pc = null, ws = null, localStream = null, wakeLock = null;
     let room = new URLSearchParams(location.search).get('room') || roomInput.value || 'baby1';
 
-    // ===== Helpers
-    const setStatus = (t) => { statusEl.textContent = t; };
+    const setStatus = t => statusEl.textContent = t;
 
     async function requestWakeLock() {
       try {
@@ -127,28 +101,15 @@
     }
 
     async function getMedia() {
-      const wantVideo = videoOn.checked;
-      const wantAudio = audioOn.checked;
-
-      /** Build constraints only for requested kinds */
       const constraints = {};
-      if (wantVideo) {
-        constraints.video = {
-          facingMode: 'environment',
-          width: { ideal: 1280 }, height: { ideal: 720 },
-          frameRate: { ideal: 30, max: 30 }
-        };
-      } else {
-        constraints.video = false;
-      }
-      constraints.audio = wantAudio ? {
+      constraints.video = videoOn.checked ? {
+        facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 }
+      } : false;
+      constraints.audio = audioOn.checked ? {
         echoCancellation: true, noiseSuppression: true, autoGainControl: true
       } : false;
-
-      if (!wantVideo && !wantAudio) throw new Error('Both video and audio are OFF.');
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      return stream;
+      if (!constraints.video && !constraints.audio) throw new Error('Both video and audio are OFF.');
+      return navigator.mediaDevices.getUserMedia(constraints);
     }
 
     function createPC() {
@@ -159,38 +120,23 @@
       });
       pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
       pc.onconnectionstatechange = () => setStatus('Conn: ' + pc.connectionState);
-      pc.onicecandidate = (e) => {
-        if (e.candidate) send({ type: 'candidate', candidate: e.candidate });
-      };
+      pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate }); };
     }
 
     function connectWS() {
       return new Promise((resolve, reject) => {
-        try {
-          // Render (and local) friendly: same host, WSS in prod.
-          const wsURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
-          ws = new WebSocket(wsURL);
-          ws.onopen = () => {
-            send({ type: 'join', room });
-            resolve();
-          };
-          ws.onmessage = onSignal;
-          ws.onerror = err => reject(err);
-          ws.onclose = () => { /* no-op; receiver can reconnect */ };
-        } catch (e) { reject(e); }
+        const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
+        ws = new WebSocket(url);
+        ws.onopen = () => { send({ type: 'join', room }); resolve(); };
+        ws.onmessage = onSignal;
+        ws.onerror = reject;
       });
     }
-
-    function send(obj) {
-      try { ws && ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {}
-    }
+    function send(obj){ try{ ws && ws.readyState===WebSocket.OPEN && ws.send(JSON.stringify(obj)); }catch{} }
 
     async function onSignal(evt) {
-      let msg = null;
-      try { msg = JSON.parse(evt.data); } catch { return; }
-
+      let msg; try { msg = JSON.parse(evt.data); } catch { return; }
       if (msg.type === 'offer') {
-        // Receiver sent an SDP offer → we answer.
         await pc.setRemoteDescription(msg);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
@@ -206,77 +152,60 @@
         room = roomInput.value.trim() || room;
         setStatus('Starting camera…');
 
-        // 1) Capture
         localStream = await getMedia();
         localVideo.srcObject = localStream;
 
-        // 2) PeerConnection
         createPC();
-        for (const track of localStream.getTracks()) {
-          pc.addTrack(track, localStream);
-        }
+        for (const track of localStream.getTracks()) pc.addTrack(track, localStream);
 
-        // 3) Signaling
         setStatus('Connecting…');
         await connectWS();
         setStatus('Waiting for offer…');
 
-        // Enter blackout/monitor mode
+        // Blackout monitor mode
         document.body.classList.add('blackout', 'streaming');
-        ui.style.display = 'none';   // hide UI
+        ui.style.display = 'none';
         await requestWakeLock();
 
-        // Reacquire tracks if they end (rare on iOS if app backgrounded)
+        // Track recovery
         localStream.getTracks().forEach(track => {
           track.onended = async () => {
             try {
-              const newStream = await getMedia();
+              const s2 = await getMedia();
               const senders = pc.getSenders();
-              for (const newTrack of newStream.getTracks()) {
-                const sender = senders.find(s => s.track && s.track.kind === newTrack.kind);
-                if (sender) await sender.replaceTrack(newTrack);
-                else pc.addTrack(newTrack, newStream);
+              for (const nt of s2.getTracks()) {
+                const sender = senders.find(s => s.track && s.track.kind === nt.kind);
+                if (sender) await sender.replaceTrack(nt);
+                else pc.addTrack(nt, s2);
               }
-              localStream = newStream;
-              localVideo.srcObject = localStream;
-            } catch (e) {}
+              localStream = s2; localVideo.srcObject = s2;
+            } catch {}
           };
         });
-
       } catch (e) {
-        alert(e.message || e);
-        startBtn.disabled = false;
-        setStatus('Idle');
+        alert(e.message || e); setStatus('Idle'); startBtn.disabled = false;
       }
     }
 
-    // ===== UI bindings
+    // UI bindings
     startBtn.addEventListener('click', startStreaming);
 
-    // Tap anywhere to toggle between full blackout and “peek”
     let peekOn = false;
-    const togglePeek = () => {
-      peekOn = !peekOn;
-      document.body.classList.toggle('peek', peekOn);
+    function togglePeek(){
+      peekOn = !peekOn; document.body.classList.toggle('peek', peekOn);
       document.body.classList.toggle('blackout', !peekOn);
-    };
+    }
     tap.addEventListener('click', togglePeek);
-    // Also allow a quick tap anywhere (fallback) once streaming
     document.body.addEventListener('click', (e) => {
       if (!document.body.classList.contains('streaming')) return;
-      if (e.target === tap) return; // already handled
-      togglePeek();
+      if (e.target === tap) return; togglePeek();
     });
 
-    // Keep room field in sync with ?room=
     roomInput.addEventListener('change', () => {
       const url = new URL(location.href);
       url.searchParams.set('room', roomInput.value.trim() || 'baby1');
       history.replaceState({}, '', url);
     });
-
-    // Default to blackout before starting
-    document.body.classList.add('blackout');
   </script>
 </body>
 </html>
