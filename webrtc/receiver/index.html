@@ -6,37 +6,49 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
   <style>
     :root { color-scheme: dark; }
-    body {
-      margin: 0; background: black; color: white;
+    html, body {
+      margin: 0; height: 100%;
+      background: #000; color: #fff;
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
-      height: 100vh; display: flex; justify-content: center; align-items: center;
     }
-    video { width: 100%; height: 100%; object-fit: cover; background: black; }
-    #status { position: absolute; top: 10px; left: 10px; font-size: 0.9em; opacity: .8; }
-    #unmute { position: absolute; bottom: 16px; left: 16px; padding: 10px 14px; border: 0; border-radius: 10px; background:#333; color:#fff; display:none; }
+    video {
+      position: fixed; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover; background: #000;
+    }
+    #status {
+      position: fixed; top: 10px; left: 10px;
+      font-size: 0.9em; opacity: 0.8; padding: 6px 10px;
+      background: rgba(0,0,0,0.35); border-radius: 8px;
+    }
+    #unmute {
+      position: fixed; bottom: 16px; left: 16px;
+      padding: 10px 14px; border: 0; border-radius: 10px;
+      background:#333; color:#fff; display:none; cursor: pointer;
+    }
   </style>
 </head>
 <body>
   <div id="status">Idle</div>
   <button id="unmute">Tap to enable audio</button>
-  <video id="remoteVideo" autoplay playsinline></video>
+  <video id="remote" autoplay playsinline></video>
 
   <script>
-    // ---- Config
+    // --- config
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "baby1";
 
-    // ---- Elements
+    // --- elements
     const statusEl = document.getElementById('status');
-    const remoteVideo = document.getElementById('remoteVideo');
+    const remoteVideo = document.getElementById('remote');
     const unmuteBtn = document.getElementById('unmute');
 
-    // ---- State
+    // --- state
     let ws, pc;
     let remoteDescriptionSet = false;
     const candidateQueue = [];
 
-    const setStatus = (m) => { console.log(m); statusEl.textContent = m; };
+    const setStatus = (msg) => { statusEl.textContent = msg; console.log('[STATUS]', msg); };
     const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
     function connectWS() {
@@ -44,47 +56,74 @@
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
         setStatus('Connecting to signaling…');
         ws = new WebSocket(url);
-        ws.onopen   = () => { setStatus('Signaling: connected'); send({ type: 'join', room }); resolve(); };
-        ws.onmessage= onSignal;
-        ws.onerror  = (e) => { console.error('WS error', e); setStatus('Signaling: error'); reject(e); };
-        ws.onclose  = (e) => { console.warn('WS closed', e.code, e.reason); setStatus('Signaling: closed'); };
+
+        let opened = false;
+        const timer = setTimeout(() => {
+          if (!opened) { try { ws.close(); } catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); }
+        }, 15000);
+
+        ws.onopen = () => {
+          opened = true; clearTimeout(timer);
+          setStatus('Signaling: connected');
+          send({ type: 'join', room });
+          resolve();
+        };
+        ws.onmessage = onSignal;
+        ws.onerror = (e) => { console.error('[WS error]', e); setStatus('Signaling: error'); };
+        ws.onclose = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); };
       });
     }
 
     function createPC() {
       pc = new RTCPeerConnection({
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        // For tougher networks, add TURN:
+        // iceServers: [
+        //   { urls: 'stun:stun.l.google.com:19302' },
+        //   { urls: 'turn:YOUR_TURN_HOST:3478', username: 'USER', credential: 'PASS' }
+        // ]
       });
+
       pc.onicecandidate = (ev) => { if (ev.candidate) send({ type:'candidate', candidate: ev.candidate }); };
       pc.ontrack = (ev) => {
         if (remoteVideo.srcObject !== ev.streams[0]) {
           remoteVideo.srcObject = ev.streams[0];
-          // try to autoplay with audio; if blocked, show unmute button
+          // try to autoplay with audio; if blocked, show unmute
           remoteVideo.muted = false;
           remoteVideo.play().catch(() => { unmuteBtn.style.display = 'block'; });
         }
       };
-      pc.oniceconnectionstatechange = () => { console.log('ICE:', pc.iceConnectionState); setStatus('ICE: ' + pc.iceConnectionState); };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log('[ICE]', pc.iceConnectionState);
+        setStatus('ICE: ' + pc.iceConnectionState);
+      };
     }
 
     unmuteBtn.addEventListener('click', async () => {
-      try { await remoteVideo.play(); unmuteBtn.style.display = 'none'; } catch(e) { console.warn(e); }
+      try { await remoteVideo.play(); unmuteBtn.style.display = 'none'; } catch (e) { console.warn(e); }
     });
 
     async function startReceiver() {
-      await connectWS();
-      createPC();
-      const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-      await pc.setLocalDescription(offer);
-      send(offer);
-      setStatus('Offer sent, waiting for answer…');
+      try {
+        await connectWS();
+        createPC();
+
+        const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+        await pc.setLocalDescription(offer);
+        send(offer);
+        setStatus('Offer sent, waiting for answer…');
+      } catch (e) {
+        console.error(e);
+        setStatus('Error: ' + (e.message || e));
+      }
     }
 
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
 
       if (msg.type === 'answer') {
-        setStatus('Got answer, setting remote desc…');
+        setStatus('Got answer, applying…');
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
         remoteDescriptionSet = true;
 
@@ -103,6 +142,12 @@
         }
       }
     }
+
+    // tidy up on unload
+    window.addEventListener('beforeunload', () => {
+      try { ws && ws.close(); } catch {}
+      try { pc && pc.close(); } catch {}
+    });
 
     startReceiver();
   </script>
