@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <title>Baby Monitor – Sender (iPhone)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+
   <style>
     :root { color-scheme: dark; }
     html, body {
@@ -11,6 +12,8 @@
       background: #000; color: #ccc; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       touch-action: manipulation;
     }
+
+    /* Setup card before streaming */
     #ui { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 20px; }
     .card {
       width: 100%; max-width: 520px;
@@ -20,9 +23,12 @@
     .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; }
     label.switch { display: flex; align-items: center; gap: 10px; font-size: 16px; }
     input[type="checkbox"] { width: 22px; height: 22px; }
-    input[type="text"], select {
+    input[type="text"], select, input[type="number"] {
       width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222; background:#0b0b0b; color:#ddd;
+      -moz-appearance:textfield;
     }
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     button {
       width: 100%; padding: 14px 16px; border-radius: 12px; border: 0;
       background: #2a2a2a; color: #fff; font-size: 17px; font-weight: 600;
@@ -30,19 +36,32 @@
     button:active { transform: scale(0.99); }
     .hint { opacity: .7; font-size: 13px; }
 
-    video { position: fixed; left: -10000px; top: -10000px; width:1px; height:1px; } /* hidden preview */
+    /* Local preview video */
+    video#local {
+      display: none;            /* hidden by default */
+      position: fixed; inset: 0;
+      width: 100%; height: 100%; object-fit: cover;
+      background: #000;
+      z-index: 1;
+    }
+    body.previewing video#local { display: block; } /* show during preview window */
 
+    /* Blackout/peek after preview */
     body.blackout { background: #000; }
     body.peek     { background: #111; }
 
-    .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; }
-    body.streaming .overlay { display: flex; }
+    /* Status overlay during preview/streaming */
+    .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; z-index: 2; }
+    body.streaming .overlay, body.previewing .overlay { display: flex; }
     .status {
       background: rgba(255,255,255,0.05);
       border: 1px solid rgba(255,255,255,0.1);
       color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
+      text-align: center; white-space: pre-line;
     }
-    #tap { position: fixed; inset: 0; display: none; }
+
+    /* Fullscreen tap area once streaming */
+    #tap { position: fixed; inset: 0; display: none; z-index: 3; }
     body.streaming #tap { display: block; }
   </style>
 </head>
@@ -74,16 +93,23 @@
       </div>
 
       <div class="row">
+        <input id="previewMins" type="number" min="0" step="1" value="1" aria-label="Preview minutes">
+        <span class="hint">Preview minutes</span>
+      </div>
+
+      <div class="row">
         <button id="startBtn">Start streaming</button>
       </div>
 
-      <p class="hint">After starting, the screen goes fully black (baby monitor mode). Tap anywhere to “peek” (slightly brighter), tap again to return to black.</p>
+      <p class="hint">After starting, the camera preview shows for N minutes, then the screen goes fully black (baby monitor mode). Tap anywhere to “peek”.</p>
     </div>
   </div>
 
+  <!-- tap layer + status overlay -->
   <div id="tap" aria-hidden="true"></div>
   <div class="overlay"><div class="status" id="status">Idle</div></div>
 
+  <!-- local preview (muted) -->
   <video id="local" playsinline autoplay muted></video>
 
   <script>
@@ -94,20 +120,22 @@
     if (qsRoom) roomInput.value = qsRoom;
 
     // ---- Elements
-    const videoOn = document.getElementById('videoOn');
-    const audioOn = document.getElementById('audioOn');
+    const videoOn   = document.getElementById('videoOn');
+    const audioOn   = document.getElementById('audioOn');
     const cameraSel = document.getElementById('cameraSel');
-    const startBtn = document.getElementById('startBtn');
-    const localVideo = document.getElementById('local');
-    const statusEl = document.getElementById('status');
-    const ui = document.getElementById('ui');
-    const tap = document.getElementById('tap');
+    const previewMinsInput = document.getElementById('previewMins');
+    const startBtn  = document.getElementById('startBtn');
+    const localVideo= document.getElementById('local');
+    const statusEl  = document.getElementById('status');
+    const ui        = document.getElementById('ui');
+    const tap       = document.getElementById('tap');
 
     // ---- State
     let ws = null, pc = null, localStream = null;
     let remoteDescriptionSet = false;
     const candidateQueue = [];
     let wakeLock = null;
+    let previewTimer = null, previewTicker = null, previewEnd = 0;
 
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
 
@@ -142,14 +170,11 @@
       const facing = cameraSel.value || 'environment';
       const constraints = {
         video: wantVideo ? {
-          facingMode: facing,                // 'environment' (back) or 'user' (front)
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          facingMode: facing,
+          width: { ideal: 1280 }, height: { ideal: 720 },
           frameRate: { ideal: 30, max: 30 }
         } : false,
-        audio: wantAudio ? {
-          echoCancellation: true, noiseSuppression: true, autoGainControl: true
-        } : false
+        audio: wantAudio ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true } : false
       };
       return await navigator.mediaDevices.getUserMedia(constraints);
     }
@@ -177,9 +202,7 @@
       });
     }
 
-    function send(obj) {
-      try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); } catch {}
-    }
+    function send(obj) { try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); } catch {} }
 
     function createPC() {
       pc = new RTCPeerConnection({
@@ -190,9 +213,41 @@
 
       pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate }); };
       pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
-      pc.onconnectionstatechange = () => console.log('[PC]', pc.connectionState);
 
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    }
+
+    function beginPreviewWindow(minutes) {
+      const ms = Math.max(0, Math.round((Number(minutes) || 1) * 60000));
+      if (ms === 0) { enterBlackout(); return; }
+
+      document.body.classList.add('previewing');
+      document.body.classList.remove('blackout','peek');
+      ui.style.display = 'none';
+      localVideo.style.display = 'block';
+
+      previewEnd = Date.now() + ms;
+      tickPreviewCountdown(); // initial paint
+      previewTicker = setInterval(tickPreviewCountdown, 1000);
+      previewTimer  = setTimeout(() => {
+        clearInterval(previewTicker); previewTicker = null;
+        enterBlackout();
+      }, ms);
+    }
+
+    function tickPreviewCountdown() {
+      const remain = Math.max(0, previewEnd - Date.now());
+      const sec = Math.ceil(remain / 1000);
+      const mm = String(Math.floor(sec / 60)).padStart(2,'0');
+      const ss = String(sec % 60).padStart(2,'0');
+      setStatus(`Preview ends in ${mm}:${ss}`);
+    }
+
+    function enterBlackout() {
+      document.body.classList.remove('previewing');
+      document.body.classList.add('streaming','blackout');
+      localVideo.style.display = 'none';
+      setStatus('Streaming… Tap anywhere to peek');
     }
 
     async function onSignal(evt) {
@@ -204,6 +259,7 @@
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
         remoteDescriptionSet = true;
 
+        // Flush queued ICE
         while (candidateQueue.length) {
           const c = candidateQueue.shift();
           try { await pc.addIceCandidate(c); } catch (err) { console.warn('late ICE add failed', err); }
@@ -213,10 +269,11 @@
         await pc.setLocalDescription(answer);
         send(answer);
 
-        ui.style.display = 'none';
-        document.body.classList.add('streaming', 'blackout');
         await requestWakeLock();
-        setStatus('Streaming… Tap anywhere to peek');
+
+        // Start preview window NOW (after stream is truly active)
+        const mins = Number(previewMinsInput.value) || 1;
+        beginPreviewWindow(mins);
 
       } else if (msg.type === 'candidate' && msg.candidate) {
         const cand = new RTCIceCandidate(msg.candidate);
@@ -235,12 +292,12 @@
 
         setStatus('Starting camera…');
         localStream = await getMedia();
-        localVideo.srcObject = localStream;
+        localVideo.srcObject = localStream;   // local muted preview (only shown during preview window)
 
         await connectWS(room);
         setStatus('Waiting for offer…');
 
-        // Reacquire if tracks end (rare)
+        // Track recovery (rare)
         localStream.getTracks().forEach(track => {
           track.onended = async () => {
             try {
@@ -248,7 +305,7 @@
               const senders = pc ? pc.getSenders() : [];
               for (const t of s2.getTracks()) {
                 const sender = senders.find(s => s.track && s.track.kind === t.kind);
-                if (sender) { await sender.replaceTrack(t); }
+                if (sender) await sender.replaceTrack(t); else if (pc) pc.addTrack(t, s2);
               }
               localStream = s2; localVideo.srcObject = s2;
             } catch {}
@@ -263,7 +320,7 @@
       }
     }
 
-    // Tap anywhere to toggle peek/blackout when streaming
+    // Tap anywhere to toggle peek brightness after blackout
     function togglePeek() {
       if (!document.body.classList.contains('streaming')) return;
       const isPeek = document.body.classList.toggle('peek');
@@ -274,6 +331,15 @@
       if (!document.body.classList.contains('streaming')) return;
       if (e.target === tap) return;
       togglePeek();
+    });
+
+    // Clean up on unload
+    window.addEventListener('beforeunload', () => {
+      if (previewTimer) clearTimeout(previewTimer);
+      if (previewTicker) clearInterval(previewTicker);
+      try { ws && ws.close(); } catch {}
+      try { pc && pc.close(); } catch {}
+      try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
     });
 
     startBtn.addEventListener('click', startStreaming);
