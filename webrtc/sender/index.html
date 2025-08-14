@@ -13,7 +13,7 @@
       touch-action: manipulation;
     }
 
-    /* Setup card (before streaming) */
+    /* Setup card (visible before streaming, and when "managing" during streaming) */
     #ui { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 20px; }
     .card {
       width: 100%; max-width: 520px;
@@ -36,20 +36,20 @@
     button:active { transform: scale(0.99); }
     .hint { opacity: .7; font-size: 13px; }
 
-    /* Local video: auto-size full screen during preview window */
+    /* Local video shows ONLY during preview window */
     video#local {
-      display: none;               /* shown only during preview window */
+      display: none;               /* shown only during preview */
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
       object-fit: cover; background: #000; z-index: 1;
     }
     body.previewing video#local { display: block; }
 
-    /* Blackout/peek after preview */
-    body.blackout { background: #000; }
-    body.peek     { background: #111; }
+    /* Streaming states */
+    body.blackout { background: #000; } /* full black */
+    /* (no 'peek' now; explicit UI reveal on tap) */
 
-    /* Status overlay (during preview or streaming) */
+    /* Status overlay (visible during preview or streaming) */
     .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; z-index: 2; }
     body.streaming .overlay, body.previewing .overlay { display: flex; }
     .status {
@@ -59,9 +59,12 @@
       text-align: center; white-space: pre-line;
     }
 
-    /* Fullscreen tap area to toggle peek AFTER preview ends */
+    /* Tap layer only when streaming AND UI is hidden */
     #tap { position: fixed; inset: 0; display: none; z-index: 3; }
-    body.streaming #tap { display: block; }
+    body.streaming:not(.ui-visible) #tap { display: block; }
+
+    /* Hide the UI when streaming unless explicitly visible */
+    body.streaming:not(.ui-visible) #ui { display: none; }
   </style>
 </head>
 <body class="blackout">
@@ -100,7 +103,7 @@
         <button id="startBtn">Start streaming</button>
       </div>
 
-      <p class="hint">After starting, the camera preview shows immediately for N minutes (auto-sized). Then the screen goes black. Tap anywhere to “peek” until you press Stop streaming.</p>
+      <p class="hint">After starting, the camera preview shows for N minutes (auto-sized). When it ends, the screen turns fully black and shows “Streaming…”. Tap to bring this screen back (button will say “Stop streaming”).</p>
     </div>
   </div>
 
@@ -131,7 +134,6 @@
 
     // ---- State
     let ws = null, pc = null, localStream = null;
-    const candidateQueue = [];
     let wakeLock = null;
     let previewTimer = null, previewTicker = null, previewEnd = 0;
     let started = false;
@@ -177,7 +179,6 @@
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
-      // hint encoder this is motion (helps on some devices)
       const v = stream.getVideoTracks()[0];
       if (v && 'contentHint' in v) { try { v.contentHint = 'motion'; } catch {} }
 
@@ -217,6 +218,7 @@
       });
       pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate }); };
       pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
+
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 
@@ -225,17 +227,15 @@
       if (ms === 0) { enterBlackout(); return; }
 
       document.body.classList.add('previewing');
-      document.body.classList.remove('blackout','peek');
-      ui.style.display = 'none';
+      document.body.classList.add('streaming');
+      document.body.classList.remove('ui-visible'); // UI hidden during preview
+      ui.style.display = ''; // allow CSS to control via body classes
       localVideo.style.display = 'block';
 
       previewEnd = Date.now() + ms;
       tickPreviewCountdown();
       previewTicker = setInterval(tickPreviewCountdown, 1000);
-      previewTimer  = setTimeout(() => {
-        clearInterval(previewTicker); previewTicker = null;
-        enterBlackout();
-      }, ms);
+      previewTimer  = setTimeout(endPreviewNow, ms);
     }
 
     function tickPreviewCountdown() {
@@ -246,11 +246,19 @@
       setStatus(`Preview ends in ${mm}:${ss}`);
     }
 
+    function endPreviewNow() {
+      if (previewTimer) clearTimeout(previewTimer);
+      if (previewTicker) clearInterval(previewTicker);
+      previewTimer = previewTicker = null;
+      enterBlackout();
+    }
+
     function enterBlackout() {
       document.body.classList.remove('previewing');
-      document.body.classList.add('streaming','blackout');
+      document.body.classList.add('streaming');     // keep streaming state
+      document.body.classList.remove('ui-visible'); // UI hidden
       localVideo.style.display = 'none';
-      setStatus('Streaming… Tap anywhere to peek');
+      setStatus('Streaming...');
     }
 
     async function onSignal(evt) {
@@ -263,15 +271,16 @@
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         send(answer);
-        // (Preview already running; keep going)
+        // No UI changes here; preview/blackout is driven by user/timeout
       } else if (msg.type === 'candidate' && msg.candidate) {
         try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch (err) { console.warn('ICE add failed', err); }
       }
     }
 
-    async function startStreaming() {
+    async function startOrStop() {
       try {
         if (started) { await stopStreaming(); return; }
+
         startBtn.disabled = true;
 
         const room = currentRoom();
@@ -279,11 +288,10 @@
         localStream = await getMedia();
         localVideo.srcObject = localStream;
 
-        // show preview immediately (don’t wait for receiver)
+        // Start preview immediately
         beginPreviewWindow(Number(previewMinsInput.value) || 1);
 
         await connectWS(room);
-        setStatus('Waiting for receiver…');
         await requestWakeLock();
 
         started = true;
@@ -299,42 +307,71 @@
     }
 
     async function stopStreaming() {
+      // Clear timers
       if (previewTimer) clearTimeout(previewTimer);
       if (previewTicker) clearInterval(previewTicker);
       previewTimer = previewTicker = null;
 
+      // Close PC/WS and stop media
       try { pc && pc.getSenders().forEach(s => s.track && s.track.stop()); } catch {}
       try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
       try { pc && pc.close(); } catch {}
       try { ws && ws.close(); } catch {}
 
+      // Reset UI state
       localStream = null; pc = null; ws = null;
-      document.body.classList.remove('previewing','streaming','peek');
+      started = false;
+
+      document.body.classList.remove('previewing','streaming','ui-visible');
       document.body.classList.add('blackout');
-      ui.style.display = 'block';
+      ui.style.display = '';
       localVideo.style.display = 'none';
       setStatus('Stopped');
 
-      started = false;
       startBtn.textContent = 'Start streaming';
     }
 
-    // Tap to toggle peek AFTER preview ends (while streaming)
-    function togglePeek() {
-      if (!document.body.classList.contains('streaming')) return;
-      const isPeek = document.body.classList.toggle('peek');
-      document.body.classList.toggle('blackout', !isPeek);
+    // ---- Interactions required by your spec ----
+    // 1) While PREVIEWING: tap or Esc -> stop preview immediately (go to black "Streaming...")
+    function onGlobalClick(e) {
+      if (document.body.classList.contains('previewing')) {
+        endPreviewNow(); // immediate blackout
+        return;
+      }
+      // 2) While STREAMING (black), tap -> bring back the UI (button = Stop streaming)
+      if (document.body.classList.contains('streaming') && !document.body.classList.contains('ui-visible')) {
+        document.body.classList.add('ui-visible');
+        // keep video hidden; we are only managing the stream
+        setStatus('Streaming...'); // still streaming
+        return;
+      }
+      // 3) If UI is visible during streaming and user taps outside the card, hide UI again
+      if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
+        const inCard = e.target.closest('.card');
+        if (!inCard) {
+          document.body.classList.remove('ui-visible'); // back to black
+          setStatus('Streaming...');
+        }
+      }
     }
-    tap.addEventListener('click', togglePeek);
-    document.body.addEventListener('click', (e) => {
-      if (!document.body.classList.contains('streaming')) return;
-      if (e.target === tap) return;
-      togglePeek();
+    document.addEventListener('click', onGlobalClick);
+
+    // Esc mirrors tap behavior during preview, and hides UI if visible during streaming
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (document.body.classList.contains('previewing')) {
+          endPreviewNow();
+        } else if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
+          document.body.classList.remove('ui-visible');
+          setStatus('Streaming...');
+        }
+      }
     });
 
     // Clean up on unload
     window.addEventListener('beforeunload', stopStreaming);
-    startBtn.addEventListener('click', startStreaming);
+
+    startBtn.addEventListener('click', startOrStop);
   </script>
 </body>
 </html>
