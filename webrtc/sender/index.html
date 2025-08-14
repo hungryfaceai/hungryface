@@ -13,7 +13,7 @@
       touch-action: manipulation;
     }
 
-    /* Setup card before streaming */
+    /* Setup card (before streaming) */
     #ui { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 20px; }
     .card {
       width: 100%; max-width: 520px;
@@ -36,21 +36,20 @@
     button:active { transform: scale(0.99); }
     .hint { opacity: .7; font-size: 13px; }
 
-    /* Local preview video */
+    /* Local video preview: auto-size full screen */
     video#local {
-      display: none;            /* hidden by default */
+      display: none;               /* shown only during preview window */
       position: fixed; inset: 0;
-      width: 100%; height: 100%; object-fit: cover;
-      background: #000;
-      z-index: 1;
+      width: 100vw; height: 100vh;
+      object-fit: cover; background: #000; z-index: 1;
     }
-    body.previewing video#local { display: block; } /* show during preview window */
+    body.previewing video#local { display: block; }
 
     /* Blackout/peek after preview */
     body.blackout { background: #000; }
     body.peek     { background: #111; }
 
-    /* Status overlay during preview/streaming */
+    /* Status overlay (during preview or streaming) */
     .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; z-index: 2; }
     body.streaming .overlay, body.previewing .overlay { display: flex; }
     .status {
@@ -60,7 +59,7 @@
       text-align: center; white-space: pre-line;
     }
 
-    /* Fullscreen tap area once streaming */
+    /* Fullscreen tap area to toggle peek AFTER preview ends */
     #tap { position: fixed; inset: 0; display: none; z-index: 3; }
     body.streaming #tap { display: block; }
   </style>
@@ -101,7 +100,7 @@
         <button id="startBtn">Start streaming</button>
       </div>
 
-      <p class="hint">After starting, the camera preview shows for N minutes, then the screen goes fully black (baby monitor mode). Tap anywhere to “peek”.</p>
+      <p class="hint">After starting, the camera preview shows for N minutes (auto-sized). Then the screen goes black. Tap anywhere to “peek” until you press Stop streaming.</p>
     </div>
   </div>
 
@@ -136,6 +135,7 @@
     const candidateQueue = [];
     let wakeLock = null;
     let previewTimer = null, previewTicker = null, previewEnd = 0;
+    let started = false;
 
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
 
@@ -187,7 +187,7 @@
 
         let opened = false;
         const timer = setTimeout(() => {
-          if (!opened) { try { ws.close(); } catch{} reject(new Error('WS timeout')); setStatus('Signaling: timeout'); }
+          if (!opened) { try { ws.close(); } catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); }
         }, 15000);
 
         ws.onopen = () => {
@@ -198,7 +198,7 @@
         };
         ws.onmessage = onSignal;
         ws.onerror = (e) => { console.error('[WS error]', e); setStatus('Signaling: error'); };
-        ws.onclose = (e) => { console.warn('[WS closed]', e.code, e.reason); if (!opened) reject(new Error('WS closed')); setStatus('Signaling: closed'); };
+        ws.onclose = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); };
       });
     }
 
@@ -210,10 +210,8 @@
         bundlePolicy: 'max-bundle',
         sdpSemantics: 'unified-plan'
       });
-
       pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate }); };
       pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
-
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 
@@ -227,7 +225,7 @@
       localVideo.style.display = 'block';
 
       previewEnd = Date.now() + ms;
-      tickPreviewCountdown(); // initial paint
+      tickPreviewCountdown();
       previewTicker = setInterval(tickPreviewCountdown, 1000);
       previewTimer  = setTimeout(() => {
         clearInterval(previewTicker); previewTicker = null;
@@ -257,60 +255,41 @@
         setStatus('Got offer, creating answer…');
         createPC();
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
-        remoteDescriptionSet = true;
-
-        // Flush queued ICE
-        while (candidateQueue.length) {
-          const c = candidateQueue.shift();
-          try { await pc.addIceCandidate(c); } catch (err) { console.warn('late ICE add failed', err); }
-        }
-
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         send(answer);
 
+        // Once we answered, start preview timer and keep screen awake
         await requestWakeLock();
-
-        // Start preview window NOW (after stream is truly active)
         const mins = Number(previewMinsInput.value) || 1;
         beginPreviewWindow(mins);
 
       } else if (msg.type === 'candidate' && msg.candidate) {
-        const cand = new RTCIceCandidate(msg.candidate);
-        if (remoteDescriptionSet) {
-          try { await pc.addIceCandidate(cand); } catch (err) { console.warn('ICE add failed', err); }
-        } else {
-          candidateQueue.push(cand);
-        }
+        try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch (err) { console.warn('ICE add failed', err); }
       }
     }
 
     async function startStreaming() {
       try {
-        startBtn.disabled = true;
-        const room = currentRoom();
+        if (started) { // -> Stop streaming
+          await stopStreaming();
+          return;
+        }
 
+        startBtn.disabled = true;
+
+        const room = currentRoom();
         setStatus('Starting camera…');
         localStream = await getMedia();
-        localVideo.srcObject = localStream;   // local muted preview (only shown during preview window)
+        localVideo.srcObject = localStream;
 
         await connectWS(room);
         setStatus('Waiting for offer…');
 
-        // Track recovery (rare)
-        localStream.getTracks().forEach(track => {
-          track.onended = async () => {
-            try {
-              const s2 = await getMedia();
-              const senders = pc ? pc.getSenders() : [];
-              for (const t of s2.getTracks()) {
-                const sender = senders.find(s => s.track && s.track.kind === t.kind);
-                if (sender) await sender.replaceTrack(t); else if (pc) pc.addTrack(t, s2);
-              }
-              localStream = s2; localVideo.srcObject = s2;
-            } catch {}
-          };
-        });
+        // Button becomes "Stop streaming"
+        started = true;
+        startBtn.textContent = 'Stop streaming';
+        startBtn.disabled = false;
 
       } catch (err) {
         console.error(err);
@@ -320,7 +299,31 @@
       }
     }
 
-    // Tap anywhere to toggle peek brightness after blackout
+    async function stopStreaming() {
+      // Clear timers
+      if (previewTimer) clearTimeout(previewTimer);
+      if (previewTicker) clearInterval(previewTicker);
+      previewTimer = previewTicker = null;
+
+      // Close PC/WS and stop media
+      try { pc && pc.getSenders().forEach(s => s.track && s.track.stop()); } catch {}
+      try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
+      try { pc && pc.close(); } catch {}
+      try { ws && ws.close(); } catch {}
+
+      // Reset UI state
+      localStream = null; pc = null; ws = null;
+      document.body.classList.remove('previewing','streaming','peek');
+      document.body.classList.add('blackout');
+      ui.style.display = 'block';
+      localVideo.style.display = 'none';
+      setStatus('Stopped');
+
+      started = false;
+      startBtn.textContent = 'Start streaming';
+    }
+
+    // Tap to toggle peek AFTER preview (while streaming/blackout)
     function togglePeek() {
       if (!document.body.classList.contains('streaming')) return;
       const isPeek = document.body.classList.toggle('peek');
@@ -334,14 +337,7 @@
     });
 
     // Clean up on unload
-    window.addEventListener('beforeunload', () => {
-      if (previewTimer) clearTimeout(previewTimer);
-      if (previewTicker) clearInterval(previewTicker);
-      try { ws && ws.close(); } catch {}
-      try { pc && pc.close(); } catch {}
-      try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
-    });
-
+    window.addEventListener('beforeunload', stopStreaming);
     startBtn.addEventListener('click', startStreaming);
   </script>
 </body>
