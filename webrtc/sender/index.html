@@ -9,25 +9,20 @@
       background: black;
       color: white;
       font-family: sans-serif;
+      height: 100vh;
       display: flex;
       flex-direction: column;
-      height: 100vh;
       justify-content: center;
       align-items: center;
     }
-    video {
-      display: none;
-    }
+    video { display: none; }
     #controls {
       position: absolute;
       top: 20px;
       left: 20px;
       z-index: 10;
     }
-    button, label {
-      font-size: 1.2em;
-      margin: 0.5em;
-    }
+    label, button { font-size: 1.2em; margin: 0.5em; }
     #status {
       position: absolute;
       bottom: 10px;
@@ -47,12 +42,16 @@
   <video id="preview" autoplay playsinline muted></video>
 
   <script>
-    const WS_ENDPOINT = "wss://hungryface.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "baby1";
+    // Dynamically set WS endpoint to Render server
+    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+
     let ws, pc, localStream;
+    let remoteDescriptionSet = false;
+    const candidateQueue = [];
     const statusEl = document.getElementById('status');
 
-    function setStatus(msg) {
+    function logStatus(msg) {
       console.log(msg);
       statusEl.textContent = msg;
     }
@@ -64,17 +63,17 @@
     function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
-        setStatus('Connecting to signaling…');
+        logStatus('Connecting to signaling…');
         ws = new WebSocket(url);
 
         ws.onopen = () => {
-          setStatus('Signaling: connected');
+          logStatus('Signaling: connected');
           send({ type: 'join', room });
           resolve();
         };
         ws.onmessage = onSignal;
-        ws.onerror = (e) => { setStatus('Signaling: error'); console.error('WS error', e); reject(e); };
-        ws.onclose = (e) => { console.warn('WS closed', e.code, e.reason); setStatus('Signaling: closed'); };
+        ws.onerror = (e) => { logStatus('Signaling: error'); reject(e); };
+        ws.onclose = () => logStatus('Signaling: closed');
       });
     }
 
@@ -86,21 +85,19 @@
       document.getElementById('preview').srcObject = localStream;
 
       await connectWS();
-      setStatus('Waiting for offer…');
+      logStatus('Waiting for offer…');
     }
 
     function createPC() {
-      pc = new RTCPeerConnection({
-        iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
-      });
+      pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
 
       pc.onicecandidate = (event) => {
         if (event.candidate) send({ type: 'candidate', candidate: event.candidate });
       };
 
       pc.oniceconnectionstatechange = () => {
-        console.log('ICE conn state:', pc.iceConnectionState);
-        setStatus('ICE: ' + pc.iceConnectionState);
+        console.log('ICE state:', pc.iceConnectionState);
+        logStatus('ICE: ' + pc.iceConnectionState);
       };
 
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
@@ -110,21 +107,32 @@
       const data = JSON.parse(event.data);
 
       if (data.type === 'offer') {
-        setStatus('Got offer, creating answer…');
+        logStatus('Got offer, creating answer…');
         createPC();
         await pc.setRemoteDescription(new RTCSessionDescription(data));
+        remoteDescriptionSet = true;
+
+        // Process any queued ICE candidates
+        candidateQueue.forEach(c => pc.addIceCandidate(c));
+        candidateQueue.length = 0;
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         send(answer);
-        setStatus('Streaming… (tap screen to show controls)');
-        document.body.onclick = () => document.getElementById('controls').style.display =
-          document.getElementById('controls').style.display === 'none' ? 'block' : 'none';
+
+        logStatus('Streaming… (tap screen to show/hide controls)');
+        document.body.onclick = () => {
+          const controls = document.getElementById('controls');
+          controls.style.display = controls.style.display === 'none' ? 'block' : 'none';
+        };
         document.getElementById('controls').style.display = 'none';
+
       } else if (data.type === 'candidate') {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-        } catch (err) {
-          console.error('Error adding ICE candidate', err);
+        const candidate = new RTCIceCandidate(data.candidate);
+        if (remoteDescriptionSet) {
+          await pc.addIceCandidate(candidate);
+        } else {
+          candidateQueue.push(candidate);
         }
       }
     }
