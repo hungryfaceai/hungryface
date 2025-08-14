@@ -6,10 +6,27 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
   <style>
     :root { color-scheme: dark; }
-    html, body { margin: 0; height: 100%; background: #000; color: #fff; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif; }
-    video { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; background: #000; }
-    #status { position: fixed; top: 10px; left: 10px; font-size: 0.9em; opacity: 0.85; padding: 6px 10px; background: rgba(0,0,0,0.35); border-radius: 8px; }
-    #unmute { position: fixed; bottom: 16px; left: 16px; padding: 10px 14px; border: 0; border-radius: 10px; background:#333; color:#fff; display:none; cursor: pointer; }
+    html, body {
+      margin: 0; height: 100%;
+      background: #000; color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+    }
+    /* Auto-size to screen without cropping; switch to 'cover' if you want fill */
+    video {
+      position: fixed; inset: 0;
+      width: 100vw; height: 100vh;
+      object-fit: contain; background: #000;
+    }
+    #status {
+      position: fixed; top: 10px; left: 10px;
+      font-size: 0.9em; opacity: 0.85; padding: 6px 10px;
+      background: rgba(0,0,0,0.35); border-radius: 8px;
+    }
+    #unmute {
+      position: fixed; bottom: 16px; left: 16px;
+      padding: 10px 14px; border: 0; border-radius: 10px;
+      background:#333; color:#fff; display:none; cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -17,143 +34,159 @@
   <button id="unmute">Tap to enable audio</button>
   <video id="remote" autoplay playsinline></video>
 
-<script>
-  const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
-  const room = new URLSearchParams(location.search).get("room") || "baby1";
+  <script>
+    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const room = new URLSearchParams(location.search).get("room") || "baby1";
 
-  const statusEl = document.getElementById('status');
-  const remoteVideo = document.getElementById('remote');
-  const unmuteBtn = document.getElementById('unmute');
+    const statusEl = document.getElementById('status');
+    const remoteVideo = document.getElementById('remote');
+    const unmuteBtn = document.getElementById('unmute');
 
-  let ws, pc;
-  let remoteDescriptionSet = false;
-  const candidateQueue = [];
-  let offerResendTimer = null;               // NEW
+    let ws, pc;
+    let remoteDescriptionSet = false;
+    const candidateQueue = [];
+    let offerResendTimer = null;
+    let lastAnswerSdp = null;    // NEW: de-dupe identical answers
 
-  const setStatus = (msg) => { statusEl.textContent = msg; console.log('[STATUS]', msg); };
-  const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
+    const setStatus = (msg) => { statusEl.textContent = msg; console.log('[STATUS]', msg); };
+    const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
-  function connectWS() {
-    return new Promise((resolve, reject) => {
-      const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
-      setStatus('Connecting to signaling…');
-      ws = new WebSocket(url);
+    function connectWS() {
+      return new Promise((resolve, reject) => {
+        const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
+        setStatus('Connecting to signaling…');
+        ws = new WebSocket(url);
 
-      let opened = false;
-      const timer = setTimeout(() => {
-        if (!opened) { try { ws.close(); } catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); }
-      }, 15000);
+        let opened = false;
+        const timer = setTimeout(() => {
+          if (!opened) { try { ws.close(); } catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); }
+        }, 15000);
 
-      ws.onopen = () => {
-        opened = true; clearTimeout(timer);
-        setStatus('Signaling: connected');
-        send({ type: 'join', room });
-        resolve();
+        ws.onopen = () => {
+          opened = true; clearTimeout(timer);
+          setStatus('Signaling: connected');
+          send({ type: 'join', room });
+          resolve();
+        };
+        ws.onmessage = onSignal;
+        ws.onerror = (e) => { console.error('[WS error]', e); setStatus('Signaling: error'); };
+        ws.onclose = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); };
+      });
+    }
+
+    function createPC() {
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+
+      // Explicitly request both tracks in the SDP
+      pc.addTransceiver('video', { direction: 'recvonly' });
+      pc.addTransceiver('audio', { direction: 'recvonly' });
+
+      pc.onicecandidate = (ev) => { if (ev.candidate) send({ type:'candidate', candidate: ev.candidate }); };
+      pc.ontrack = (ev) => {
+        if (remoteVideo.srcObject !== ev.streams[0]) {
+          remoteVideo.srcObject = ev.streams[0];
+          // Try autoplay with audio; if blocked, show button
+          remoteVideo.muted = false;
+          remoteVideo.play().catch(() => { unmuteBtn.style.display = 'block'; });
+        }
       };
-      ws.onmessage = onSignal;
-      ws.onerror = (e) => { console.error('[WS error]', e); setStatus('Signaling: error'); };
-      ws.onclose  = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); };
+      pc.oniceconnectionstatechange = () => {
+        console.log('[ICE]', pc.iceConnectionState);
+        setStatus('ICE: ' + pc.iceConnectionState);
+      };
+    }
+
+    unmuteBtn.addEventListener('click', async () => {
+      try { await remoteVideo.play(); unmuteBtn.style.display = 'none'; } catch (e) { console.warn(e); }
     });
-  }
 
-  function createPC() {
-    pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-
-    // Explicitly request both tracks in the SDP
-    pc.addTransceiver('video', { direction: 'recvonly' });
-    pc.addTransceiver('audio', { direction: 'recvonly' });
-
-    pc.onicecandidate = (ev) => { if (ev.candidate) send({ type:'candidate', candidate: ev.candidate }); };
-    pc.ontrack = (ev) => {
-      if (remoteVideo.srcObject !== ev.streams[0]) {
-        remoteVideo.srcObject = ev.streams[0];
-        remoteVideo.muted = false;
-        remoteVideo.play().catch(() => { unmuteBtn.style.display = 'block'; });
+    async function sendCurrentOffer() {
+      if (pc?.localDescription?.type === 'offer') {
+        console.log('[WS OUT] offer (send/resend)');
+        send(pc.localDescription);
       }
-    };
-    pc.oniceconnectionstatechange = () => {
-      console.log('[ICE]', pc.iceConnectionState);
-      setStatus('ICE: ' + pc.iceConnectionState);
-    };
-  }
-
-  unmuteBtn.addEventListener('click', async () => {
-    try { await remoteVideo.play(); unmuteBtn.style.display = 'none'; } catch (e) { console.warn(e); }
-  });
-
-  async function sendCurrentOffer() {
-    if (pc?.localDescription?.type === 'offer') {
-      console.log('[WS OUT] offer (send/resend)');
-      send(pc.localDescription);
     }
-  }
 
-  function startOfferResendLoop() {          // NEW
-    stopOfferResendLoop();
-    offerResendTimer = setInterval(() => {
-      if (!remoteDescriptionSet) sendCurrentOffer();
-      else stopOfferResendLoop();
-    }, 2000);
-  }
-  function stopOfferResendLoop() {           // NEW
-    if (offerResendTimer) clearInterval(offerResendTimer);
-    offerResendTimer = null;
-  }
-
-  async function startReceiver() {
-    try {
-      await connectWS();
-      createPC();
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      await sendCurrentOffer();              // initial send
-      startOfferResendLoop();                // NEW: keep resending till answered
-      setStatus('Offer sent, waiting for answer…');
-    } catch (e) {
-      console.error(e);
-      setStatus('Error: ' + (e.message || e));
+    function startOfferResendLoop() {
+      stopOfferResendLoop();
+      offerResendTimer = setInterval(() => {
+        if (!remoteDescriptionSet) sendCurrentOffer();
+        else stopOfferResendLoop();
+      }, 2000);
     }
-  }
+    function stopOfferResendLoop() {
+      if (offerResendTimer) clearInterval(offerResendTimer);
+      offerResendTimer = null;
+    }
 
-  async function onSignal(evt) {
-    let msg; try { msg = JSON.parse(evt.data); } catch { return; }
-    console.log('[WS IN]', msg.type);
+    async function startReceiver() {
+      try {
+        await connectWS();
+        createPC();
 
-    if (msg.type === 'answer') {
-      setStatus('Got answer, applying…');
-      await pc.setRemoteDescription(new RTCSessionDescription(msg));
-      remoteDescriptionSet = true;
-      stopOfferResendLoop();                 // NEW: stop resending once answered
-
-      // Flush queued ICE
-      for (const c of candidateQueue) {
-        try { await pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
+        // Initial offer
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await sendCurrentOffer();
+        startOfferResendLoop();
+        setStatus('Offer sent, waiting for answer…');
+      } catch (e) {
+        console.error(e);
+        setStatus('Error: ' + (e.message || e));
       }
-      candidateQueue.length = 0;
-
-    } else if (msg.type === 'candidate' && msg.candidate) {
-      const cand = new RTCIceCandidate(msg.candidate);
-      if (remoteDescriptionSet) {
-        try { await pc.addIceCandidate(cand); } catch (e) { console.warn('ICE add failed', e); }
-      } else {
-        candidateQueue.push(cand);
-      }
-
-    } else if (msg.type === 'need-offer' || msg.type === 'peer-joined') {
-      // sender asking / peer joined -> (re)send offer immediately
-      await sendCurrentOffer();
     }
-  }
 
-  window.addEventListener('beforeunload', () => {
-    stopOfferResendLoop();
-    try { ws && ws.close(); } catch {}
-    try { pc && pc.close(); } catch {}
-  });
+    async function onSignal(evt) {
+      let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+      console.log('[WS IN]', msg.type);
 
-  startReceiver();
-</script>
+      if (msg.type === 'answer') {
+        // Apply answer only in the correct state
+        if (pc.signalingState !== 'have-local-offer') {
+          console.log('[SKIP] answer in state', pc.signalingState);
+          return;
+        }
+        // Ignore identical answers
+        if (lastAnswerSdp === msg.sdp) {
+          console.log('[DUP] identical answer ignored');
+          return;
+        }
+        lastAnswerSdp = msg.sdp;
 
+        setStatus('Got answer, applying…');
+        await pc.setRemoteDescription(new RTCSessionDescription(msg));
+        remoteDescriptionSet = true;
+        stopOfferResendLoop();
+
+        // Flush queued ICE
+        for (const c of candidateQueue) {
+          try { await pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
+        }
+        candidateQueue.length = 0;
+
+      } else if (msg.type === 'candidate' && msg.candidate) {
+        const cand = new RTCIceCandidate(msg.candidate);
+        if (remoteDescriptionSet) {
+          try { await pc.addIceCandidate(cand); } catch (e) { console.warn('ICE add failed', e); }
+        } else {
+          candidateQueue.push(cand);
+        }
+
+      } else if (msg.type === 'need-offer' || msg.type === 'peer-joined') {
+        // Sender joined or explicitly asked → (re)send our offer
+        await sendCurrentOffer();
+      }
+    }
+
+    window.addEventListener('beforeunload', () => {
+      stopOfferResendLoop();
+      try { ws && ws.close(); } catch {}
+      try { pc && pc.close(); } catch {}
+    });
+
+    startReceiver();
+  </script>
 </body>
 </html>
