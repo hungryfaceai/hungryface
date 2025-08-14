@@ -1,123 +1,293 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Baby Monitor Sender</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <meta charset="utf-8" />
+  <title>Baby Monitor – Sender (iPhone)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+
   <style>
-    body {
-      margin: 0;
-      background: black;
-      color: white;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center;
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; height: 100%;
+      background: #000; color: #ccc; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+      touch-action: manipulation;
     }
-    video { display: none; }
-    #controls { position: absolute; top: 20px; left: 20px; z-index: 10; }
-    label, button { font-size: 1.1em; margin: 0.5em; }
-    #status { position: absolute; bottom: 10px; left: 10px; font-size: 0.9em; opacity: 0.75; }
+
+    /* Centered card before streaming */
+    #ui {
+      min-height: 100%;
+      display: flex; align-items: center; justify-content: center; padding: 20px;
+    }
+    .card {
+      width: 100%; max-width: 520px;
+      background: #0b0b0b; border: 1px solid #141414; border-radius: 14px;
+      padding: 18px; box-sizing: border-box;
+    }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; }
+    label.switch { display: flex; align-items: center; gap: 10px; font-size: 16px; }
+    input[type="checkbox"] { width: 22px; height: 22px; }
+    input[type="text"] { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222; background:#0b0b0b; color:#ddd; }
+    button {
+      width: 100%; padding: 14px 16px; border-radius: 12px; border: 0;
+      background: #2a2a2a; color: #fff; font-size: 17px; font-weight: 600;
+    }
+    button:active { transform: scale(0.99); }
+    .hint { opacity: .7; font-size: 13px; }
+
+    /* Hidden video just to keep capture alive */
+    video { position: fixed; left: -10000px; top: -10000px; width:1px; height:1px; }
+
+    /* Baby-monitor blackout/peek */
+    body.blackout { background: #000; }
+    body.peek     { background: #111; } /* slightly brighter “peek” */
+
+    /* Status overlay (visible only when streaming) */
+    .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; }
+    body.streaming .overlay { display: flex; }
+    .status {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
+    }
+
+    /* Entire touch area to toggle peek once streaming */
+    #tap { position: fixed; inset: 0; display: none; }
+    body.streaming #tap { display: block; }
   </style>
 </head>
-<body>
-  <div id="controls">
-    <label><input type="checkbox" id="videoToggle" checked> Video</label>
-    <label><input type="checkbox" id="audioToggle" checked> Audio</label>
-    <button id="startBtn">Start streaming</button>
+<body class="blackout">
+  <div id="ui">
+    <div class="card">
+      <h2 style="margin:0 0 8px 0;">iPhone Sender</h2>
+
+      <div class="row">
+        <label class="switch">
+          <input id="videoOn" type="checkbox" checked>
+          <span>Video ON</span>
+        </label>
+        <label class="switch">
+          <input id="audioOn" type="checkbox" checked>
+          <span>Audio ON</span>
+        </label>
+      </div>
+
+      <div class="row">
+        <input id="room" type="text" placeholder="Room (e.g., baby1)" value="baby1" autocomplete="off">
+      </div>
+
+      <div class="row">
+        <button id="startBtn">Start streaming</button>
+      </div>
+
+      <p class="hint">After starting, the screen goes fully black (baby monitor mode). Tap anywhere to “peek” (slightly brighter), tap again to return to black.</p>
+    </div>
   </div>
-  <div id="status">Idle</div>
-  <video id="preview" autoplay playsinline muted></video>
+
+  <!-- touch layer + status -->
+  <div id="tap" aria-hidden="true"></div>
+  <div class="overlay"><div class="status" id="status">Idle</div></div>
+
+  <!-- hidden preview just to keep camera alive -->
+  <video id="local" playsinline autoplay muted></video>
 
   <script>
-    // --- Config
-    const room = new URLSearchParams(location.search).get("room") || "baby1";
+    // ---- Config
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const qsRoom = new URLSearchParams(location.search).get('room');
+    const roomInput = document.getElementById('room');
+    if (qsRoom) roomInput.value = qsRoom;
 
-    // --- State
-    let ws, pc, localStream;
+    // ---- Elements
+    const videoOn = document.getElementById('videoOn');
+    const audioOn = document.getElementById('audioOn');
+    const startBtn = document.getElementById('startBtn');
+    const localVideo = document.getElementById('local');
+    const statusEl = document.getElementById('status');
+    const ui = document.getElementById('ui');
+    const tap = document.getElementById('tap');
+
+    // ---- State
+    let ws = null, pc = null, localStream = null;
     let remoteDescriptionSet = false;
     const candidateQueue = [];
-    const statusEl = document.getElementById('status');
+    let wakeLock = null;
 
-    const setStatus = (m) => { console.log(m); statusEl.textContent = m; };
+    const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
 
-    function send(obj){ try { ws?.readyState===WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} }
+    // Keep screen awake (when supported)
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+          document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible') {
+              try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+            }
+          });
+        }
+      } catch {}
+    }
 
-    function connectWS() {
+    function currentRoom() {
+      const r = (roomInput.value || 'baby1').trim();
+      // reflect in URL for convenience
+      try {
+        const u = new URL(location.href);
+        u.searchParams.set('room', r);
+        history.replaceState({}, '', u);
+      } catch {}
+      return r;
+    }
+
+    async function getMedia() {
+      const wantVideo = videoOn.checked;
+      const wantAudio = audioOn.checked;
+      if (!wantVideo && !wantAudio) throw new Error('Both video and audio are OFF.');
+
+      const constraints = {
+        video: wantVideo ? {
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30, max: 30 }
+        } : false,
+        audio: wantAudio ? {
+          echoCancellation: true, noiseSuppression: true, autoGainControl: true
+        } : false
+      };
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    }
+
+    function connectWS(room) {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
         setStatus('Connecting to signaling…');
         ws = new WebSocket(url);
-        ws.onopen = () => { setStatus('Signaling: connected'); send({ type:'join', room }); resolve(); };
+
+        let opened = false;
+        const timer = setTimeout(() => {
+          if (!opened) { try { ws.close(); } catch{} reject(new Error('WS timeout')); setStatus('Signaling: timeout'); }
+        }, 15000);
+
+        ws.onopen = () => {
+          opened = true; clearTimeout(timer);
+          setStatus('Signaling: connected');
+          send({ type: 'join', room });
+          resolve();
+        };
         ws.onmessage = onSignal;
-        ws.onerror = (e) => { console.error('WS error', e); setStatus('Signaling: error'); reject(e); };
-        ws.onclose  = (e) => { console.warn('WS closed', e.code, e.reason); setStatus('Signaling: closed'); };
+        ws.onerror = (e) => { console.error('[WS error]', e); setStatus('Signaling: error'); };
+        ws.onclose = (e) => { console.warn('[WS closed]', e.code, e.reason); if (!opened) reject(new Error('WS closed')); setStatus('Signaling: closed'); };
       });
     }
 
-    async function startStream() {
-      try {
-        const wantVideo = document.getElementById('videoToggle').checked;
-        const wantAudio = document.getElementById('audioToggle').checked;
-        const constraints = {
-          video: wantVideo ? { facingMode:'environment', width:{ideal:1280}, height:{ideal:720}, frameRate:{ideal:30,max:30} } : false,
-          audio: wantAudio ? { echoCancellation:true, noiseSuppression:true, autoGainControl:true } : false
-        };
-        if (!constraints.video && !constraints.audio) throw new Error('Both video and audio are OFF.');
-        localStream = await navigator.mediaDevices.getUserMedia(constraints);
-        document.getElementById('preview').srcObject = localStream;
-
-        await connectWS();
-        setStatus('Waiting for offer…');
-      } catch (e) {
-        console.error(e); setStatus('Error: ' + (e.message||e));
-      }
+    function send(obj) {
+      try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); } catch {}
     }
 
     function createPC() {
       pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+        bundlePolicy: 'max-bundle',
+        sdpSemantics: 'unified-plan'
       });
-      pc.onicecandidate = (ev) => { if (ev.candidate) send({ type:'candidate', candidate: ev.candidate }); };
-      pc.oniceconnectionstatechange = () => { console.log('ICE:', pc.iceConnectionState); setStatus('ICE: ' + pc.iceConnectionState); };
-      localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+
+      pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate }); };
+      pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
+      pc.onconnectionstatechange = () => console.log('[PC]', pc.connectionState);
+
+      // Publish tracks
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
 
       if (msg.type === 'offer') {
+        // Receiver sent an SDP offer → answer it
         setStatus('Got offer, creating answer…');
         createPC();
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
         remoteDescriptionSet = true;
 
-        // flush queued ICE
-        for (const c of candidateQueue) { try { await pc.addIceCandidate(c); } catch(e) { console.warn('late ICE add failed', e); } }
-        candidateQueue.length = 0;
+        // Flush queued ICE
+        while (candidateQueue.length) {
+          const c = candidateQueue.shift();
+          try { await pc.addIceCandidate(c); } catch (err) { console.warn('late ICE add failed', err); }
+        }
 
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         send(answer);
 
-        // Hide controls while streaming; tap to toggle
-        const controls = document.getElementById('controls');
-        controls.style.display = 'none';
-        document.body.onclick = () => {
-          controls.style.display = controls.style.display === 'none' ? 'block' : 'none';
-        };
-        setStatus('Streaming… (tap to show/hide controls)');
+        // Enter baby-monitor mode
+        ui.style.display = 'none';
+        document.body.classList.add('streaming', 'blackout');
+        await requestWakeLock();
+        setStatus('Streaming… Tap anywhere to peek');
 
       } else if (msg.type === 'candidate' && msg.candidate) {
         const cand = new RTCIceCandidate(msg.candidate);
         if (remoteDescriptionSet) {
-          try { await pc.addIceCandidate(cand); } catch (e) { console.warn('ICE add failed', e); }
+          try { await pc.addIceCandidate(cand); } catch (err) { console.warn('ICE add failed', err); }
         } else {
           candidateQueue.push(cand);
         }
       }
     }
 
-    document.getElementById('startBtn').addEventListener('click', startStream);
+    async function startStreaming() {
+      try {
+        startBtn.disabled = true;
+        const room = currentRoom();
+
+        // 1) Capture (must be user-gesture on iOS)
+        setStatus('Starting camera…');
+        localStream = await getMedia();
+        localVideo.srcObject = localStream; // keep alive (muted, hidden)
+
+        // 2) Connect signaling
+        await connectWS(room);
+        setStatus('Waiting for offer…');
+
+        // If a track ends, try to reacquire
+        localStream.getTracks().forEach(track => {
+          track.onended = async () => {
+            try {
+              const s2 = await getMedia();
+              const senders = pc ? pc.getSenders() : [];
+              for (const t of s2.getTracks()) {
+                const sender = senders.find(s => s.track && s.track.kind === t.kind);
+                if (sender) { await sender.replaceTrack(t); }
+              }
+              localStream = s2; localVideo.srcObject = s2;
+            } catch {}
+          };
+        });
+
+      } catch (err) {
+        console.error(err);
+        alert(err.message || err);
+        setStatus('Idle');
+        startBtn.disabled = false;
+      }
+    }
+
+    // Tap anywhere to toggle peek/blackout when streaming
+    function togglePeek() {
+      if (!document.body.classList.contains('streaming')) return;
+      const isPeek = document.body.classList.toggle('peek');
+      document.body.classList.toggle('blackout', !isPeek);
+    }
+    tap.addEventListener('click', togglePeek);
+    // fallback (anywhere)
+    document.body.addEventListener('click', (e) => {
+      if (!document.body.classList.contains('streaming')) return;
+      if (e.target === tap) return; // already handled
+      togglePeek();
+    });
+
+    startBtn.addEventListener('click', startStreaming);
   </script>
 </body>
 </html>
