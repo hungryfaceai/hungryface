@@ -1,80 +1,115 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport"
-        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>Receiver – Baby Monitor</title>
+  <meta charset="utf-8">
+  <title>Baby Monitor Receiver</title>
   <style>
-    :root { color-scheme: dark; }
-    html, body { margin: 0; padding: 0; height: 100%; background: #000; color: #bbb; font-family: -apple-system, system-ui, sans-serif; }
-    video { width: 100%; height: 100%; object-fit: cover; background: #000; }
-    .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); z-index: 2; pointer-events: none; }
-    .status { background: rgba(0,0,0,0.6); color: #fff; padding: 10px 16px; border-radius: 12px; font-size: 15px; }
+    body {
+      margin: 0;
+      background: black;
+      color: white;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      justify-content: center;
+      align-items: center;
+    }
+    video {
+      width: 100%;
+      height: auto;
+      background: black;
+    }
+    #status {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      font-size: 0.9em;
+      opacity: 0.7;
+    }
   </style>
 </head>
 <body>
-  <video id="remote" playsinline autoplay></video>
-  <div class="overlay" id="overlay"><div class="status" id="status">Connecting…</div></div>
+  <div id="status">Idle</div>
+  <video id="remoteVideo" autoplay playsinline></video>
 
   <script>
-    // --- Config: Render signaling
     const WS_ENDPOINT = "wss://hungryface.onrender.com/ws";
+    const room = new URLSearchParams(location.search).get("room") || "baby1";
+    let ws, pc;
+    const statusEl = document.getElementById('status');
 
-    const $ = id => document.getElementById(id);
-    const remoteVideo = $('remote'), overlay = $('overlay'), statusEl = $('status');
-    const setStatus = t => statusEl.textContent = t;
+    function setStatus(msg) {
+      console.log(msg);
+      statusEl.textContent = msg;
+    }
 
-    let pc = null, ws = null;
-    const room = new URLSearchParams(location.search).get('room') || 'baby1';
-
-    function createPC() {
-      pc = new RTCPeerConnection({ iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }] });
-      pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
-      pc.onconnectionstatechange = () => setStatus('Conn: ' + pc.connectionState);
-      pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate }); };
-      pc.ontrack = (e) => {
-        if (remoteVideo.srcObject !== e.streams[0]) {
-          remoteVideo.srcObject = e.streams[0];
-          overlay.style.display = 'none';
-        }
-      };
+    function send(data) {
+      ws.send(JSON.stringify(data));
     }
 
     function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
+        setStatus('Connecting to signaling…');
         ws = new WebSocket(url);
-        ws.onopen = () => { send({ type: 'join', room }); resolve(); };
+
+        ws.onopen = () => {
+          setStatus('Signaling: connected');
+          send({ type: 'join', room });
+          resolve();
+        };
         ws.onmessage = onSignal;
-        ws.onerror = reject;
+        ws.onerror = (e) => { setStatus('Signaling: error'); console.error('WS error', e); reject(e); };
+        ws.onclose = (e) => { console.warn('WS closed', e.code, e.reason); setStatus('Signaling: closed'); };
       });
     }
-    function send(obj){ try{ ws && ws.readyState===WebSocket.OPEN && ws.send(JSON.stringify(obj)); }catch{} }
 
-    async function onSignal(evt) {
-      let msg; try { msg = JSON.parse(evt.data); } catch { return; }
-      if (msg.type === 'answer') {
-        await pc.setRemoteDescription(msg);
-      } else if (msg.type === 'candidate' && msg.candidate) {
-        try { await pc.addIceCandidate(msg.candidate); } catch {}
+    function createPC() {
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
+      });
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) send({ type: 'candidate', candidate: event.candidate });
+      };
+
+      pc.ontrack = (event) => {
+        document.getElementById('remoteVideo').srcObject = event.streams[0];
+      };
+
+      pc.onicegatheringstatechange = () => console.log('ICE gathering:', pc.iceGatheringState);
+      pc.oniceconnectionstatechange = () => {
+        console.log('ICE conn:', pc.iceConnectionState);
+        setStatus('ICE: ' + pc.iceConnectionState);
+      };
+    }
+
+    async function startReceiver() {
+      await connectWS();
+      createPC();
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      send(offer);
+      setStatus('Offer sent, waiting for answer…');
+    }
+
+    async function onSignal(event) {
+      const data = JSON.parse(event.data);
+
+      if (data.type === 'answer') {
+        setStatus('Got answer, setting remote desc…');
+        await pc.setRemoteDescription(new RTCSessionDescription(data));
+      } else if (data.type === 'candidate') {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch (err) {
+          console.error('Error adding ICE candidate', err);
+        }
       }
     }
 
-    async function start() {
-      setStatus('Creating connection…'); createPC();
-      setStatus('Connecting to signaling…'); await connectWS();
-
-      // Receiver is offerer (recvonly)
-      setStatus('Creating offer…');
-      const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-      await pc.setLocalDescription(offer);
-      send(pc.localDescription);
-
-      setStatus('Waiting for answer…');
-    }
-
-    start().catch(e => setStatus('Error: ' + (e.message || e)));
+    startReceiver();
   </script>
 </body>
 </html>
