@@ -2,75 +2,121 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WebRTC Sender (Answerer, iPhone)</title>
-  <link rel="icon" href="data:,">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Sender (iPhone) – Baby Monitor</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 16px; }
-    video { width: 100%; max-height: 60vh; background: #000; border-radius: 8px; }
-    textarea { width: 100%; height: 140px; }
-    button { padding: 10px 14px; margin: 6px 4px 6px 0; }
-    .row { margin: 12px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .small { font-size: 12px; color: #666; }
-    label { display:block; margin-bottom: 6px; }
-    select { padding: 8px; }
-    .status { margin-left: 6px; font-weight: 600; }
-    .notice { background:#e7f3ff; border:1px solid #b6e0ff; padding:8px 10px; border-radius:6px; font-size:13px; }
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      background: #000; color: #bbb; font-family: -apple-system, system-ui, sans-serif;
+      touch-action: manipulation;
+    }
+    /* Container */
+    .wrap {
+      min-height: 100%; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 18px; padding: 16px;
+    }
+    /* Controls card */
+    .card {
+      width: 100%; max-width: 520px; background: #0a0a0a; border-radius: 14px;
+      padding: 18px; box-sizing: border-box; border: 1px solid #141414;
+    }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; }
+    label.switch { display: flex; align-items: center; gap: 10px; font-size: 16px; }
+    input[type="checkbox"] { width: 22px; height: 22px; }
+    input[type="text"] { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222; background:#0a0a0a; color:#ddd; }
+    button {
+      width: 100%; padding: 14px 16px; border-radius: 12px; border: 0;
+      background: #2a2a2a; color: #fff; font-size: 17px; font-weight: 600;
+    }
+    button:active { transform: scale(0.99); }
+    .hint { opacity: .7; font-size: 13px; }
+
+    /* Hidden video element just to keep camera running */
+    video { position: fixed; left: -9999px; top: -9999px; width:1px; height:1px; }
+
+    /* Blackout states */
+    .blackout { background: #000; }
+    .peek { background: #121212; } /* “more luminosity” but still black */
+
+    /* Overlay status in blackout/peek */
+    .overlay {
+      position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+      pointer-events: none;
+    }
+    .blackout .overlay, .peek .overlay { display: flex; }
+    .status {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
+    }
+    .taparea {
+      position: fixed; inset: 0; display: none; /* enabled once streaming */
+    }
+    .streaming .taparea { display: block; }
   </style>
 </head>
-<body>
-  <h1>Sender (Answerer, iPhone)</h1>
+<body class="blackout">
+  <div class="wrap" id="ui">
+    <h2 style="margin:0 0 6px 0;">iPhone Sender</h2>
 
-  <div class="notice">
-    Keep this page in the foreground and the screen unlocked. On iPhone, the camera stops if the device locks or you switch apps.
+    <div class="card">
+      <div class="row">
+        <label class="switch">
+          <input id="videoOn" type="checkbox" checked>
+          <span>Video ON</span>
+        </label>
+        <label class="switch">
+          <input id="audioOn" type="checkbox" checked>
+          <span>Audio ON</span>
+        </label>
+      </div>
+
+      <div class="row">
+        <input id="room" type="text" placeholder="Room (e.g., baby1)" value="baby1" autocomplete="off">
+      </div>
+
+      <div class="row">
+        <button id="startBtn">Start streaming</button>
+      </div>
+
+      <p class="hint">The screen will go fully black. Tap anywhere to “peek” (slightly brighter black); tap again to return to full blackout.</p>
+      <p class="hint">Requires the receiver page to be open on the laptop and in the same room.</p>
+    </div>
   </div>
 
-  <div class="row">
-    <label>Camera:</label>
-    <select id="cameraFacing">
-      <option value="environment" selected>Back camera</option>
-      <option value="user">Front camera</option>
-    </select>
-  </div>
+  <!-- Touch layer for blackout/peek -->
+  <div class="taparea" id="tap"></div>
+  <div class="overlay"><div class="status" id="status">Idle</div></div>
 
-  <div class="row">
-    <button id="start">Start camera & mic</button>
-    <span class="small">Requires HTTPS.</span>
-    <span class="status" id="pcState">Idle</span>
-  </div>
-
-  <video id="local" playsinline muted autoplay></video>
-
-  <div class="row">
-    <label for="offer" class="small">Paste Offer (from laptop):</label>
-    <textarea id="offer" placeholder='{"type":"offer","sdp":"..."}'></textarea>
-  </div>
-
-  <div class="row">
-    <button id="acceptOffer" disabled>Accept Offer & Create Answer</button>
-    <button id="copyAnswer" disabled>Copy Answer</button>
-  </div>
-
-  <textarea id="answer" placeholder="Answer will appear here" readonly></textarea>
+  <!-- Hidden video to keep the capture alive -->
+  <video id="local" playsinline autoplay muted></video>
 
   <script>
-    let pc = null, localStream = null, wakeLock = null;
-    const startBtn = document.getElementById('start');
-    const acceptOfferBtn = document.getElementById('acceptOffer');
-    const copyAnswerBtn = document.getElementById('copyAnswer');
-    const offerTA = document.getElementById('offer');
-    const answerTA = document.getElementById('answer');
-    const localVideo = document.getElementById('local');
-    const pcState = document.getElementById('pcState');
-    const cameraFacing = document.getElementById('cameraFacing');
+    // ===== Elements
+    const $ = id => document.getElementById(id);
+    const ui = $('ui');
+    const startBtn = $('startBtn');
+    const roomInput = $('room');
+    const videoOn = $('videoOn');
+    const audioOn = $('audioOn');
+    const localVideo = $('local');
+    const statusEl = $('status');
+    const tap = $('tap');
 
-    const setStatus = (s) => pcState.textContent = s;
+    // ===== State
+    let pc = null, ws = null, localStream = null;
+    let wakeLock = null;
+    let room = new URLSearchParams(location.search).get('room') || roomInput.value || 'baby1';
+
+    // ===== Helpers
+    const setStatus = (t) => { statusEl.textContent = t; };
 
     async function requestWakeLock() {
       try {
         if ('wakeLock' in navigator) {
           wakeLock = await navigator.wakeLock.request('screen');
-          wakeLock.addEventListener('release', () => {});
           document.addEventListener('visibilitychange', async () => {
             if (document.visibilityState === 'visible') {
               try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
@@ -80,110 +126,157 @@
       } catch {}
     }
 
+    async function getMedia() {
+      const wantVideo = videoOn.checked;
+      const wantAudio = audioOn.checked;
+
+      /** Build constraints only for requested kinds */
+      const constraints = {};
+      if (wantVideo) {
+        constraints.video = {
+          facingMode: 'environment',
+          width: { ideal: 1280 }, height: { ideal: 720 },
+          frameRate: { ideal: 30, max: 30 }
+        };
+      } else {
+        constraints.video = false;
+      }
+      constraints.audio = wantAudio ? {
+        echoCancellation: true, noiseSuppression: true, autoGainControl: true
+      } : false;
+
+      if (!wantVideo && !wantAudio) throw new Error('Both video and audio are OFF.');
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      return stream;
+    }
+
     function createPC() {
       pc = new RTCPeerConnection({
         iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
         sdpSemantics: 'unified-plan',
         bundlePolicy: 'max-bundle'
       });
-      pc.oniceconnectionstatechange = () => setStatus(pc.iceConnectionState);
-      pc.onconnectionstatechange = () => setStatus(pc.connectionState);
+      pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
+      pc.onconnectionstatechange = () => setStatus('Conn: ' + pc.connectionState);
+      pc.onicecandidate = (e) => {
+        if (e.candidate) send({ type: 'candidate', candidate: e.candidate });
+      };
     }
 
-    async function getMedia() {
-      const facingMode = cameraFacing.value;
-      return navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode,
-          width: { ideal: 1280 }, height: { ideal: 720 },
-          frameRate: { ideal: 30, max: 30 }
-        },
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-      });
-    }
-
-    async function startCapture() {
-      localStream = await getMedia();
-      localVideo.srcObject = localStream;
-
-      // Reacquire tracks if they end (e.g., device sleeps)
-      localStream.getTracks().forEach(track => {
-        track.onended = async () => {
-          try {
-            const newStream = await getMedia();
-            const senders = pc ? pc.getSenders() : [];
-            for (const newTrack of newStream.getTracks()) {
-              const sender = senders.find(s => s.track && s.track.kind === newTrack.kind);
-              if (sender) await sender.replaceTrack(newTrack);
-              else if (pc) pc.addTrack(newTrack, newStream);
-            }
-            localStream = newStream;
-            localVideo.srcObject = localStream;
-          } catch (e) {
-            console.warn('Reacquire media failed:', e);
-          }
-        };
-      });
-
-      acceptOfferBtn.disabled = false;
-      requestWakeLock();
-    }
-
-    const waitForIceGatheringComplete = (pc) => {
-      if (pc.iceGatheringState === 'complete') return Promise.resolve();
-      return new Promise(resolve => {
-        const check = () => {
-          if (pc.iceGatheringState === 'complete') {
-            pc.removeEventListener('icegatheringstatechange', check);
+    function connectWS() {
+      return new Promise((resolve, reject) => {
+        try {
+          // Render (and local) friendly: same host, WSS in prod.
+          const wsURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+          ws = new WebSocket(wsURL);
+          ws.onopen = () => {
+            send({ type: 'join', room });
             resolve();
-          }
-        };
-        pc.addEventListener('icegatheringstatechange', check);
+          };
+          ws.onmessage = onSignal;
+          ws.onerror = err => reject(err);
+          ws.onclose = () => { /* no-op; receiver can reconnect */ };
+        } catch (e) { reject(e); }
       });
-    };
-
-    async function acceptOfferAndAnswer() {
-      const val = offerTA.value.trim();
-      if (!val) return alert('Paste the Offer JSON first.');
-      if (!pc) createPC();
-
-      let remote;
-      try {
-        remote = JSON.parse(val);
-        if (remote.type !== 'offer') throw new Error('Pasted JSON is not an SDP offer');
-        await pc.setRemoteDescription(remote);
-      } catch (e) {
-        console.error('setRemoteDescription(offer) failed', e);
-        alert('setRemoteDescription (offer) failed: ' + (e?.message || e));
-        return;
-      }
-
-      // Attach tracks so the answer is sendonly
-      localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      await waitForIceGatheringComplete(pc);
-
-      answerTA.value = JSON.stringify(pc.localDescription);
-      copyAnswerBtn.disabled = false;
     }
 
-    startBtn.onclick = async () => {
-      startBtn.disabled = true;
-      try { await startCapture(); }
-      catch (e) {
-        startBtn.disabled = false;
-        alert('Failed to start camera/mic: ' + e.message);
+    function send(obj) {
+      try { ws && ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {}
+    }
+
+    async function onSignal(evt) {
+      let msg = null;
+      try { msg = JSON.parse(evt.data); } catch { return; }
+
+      if (msg.type === 'offer') {
+        // Receiver sent an SDP offer → we answer.
+        await pc.setRemoteDescription(msg);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        send(pc.localDescription);
+      } else if (msg.type === 'candidate' && msg.candidate) {
+        try { await pc.addIceCandidate(msg.candidate); } catch {}
       }
-    };
+    }
 
-    acceptOfferBtn.onclick = acceptOfferAndAnswer;
+    async function startStreaming() {
+      try {
+        startBtn.disabled = true;
+        room = roomInput.value.trim() || room;
+        setStatus('Starting camera…');
 
-    copyAnswerBtn.onclick = async () => {
-      try { await navigator.clipboard.writeText(answerTA.value); }
-      catch { answerTA.select(); document.execCommand('copy'); }
+        // 1) Capture
+        localStream = await getMedia();
+        localVideo.srcObject = localStream;
+
+        // 2) PeerConnection
+        createPC();
+        for (const track of localStream.getTracks()) {
+          pc.addTrack(track, localStream);
+        }
+
+        // 3) Signaling
+        setStatus('Connecting…');
+        await connectWS();
+        setStatus('Waiting for offer…');
+
+        // Enter blackout/monitor mode
+        document.body.classList.add('blackout', 'streaming');
+        ui.style.display = 'none';   // hide UI
+        await requestWakeLock();
+
+        // Reacquire tracks if they end (rare on iOS if app backgrounded)
+        localStream.getTracks().forEach(track => {
+          track.onended = async () => {
+            try {
+              const newStream = await getMedia();
+              const senders = pc.getSenders();
+              for (const newTrack of newStream.getTracks()) {
+                const sender = senders.find(s => s.track && s.track.kind === newTrack.kind);
+                if (sender) await sender.replaceTrack(newTrack);
+                else pc.addTrack(newTrack, newStream);
+              }
+              localStream = newStream;
+              localVideo.srcObject = localStream;
+            } catch (e) {}
+          };
+        });
+
+      } catch (e) {
+        alert(e.message || e);
+        startBtn.disabled = false;
+        setStatus('Idle');
+      }
+    }
+
+    // ===== UI bindings
+    startBtn.addEventListener('click', startStreaming);
+
+    // Tap anywhere to toggle between full blackout and “peek”
+    let peekOn = false;
+    const togglePeek = () => {
+      peekOn = !peekOn;
+      document.body.classList.toggle('peek', peekOn);
+      document.body.classList.toggle('blackout', !peekOn);
     };
+    tap.addEventListener('click', togglePeek);
+    // Also allow a quick tap anywhere (fallback) once streaming
+    document.body.addEventListener('click', (e) => {
+      if (!document.body.classList.contains('streaming')) return;
+      if (e.target === tap) return; // already handled
+      togglePeek();
+    });
+
+    // Keep room field in sync with ?room=
+    roomInput.addEventListener('change', () => {
+      const url = new URL(location.href);
+      url.searchParams.set('room', roomInput.value.trim() || 'baby1');
+      history.replaceState({}, '', url);
+    });
+
+    // Default to blackout before starting
+    document.body.classList.add('blackout');
   </script>
 </body>
 </html>
