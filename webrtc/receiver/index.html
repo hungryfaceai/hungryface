@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Baby Monitor Receiver</title>
+  <style>
+    body {
+      margin: 0;
+      background: black;
+      color: white;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      justify-content: center;
+      align-items: center;
+    }
+    video {
+      width: 100%;
+      height: auto;
+      background: black;
+    }
+    #status {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      font-size: 0.9em;
+      opacity: 0.7;
+    }
+  </style>
+</head>
+<body>
+  <div id="status">Idle</div>
+  <video id="remoteVideo" autoplay playsinline></video>
+
+  <script>
+    const WS_ENDPOINT = "wss://hungryface.onrender.com/ws";
+    const room = new URLSearchParams(location.search).get("room") || "baby1";
+    let ws, pc;
+    const statusEl = document.getElementById('status');
+
+    function setStatus(msg) {
+      console.log(msg);
+      statusEl.textContent = msg;
+    }
+
+    function send(data) {
+      ws.send(JSON.stringify(data));
+    }
+
+    function connectWS() {
+      return new Promise((resolve, reject) => {
+        const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
+        setStatus('Connecting to signaling…');
+        ws = new WebSocket(url);
+
+        ws.onopen = () => {
+          setStatus('Signaling: connected');
+          send({ type: 'join', room });
+          resolve();
+        };
+        ws.onmessage = onSignal;
+        ws.onerror = (e) => { setStatus('Signaling: error'); console.error('WS error', e); reject(e); };
+        ws.onclose = (e) => { console.warn('WS closed', e.code, e.reason); setStatus('Signaling: closed'); };
+      });
+    }
+
+    function createPC() {
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
+      });
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) send({ type: 'candidate', candidate: event.candidate });
+      };
+
+      pc.ontrack = (event) => {
+        document.getElementById('remoteVideo').srcObject = event.streams[0];
+      };
+
+      pc.onicegatheringstatechange = () => console.log('ICE gathering:', pc.iceGatheringState);
+      pc.oniceconnectionstatechange = () => {
+        console.log('ICE conn:', pc.iceConnectionState);
+        setStatus('ICE: ' + pc.iceConnectionState);
+      };
+    }
+
+    async function startReceiver() {
+      await connectWS();
+      createPC();
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      send(offer);
+      setStatus('Offer sent, waiting for answer…');
+    }
+
+    async function onSignal(event) {
+      const data = JSON.parse(event.data);
+
+      if (data.type === 'answer') {
+        setStatus('Got answer, setting remote desc…');
+        await pc.setRemoteDescription(new RTCSessionDescription(data));
+      } else if (data.type === 'candidate') {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch (err) {
+          console.error('Error adding ICE candidate', err);
+        }
+      }
+    }
+
+    startReceiver();
+  </script>
+</body>
+</html>
