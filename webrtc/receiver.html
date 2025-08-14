@@ -2,315 +2,111 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WebRTC Receiver (Offerer) + MediaPipe Pose</title>
-  <link rel="icon" href="data:,">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Receiver – Baby Monitor</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 16px; }
-    .grid { display: grid; grid-template-columns: 1fr; gap: 12px; max-width: 980px; margin: 0 auto; }
-
-    /* IMPORTANT: canvas is transparent so you see the video underneath */
-    video { width: 100%; max-height: 70vh; background: #000; border-radius: 8px; display: block; }
-    canvas { width: 100%; max-height: 70vh; background: transparent; border-radius: 8px; display: block; }
-
-    textarea { width: 100%; height: 140px; }
-    button { padding: 10px 14px; margin: 6px 4px 6px 0; }
-    .row { margin: 12px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .status { font-weight: 600; }
-    .overwrap { position: relative; }
-    #overlay { position: absolute; left:0; top:0; pointer-events: none; z-index: 1; }
-    .small { font-size: 12px; color: #666; }
-    label.small { user-select: none; }
-    .notice { background:#fff3cd; border:1px solid #ffe69c; padding:8px 10px; border-radius:6px; font-size:13px; }
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; padding: 0; height: 100%; background: #000; color: #bbb;
+      font-family: -apple-system, system-ui, sans-serif;
+    }
+    video {
+      width: 100%; height: 100%; object-fit: cover;
+      background: #000;
+    }
+    .overlay {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.5);
+      z-index: 2; pointer-events: none;
+    }
+    .status {
+      background: rgba(0,0,0,0.6);
+      color: #fff; padding: 10px 16px; border-radius: 12px;
+      font-size: 15px;
+    }
   </style>
 </head>
 <body>
-  <div class="grid">
-    <h1>Laptop (Offerer) + Pose</h1>
+  <video id="remote" playsinline autoplay></video>
+  <div class="overlay" id="overlay"><div class="status" id="status">Connecting…</div></div>
 
-    <div class="row">
-      <button id="createOffer">Create Offer</button>
-      <button id="copyOffer" disabled>Copy Offer</button>
-      <label class="small"><input type="checkbox" id="wantAudio" checked> Offer to receive audio</label>
-      <button id="reconnect" disabled>Reconnect</button>
-      <button id="reset">Reset</button>
-      <span class="status" id="pcState">Idle</span>
-    </div>
+  <script>
+    const $ = id => document.getElementById(id);
+    const remoteVideo = $('remote');
+    const overlay = $('overlay');
+    const statusEl = $('status');
 
-    <textarea id="offer" placeholder="Offer will appear here" readonly></textarea>
+    let pc = null, ws = null;
+    const room = new URLSearchParams(location.search).get('room') || 'baby1';
 
-    <div class="row">
-      <label for="answer" class="small">Paste Answer (from iPhone):</label>
-      <textarea id="answer" placeholder='{"type":"answer","sdp":"..."}'></textarea>
-      <button id="acceptAnswer">Accept Answer</button>
-    </div>
+    const setStatus = (txt) => { statusEl.textContent = txt; };
 
-    <div id="reconnNotice" class="notice" style="display:none;">
-      Connection dropped — I created a new Offer (ICE restart). Copy it to the iPhone and press “Accept Offer & Create Answer”.
-    </div>
-
-    <div class="row">
-      <button id="enableAudio" disabled>Enable Audio (if blocked)</button>
-      <span class="small">Browsers may block autoplay with sound until you click.</span>
-    </div>
-
-    <div class="overwrap">
-      <video id="remote" playsinline autoplay></video>
-      <canvas id="overlay"></canvas>
-    </div>
-
-    <div class="row small" id="perf"></div>
-  </div>
-
-  <script type="module">
-    import { FilesetResolver, PoseLandmarker, DrawingUtils }
-      from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
-
-    // --- Elements
-    const el = (id) => document.getElementById(id);
-    const createOfferBtn = el('createOffer');
-    const copyOfferBtn = el('copyOffer');
-    const acceptAnswerBtn = el('acceptAnswer');
-    const reconnectBtn = el('reconnect');
-    const resetBtn = el('reset');
-    const offerTA = el('offer');
-    const answerTA = el('answer');
-    const pcState = el('pcState');
-    const wantAudio = el('wantAudio');
-    const notice = el('reconnNotice');
-    const video = el('remote');
-    const overlay = el('overlay');
-    const ctx = overlay.getContext('2d');
-    const enableAudioBtn = el('enableAudio');
-    const perf = el('perf');
-
-    // --- State
-    let pc = null;
-    let landmarker = null;
-    let drawingUtils = null;
-    let lastT = performance.now();
-    let inferenceRunning = false;
-    let disconnectTimer = null;
-    let needPoseReset = false;
-
-    // --- Helpers
-    const setStatus = (s) => pcState.textContent = s;
-
-    const waitForIceGatheringComplete = (pc) => {
-      if (pc.iceGatheringState === 'complete') return Promise.resolve();
-      return new Promise(resolve => {
-        const check = () => {
-          if (pc.iceGatheringState === 'complete') {
-            pc.removeEventListener('icegatheringstatechange', check);
-            resolve();
-          }
-        };
-        pc.addEventListener('icegatheringstatechange', check);
+    function createPC() {
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
       });
-    };
-
-    function resizeOverlayToVideo() {
-      const dpr = window.devicePixelRatio || 1;
-      const w = video.videoWidth | 0;
-      const h = video.videoHeight | 0;
-      if (!w || !h) return;
-      overlay.style.width = w + "px";
-      overlay.style.height = h + "px";
-      overlay.width = Math.floor(w * dpr);
-      overlay.height = Math.floor(h * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    }
-
-    async function initPose() {
-      if (landmarker) return;
-      const fileset = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-      );
-      landmarker = await PoseLandmarker.createFromOptions(fileset, {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
-          delegate: "GPU"
-        },
-        runningMode: "video",
-        numPoses: 1,
-        minPoseDetectionConfidence: 0.4,
-        minPosePresenceConfidence: 0.4,
-        minTrackingConfidence: 0.4
-      });
-      drawingUtils = new DrawingUtils(ctx);
-    }
-
-    async function resetPoseGraph() {
-      try { await landmarker?.close?.(); } catch {}
-      landmarker = null;
-      await initPose();
-      lastT = performance.now();
-    }
-
-    function startInferenceLoop() {
-      if (inferenceRunning) return;
-      inferenceRunning = true;
-
-      const useVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
-
-      const step = async () => {
-        try {
-          if (!landmarker) await initPose();
-          if (needPoseReset) { await resetPoseGraph(); needPoseReset = false; }
-
-          if (video.readyState < 2) {
-            scheduleNext();
-            return;
-          }
-
-          // Use monotonic clock to avoid timestamp regressions after reconnects
-          const tMs = performance.now();
-          const results = await landmarker.detectForVideo(video, tMs);
-
-          // FPS + draw
-          const now = performance.now();
-          const dt = now - lastT; lastT = now;
-          const fps = 1000 / dt;
-          perf.textContent = `Inference ~ ${fps.toFixed(1)} FPS`;
-
-          resizeOverlayToVideo();
-          ctx.clearRect(0, 0, overlay.width, overlay.height);
-          if (results.landmarks) for (const lm of results.landmarks) drawingUtils.drawLandmarks(lm);
-        } catch (e) {
-          const msg = String(e?.message || e || '');
-          if (msg.includes('timestamp') || msg.includes('WaitUntilIdle') || msg.includes('CalculatorGraph::Run')) {
-            console.warn('Pose graph reset due to timestamp error:', e);
-            needPoseReset = true;
-          } else {
-            console.error('Pose error:', e);
-          }
-        }
-        scheduleNext();
+      pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
+      pc.onconnectionstatechange = () => setStatus('Conn: ' + pc.connectionState);
+      pc.onicecandidate = (e) => {
+        if (e.candidate) send({ type: 'candidate', candidate: e.candidate });
       };
-
-      function scheduleNext() {
-        if (useVFC) video.requestVideoFrameCallback(() => step());
-        else requestAnimationFrame(step);
-      }
-
-      if (video.readyState >= 2) step();
-      else video.onloadedmetadata = () => step();
-    }
-
-    function setupPcEvents() {
-      pc.oniceconnectionstatechange = () => {
-        setStatus(pc.iceConnectionState);
-        if (pc.iceConnectionState === 'disconnected') {
-          clearTimeout(disconnectTimer);
-          disconnectTimer = setTimeout(() => triggerReconnect(), 5000);
-        } else if (pc.iceConnectionState === 'failed') {
-          triggerReconnect();
-        } else if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-          notice.style.display = 'none';
-          clearTimeout(disconnectTimer);
-        }
-      };
-      pc.onconnectionstatechange = () => setStatus(pc.connectionState);
       pc.ontrack = (e) => {
-        video.srcObject = e.streams[0];
-        enableAudioBtn.disabled = false;
-        needPoseReset = true;               // reset pose graph on new stream/track
-        video.onloadedmetadata = () => {    // also when stream format changes
-          needPoseReset = true;
-        };
+        if (remoteVideo.srcObject !== e.streams[0]) {
+          remoteVideo.srcObject = e.streams[0];
+          overlay.style.display = 'none';
+        }
       };
     }
 
-    async function makeOffer({ iceRestart = false } = {}) {
-      try {
-        const offer = await pc.createOffer({ iceRestart });
-        await pc.setLocalDescription(offer);
-        await waitForIceGatheringComplete(pc);
-        offerTA.value = JSON.stringify(pc.localDescription);
-        copyOfferBtn.disabled = false;
-        reconnectBtn.disabled = false;
-        if (iceRestart) {
-          notice.style.display = '';
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-      } catch (e) {
-        console.error('Create offer failed', e);
-        alert('Create offer failed: ' + (e?.message || e));
+    function connectWS() {
+      return new Promise((resolve, reject) => {
+        const wsURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+        ws = new WebSocket(wsURL);
+        ws.onopen = () => {
+          send({ type: 'join', room });
+          resolve();
+        };
+        ws.onmessage = onSignal;
+        ws.onerror = err => reject(err);
+        ws.onclose = () => {};
+      });
+    }
+
+    function send(obj) {
+      try { ws && ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {}
+    }
+
+    async function onSignal(evt) {
+      let msg = null;
+      try { msg = JSON.parse(evt.data); } catch { return; }
+
+      if (msg.type === 'answer') {
+        await pc.setRemoteDescription(msg);
+      } else if (msg.type === 'candidate' && msg.candidate) {
+        try { await pc.addIceCandidate(msg.candidate); } catch {}
       }
     }
 
-    function triggerReconnect() {
-      if (!pc) return;
-      makeOffer({ iceRestart: true }); // user must paste new offer to the iPhone
+    async function start() {
+      setStatus('Creating connection…');
+      createPC();
+
+      setStatus('Connecting to signaling…');
+      await connectWS();
+
+      // Receiver doesn't send media, only receives
+      setStatus('Creating offer…');
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      send(pc.localDescription);
+
+      setStatus('Waiting for answer…');
     }
 
-    // --- UI handlers
-    createOfferBtn.onclick = async () => {
-      createOfferBtn.disabled = true;
-      try {
-        pc = new RTCPeerConnection({
-          iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
-          sdpSemantics: 'unified-plan',
-          bundlePolicy: 'max-bundle'
-        });
-        pc.addTransceiver('video', { direction: 'recvonly' });
-        if (wantAudio.checked) pc.addTransceiver('audio', { direction: 'recvonly' });
-        setupPcEvents();
-        await makeOffer();
-      } catch (e) {
-        alert('Failed to start: ' + (e?.message || e));
-        createOfferBtn.disabled = false;
-      }
-    };
-
-    copyOfferBtn.onclick = async () => {
-      try { await navigator.clipboard.writeText(offerTA.value); }
-      catch { offerTA.select(); document.execCommand('copy'); }
-    };
-
-    reconnectBtn.onclick = () => triggerReconnect();
-
-    acceptAnswerBtn.onclick = async () => {
-      const val = answerTA.value.trim();
-      if (!val) return alert('Paste the Answer JSON first.');
-      try {
-        const desc = JSON.parse(val);
-        if (desc.type !== 'answer') throw new Error('Pasted JSON is not an SDP answer');
-        if (!pc || (pc.signalingState !== 'have-local-offer' && pc.signalingState !== 'stable')) {
-          throw new Error('Unexpected signalingState: ' + (pc?.signalingState || 'none'));
-        }
-        await pc.setRemoteDescription(desc);
-        await initPose();
-        startInferenceLoop();
-        notice.style.display = 'none';
-      } catch (e) {
-        console.error('Accept answer failed', e, { local: pc?.localDescription?.type, state: pc?.signalingState });
-        alert('Accept answer failed: ' + (e?.message || e));
-      }
-    };
-
-    enableAudioBtn.onclick = async () => {
-      try { await video.play(); enableAudioBtn.disabled = true; }
-      catch { alert('Autoplay blocked, click the page and try again.'); }
-    };
-
-    resetBtn.onclick = () => {
-      try { pc?.getSenders().forEach(s => s.track && s.track.stop()); } catch {}
-      try { pc?.close(); } catch {}
-      pc = null;
-      video.srcObject = null;
-      overlay.width = overlay.height = 0;
-      offerTA.value = '';
-      answerTA.value = '';
-      copyOfferBtn.disabled = true;
-      reconnectBtn.disabled = true;
-      createOfferBtn.disabled = false;
-      notice.style.display = 'none';
-      setStatus('Idle');
-      inferenceRunning = false;
-      // keep landmarker loaded for reuse
-    };
+    start().catch(err => {
+      setStatus('Error: ' + err.message);
+    });
   </script>
 </body>
 </html>
