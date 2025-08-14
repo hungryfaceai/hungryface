@@ -9,9 +9,8 @@
       background: black;
       color: white;
       font-family: sans-serif;
-      display: flex;
-      flex-direction: column;
       height: 100vh;
+      display: flex;
       justify-content: center;
       align-items: center;
     }
@@ -34,12 +33,15 @@
   <video id="remoteVideo" autoplay playsinline></video>
 
   <script>
-    const WS_ENDPOINT = "wss://hungryface.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "baby1";
+    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+
     let ws, pc;
+    let remoteDescriptionSet = false;
+    const candidateQueue = [];
     const statusEl = document.getElementById('status');
 
-    function setStatus(msg) {
+    function logStatus(msg) {
       console.log(msg);
       statusEl.textContent = msg;
     }
@@ -51,24 +53,22 @@
     function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
-        setStatus('Connecting to signaling…');
+        logStatus('Connecting to signaling…');
         ws = new WebSocket(url);
 
         ws.onopen = () => {
-          setStatus('Signaling: connected');
+          logStatus('Signaling: connected');
           send({ type: 'join', room });
           resolve();
         };
         ws.onmessage = onSignal;
-        ws.onerror = (e) => { setStatus('Signaling: error'); console.error('WS error', e); reject(e); };
-        ws.onclose = (e) => { console.warn('WS closed', e.code, e.reason); setStatus('Signaling: closed'); };
+        ws.onerror = (e) => { logStatus('Signaling: error'); reject(e); };
+        ws.onclose = () => logStatus('Signaling: closed');
       });
     }
 
     function createPC() {
-      pc = new RTCPeerConnection({
-        iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
-      });
+      pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
 
       pc.onicecandidate = (event) => {
         if (event.candidate) send({ type: 'candidate', candidate: event.candidate });
@@ -78,33 +78,39 @@
         document.getElementById('remoteVideo').srcObject = event.streams[0];
       };
 
-      pc.onicegatheringstatechange = () => console.log('ICE gathering:', pc.iceGatheringState);
       pc.oniceconnectionstatechange = () => {
-        console.log('ICE conn:', pc.iceConnectionState);
-        setStatus('ICE: ' + pc.iceConnectionState);
+        console.log('ICE state:', pc.iceConnectionState);
+        logStatus('ICE: ' + pc.iceConnectionState);
       };
     }
 
     async function startReceiver() {
       await connectWS();
       createPC();
+
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       send(offer);
-      setStatus('Offer sent, waiting for answer…');
+      logStatus('Offer sent, waiting for answer…');
     }
 
     async function onSignal(event) {
       const data = JSON.parse(event.data);
 
       if (data.type === 'answer') {
-        setStatus('Got answer, setting remote desc…');
+        logStatus('Got answer, setting remote desc…');
         await pc.setRemoteDescription(new RTCSessionDescription(data));
+        remoteDescriptionSet = true;
+
+        candidateQueue.forEach(c => pc.addIceCandidate(c));
+        candidateQueue.length = 0;
+
       } else if (data.type === 'candidate') {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-        } catch (err) {
-          console.error('Error adding ICE candidate', err);
+        const candidate = new RTCIceCandidate(data.candidate);
+        if (remoteDescriptionSet) {
+          await pc.addIceCandidate(candidate);
+        } else {
+          candidateQueue.push(candidate);
         }
       }
     }
