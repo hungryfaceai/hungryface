@@ -3,114 +3,96 @@
 <head>
   <meta charset="utf-8">
   <title>Baby Monitor Receiver</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
   <style>
     body {
-      margin: 0;
-      background: black;
-      color: white;
-      font-family: sans-serif;
-      height: 100vh;
-      display: flex;
-      justify-content: center;
-      align-items: center;
+      margin: 0; background: black; color: white; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      height: 100vh; display: flex; justify-content: center; align-items: center;
     }
-    video {
-      width: 100%;
-      height: auto;
-      background: black;
-    }
-    #status {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      font-size: 0.9em;
-      opacity: 0.7;
-    }
+    video { width: 100%; height: auto; background: black; }
+    #status { position: absolute; top: 10px; left: 10px; font-size: 0.9em; opacity: 0.75; }
+    #unmute { position: absolute; bottom: 16px; left: 16px; padding: 10px 14px; border: 0; border-radius: 10px; background:#333; color:#fff; display:none; }
   </style>
 </head>
 <body>
   <div id="status">Idle</div>
+  <button id="unmute">Tap to enable audio</button>
   <video id="remoteVideo" autoplay playsinline></video>
 
   <script>
+    // --- Config
     const room = new URLSearchParams(location.search).get("room") || "baby1";
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
 
+    // --- State
     let ws, pc;
     let remoteDescriptionSet = false;
     const candidateQueue = [];
     const statusEl = document.getElementById('status');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const unmuteBtn = document.getElementById('unmute');
 
-    function logStatus(msg) {
-      console.log(msg);
-      statusEl.textContent = msg;
-    }
+    const setStatus = (m) => { console.log(m); statusEl.textContent = m; };
 
-    function send(data) {
-      ws.send(JSON.stringify(data));
-    }
+    function send(obj){ try { ws?.readyState===WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} }
 
     function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
-        logStatus('Connecting to signaling…');
+        setStatus('Connecting to signaling…');
         ws = new WebSocket(url);
-
-        ws.onopen = () => {
-          logStatus('Signaling: connected');
-          send({ type: 'join', room });
-          resolve();
-        };
+        ws.onopen = () => { setStatus('Signaling: connected'); send({ type:'join', room }); resolve(); };
         ws.onmessage = onSignal;
-        ws.onerror = (e) => { logStatus('Signaling: error'); reject(e); };
-        ws.onclose = () => logStatus('Signaling: closed');
+        ws.onerror = (e) => { console.error('WS error', e); setStatus('Signaling: error'); reject(e); };
+        ws.onclose  = (e) => { console.warn('WS closed', e.code, e.reason); setStatus('Signaling: closed'); };
       });
     }
 
     function createPC() {
-      pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) send({ type: 'candidate', candidate: event.candidate });
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+      pc.onicecandidate = (ev) => { if (ev.candidate) send({ type:'candidate', candidate: ev.candidate }); };
+      pc.ontrack = (ev) => {
+        if (remoteVideo.srcObject !== ev.streams[0]) {
+          remoteVideo.srcObject = ev.streams[0];
+          try {
+            remoteVideo.muted = false;
+            remoteVideo.play().catch(() => { unmuteBtn.style.display = 'block'; });
+          } catch { unmuteBtn.style.display = 'block'; }
+        }
       };
-
-      pc.ontrack = (event) => {
-        document.getElementById('remoteVideo').srcObject = event.streams[0];
-      };
-
-      pc.oniceconnectionstatechange = () => {
-        console.log('ICE state:', pc.iceConnectionState);
-        logStatus('ICE: ' + pc.iceConnectionState);
-      };
+      pc.oniceconnectionstatechange = () => { console.log('ICE:', pc.iceConnectionState); setStatus('ICE: ' + pc.iceConnectionState); };
     }
+
+    unmuteBtn.addEventListener('click', async () => {
+      try { await remoteVideo.play(); unmuteBtn.style.display = 'none'; } catch(e) { console.warn(e); }
+    });
 
     async function startReceiver() {
       await connectWS();
       createPC();
-
-      const offer = await pc.createOffer();
+      const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
       await pc.setLocalDescription(offer);
       send(offer);
-      logStatus('Offer sent, waiting for answer…');
+      setStatus('Offer sent, waiting for answer…');
     }
 
-    async function onSignal(event) {
-      const data = JSON.parse(event.data);
-
-      if (data.type === 'answer') {
-        logStatus('Got answer, setting remote desc…');
-        await pc.setRemoteDescription(new RTCSessionDescription(data));
+    async function onSignal(evt) {
+      let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+      if (msg.type === 'answer') {
+        setStatus('Got answer, setting remote desc…');
+        await pc.setRemoteDescription(new RTCSessionDescription(msg));
         remoteDescriptionSet = true;
-
-        candidateQueue.forEach(c => pc.addIceCandidate(c));
+        // flush queued ICE
+        for (const c of candidateQueue) { try { await pc.addIceCandidate(c); } catch(e){ console.warn('late ICE add failed', e); } }
         candidateQueue.length = 0;
-
-      } else if (data.type === 'candidate') {
-        const candidate = new RTCIceCandidate(data.candidate);
+      } else if (msg.type === 'candidate' && msg.candidate) {
+        const cand = new RTCIceCandidate(msg.candidate);
         if (remoteDescriptionSet) {
-          await pc.addIceCandidate(candidate);
+          try { await pc.addIceCandidate(cand); } catch (e) { console.warn('ICE add failed', e); }
         } else {
-          candidateQueue.push(candidate);
+          candidateQueue.push(cand);
         }
       }
     }
