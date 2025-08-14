@@ -46,11 +46,49 @@
     let remoteDescriptionSet = false;
     const candidateQueue = [];
     let offerResendTimer = null;
-    let lastAnswerSdp = null;    // NEW: de-dupe identical answers
+    let lastAnswerSdp = null;    // de-dupe identical answers
 
     const setStatus = (msg) => { statusEl.textContent = msg; console.log('[STATUS]', msg); };
     const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
+    // ----- Autoplay patch: start muted, show button to unmute -----
+    unmuteBtn.style.display = 'block'; // visible until we confirm audible playback
+
+    async function tryStartMuted() {
+      try {
+        remoteVideo.muted = true;   // muted autoplay usually allowed
+        remoteVideo.volume = 1.0;
+        await remoteVideo.play();
+      } catch (e) {
+        console.warn('autoplay (muted) blocked:', e);
+      }
+    }
+
+    async function enableAudio() {
+      try {
+        remoteVideo.muted = false;
+        remoteVideo.volume = 1.0;
+        await remoteVideo.play();
+      } catch (e) {
+        console.warn('unmute play blocked:', e);
+      } finally {
+        // hide only if truly playing with audio
+        unmuteBtn.style.display = (!remoteVideo.paused && !remoteVideo.muted) ? 'none' : 'block';
+      }
+    }
+
+    unmuteBtn.addEventListener('click', enableAudio);
+    // One-time gesture hooks help Safari/iOS
+    document.addEventListener('touchstart', enableAudio, { once: true });
+    document.addEventListener('click',      enableAudio, { once: true });
+
+    // (optional) helpful logs
+    remoteVideo.addEventListener('loadedmetadata', () =>
+      console.log('metadata:', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight));
+    remoteVideo.addEventListener('playing', () =>
+      console.log('playing… muted=', remoteVideo.muted));
+
+    // ----- Signaling / WebRTC -----
     function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
@@ -70,7 +108,7 @@
         };
         ws.onmessage = onSignal;
         ws.onerror = (e) => { console.error('[WS error]', e); setStatus('Signaling: error'); };
-        ws.onclose = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); };
+        ws.onclose  = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); };
       });
     }
 
@@ -87,9 +125,7 @@
       pc.ontrack = (ev) => {
         if (remoteVideo.srcObject !== ev.streams[0]) {
           remoteVideo.srcObject = ev.streams[0];
-          // Try autoplay with audio; if blocked, show button
-          remoteVideo.muted = false;
-          remoteVideo.play().catch(() => { unmuteBtn.style.display = 'block'; });
+          tryStartMuted(); // start playback muted; user can unmute
         }
       };
       pc.oniceconnectionstatechange = () => {
@@ -97,10 +133,6 @@
         setStatus('ICE: ' + pc.iceConnectionState);
       };
     }
-
-    unmuteBtn.addEventListener('click', async () => {
-      try { await remoteVideo.play(); unmuteBtn.style.display = 'none'; } catch (e) { console.warn(e); }
-    });
 
     async function sendCurrentOffer() {
       if (pc?.localDescription?.type === 'offer') {
