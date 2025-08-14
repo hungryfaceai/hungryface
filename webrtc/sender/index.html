@@ -47,7 +47,8 @@
 
     /* Streaming states */
     body.blackout { background: #000; } /* full black */
-    /* (no 'peek' now; explicit UI reveal on tap) */
+    /* overlay hidden when UI is visible during streaming */
+    body.streaming.ui-visible .overlay { display: none !important; }
 
     /* Status overlay (visible during preview or streaming) */
     .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; z-index: 2; }
@@ -103,7 +104,7 @@
         <button id="startBtn">Start streaming</button>
       </div>
 
-      <p class="hint">After starting, the camera preview shows for N minutes (auto-sized). When it ends, the screen turns fully black and shows “Streaming…”. Tap to bring this screen back (button will say “Stop streaming”).</p>
+      <p class="hint">After starting, the camera preview shows for N minutes. When it ends, the screen turns fully black and shows “Streaming…”. Tap to bring this screen back (button will say “Stop streaming”).</p>
     </div>
   </div>
 
@@ -117,6 +118,8 @@
   <script>
     // ---- Config
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const UI_AUTOHIDE_MS = 10000; // auto-hide UI after 10s of inactivity while streaming
+
     const qsRoom = new URLSearchParams(location.search).get('room');
     const roomInput = document.getElementById('room');
     if (qsRoom) roomInput.value = qsRoom;
@@ -137,6 +140,7 @@
     let wakeLock = null;
     let previewTimer = null, previewTicker = null, previewEnd = 0;
     let started = false;
+    let hideUITimer = null;
 
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
 
@@ -259,6 +263,30 @@
       document.body.classList.remove('ui-visible'); // UI hidden
       localVideo.style.display = 'none';
       setStatus('Streaming...');
+      clearTimeout(hideUITimer); hideUITimer = null;
+    }
+
+    function showUIWhileStreaming() {
+      if (!document.body.classList.contains('streaming')) return;
+      document.body.classList.add('ui-visible');
+      setStatus('Streaming...'); // still streaming
+      scheduleAutoHideUI();
+    }
+
+    function scheduleAutoHideUI() {
+      clearTimeout(hideUITimer);
+      hideUITimer = setTimeout(() => {
+        if (document.body.classList.contains('streaming')) {
+          document.body.classList.remove('ui-visible');
+          setStatus('Streaming...');
+        }
+      }, UI_AUTOHIDE_MS);
+    }
+
+    function resetAutoHideUI() {
+      if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
+        scheduleAutoHideUI();
+      }
     }
 
     async function onSignal(evt) {
@@ -271,7 +299,7 @@
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         send(answer);
-        // No UI changes here; preview/blackout is driven by user/timeout
+        // UI flow managed separately
       } else if (msg.type === 'candidate' && msg.candidate) {
         try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch (err) { console.warn('ICE add failed', err); }
       }
@@ -310,7 +338,8 @@
       // Clear timers
       if (previewTimer) clearTimeout(previewTimer);
       if (previewTicker) clearInterval(previewTicker);
-      previewTimer = previewTicker = null;
+      if (hideUITimer) clearTimeout(hideUITimer);
+      previewTimer = previewTicker = hideUITimer = null;
 
       // Close PC/WS and stop media
       try { pc && pc.getSenders().forEach(s => s.track && s.track.stop()); } catch {}
@@ -331,32 +360,34 @@
       startBtn.textContent = 'Start streaming';
     }
 
-    // ---- Interactions required by your spec ----
-    // 1) While PREVIEWING: tap or Esc -> stop preview immediately (go to black "Streaming...")
-    function onGlobalClick(e) {
+    // ---- Interactions per spec ----
+    // Tap anywhere:
+    document.addEventListener('click', (e) => {
+      // If PREVIEWING → stop preview immediately (go to black)
       if (document.body.classList.contains('previewing')) {
-        endPreviewNow(); // immediate blackout
+        endPreviewNow();
         return;
       }
-      // 2) While STREAMING (black), tap -> bring back the UI (button = Stop streaming)
+      // If STREAMING with UI hidden → show UI (and start inactivity timer)
       if (document.body.classList.contains('streaming') && !document.body.classList.contains('ui-visible')) {
-        document.body.classList.add('ui-visible');
-        // keep video hidden; we are only managing the stream
-        setStatus('Streaming...'); // still streaming
+        showUIWhileStreaming();
         return;
       }
-      // 3) If UI is visible during streaming and user taps outside the card, hide UI again
+      // If STREAMING with UI visible → clicking outside the card hides UI immediately
       if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
         const inCard = e.target.closest('.card');
         if (!inCard) {
-          document.body.classList.remove('ui-visible'); // back to black
+          document.body.classList.remove('ui-visible');
           setStatus('Streaming...');
+          clearTimeout(hideUITimer); hideUITimer = null;
+        } else {
+          // interaction inside UI → reset inactivity timer
+          resetAutoHideUI();
         }
       }
-    }
-    document.addEventListener('click', onGlobalClick);
+    });
 
-    // Esc mirrors tap behavior during preview, and hides UI if visible during streaming
+    // Esc: while previewing -> end preview; while streaming & UI visible -> hide UI
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         if (document.body.classList.contains('previewing')) {
@@ -364,9 +395,16 @@
         } else if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
           document.body.classList.remove('ui-visible');
           setStatus('Streaming...');
+          clearTimeout(hideUITimer); hideUITimer = null;
         }
+      } else {
+        resetAutoHideUI();
       }
     });
+
+    // Any movement/touch while UI visible should keep it alive
+    document.addEventListener('mousemove', resetAutoHideUI, { passive: true });
+    document.addEventListener('touchstart', resetAutoHideUI, { passive: true });
 
     // Clean up on unload
     window.addEventListener('beforeunload', stopStreaming);
