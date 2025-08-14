@@ -6,56 +6,26 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png">
   <title>Baby Monitor – Sender</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-
   <style>
     :root { color-scheme: dark; }
-    html, body {
-      margin: 0; height: 100%;
-      background: #000; color: #ccc; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
-      touch-action: manipulation;
-    }
+    html, body { margin: 0; height: 100%; background: #000; color: #ccc; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif; touch-action: manipulation; }
     #ui { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 20px; }
-    .card {
-      width: 100%; max-width: 520px;
-      background: #0b0b0b; border: 1px solid #141414; border-radius: 14px;
-      padding: 18px; box-sizing: border-box;
-    }
+    .card { width: 100%; max-width: 520px; background: #0b0b0b; border: 1px solid #141414; border-radius: 14px; padding: 18px; box-sizing: border-box; }
     .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; }
     label.switch { display: flex; align-items: center; gap: 10px; font-size: 16px; }
     input[type="checkbox"] { width: 22px; height: 22px; }
-    input[type="text"], select, input[type="number"] {
-      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222; background:#0b0b0b; color:#ddd;
-      -moz-appearance:textfield;
-    }
-    input[type="number"]::-webkit-outer-spin-button,
-    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-    button {
-      width: 100%; padding: 14px 16px; border-radius: 12px; border: 0;
-      background: #2a2a2a; color: #fff; font-size: 17px; font-weight: 600;
-    }
+    input[type="text"], select, input[type="number"] { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222; background:#0b0b0b; color:#ddd; -moz-appearance:textfield; }
+    input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    button { width: 100%; padding: 14px 16px; border-radius: 12px; border: 0; background: #2a2a2a; color: #fff; font-size: 17px; font-weight: 600; }
     button:active { transform: scale(0.99); }
     .hint { opacity: .7; font-size: 13px; }
-
-    video#local {
-      display: none;
-      position: fixed; inset: 0;
-      width: 100vw; height: 100vh;
-      object-fit: cover; background: #000; z-index: 1;
-    }
+    video#local { display: none; position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: cover; background: #000; z-index: 1; }
     body.previewing video#local { display: block; }
-
     body.blackout { background: #000; }
     body.streaming.ui-visible .overlay { display: none !important; }
-
     .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; z-index: 2; }
     body.streaming .overlay, body.previewing .overlay { display: flex; }
-    .status {
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
-      text-align: center; white-space: pre-line;
-    }
-
+    .status { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px; text-align: center; white-space: pre-line; }
     #tap { position: fixed; inset: 0; display: none; z-index: 3; }
     body.streaming:not(.ui-visible) #tap { display: block; }
     body.streaming:not(.ui-visible) #ui { display: none; }
@@ -65,38 +35,19 @@
   <div id="ui">
     <div class="card">
       <h2 style="margin:0 0 8px 0;">iPhone Sender</h2>
-
       <div class="row">
-        <label class="switch">
-          <input id="videoOn" type="checkbox" checked>
-          <span>Video ON</span>
-        </label>
-        <label class="switch">
-          <input id="audioOn" type="checkbox" checked>
-          <span>Audio ON</span>
-        </label>
+        <label class="switch"><input id="videoOn" type="checkbox" checked><span>Video ON</span></label>
+        <label class="switch"><input id="audioOn" type="checkbox" checked><span>Audio ON</span></label>
       </div>
-
       <div class="row">
         <select id="cameraSel" aria-label="Camera">
           <option value="environment" selected>Back camera</option>
           <option value="user">Front camera</option>
         </select>
       </div>
-
-      <div class="row">
-        <input id="room" type="text" placeholder="Room (e.g., baby1)" value="baby1" autocomplete="off">
-      </div>
-
-      <div class="row">
-        <input id="previewMins" type="number" min="0" step="1" value="1" aria-label="Preview minutes">
-        <span class="hint">Preview minutes</span>
-      </div>
-
-      <div class="row">
-        <button id="startBtn">Start streaming</button>
-      </div>
-
+      <div class="row"><input id="room" type="text" placeholder="Room (e.g., baby1)" value="baby1" autocomplete="off"></div>
+      <div class="row"><input id="previewMins" type="number" min="0" step="1" value="1" aria-label="Preview minutes"><span class="hint">Preview minutes</span></div>
+      <div class="row"><button id="startBtn">Start streaming</button></div>
       <p class="hint">After starting, the camera preview shows for N minutes. When it ends, the screen turns fully black and shows “Streaming…”. Tap to bring this screen back (button will say “Stop streaming”).</p>
     </div>
   </div>
@@ -108,6 +59,7 @@
   <script>
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
+    const NEED_OFFER_INTERVAL_MS = 3000;   // <— retry every 3s until we get an offer
 
     const qsRoom = new URLSearchParams(location.search).get('room');
     const roomInput = document.getElementById('room');
@@ -120,8 +72,6 @@
     const startBtn  = document.getElementById('startBtn');
     const localVideo= document.getElementById('local');
     const statusEl  = document.getElementById('status');
-    const ui        = document.getElementById('ui');
-    const tap       = document.getElementById('tap');
 
     let ws = null, pc = null, localStream = null;
     let wakeLock = null;
@@ -129,49 +79,30 @@
     let started = false;
     let hideUITimer = null;
 
-    let remoteDescriptionSet = false;      // NEW: to queue ICE until offer applied
-    const candidateQueue = [];             // NEW: ICE queue
+    let remoteDescriptionSet = false;
+    const candidateQueue = [];
+    let needOfferTimer = null;             // <— NEW
 
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
 
     async function requestWakeLock() {
-      try {
-        if ('wakeLock' in navigator) {
-          wakeLock = await navigator.wakeLock.request('screen');
-          document.addEventListener('visibilitychange', async () => {
-            if (document.visibilityState === 'visible') {
-              try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
-            }
-          });
-        }
-      } catch {}
+      try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } catch {}
     }
 
     function currentRoom() {
       const r = (roomInput.value || 'baby1').trim();
-      try {
-        const u = new URL(location.href);
-        u.searchParams.set('room', r);
-        history.replaceState({}, '', u);
-      } catch {}
+      try { const u = new URL(location.href); u.searchParams.set('room', r); history.replaceState({}, '', u); } catch {}
       return r;
     }
 
     async function getMedia() {
-      const wantVideo = videoOn.checked;
-      const wantAudio = audioOn.checked;
+      const wantVideo = videoOn.checked, wantAudio = audioOn.checked;
       if (!wantVideo && !wantAudio) throw new Error('Both video and audio are OFF.');
-
       const facing = cameraSel.value || 'environment';
-      const constraints = {
-        video: wantVideo ? {
-          facingMode: facing,
-          width: { ideal: 1280 }, height: { ideal: 720 },
-          frameRate: { ideal: 30, max: 30 }
-        } : false,
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: wantVideo ? { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } } : false,
         audio: wantAudio ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true } : false
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      });
       const v = stream.getVideoTracks()[0];
       if (v && 'contentHint' in v) { try { v.contentHint = 'motion'; } catch {} }
       return stream;
@@ -184,16 +115,22 @@
         ws = new WebSocket(url);
 
         let opened = false;
-        const timer = setTimeout(() => {
-          if (!opened) { try { ws.close(); } catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); }
-        }, 15000);
+        const timer = setTimeout(() => { if (!opened) { try { ws.close(); } catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); } }, 15000);
 
         ws.onopen = () => {
           opened = true; clearTimeout(timer);
           setStatus('Signaling: connected');
           send({ type: 'join', room });
-          // Ask receiver to (re)send the offer if we missed it
-          send({ type: 'need-offer' });                      // NEW
+          // ask for offer repeatedly until we actually receive one
+          send({ type: 'need-offer' });
+          needOfferTimer = setInterval(() => {
+            if (!remoteDescriptionSet) {
+              console.log('[WS OUT] need-offer (retry)');
+              send({ type: 'need-offer' });
+            } else {
+              clearInterval(needOfferTimer); needOfferTimer = null;
+            }
+          }, NEED_OFFER_INTERVAL_MS);
           resolve();
         };
         ws.onmessage = onSignal;
@@ -205,11 +142,7 @@
     function send(obj) { try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); } catch {} }
 
     function createPC() {
-      pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-        bundlePolicy: 'max-bundle',
-        sdpSemantics: 'unified-plan'
-      });
+      pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], bundlePolicy: 'max-bundle', sdpSemantics: 'unified-plan' });
       pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate }); };
       pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
@@ -218,57 +151,34 @@
     function beginPreviewWindow(minutes) {
       const ms = Math.max(0, Math.round((Number(minutes) || 1) * 60000));
       if (ms === 0) { enterBlackout(); return; }
-
-      document.body.classList.add('previewing','streaming');
-      document.body.classList.remove('ui-visible');
-      ui.style.display = '';
+      document.body.classList.add('previewing','streaming'); document.body.classList.remove('ui-visible');
       localVideo.style.display = 'block';
-
-      previewEnd = Date.now() + ms;
-      tickPreviewCountdown();
+      previewEnd = Date.now() + ms; tickPreviewCountdown();
       previewTicker = setInterval(tickPreviewCountdown, 1000);
       previewTimer  = setTimeout(endPreviewNow, ms);
     }
-
     function tickPreviewCountdown() {
-      const remain = Math.max(0, previewEnd - Date.now());
-      const sec = Math.ceil(remain / 1000);
-      const mm = String(Math.floor(sec / 60)).padStart(2,'0');
-      const ss = String(sec % 60).padStart(2,'0');
+      const sec = Math.ceil(Math.max(0, previewEnd - Date.now())/1000);
+      const mm = String(Math.floor(sec/60)).padStart(2,'0'); const ss = String(sec%60).padStart(2,'0');
       setStatus(`Preview ends in ${mm}:${ss}`);
     }
-
-    function endPreviewNow() {
-      if (previewTimer) clearTimeout(previewTimer);
-      if (previewTicker) clearInterval(previewTicker);
-      previewTimer = previewTicker = null;
-      enterBlackout();
-    }
-
-    function enterBlackout() {
-      document.body.classList.remove('previewing');
-      document.body.classList.add('streaming');
-      document.body.classList.remove('ui-visible');
-      localVideo.style.display = 'none';
-      setStatus('Streaming...');
-      clearTimeout(hideUITimer); hideUITimer = null;
-    }
+    function endPreviewNow() { if (previewTimer) clearTimeout(previewTimer); if (previewTicker) clearInterval(previewTicker); previewTimer = previewTicker = null; enterBlackout(); }
+    function enterBlackout() { document.body.classList.remove('previewing'); document.body.classList.add('streaming'); document.body.classList.remove('ui-visible'); localVideo.style.display='none'; setStatus('Streaming...'); clearTimeout(hideUITimer); hideUITimer=null; }
 
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+      console.log('[WS IN]', msg.type);
 
       if (msg.type === 'offer') {
         setStatus('Got offer, creating answer…');
         if (!pc) createPC();
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
-        remoteDescriptionSet = true;                          // NEW
+        remoteDescriptionSet = true;
 
-        // Flush queued ICE (if any arrived early)
         while (candidateQueue.length) {
           const c = candidateQueue.shift();
           try { await pc.addIceCandidate(c); } catch (err) { console.warn('late ICE add failed', err); }
         }
-
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         send(answer);
@@ -278,7 +188,7 @@
         if (remoteDescriptionSet && pc) {
           try { await pc.addIceCandidate(cand); } catch (err) { console.warn('ICE add failed', err); }
         } else {
-          candidateQueue.push(cand);                          // NEW: queue until RD set
+          candidateQueue.push(cand);
         }
       }
     }
@@ -286,7 +196,6 @@
     async function startOrStop() {
       try {
         if (started) { await stopStreaming(); return; }
-
         startBtn.disabled = true;
 
         const room = currentRoom();
@@ -295,7 +204,6 @@
         localVideo.srcObject = localStream;
 
         beginPreviewWindow(Number(previewMinsInput.value) || 1);
-
         await connectWS(room);
         await requestWakeLock();
 
@@ -315,7 +223,8 @@
       if (previewTimer) clearTimeout(previewTimer);
       if (previewTicker) clearInterval(previewTicker);
       if (hideUITimer) clearTimeout(hideUITimer);
-      previewTimer = previewTicker = hideUITimer = null;
+      if (needOfferTimer) clearInterval(needOfferTimer);   // <— clear retry loop
+      previewTimer = previewTicker = hideUITimer = needOfferTimer = null;
 
       try { pc && pc.getSenders().forEach(s => s.track && s.track.stop()); } catch {}
       try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
@@ -323,76 +232,38 @@
       try { ws && ws.close(); } catch {}
 
       localStream = null; pc = null; ws = null;
-      started = false;
-      remoteDescriptionSet = false;
-      candidateQueue.length = 0;
+      started = false; remoteDescriptionSet = false; candidateQueue.length = 0;
 
-      document.body.classList.remove('previewing','streaming','ui-visible');
-      document.body.classList.add('blackout');
-      ui.style.display = '';
-      localVideo.style.display = 'none';
-      setStatus('Stopped');
-
+      document.body.classList.remove('previewing','streaming','ui-visible'); document.body.classList.add('blackout');
+      localVideo.style.display = 'none'; setStatus('Stopped');
       startBtn.textContent = 'Start streaming';
     }
 
-    // Interactions
+    // Interactions (unchanged behavior)
     document.addEventListener('click', (e) => {
-      if (document.body.classList.contains('previewing')) {
-        endPreviewNow();
-        return;
-      }
-      if (document.body.classList.contains('streaming') && !document.body.classList.contains('ui-visible')) {
-        document.body.classList.add('ui-visible');
-        setStatus('Streaming...');
-        scheduleAutoHideUI();
-        return;
-      }
+      if (document.body.classList.contains('previewing')) { endPreviewNow(); return; }
+      if (document.body.classList.contains('streaming') && !document.body.classList.contains('ui-visible')) { document.body.classList.add('ui-visible'); setStatus('Streaming...'); scheduleAutoHideUI(); return; }
       if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
         const inCard = e.target.closest('.card');
-        if (!inCard) {
-          document.body.classList.remove('ui-visible');
-          setStatus('Streaming...');
-          clearTimeout(hideUITimer); hideUITimer = null;
-        } else {
-          resetAutoHideUI();
-        }
+        if (!inCard) { document.body.classList.remove('ui-visible'); setStatus('Streaming...'); clearTimeout(hideUITimer); hideUITimer=null; }
+        else { resetAutoHideUI(); }
       }
     });
-
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        if (document.body.classList.contains('previewing')) {
-          endPreviewNow();
-        } else if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
-          document.body.classList.remove('ui-visible');
-          setStatus('Streaming...');
-          clearTimeout(hideUITimer); hideUITimer = null;
+        if (document.body.classList.contains('previewing')) endPreviewNow();
+        else if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
+          document.body.classList.remove('ui-visible'); setStatus('Streaming...'); clearTimeout(hideUITimer); hideUITimer=null;
         }
-      } else {
-        resetAutoHideUI();
-      }
+      } else { resetAutoHideUI(); }
     });
-
-    function scheduleAutoHideUI() {
-      clearTimeout(hideUITimer);
-      hideUITimer = setTimeout(() => {
-        if (document.body.classList.contains('streaming')) {
-          document.body.classList.remove('ui-visible');
-          setStatus('Streaming...');
-        }
-      }, UI_AUTOHIDE_MS);
-    }
-    function resetAutoHideUI() {
-      if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
-        scheduleAutoHideUI();
-      }
-    }
+    function scheduleAutoHideUI(){ clearTimeout(hideUITimer); hideUITimer = setTimeout(() => { if (document.body.classList.contains('streaming')) { document.body.classList.remove('ui-visible'); setStatus('Streaming...'); } }, UI_AUTOHIDE_MS); }
+    function resetAutoHideUI(){ if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) scheduleAutoHideUI(); }
     document.addEventListener('mousemove', resetAutoHideUI, { passive: true });
     document.addEventListener('touchstart', resetAutoHideUI, { passive: true });
 
     window.addEventListener('beforeunload', stopStreaming);
-    startBtn.addEventListener('click', startOrStop);
+    document.getElementById('startBtn').addEventListener('click', startOrStop);
   </script>
 </body>
 </html>
