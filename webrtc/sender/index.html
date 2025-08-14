@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <link rel="manifest" href="manifest.json" />
-  <link rel="icon" href="icons/icon-192.png" type="image/png">  
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
   <title>Baby Monitor – Sender</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 
@@ -14,8 +14,6 @@
       background: #000; color: #ccc; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       touch-action: manipulation;
     }
-
-    /* Setup card (visible before streaming, and when "managing" during streaming) */
     #ui { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 20px; }
     .card {
       width: 100%; max-width: 520px;
@@ -38,21 +36,17 @@
     button:active { transform: scale(0.99); }
     .hint { opacity: .7; font-size: 13px; }
 
-    /* Local video shows ONLY during preview window */
     video#local {
-      display: none;               /* shown only during preview */
+      display: none;
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
       object-fit: cover; background: #000; z-index: 1;
     }
     body.previewing video#local { display: block; }
 
-    /* Streaming states */
-    body.blackout { background: #000; } /* full black */
-    /* overlay hidden when UI is visible during streaming */
+    body.blackout { background: #000; }
     body.streaming.ui-visible .overlay { display: none !important; }
 
-    /* Status overlay (visible during preview or streaming) */
     .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; z-index: 2; }
     body.streaming .overlay, body.previewing .overlay { display: flex; }
     .status {
@@ -62,11 +56,8 @@
       text-align: center; white-space: pre-line;
     }
 
-    /* Tap layer only when streaming AND UI is hidden */
     #tap { position: fixed; inset: 0; display: none; z-index: 3; }
     body.streaming:not(.ui-visible) #tap { display: block; }
-
-    /* Hide the UI when streaming unless explicitly visible */
     body.streaming:not(.ui-visible) #ui { display: none; }
   </style>
 </head>
@@ -110,23 +101,18 @@
     </div>
   </div>
 
-  <!-- tap layer + status overlay -->
   <div id="tap" aria-hidden="true"></div>
   <div class="overlay"><div class="status" id="status">Idle</div></div>
-
-  <!-- local preview (muted) -->
   <video id="local" playsinline autoplay muted></video>
 
   <script>
-    // ---- Config
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
-    const UI_AUTOHIDE_MS = 10000; // auto-hide UI after 10s of inactivity while streaming
+    const UI_AUTOHIDE_MS = 10000;
 
     const qsRoom = new URLSearchParams(location.search).get('room');
     const roomInput = document.getElementById('room');
     if (qsRoom) roomInput.value = qsRoom;
 
-    // ---- Elements
     const videoOn   = document.getElementById('videoOn');
     const audioOn   = document.getElementById('audioOn');
     const cameraSel = document.getElementById('cameraSel');
@@ -137,12 +123,14 @@
     const ui        = document.getElementById('ui');
     const tap       = document.getElementById('tap');
 
-    // ---- State
     let ws = null, pc = null, localStream = null;
     let wakeLock = null;
     let previewTimer = null, previewTicker = null, previewEnd = 0;
     let started = false;
     let hideUITimer = null;
+
+    let remoteDescriptionSet = false;      // NEW: to queue ICE until offer applied
+    const candidateQueue = [];             // NEW: ICE queue
 
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
 
@@ -184,10 +172,8 @@
         audio: wantAudio ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true } : false
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
-
       const v = stream.getVideoTracks()[0];
       if (v && 'contentHint' in v) { try { v.contentHint = 'motion'; } catch {} }
-
       return stream;
     }
 
@@ -206,6 +192,8 @@
           opened = true; clearTimeout(timer);
           setStatus('Signaling: connected');
           send({ type: 'join', room });
+          // Ask receiver to (re)send the offer if we missed it
+          send({ type: 'need-offer' });                      // NEW
           resolve();
         };
         ws.onmessage = onSignal;
@@ -224,7 +212,6 @@
       });
       pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate }); };
       pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
-
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 
@@ -232,10 +219,9 @@
       const ms = Math.max(0, Math.round((Number(minutes) || 1) * 60000));
       if (ms === 0) { enterBlackout(); return; }
 
-      document.body.classList.add('previewing');
-      document.body.classList.add('streaming');
-      document.body.classList.remove('ui-visible'); // UI hidden during preview
-      ui.style.display = ''; // allow CSS to control via body classes
+      document.body.classList.add('previewing','streaming');
+      document.body.classList.remove('ui-visible');
+      ui.style.display = '';
       localVideo.style.display = 'block';
 
       previewEnd = Date.now() + ms;
@@ -261,34 +247,11 @@
 
     function enterBlackout() {
       document.body.classList.remove('previewing');
-      document.body.classList.add('streaming');     // keep streaming state
-      document.body.classList.remove('ui-visible'); // UI hidden
+      document.body.classList.add('streaming');
+      document.body.classList.remove('ui-visible');
       localVideo.style.display = 'none';
       setStatus('Streaming...');
       clearTimeout(hideUITimer); hideUITimer = null;
-    }
-
-    function showUIWhileStreaming() {
-      if (!document.body.classList.contains('streaming')) return;
-      document.body.classList.add('ui-visible');
-      setStatus('Streaming...'); // still streaming
-      scheduleAutoHideUI();
-    }
-
-    function scheduleAutoHideUI() {
-      clearTimeout(hideUITimer);
-      hideUITimer = setTimeout(() => {
-        if (document.body.classList.contains('streaming')) {
-          document.body.classList.remove('ui-visible');
-          setStatus('Streaming...');
-        }
-      }, UI_AUTOHIDE_MS);
-    }
-
-    function resetAutoHideUI() {
-      if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
-        scheduleAutoHideUI();
-      }
     }
 
     async function onSignal(evt) {
@@ -296,14 +259,27 @@
 
       if (msg.type === 'offer') {
         setStatus('Got offer, creating answer…');
-        createPC();
+        if (!pc) createPC();
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
+        remoteDescriptionSet = true;                          // NEW
+
+        // Flush queued ICE (if any arrived early)
+        while (candidateQueue.length) {
+          const c = candidateQueue.shift();
+          try { await pc.addIceCandidate(c); } catch (err) { console.warn('late ICE add failed', err); }
+        }
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         send(answer);
-        // UI flow managed separately
+
       } else if (msg.type === 'candidate' && msg.candidate) {
-        try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch (err) { console.warn('ICE add failed', err); }
+        const cand = new RTCIceCandidate(msg.candidate);
+        if (remoteDescriptionSet && pc) {
+          try { await pc.addIceCandidate(cand); } catch (err) { console.warn('ICE add failed', err); }
+        } else {
+          candidateQueue.push(cand);                          // NEW: queue until RD set
+        }
       }
     }
 
@@ -318,7 +294,6 @@
         localStream = await getMedia();
         localVideo.srcObject = localStream;
 
-        // Start preview immediately
         beginPreviewWindow(Number(previewMinsInput.value) || 1);
 
         await connectWS(room);
@@ -337,21 +312,20 @@
     }
 
     async function stopStreaming() {
-      // Clear timers
       if (previewTimer) clearTimeout(previewTimer);
       if (previewTicker) clearInterval(previewTicker);
       if (hideUITimer) clearTimeout(hideUITimer);
       previewTimer = previewTicker = hideUITimer = null;
 
-      // Close PC/WS and stop media
       try { pc && pc.getSenders().forEach(s => s.track && s.track.stop()); } catch {}
       try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
       try { pc && pc.close(); } catch {}
       try { ws && ws.close(); } catch {}
 
-      // Reset UI state
       localStream = null; pc = null; ws = null;
       started = false;
+      remoteDescriptionSet = false;
+      candidateQueue.length = 0;
 
       document.body.classList.remove('previewing','streaming','ui-visible');
       document.body.classList.add('blackout');
@@ -362,20 +336,18 @@
       startBtn.textContent = 'Start streaming';
     }
 
-    // ---- Interactions per spec ----
-    // Tap anywhere:
+    // Interactions
     document.addEventListener('click', (e) => {
-      // If PREVIEWING → stop preview immediately (go to black)
       if (document.body.classList.contains('previewing')) {
         endPreviewNow();
         return;
       }
-      // If STREAMING with UI hidden → show UI (and start inactivity timer)
       if (document.body.classList.contains('streaming') && !document.body.classList.contains('ui-visible')) {
-        showUIWhileStreaming();
+        document.body.classList.add('ui-visible');
+        setStatus('Streaming...');
+        scheduleAutoHideUI();
         return;
       }
-      // If STREAMING with UI visible → clicking outside the card hides UI immediately
       if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
         const inCard = e.target.closest('.card');
         if (!inCard) {
@@ -383,13 +355,11 @@
           setStatus('Streaming...');
           clearTimeout(hideUITimer); hideUITimer = null;
         } else {
-          // interaction inside UI → reset inactivity timer
           resetAutoHideUI();
         }
       }
     });
 
-    // Esc: while previewing -> end preview; while streaming & UI visible -> hide UI
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         if (document.body.classList.contains('previewing')) {
@@ -404,13 +374,24 @@
       }
     });
 
-    // Any movement/touch while UI visible should keep it alive
+    function scheduleAutoHideUI() {
+      clearTimeout(hideUITimer);
+      hideUITimer = setTimeout(() => {
+        if (document.body.classList.contains('streaming')) {
+          document.body.classList.remove('ui-visible');
+          setStatus('Streaming...');
+        }
+      }, UI_AUTOHIDE_MS);
+    }
+    function resetAutoHideUI() {
+      if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
+        scheduleAutoHideUI();
+      }
+    }
     document.addEventListener('mousemove', resetAutoHideUI, { passive: true });
     document.addEventListener('touchstart', resetAutoHideUI, { passive: true });
 
-    // Clean up on unload
     window.addEventListener('beforeunload', stopStreaming);
-
     startBtn.addEventListener('click', startOrStop);
   </script>
 </body>
