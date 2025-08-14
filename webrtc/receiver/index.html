@@ -11,7 +11,6 @@
       background: #000; color: #fff;
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
     }
-    /* Auto-size to screen without cropping; switch to 'cover' if you want fill */
     video {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
@@ -85,7 +84,6 @@
       pc.ontrack = (ev) => {
         if (remoteVideo.srcObject !== ev.streams[0]) {
           remoteVideo.srcObject = ev.streams[0];
-          // Attempt to play with audio; if blocked, show button
           remoteVideo.muted = false;
           remoteVideo.play().catch(() => { unmuteBtn.style.display = 'block'; });
         }
@@ -100,15 +98,21 @@
       try { await remoteVideo.play(); unmuteBtn.style.display = 'none'; } catch (e) { console.warn(e); }
     });
 
+    async function sendCurrentOffer() {
+      if (pc?.localDescription?.type === 'offer') {
+        send(pc.localDescription);
+        setStatus('Offer (re)sent…');
+      }
+    }
+
     async function startReceiver() {
       try {
         await connectWS();
         createPC();
 
-        // Offer asks for both audio + video (via transceivers above)
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        send(offer);
+        await sendCurrentOffer(); // initial send
         setStatus('Offer sent, waiting for answer…');
       } catch (e) {
         console.error(e);
@@ -124,7 +128,6 @@
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
         remoteDescriptionSet = true;
 
-        // Flush queued ICE
         for (const c of candidateQueue) {
           try { await pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
         }
@@ -137,6 +140,14 @@
         } else {
           candidateQueue.push(cand);
         }
+
+      } else if (msg.type === 'need-offer') {
+        // Sender joined late and is asking for the offer
+        await sendCurrentOffer();
+
+      } else if (msg.type === 'peer-joined') {
+        // A peer joined the room; re-send the current offer for robustness
+        await sendCurrentOffer();
       }
     }
 
