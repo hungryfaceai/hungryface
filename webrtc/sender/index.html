@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <title>Baby Monitor – Sender (iPhone)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-
   <style>
     :root { color-scheme: dark; }
     html, body {
@@ -12,12 +11,7 @@
       background: #000; color: #ccc; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       touch-action: manipulation;
     }
-
-    /* Centered card before streaming */
-    #ui {
-      min-height: 100%;
-      display: flex; align-items: center; justify-content: center; padding: 20px;
-    }
+    #ui { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 20px; }
     .card {
       width: 100%; max-width: 520px;
       background: #0b0b0b; border: 1px solid #141414; border-radius: 14px;
@@ -26,7 +20,9 @@
     .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; }
     label.switch { display: flex; align-items: center; gap: 10px; font-size: 16px; }
     input[type="checkbox"] { width: 22px; height: 22px; }
-    input[type="text"] { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222; background:#0b0b0b; color:#ddd; }
+    input[type="text"], select {
+      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222; background:#0b0b0b; color:#ddd;
+    }
     button {
       width: 100%; padding: 14px 16px; border-radius: 12px; border: 0;
       background: #2a2a2a; color: #fff; font-size: 17px; font-weight: 600;
@@ -34,14 +30,11 @@
     button:active { transform: scale(0.99); }
     .hint { opacity: .7; font-size: 13px; }
 
-    /* Hidden video just to keep capture alive */
-    video { position: fixed; left: -10000px; top: -10000px; width:1px; height:1px; }
+    video { position: fixed; left: -10000px; top: -10000px; width:1px; height:1px; } /* hidden preview */
 
-    /* Baby-monitor blackout/peek */
     body.blackout { background: #000; }
-    body.peek     { background: #111; } /* slightly brighter “peek” */
+    body.peek     { background: #111; }
 
-    /* Status overlay (visible only when streaming) */
     .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; }
     body.streaming .overlay { display: flex; }
     .status {
@@ -49,8 +42,6 @@
       border: 1px solid rgba(255,255,255,0.1);
       color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
     }
-
-    /* Entire touch area to toggle peek once streaming */
     #tap { position: fixed; inset: 0; display: none; }
     body.streaming #tap { display: block; }
   </style>
@@ -72,6 +63,13 @@
       </div>
 
       <div class="row">
+        <select id="cameraSel" aria-label="Camera">
+          <option value="environment" selected>Back camera</option>
+          <option value="user">Front camera</option>
+        </select>
+      </div>
+
+      <div class="row">
         <input id="room" type="text" placeholder="Room (e.g., baby1)" value="baby1" autocomplete="off">
       </div>
 
@@ -83,11 +81,9 @@
     </div>
   </div>
 
-  <!-- touch layer + status -->
   <div id="tap" aria-hidden="true"></div>
   <div class="overlay"><div class="status" id="status">Idle</div></div>
 
-  <!-- hidden preview just to keep camera alive -->
   <video id="local" playsinline autoplay muted></video>
 
   <script>
@@ -100,6 +96,7 @@
     // ---- Elements
     const videoOn = document.getElementById('videoOn');
     const audioOn = document.getElementById('audioOn');
+    const cameraSel = document.getElementById('cameraSel');
     const startBtn = document.getElementById('startBtn');
     const localVideo = document.getElementById('local');
     const statusEl = document.getElementById('status');
@@ -114,7 +111,6 @@
 
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
 
-    // Keep screen awake (when supported)
     async function requestWakeLock() {
       try {
         if ('wakeLock' in navigator) {
@@ -130,7 +126,6 @@
 
     function currentRoom() {
       const r = (roomInput.value || 'baby1').trim();
-      // reflect in URL for convenience
       try {
         const u = new URL(location.href);
         u.searchParams.set('room', r);
@@ -144,9 +139,10 @@
       const wantAudio = audioOn.checked;
       if (!wantVideo && !wantAudio) throw new Error('Both video and audio are OFF.');
 
+      const facing = cameraSel.value || 'environment';
       const constraints = {
         video: wantVideo ? {
-          facingMode: 'environment',
+          facingMode: facing,                // 'environment' (back) or 'user' (front)
           width: { ideal: 1280 },
           height: { ideal: 720 },
           frameRate: { ideal: 30, max: 30 }
@@ -196,7 +192,6 @@
       pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
       pc.onconnectionstatechange = () => console.log('[PC]', pc.connectionState);
 
-      // Publish tracks
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 
@@ -204,13 +199,11 @@
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
 
       if (msg.type === 'offer') {
-        // Receiver sent an SDP offer → answer it
         setStatus('Got offer, creating answer…');
         createPC();
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
         remoteDescriptionSet = true;
 
-        // Flush queued ICE
         while (candidateQueue.length) {
           const c = candidateQueue.shift();
           try { await pc.addIceCandidate(c); } catch (err) { console.warn('late ICE add failed', err); }
@@ -220,7 +213,6 @@
         await pc.setLocalDescription(answer);
         send(answer);
 
-        // Enter baby-monitor mode
         ui.style.display = 'none';
         document.body.classList.add('streaming', 'blackout');
         await requestWakeLock();
@@ -241,16 +233,14 @@
         startBtn.disabled = true;
         const room = currentRoom();
 
-        // 1) Capture (must be user-gesture on iOS)
         setStatus('Starting camera…');
         localStream = await getMedia();
-        localVideo.srcObject = localStream; // keep alive (muted, hidden)
+        localVideo.srcObject = localStream;
 
-        // 2) Connect signaling
         await connectWS(room);
         setStatus('Waiting for offer…');
 
-        // If a track ends, try to reacquire
+        // Reacquire if tracks end (rare)
         localStream.getTracks().forEach(track => {
           track.onended = async () => {
             try {
@@ -280,10 +270,9 @@
       document.body.classList.toggle('blackout', !isPeek);
     }
     tap.addEventListener('click', togglePeek);
-    // fallback (anywhere)
     document.body.addEventListener('click', (e) => {
       if (!document.body.classList.contains('streaming')) return;
-      if (e.target === tap) return; // already handled
+      if (e.target === tap) return;
       togglePeek();
     });
 
