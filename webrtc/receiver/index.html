@@ -6,26 +6,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
   <style>
     :root { color-scheme: dark; }
-    html, body {
-      margin: 0; height: 100%;
-      background: #000; color: #fff;
-      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
-    }
-    video {
-      position: fixed; inset: 0;
-      width: 100vw; height: 100vh;
-      object-fit: contain; background: #000;
-    }
-    #status {
-      position: fixed; top: 10px; left: 10px;
-      font-size: 0.9em; opacity: 0.85; padding: 6px 10px;
-      background: rgba(0,0,0,0.35); border-radius: 8px;
-    }
-    #unmute {
-      position: fixed; bottom: 16px; left: 16px;
-      padding: 10px 14px; border: 0; border-radius: 10px;
-      background:#333; color:#fff; display:none; cursor: pointer;
-    }
+    html, body { margin: 0; height: 100%; background: #000; color: #fff; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif; }
+    video { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; background: #000; }
+    #status { position: fixed; top: 10px; left: 10px; font-size: 0.9em; opacity: 0.85; padding: 6px 10px; background: rgba(0,0,0,0.35); border-radius: 8px; }
+    #unmute { position: fixed; bottom: 16px; left: 16px; padding: 10px 14px; border: 0; border-radius: 10px; background:#333; color:#fff; display:none; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -72,11 +56,7 @@
     }
 
     function createPC() {
-      pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-      });
-
-      // Explicitly request both tracks in the SDP
+      pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
@@ -122,6 +102,7 @@
 
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+      console.log('[WS IN]', msg.type);
 
       if (msg.type === 'answer') {
         setStatus('Got answer, applying…');
@@ -141,12 +122,7 @@
           candidateQueue.push(cand);
         }
 
-      } else if (msg.type === 'need-offer') {
-        // Sender joined late and is asking for the offer
-        await sendCurrentOffer();
-
-      } else if (msg.type === 'peer-joined') {
-        // A peer joined the room; re-send the current offer for robustness
+      } else if (msg.type === 'need-offer' || msg.type === 'peer-joined') {
         await sendCurrentOffer();
       }
     }
