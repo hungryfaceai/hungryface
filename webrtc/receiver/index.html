@@ -4,6 +4,11 @@
   <meta charset="utf-8">
   <title>Baby Monitor – Receiver</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+
+  <!-- MediaPipe Solutions FALLBACK (works on GitHub Pages; no COOP/COEP) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
+
   <style>
     :root { color-scheme: dark; }
     html, body {
@@ -12,31 +17,30 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       overflow: hidden;
     }
+    /* Video fills screen, preserving aspect */
     video {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
-      object-fit: contain; background: #000; z-index: 1;
+      object-fit: contain; background: #000;
     }
-    /* Pose overlay above video, below controls */
-    canvas#poseCanvas {
-      position: fixed; inset: 0;
-      width: 100vw; height: 100vh;
-      pointer-events: none; display: none; z-index: 2;
-    }
-    /* Transparent buttons */
+
+    /* Transparent buttons (audio + fullscreen) */
     .btn {
       padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
       background: transparent; color: #fff; font-size: 16px; font-weight: 600;
-      cursor: pointer; text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+      cursor: pointer; box-shadow: none;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
     }
     .btn:active { transform: scale(0.99); }
+
+    /* Bottom-center controls overlay (audio + fullscreen) */
     #controls {
       position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
       display: flex; align-items: center; gap: 12px; z-index: 6;
     }
     #enableAudioBtn, #disableAudioBtn { display: none; }
 
-    /* Center status box (auto-hides) */
+    /* Sender-style status overlay (center translucent card) */
     .overlay {
       position: fixed; inset: 0; display: flex;
       align-items: center; justify-content: center;
@@ -49,39 +53,53 @@
       text-align: center; white-space: pre-line; max-width: 90vw;
     }
     .overlay.hidden { display: none; }
+
+    /* Pose overlay canvas */
+    #poseOverlay {
+      position: fixed; inset: 0;
+      width: 100vw; height: 100vh;
+      pointer-events: none; z-index: 4;
+      display: none;
+    }
   </style>
 </head>
 <body>
+  <!-- Bottom overlay controls -->
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
     <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
   </div>
 
+  <!-- Video -->
   <video id="remote" autoplay playsinline></video>
-  <canvas id="poseCanvas"></canvas>
+  <!-- Pose overlay -->
+  <canvas id="poseOverlay"></canvas>
 
+  <!-- Center status box -->
   <div id="overlay" class="overlay">
     <div id="status" class="status">Idle</div>
   </div>
 
-  <script type="module">
+  <script>
+    // ---------- Config ----------
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
     const WS_KEEPALIVE_MS = 25000;
     const WS_RECONNECT_MIN_MS = 1000;
     const WS_RECONNECT_MAX_MS = 10000;
     const RESTART_ON_ICE_TIMEOUT_MS = 5000;
-    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
+    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000; // 10s
 
+    // ---------- Elements ----------
     const remoteVideo = document.getElementById('remote');
     const fsBtn = document.getElementById('fsBtn');
     const enableAudioBtn = document.getElementById('enableAudioBtn');
     const disableAudioBtn = document.getElementById('disableAudioBtn');
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
-    const poseCanvas = document.getElementById('poseCanvas');
 
+    // ---------- State ----------
     let ws = null, wsKeepalive = null, wsRetryMs = WS_RECONNECT_MIN_MS;
     let pc = null;
     let remoteDescriptionSet = false;
@@ -91,21 +109,19 @@
     let iceDisconnectedSince = null;
     let hideStatusTimer = null;
 
-    // Pose state (mirrors sender toggle)
-    let poseEnabled = false;
-    let poseModule = null, PoseLandmarker = null, FilesetResolver = null, DrawingUtils = null;
-    let poseLandmarker = null, poseCtx = null, poseUtils = null;
-    let poseLoopActive = false;
-
+    // ---------- UI helpers ----------
     function showStatus(msg) {
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
       console.log('[STATUS]', msg);
+
       if (msg === 'Connected') {
         if (hideStatusTimer) clearTimeout(hideStatusTimer);
-        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
+        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'),
+          STATUS_HIDE_AFTER_CONNECTED_MS);
       } else {
         if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
+        overlay.classList.remove('hidden');
       }
     }
 
@@ -119,21 +135,40 @@
       }
     }
 
+    enableAudioBtn.style.display = 'block';
+
     async function tryStartMuted() {
-      try { remoteVideo.muted = true; remoteVideo.volume = 1.0; await remoteVideo.play(); }
-      catch {}
+      try {
+        remoteVideo.muted = true;
+        remoteVideo.volume = 1.0;
+        await remoteVideo.play();
+      } catch (e) {
+        console.warn('autoplay (muted) blocked:', e);
+      }
       updateAudioButtons();
     }
-    enableAudioBtn.addEventListener('click', async (e) => {
-      e?.preventDefault?.();
-      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
-      updateAudioButtons();
-    });
-    disableAudioBtn.addEventListener('click', (e) => {
-      e?.preventDefault?.();
-      remoteVideo.muted = true; updateAudioButtons();
-    });
 
+    async function enableAudio(e) {
+      e?.stopPropagation?.(); e?.preventDefault?.();
+      try {
+        remoteVideo.muted = false;
+        remoteVideo.volume = 1.0;
+        await remoteVideo.play();
+      } catch (err) {
+        console.warn('unmute play blocked:', err);
+      }
+      updateAudioButtons();
+    }
+    function disableAudio(e) {
+      e?.stopPropagation?.(); e?.preventDefault?.();
+      remoteVideo.muted = true;
+      updateAudioButtons();
+    }
+
+    enableAudioBtn.addEventListener('click', enableAudio);
+    disableAudioBtn.addEventListener('click', disableAudio);
+
+    // Fullscreen button + exit on tap/esc
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -144,85 +179,23 @@
           await document.exitFullscreen();
           fsBtn.textContent = 'Fullscreen';
         }
-      } catch {}
+      } catch (err) { console.warn('fullscreen error', err); }
     });
     document.addEventListener('fullscreenchange', () => {
       fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
     });
-    document.addEventListener('click', () => { if (document.fullscreenElement) document.exitFullscreen().catch(()=>{}); });
+    document.addEventListener('click', () => {
+      if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+    });
 
-    remoteVideo.addEventListener('playing', () => updateAudioButtons());
+    remoteVideo.addEventListener('loadedmetadata', () =>
+      console.log('metadata:', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight));
+    remoteVideo.addEventListener('playing', () => {
+      console.log('playing… muted=', remoteVideo.muted);
+      updateAudioButtons();
+    });
 
-    // ---- MediaPipe Pose (lazy) ----
-    async function ensurePoseLoaded() {
-      if (poseLandmarker) return;
-      if (!poseModule) {
-        poseModule = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3');
-        ({ PoseLandmarker, FilesetResolver, DrawingUtils } = poseModule);
-      }
-      const fileset = await FilesetResolver.forVisionTasks(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
-      );
-      poseLandmarker = await PoseLandmarker.createFromOptions(fileset, {
-        baseOptions: {
-          modelAssetPath:
-            'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/models/pose_landmarker_lite.task',
-          delegate: 'GPU'
-        },
-        runningMode: 'VIDEO',
-        numPoses: 1
-      });
-      poseCtx = poseCanvas.getContext('2d');
-      poseUtils = new DrawingUtils(poseCtx);
-    }
-
-    function updatePoseCanvasSizeToVideo(videoEl) {
-      const w = videoEl.videoWidth || 0;
-      const h = videoEl.videoHeight || 0;
-      if (!w || !h) return;
-      if (poseCanvas.width !== w || poseCanvas.height !== h) {
-        poseCanvas.width = w;
-        poseCanvas.height = h;
-      }
-    }
-
-    function startPoseLoopFor(videoEl) {
-      if (poseLoopActive) return;
-      poseLoopActive = true;
-
-      const step = () => {
-        if (!poseEnabled || !poseLandmarker) { poseLoopActive = false; return; }
-        if (videoEl.readyState >= 2) {
-          updatePoseCanvasSizeToVideo(videoEl);
-          poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
-          try {
-            const res = poseLandmarker.detectForVideo(videoEl, performance.now());
-            const poses = res?.landmarks || [];
-            for (const lm of poses) {
-              poseUtils.drawLandmarks(lm, { radius: 2 });
-              try { poseUtils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS); } catch {}
-            }
-          } catch {}
-        }
-        if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
-          videoEl.requestVideoFrameCallback(() => requestAnimationFrame(step));
-        } else {
-          requestAnimationFrame(step);
-        }
-      };
-      requestAnimationFrame(step);
-    }
-
-    function setPoseEnabled(on) {
-      poseEnabled = !!on;
-      poseCanvas.style.display = poseEnabled ? 'block' : 'none';
-      if (!poseEnabled) return;
-      ensurePoseLoaded()
-        .then(() => startPoseLoopFor(remoteVideo))
-        .catch((e) => { console.warn('Pose load error:', e); poseEnabled = false; poseCanvas.style.display = 'none'; });
-    }
-
-    // ---- WebSocket (auto-reconnect) ----
+    // ---------- WebSocket (auto-reconnect) ----------
     async function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
@@ -249,7 +222,7 @@
           resolve();
         };
         sock.onmessage = onSignal;
-        sock.onerror = () => {};
+        sock.onerror = (e) => { console.warn('[WS error]', e); };
         sock.onclose  = () => {
           showStatus('Signaling: closed');
           if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
@@ -260,6 +233,7 @@
 
     function scheduleWSReconnect() {
       const delay = Math.min(wsRetryMs, WS_RECONNECT_MAX_MS);
+      console.log('[WS] reconnect in', delay,'ms');
       setTimeout(() => {
         wsRetryMs = Math.min(wsRetryMs * 2, WS_RECONNECT_MAX_MS);
         startNegotiation();
@@ -268,7 +242,7 @@
 
     const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
-    // ---- PeerConnection / Negotiation ----
+    // ---------- PeerConnection / Negotiation ----------
     function createPC() {
       if (pc) { try { pc.close(); } catch{}; pc = null; }
       remoteDescriptionSet = false;
@@ -289,16 +263,25 @@
       };
 
       pc.oniceconnectionstatechange = () => {
-        const s = pc.iceConnectionState;
-        if (s === 'connected') showStatus('Connected'); else showStatus('ICE: ' + s);
-        if (s === 'disconnected') {
+        const state = pc.iceConnectionState;
+        console.log('[ICE]', state);
+
+        if (state === 'connected') {
+          showStatus('Connected');
+        } else {
+          showStatus('ICE: ' + state);
+        }
+
+        if (state === 'disconnected') {
           if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
           setTimeout(() => {
             if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= RESTART_ON_ICE_TIMEOUT_MS) {
+              console.log('[ICE] disconnected timeout - restarting negotiation');
               startNegotiation(true);
             }
           }, RESTART_ON_ICE_TIMEOUT_MS + 50);
-        } else if (s === 'failed') {
+        } else if (state === 'failed') {
+          console.log('[ICE] failed - restarting negotiation');
           startNegotiation(true);
         } else {
           iceDisconnectedSince = null;
@@ -307,19 +290,27 @@
     }
 
     async function sendCurrentOffer() {
-      if (pc?.localDescription?.type === 'offer') send(pc.localDescription);
+      if (pc?.localDescription?.type === 'offer') {
+        console.log('[WS OUT] offer (send/resend)');
+        send(pc.localDescription);
+      }
     }
+
     function startOfferResendLoop() {
       stopOfferResendLoop();
       offerResendTimer = setInterval(() => {
-        if (!remoteDescriptionSet) sendCurrentOffer(); else stopOfferResendLoop();
+        if (!remoteDescriptionSet) sendCurrentOffer();
+        else stopOfferResendLoop();
       }, 2000);
     }
-    function stopOfferResendLoop() { if (offerResendTimer) clearInterval(offerResendTimer); offerResendTimer = null; }
+    function stopOfferResendLoop() {
+      if (offerResendTimer) clearInterval(offerResendTimer);
+      offerResendTimer = null;
+    }
 
     async function startNegotiation(forceNewPc = false) {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
-        try { await connectWS(); } catch { scheduleWSReconnect(); return; }
+        try { await connectWS(); } catch(e) { scheduleWSReconnect(); return; }
       }
       if (!pc || forceNewPc) createPC();
 
@@ -329,17 +320,25 @@
         await sendCurrentOffer();
         startOfferResendLoop();
         showStatus('Offer sent, waiting for answer…');
-      } catch {
+      } catch (e) {
+        console.error('negotiation error', e);
         showStatus('Negotiation error');
       }
     }
 
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+      console.log('[WS IN]', msg.type);
 
       if (msg.type === 'answer') {
-        if (pc.signalingState !== 'have-local-offer') return;
-        if (lastAnswerSdp === msg.sdp) return;
+        if (pc.signalingState !== 'have-local-offer') {
+          console.log('[SKIP] answer in state', pc.signalingState);
+          return;
+        }
+        if (lastAnswerSdp === msg.sdp) {
+          console.log('[DUP] identical answer ignored');
+          return;
+        }
         lastAnswerSdp = msg.sdp;
 
         showStatus('Got answer, applying…');
@@ -347,15 +346,16 @@
         remoteDescriptionSet = true;
         stopOfferResendLoop();
 
+        // Flush queued ICE
         for (const c of candidateQueue) {
-          try { await pc.addIceCandidate(c); } catch {}
+          try { await pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
         }
         candidateQueue.length = 0;
 
       } else if (msg.type === 'candidate' && msg.candidate) {
         const cand = new RTCIceCandidate(msg.candidate);
         if (remoteDescriptionSet) {
-          try { await pc.addIceCandidate(cand); } catch {}
+          try { await pc.addIceCandidate(cand); } catch (e) { console.warn('ICE add failed', e); }
         } else {
           candidateQueue.push(cand);
         }
@@ -364,11 +364,15 @@
         await sendCurrentOffer();
 
       } else if (msg.type === 'bye') {
+        console.log('[INFO] sender bye -> keep re-offering');
         remoteDescriptionSet = false;
         startOfferResendLoop();
 
       } else if (msg.type === 'pose-toggle') {
-        setPoseEnabled(!!msg.enabled);
+        // Sender toggled Pose overlay -> enable/disable our overlay
+        poseEnabledRemote = !!msg.enabled;
+        if (poseEnabledRemote) { await startRemotePoseIfNeeded(); }
+        else { stopRemotePose(); }
       }
     }
 
@@ -380,7 +384,93 @@
       if (hideStatusTimer) clearTimeout(hideStatusTimer);
     });
 
-    // Kick off
+    // ---------------- Receiver Pose FALLBACK ----------------
+    let poseEnabledRemote = false;   // toggled by 'pose-toggle'
+    let rPoseEngine = null;
+    const rPoseCanvas = document.getElementById('poseOverlay');
+    const rPoseCtx    = rPoseCanvas.getContext('2d', { alpha: true });
+
+    function sizeRCanvas() {
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      const w = Math.floor(window.innerWidth  * dpr);
+      const h = Math.floor(window.innerHeight * dpr);
+      if (rPoseCanvas.width !== w || rPoseCanvas.height !== h) {
+        rPoseCanvas.width = w; rPoseCanvas.height = h;
+      }
+    }
+    sizeRCanvas();
+    addEventListener('resize', sizeRCanvas);
+
+    class ReceiverPoseEngine {
+      constructor(videoEl, canvas, ctx) {
+        this.video = videoEl;
+        this.canvas = canvas;
+        this.ctx = ctx;
+        this.pose = null;
+        this.running = false;
+      }
+      async load() {
+        if (this.pose) return;
+        this.pose = new Pose.Pose({
+          locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${f}`
+        });
+        this.pose.setOptions({
+          modelComplexity: 1,
+          smoothLandmarks: true,
+          enableSegmentation: false,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+          selfieMode: false
+        });
+        this.pose.onResults((res) => this.onResults(res));
+      }
+      onResults(results) {
+        const w = this.canvas.width, h = this.canvas.height;
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.clearRect(0, 0, w, h);
+        ctx.scale(w, h);
+        const lms = results.poseLandmarks || [];
+        if (lms.length) {
+          drawingUtils.drawConnectors(ctx, lms, Pose.POSE_CONNECTIONS, { color: '#4DF3C3', lineWidth: 0.008 });
+          drawingUtils.drawLandmarks(ctx, lms, { color: '#4DF3C3', radius: 0.01 });
+        }
+        ctx.restore();
+      }
+      async start() {
+        await this.load();
+        this.running = true;
+        const loop = async () => {
+          if (!this.running) return;
+          try {
+            if (remoteVideo.readyState >= 2) {
+              await this.pose.send({ image: remoteVideo });
+            }
+          } catch {}
+          requestAnimationFrame(loop);
+        };
+        requestAnimationFrame(loop);
+      }
+      stop() {
+        this.running = false;
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      }
+    }
+    function updateRemoteOverlayVisibility() {
+      rPoseCanvas.style.display = poseEnabledRemote ? 'block' : 'none';
+    }
+    async function startRemotePoseIfNeeded() {
+      if (!poseEnabledRemote) return;
+      if (!rPoseEngine) rPoseEngine = new ReceiverPoseEngine(remoteVideo, rPoseCanvas, rPoseCtx);
+      try { await rPoseEngine.start(); } catch (e) { console.warn('Receiver pose start failed', e); }
+      updateRemoteOverlayVisibility();
+    }
+    function stopRemotePose() {
+      if (rPoseEngine) rPoseEngine.stop();
+      updateRemoteOverlayVisibility();
+    }
+
+    // Go!
     startNegotiation();
   </script>
 </body>
