@@ -1,310 +1,356 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Baby Monitor – Sender</title>
+  <meta charset="utf-8">
+  <title>Baby Monitor – Receiver</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-
-  <!-- MediaPipe (global UMD builds) -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
-
   <style>
     :root { color-scheme: dark; }
-    html, body { margin:0; height:100%; background:#000; color:#ccc; font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; touch-action:manipulation; }
-    #ui { min-height:100%; display:flex; align-items:center; justify-content:center; padding:20px; }
-    .card { width:100%; max-width:520px; background:#0b0b0b; border:1px solid #141414; border-radius:14px; padding:18px; box-sizing:border-box; }
-    .row { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:10px 0; }
-    label.switch { display:flex; align-items:center; gap:10px; font-size:16px; }
-    input[type="checkbox"]{ width:22px; height:22px; }
-    input[type="text"], select, input[type="number"]{ width:100%; padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; -moz-appearance:textfield; }
-    #cameraSel{ font-size:18px; padding:14px 16px; height:52px; border-radius:12px; }
-    input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
-    button{ width:100%; padding:14px 16px; border-radius:12px; border:0; background:#2a2a2a; color:#fff; font-size:17px; font-weight:600; }
-    button:active{ transform:scale(0.99); }
+    html, body {
+      margin: 0; height: 100%;
+      background: #000; color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+      overflow: hidden;
+    }
+    /* Video fills screen, preserving aspect */
+    video {
+      position: fixed; inset: 0;
+      width: 100vw; height: 100vh;
+      object-fit: contain; background: #000;
+    }
 
-    video#local{ display:none; position:fixed; inset:0; width:100vw; height:100vh; object-fit:cover; background:#000; z-index:1; }
-    body.previewing video#local{ display:block; }
-    body.blackout{ background:#000; }
-    body.streaming.ui-visible .overlay{ display:none !important; }
-    .overlay{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; pointer-events:none; z-index:2; }
-    body.streaming .overlay, body.previewing .overlay{ display:flex; }
-    .status{ background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); color:#ddd; font-size:14px; padding:10px 14px; border-radius:12px; text-align:center; white-space:pre-line; }
-    #tap{ position:fixed; inset:0; display:none; z-index:3; }
-    body.streaming:not(.ui-visible) #tap{ display:block; }
-    body.streaming:not(.ui-visible) #ui{ display:none; }
+    /* Transparent button style */
+    .btn {
+      padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
+      background: transparent; color: #fff; font-size: 16px; font-weight: 600;
+      cursor: pointer; box-shadow: none;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+    .btn:active { transform: scale(0.99); }
 
-    fieldset.ai{ border:1px solid #222; border-radius:12px; padding:10px 12px; margin:10px 0; }
-    fieldset.ai legend{ padding:0 8px; color:#aaa; font-size:14px; }
-    fieldset.ai .cols{ display:flex; gap:16px; flex-wrap:wrap; }
+    /* Bottom-center controls overlay (audio + fullscreen) */
+    #controls {
+      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 12px; z-index: 6;
+    }
+    /* Only one of these two is shown at a time */
+    #enableAudioBtn, #disableAudioBtn { display: none; }
 
-    /* Pose overlay */
+    /* Sender-style status overlay (center translucent card) */
+    .overlay {
+      position: fixed; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      pointer-events: none; z-index: 5;
+    }
+    .status {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
+      text-align: center; white-space: pre-line; max-width: 90vw;
+    }
+    .overlay.hidden { display: none; }
+
+    /* Pose overlay canvas */
     #poseOverlay{ position:fixed; inset:0; width:100vw; height:100vh; pointer-events:none; z-index:4; display:none; }
   </style>
 </head>
-<body class="blackout">
-  <div id="ui">
-    <div class="card">
-      <h2 style="margin:0 0 8px 0;">Camera Sender</h2>
-
-      <div class="row">
-        <label class="switch"><input id="videoOn" type="checkbox" checked><span>Video ON</span></label>
-        <label class="switch"><input id="audioOn" type="checkbox" checked><span>Audio ON</span></label>
-      </div>
-
-      <div class="row">
-        <select id="cameraSel" aria-label="Camera">
-          <option value="environment" selected>Back camera</option>
-          <option value="user">Front camera</option>
-        </select>
-      </div>
-
-      <div class="row"><input id="room" type="text" placeholder="Room (e.g., Baby)" value="Baby" autocomplete="off"></div>
-
-      <div class="row">
-        <input id="previewMins" type="number" min="0" step="1" value="1" aria-label="Preview minutes">
-        <span style="opacity:.7;font-size:13px">Preview minutes</span>
-      </div>
-
-      <div class="row"><button id="startBtn">Start streaming</button></div>
-
-      <fieldset class="ai">
-        <legend>AI features</legend>
-        <div class="cols">
-          <label class="switch"><input id="aiAudio" type="checkbox"> <span>Audio</span></label>
-          <label class="switch"><input id="aiPose"  type="checkbox"> <span>Pose</span></label>
-          <label class="switch"><input id="aiFace"  type="checkbox"> <span>Face</span></label>
-        </div>
-      </fieldset>
-    </div>
+<body>
+  <!-- Bottom overlay controls: Audio + Fullscreen -->
+  <div id="controls">
+    <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
+    <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
+    <button id="fsBtn" class="btn" type="button">Fullscreen</button>
   </div>
 
-  <div id="tap" aria-hidden="true"></div>
-  <div class="overlay"><div class="status" id="status">Idle</div></div>
-  <video id="local" playsinline autoplay muted></video>
+  <!-- Video -->
+  <video id="remote" autoplay playsinline></video>
   <canvas id="poseOverlay"></canvas>
 
+  <!-- Center status box -->
+  <div id="overlay" class="overlay">
+    <div id="status" class="status">Idle</div>
+  </div>
+
   <script>
+    /* ----------------- EXISTING receiver signaling ----------------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
-    const UI_AUTOHIDE_MS = 10000;
-    const NEED_OFFER_INTERVAL_MS = 3000;
+    const room = new URLSearchParams(location.search).get("room") || "Baby";
+    const WS_KEEPALIVE_MS = 25000;
+    const WS_RECONNECT_MIN_MS = 1000;
+    const WS_RECONNECT_MAX_MS = 10000;
+    const RESTART_ON_ICE_TIMEOUT_MS = 5000;
+    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
-    const qsRoom = new URLSearchParams(location.search).get('room');
-    const roomInput = document.getElementById('room'); if (qsRoom) roomInput.value = qsRoom;
-
-    const videoOn = document.getElementById('videoOn');
-    const audioOn = document.getElementById('audioOn');
-    const cameraSel = document.getElementById('cameraSel');
-    const previewMinsInput = document.getElementById('previewMins');
-    const startBtn = document.getElementById('startBtn');
-    const localVideo = document.getElementById('local');
+    const remoteVideo = document.getElementById('remote');
+    const fsBtn = document.getElementById('fsBtn');
+    const enableAudioBtn = document.getElementById('enableAudioBtn');
+    const disableAudioBtn = document.getElementById('disableAudioBtn');
+    const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
 
-    const aiPoseEl = document.getElementById('aiPose');
-
-    let ws=null, pc=null, localStream=null, wakeLock=null;
-    let previewTimer=null, previewTicker=null, previewEnd=0;
-    let started=false, hideUITimer=null;
-    let remoteDescriptionSet=false, needOfferTimer=null, lastOfferSdp=null;
+    let ws=null, wsKeepalive=null, wsRetryMs=WS_RECONNECT_MIN_MS;
+    let pc=null;
+    let remoteDescriptionSet=false;
+    let lastAnswerSdp=null;
     const candidateQueue=[];
+    let offerResendTimer=null;
+    let iceDisconnectedSince=null;
+    let hideStatusTimer=null;
 
-    const setStatus = (t)=>{ statusEl.textContent=t; console.log('[STATUS]',t); };
-    const currentRoom = ()=>{ const r=(roomInput.value||'Baby').trim(); try{const u=new URL(location.href);u.searchParams.set('room',r);history.replaceState({},'',u);}catch{} return r; };
-
-    async function requestWakeLock(){ try{ if('wakeLock' in navigator){ wakeLock=await navigator.wakeLock.request('screen'); document.addEventListener('visibilitychange', async()=>{ if(document.visibilityState==='visible'){ try{ wakeLock=await navigator.wakeLock.request('screen'); }catch{} } }); } }catch{} }
-
-    function applyVideoToggle(){ if(!localStream) return; const vt=localStream.getVideoTracks()[0]; if(vt){ vt.enabled=videoOn.checked; setStatus(videoOn.checked?'Video ON':'Video OFF'); if(document.body.classList.contains('previewing')) localVideo.style.display=videoOn.checked?'block':'none'; } }
-    function applyAudioToggle(){ if(!localStream) return; const at=localStream.getAudioTracks()[0]; if(at){ at.enabled=audioOn.checked; setStatus(audioOn.checked?'Audio ON':'Audio OFF'); } }
-    videoOn.addEventListener('change', applyVideoToggle);
-    audioOn.addEventListener('change', applyAudioToggle);
-
-    async function getMedia(){
-      const wantVideo=videoOn.checked, wantAudio=audioOn.checked;
-      if(!wantVideo && !wantAudio) throw new Error('Both video and audio are OFF.');
-      const constraints={ video: wantVideo?{ facingMode: cameraSel.value||'environment', width:{ideal:1280}, height:{ideal:720}, frameRate:{ideal:30,max:30} }:false,
-                          audio: wantAudio?{ echoCancellation:true, noiseSuppression:true, autoGainControl:true }:false };
-      const stream=await navigator.mediaDevices.getUserMedia(constraints);
-      const vt=stream.getVideoTracks()[0]; if(vt){ vt.enabled=videoOn.checked; if('contentHint' in vt) try{ vt.contentHint='motion'; }catch{} }
-      const at=stream.getAudioTracks()[0]; if(at) at.enabled=audioOn.checked;
-      return stream;
+    function showStatus(msg){
+      statusEl.textContent = msg;
+      overlay.classList.remove('hidden');
+      console.log('[STATUS]', msg);
+      if (msg === 'Connected') {
+        if (hideStatusTimer) clearTimeout(hideStatusTimer);
+        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
+      } else {
+        if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
+        overlay.classList.remove('hidden');
+      }
     }
 
-    function connectWS(room){
-      return new Promise((resolve,reject)=>{
-        const url=`${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
-        setStatus('Connecting to signaling…');
-        ws=new WebSocket(url);
+    function updateAudioButtons(){
+      if (remoteVideo.muted) {
+        enableAudioBtn.style.display='block';
+        disableAudioBtn.style.display='none';
+      } else {
+        enableAudioBtn.style.display='none';
+        disableAudioBtn.style.display='block';
+      }
+    }
+    enableAudioBtn.style.display='block';
+    async function tryStartMuted(){ try{ remoteVideo.muted=true; remoteVideo.volume=1.0; await remoteVideo.play(); }catch(e){ console.warn('autoplay (muted) blocked:', e); } updateAudioButtons(); }
+    async function enableAudio(e){ e?.stopPropagation?.(); e?.preventDefault?.(); try{ remoteVideo.muted=false; remoteVideo.volume=1.0; await remoteVideo.play(); }catch(err){ console.warn('unmute play blocked:',err); } updateAudioButtons(); }
+    function disableAudio(e){ e?.stopPropagation?.(); e?.preventDefault?.(); remoteVideo.muted=true; updateAudioButtons(); }
+    enableAudioBtn.addEventListener('click', enableAudio);
+    disableAudioBtn.addEventListener('click', disableAudio);
+
+    fsBtn.addEventListener('click', async (e)=>{
+      e.stopPropagation();
+      try{
+        if (!document.fullscreenElement) {
+          await (remoteVideo.requestFullscreen?.call(remoteVideo) || document.documentElement.requestFullscreen());
+          fsBtn.textContent = 'Exit fullscreen';
+        } else {
+          await document.exitFullscreen();
+          fsBtn.textContent = 'Fullscreen';
+        }
+      } catch (err) { console.warn('fullscreen error', err); }
+    });
+    document.addEventListener('fullscreenchange', () => {
+      fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+    });
+    document.addEventListener('click', () => {
+      if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+    });
+
+    async function connectWS(){
+      return new Promise((resolve, reject) => {
+        const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
+        showStatus('Connecting to signaling…');
+        const sock = new WebSocket(url); ws = sock;
         let opened=false;
-        const timer=setTimeout(()=>{ if(!opened){ try{ws.close();}catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); } },15000);
-        ws.onopen=()=>{ opened=true; clearTimeout(timer); setStatus('Signaling: connected'); send({type:'join',room}); send({type:'need-offer'}); needOfferTimer=setInterval(()=>{ if(!remoteDescriptionSet){ console.log('[WS OUT] need-offer (retry)'); send({type:'need-offer'}); } else { clearInterval(needOfferTimer); needOfferTimer=null; } },NEED_OFFER_INTERVAL_MS); resolve(); };
-        ws.onmessage=onSignal;
-        ws.onerror=(e)=>{ console.error('[WS error]',e); setStatus('Signaling: error'); };
-        ws.onclose=(e)=>{ console.warn('[WS closed]',e.code,e.reason); setStatus('Signaling: closed'); };
+        const openTimeout=setTimeout(()=>{ if(!opened){ try{sock.close();}catch{}; reject(new Error('WS timeout')); } }, 15000);
+        sock.onopen=()=>{ opened=true; clearTimeout(openTimeout);
+          showStatus('Signaling: connected'); wsRetryMs=WS_RECONNECT_MIN_MS;
+          send({ type:'join', room });
+          if (wsKeepalive) clearInterval(wsKeepalive);
+          wsKeepalive = setInterval(() => { if (ws?.readyState === WebSocket.OPEN) send({ type:'keepalive', ts: Date.now() }); }, WS_KEEPALIVE_MS);
+          resolve();
+        };
+        sock.onmessage = onSignal;
+        sock.onerror = (e) => console.warn('[WS error]', e);
+        sock.onclose  = () => { showStatus('Signaling: closed'); if (wsKeepalive){ clearInterval(wsKeepalive); wsKeepalive=null; } scheduleWSReconnect(); };
       });
     }
-    const send=(obj)=>{ try{ if(ws&&ws.readyState===WebSocket.OPEN) ws.send(JSON.stringify(obj)); }catch{} };
+    function scheduleWSReconnect(){ const delay=Math.min(wsRetryMs,WS_RECONNECT_MAX_MS); console.log('[WS] reconnect in',delay,'ms'); setTimeout(()=>{ wsRetryMs=Math.min(wsRetryMs*2,WS_RECONNECT_MAX_MS); startNegotiation(); }, delay); }
+    const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
     function createPC(){
-      pc=new RTCPeerConnection({ iceServers:[{urls:'stun:stun.l.google.com:19302'}], bundlePolicy:'max-bundle', sdpSemantics:'unified-plan' });
-      pc.onicecandidate=(e)=>{ if(e.candidate) send({type:'candidate',candidate:e.candidate}); };
-      pc.oniceconnectionstatechange=()=> setStatus('ICE: '+pc.iceConnectionState);
-      localStream.getTracks().forEach(tr=>pc.addTrack(tr,localStream));
+      if (pc) { try { pc.close(); } catch{}; pc = null; }
+      remoteDescriptionSet=false; lastAnswerSdp=null; candidateQueue.length=0;
+
+      pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] });
+      pc.addTransceiver('video', { direction:'recvonly' });
+      pc.addTransceiver('audio', { direction:'recvonly' });
+
+      pc.onicecandidate = (ev) => { if (ev.candidate) send({ type:'candidate', candidate:ev.candidate }); };
+      pc.ontrack = (ev) => {
+        if (remoteVideo.srcObject !== ev.streams[0]) {
+          remoteVideo.srcObject = ev.streams[0];
+          tryStartMuted();
+        }
+      };
+      pc.oniceconnectionstatechange = () => {
+        const s = pc.iceConnectionState;
+        console.log('[ICE]', s);
+        showStatus(s === 'connected' ? 'Connected' : ('ICE: ' + s));
+        if (s === 'disconnected') {
+          if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
+          setTimeout(() => {
+            if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= RESTART_ON_ICE_TIMEOUT_MS) {
+              console.log('[ICE] disconnected timeout - restarting');
+              startNegotiation(true);
+            }
+          }, RESTART_ON_ICE_TIMEOUT_MS + 50);
+        } else if (s === 'failed') {
+          console.log('[ICE] failed - restarting');
+          startNegotiation(true);
+        } else {
+          iceDisconnectedSince = null;
+        }
+      };
     }
 
-    function beginPreviewWindow(minutes){
-      const ms=Math.max(0, Math.round((Number(minutes)||1)*60000));
-      if(ms===0){ enterBlackout(); return; }
-      document.body.classList.add('previewing','streaming'); document.body.classList.remove('ui-visible');
-      localVideo.style.display=videoOn.checked?'block':'none';
-      previewEnd=Date.now()+ms; tickPreviewCountdown();
-      previewTicker=setInterval(tickPreviewCountdown,1000);
-      previewTimer=setTimeout(endPreviewNow,ms);
+    async function sendCurrentOffer(){ if (pc?.localDescription?.type === 'offer') { console.log('[WS OUT] offer (send/resend)'); send(pc.localDescription); } }
+    function startOfferResendLoop(){ stopOfferResendLoop(); offerResendTimer = setInterval(() => { if (!remoteDescriptionSet) sendCurrentOffer(); else stopOfferResendLoop(); }, 2000); }
+    function stopOfferResendLoop(){ if (offerResendTimer) clearInterval(offerResendTimer); offerResendTimer = null; }
+
+    async function startNegotiation(forceNewPc=false){
+      if (!ws || ws.readyState !== WebSocket.OPEN) { try { await connectWS(); } catch(e) { scheduleWSReconnect(); return; } }
+      if (!pc || forceNewPc) createPC();
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await sendCurrentOffer();
+        startOfferResendLoop();
+        showStatus('Offer sent, waiting for answer…');
+      } catch (e) {
+        console.error('negotiation error', e);
+        showStatus('Negotiation error');
+      }
     }
-    function tickPreviewCountdown(){ const remain=Math.max(0, previewEnd-Date.now()); const sec=Math.ceil(remain/1000); const mm=String(Math.floor(sec/60)).padStart(2,'0'); const ss=String(sec%60).padStart(2,'0'); setStatus(`Preview ends in ${mm}:${ss}`); }
-    function endPreviewNow(){ if(previewTimer) clearTimeout(previewTimer); if(previewTicker) clearInterval(previewTicker); previewTimer=previewTicker=null; enterBlackout(); }
-    function enterBlackout(){ document.body.classList.remove('previewing'); document.body.classList.add('streaming'); document.body.classList.remove('ui-visible'); localVideo.style.display='none'; setStatus('Streaming...'); clearTimeout(hideUITimer); hideUITimer=null; }
 
     async function onSignal(evt){
-      let msg; try{ msg=JSON.parse(evt.data); }catch{ return; }
+      let msg; try { msg = JSON.parse(evt.data); } catch { return; }
       console.log('[WS IN]', msg.type);
-      if(msg.type==='offer'){
-        setStatus('Got offer, creating answer…');
-        if(!pc) createPC();
-        if(pc.signalingState==='have-local-offer'){ try{ await pc.setLocalDescription({type:'rollback'}); }catch{} }
-        if(lastOfferSdp===msg.sdp){ console.log('[DUP] identical offer ignored'); return; }
-        lastOfferSdp=msg.sdp;
+
+      if (msg.type === 'answer') {
+        if (pc.signalingState !== 'have-local-offer') { console.log('[SKIP] answer in state', pc.signalingState); return; }
+        if (lastAnswerSdp === msg.sdp) { console.log('[DUP] identical answer ignored'); return; }
+        lastAnswerSdp = msg.sdp;
+        showStatus('Got answer, applying…');
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
-        remoteDescriptionSet=true;
-        while(candidateQueue.length){ const c=candidateQueue.shift(); try{ await pc.addIceCandidate(c); }catch(e){ console.warn('late ICE add failed',e); } }
-        const answer=await pc.createAnswer(); await pc.setLocalDescription(answer); send(answer);
-      } else if(msg.type==='candidate' && msg.candidate){
-        const cand=new RTCIceCandidate(msg.candidate);
-        if(remoteDescriptionSet && pc){ try{ await pc.addIceCandidate(cand); }catch(e){ console.warn('ICE add failed',e); } }
+        remoteDescriptionSet = true; stopOfferResendLoop();
+        for (const c of candidateQueue) { try { await pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); } }
+        candidateQueue.length = 0;
+
+      } else if (msg.type === 'candidate' && msg.candidate) {
+        const cand = new RTCIceCandidate(msg.candidate);
+        if (remoteDescriptionSet) { try { await pc.addIceCandidate(cand); } catch (e) { console.warn('ICE add failed', e); } }
         else candidateQueue.push(cand);
+
+      } else if (msg.type === 'peer-joined' || msg.type === 'need-offer') {
+        await sendCurrentOffer();
+
+      } else if (msg.type === 'bye') {
+        console.log('[INFO] sender bye -> keep re-offering');
+        remoteDescriptionSet = false;
+        startOfferResendLoop();
+
       } else if (msg.type === 'pose-toggle') {
         poseEnabled = !!msg.enabled;
-        if (poseEnabled) { await startPoseOverlayIfNeeded(); } else { stopPoseOverlay(); }
+        if (poseEnabled) { await startRemotePoseIfNeeded(); } else { stopRemotePose(); }
       }
     }
 
-    async function startOrStop(){
-      try{
-        if(started){ await stopStreaming(); return; }
-        startBtn.disabled=true;
-        const room=currentRoom();
-        setStatus('Starting camera…');
-        localStream=await getMedia();
-        localVideo.srcObject=localStream;
-        applyVideoToggle(); applyAudioToggle();
-        beginPreviewWindow(Number(previewMinsInput.value)||1);
-        await connectWS(room);
-        await requestWakeLock();
-
-        if (aiPoseEl.checked) {
-          poseEnabled = true;
-          await startPoseOverlayIfNeeded();
-          send({ type:'pose-toggle', enabled:true });
-        }
-
-        started=true;
-        startBtn.textContent='Stop streaming';
-        startBtn.disabled=false;
-      }catch(err){
-        console.error(err); alert(err.message||err); setStatus('Idle'); startBtn.disabled=false;
-      }
-    }
-
-    async function stopStreaming(){
-      try{ send({type:'bye'}); }catch{}
-      if(previewTimer) clearTimeout(previewTimer);
-      if(previewTicker) clearInterval(previewTicker);
-      if(hideUITimer) clearTimeout(hideUITimer);
-      if(needOfferTimer) clearInterval(needOfferTimer);
-      previewTimer=previewTicker=hideUITimer=needOfferTimer=null;
-
-      try{ pc && pc.getSenders().forEach(s=>s.track && s.track.stop()); }catch{}
-      try{ localStream && localStream.getTracks().forEach(t=>t.stop()); }catch{}
-      try{ pc && pc.close(); }catch{}
-      try{ ws && ws.close(); }catch{}
-      localStream=null; pc=null; ws=null; started=false;
-      remoteDescriptionSet=false; candidateQueue.length=0; lastOfferSdp=null;
-
-      stopPoseOverlay();
-
-      document.body.classList.remove('previewing','streaming','ui-visible');
-      document.body.classList.add('blackout');
-      localVideo.style.display='none'; setStatus('Stopped');
-      startBtn.textContent='Start streaming';
-    }
-
-    // UI show/hide (unchanged)
-    document.addEventListener('click', (e)=>{
-      if(document.body.classList.contains('previewing')){ endPreviewNow(); return; }
-      if(document.body.classList.contains('streaming') && !document.body.classList.contains('ui-visible')){ document.body.classList.add('ui-visible'); setStatus('Streaming...'); scheduleAutoHideUI(); return; }
-      if(document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')){ const inCard=e.target.closest('.card'); if(!inCard){ document.body.classList.remove('ui-visible'); setStatus('Streaming...'); clearTimeout(hideUITimer); hideUITimer=null; } }
+    window.addEventListener('beforeunload', () => {
+      try { stopOfferResendLoop(); } catch {}
+      try { ws && ws.close(); } catch {}
+      try { pc && pc.close(); } catch {}
+      if (wsKeepalive) clearInterval(wsKeepalive);
+      if (hideStatusTimer) clearTimeout(hideStatusTimer);
     });
-    document.addEventListener('keydown',(e)=>{ if(e.key==='Escape'){ if(document.body.classList.contains('previewing')) endPreviewNow(); else if(document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')){ document.body.classList.remove('ui-visible'); setStatus('Streaming...'); clearTimeout(hideUITimer); hideUITimer=null; } } });
-    function scheduleAutoHideUI(){ clearTimeout(hideUITimer); hideUITimer=setTimeout(()=>{ if(document.body.classList.contains('streaming')){ document.body.classList.remove('ui-visible'); setStatus('Streaming...'); } }, UI_AUTOHIDE_MS); }
-    function resetAutoHideUI(){ if(document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) scheduleAutoHideUI(); }
-    document.addEventListener('mousemove', resetAutoHideUI, {passive:true});
-    document.addEventListener('touchstart', resetAutoHideUI, {passive:true});
-    window.addEventListener('beforeunload', stopStreaming);
-    startBtn.addEventListener('click', startOrStop);
 
-    // -------- Pose fallback (correct constructor & connections) --------
-    let poseEnabled=false;
-    const poseCanvas=document.getElementById('poseOverlay');
-    const poseCtx=poseCanvas.getContext('2d',{alpha:true});
-    const drawConnectorsFn = window.drawConnectors || (window.drawingUtils && window.drawingUtils.drawConnectors);
-    const drawLandmarksFn  = window.drawLandmarks  || (window.drawingUtils && window.drawingUtils.drawLandmarks);
-    const POSE_CONNECTIONS_CONST = window.POSE_CONNECTIONS || (window.pose && window.pose.POSE_CONNECTIONS);
+    /* ----------------- PoseLandmarker overlay (Tasks API) ----------------- */
+    let poseEnabled = false;
+    const poseCanvas = document.getElementById('poseOverlay');
+    const poseCtx = poseCanvas.getContext('2d', { alpha: true });
 
-    function sizePoseCanvas(){ const dpr=Math.max(1, window.devicePixelRatio||1); const w=Math.floor(innerWidth*dpr), h=Math.floor(innerHeight*dpr); if(poseCanvas.width!==w||poseCanvas.height!==h){ poseCanvas.width=w; poseCanvas.height=h; } }
+    function sizePoseCanvas(){
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      const w = Math.floor(innerWidth * dpr), h = Math.floor(innerHeight * dpr);
+      if (poseCanvas.width !== w || poseCanvas.height !== h) {
+        poseCanvas.width = w; poseCanvas.height = h;
+      }
+    }
     sizePoseCanvas(); addEventListener('resize', sizePoseCanvas);
 
-    class SolutionsPoseEngine{
-      constructor(videoEl, canvas, ctx, getSelfieMode){ this.video=videoEl; this.canvas=canvas; this.ctx=ctx; this.getSelfieMode=getSelfieMode; this.pose=null; this.running=false; }
-      async load(){ if(this.pose) return;
-        const PoseCtor = window.Pose || (window.pose && window.pose.Pose);
-        if (!PoseCtor) throw new Error('MediaPipe Pose not loaded');
-        this.pose=new PoseCtor({ locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${f}` });
-        this.pose.setOptions({ modelComplexity:1, smoothLandmarks:true, enableSegmentation:false, minDetectionConfidence:0.5, minTrackingConfidence:0.5, selfieMode:!!this.getSelfieMode() });
-        this.pose.onResults((res)=>this.onResults(res));
-      }
-      setSelfieMode(v){ if(this.pose) this.pose.setOptions({selfieMode:!!v}); }
-      onResults(results){
-        const w=this.canvas.width, h=this.canvas.height, ctx=this.ctx;
-        ctx.clearRect(0,0,w,h);
-        const lms=results.poseLandmarks||[];
-        if(lms.length && drawConnectorsFn && drawLandmarksFn && POSE_CONNECTIONS_CONST){
-          const lw=Math.max(2, Math.round(w/400));
-          const r =Math.max(2, Math.round(w/300));
-          drawConnectorsFn(ctx, lms, POSE_CONNECTIONS_CONST, { color:'#4DF3C3', lineWidth: lw });
-          drawLandmarksFn (ctx, lms, { color:'#4DF3C3', radius: r });
-        }
-      }
-      async start(){ await this.load(); this.running=true; console.log('[POSE] sender start');
-        const loop=async()=>{ if(!this.running) return;
-          try{ if(localVideo.readyState>=2){ this.setSelfieMode(cameraSel.value==='user'); await this.pose.send({image:localVideo}); } }catch{}
-          requestAnimationFrame(loop);
-        };
-        requestAnimationFrame(loop);
-      }
-      stop(){ this.running=false; this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height); }
+    let TV = null;
+    let lm = null;
+    let drawing = null;
+    let runningMode = 'IMAGE';
+    let lastVideoTime = -1;
+    let poseLoopRAF = 0;
+
+    async function ensureTasksLoaded(){
+      if (TV) return;
+      TV = await import('https://cdn.skypack.dev/@mediapipe/tasks-vision@0.10.0');
+    }
+    async function ensureLandmarker(){
+      if (lm) return;
+      await ensureTasksLoaded();
+      const vision = await TV.FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm'
+      );
+      lm = await TV.PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+          delegate: 'GPU'
+        },
+        runningMode, numPoses: 1
+      });
+      drawing = new TV.DrawingUtils(poseCtx);
     }
 
-    let poseEngine=null;
-    function updatePoseCanvasVisibility(){ poseCanvas.style.display = poseEnabled ? 'block' : 'none'; }
-    async function ensurePoseFallbackLoaded(){ if(!poseEngine){ poseEngine=new SolutionsPoseEngine(localVideo, poseCanvas, poseCtx, ()=>cameraSel.value==='user'); } await poseEngine.load(); }
-    async function startPoseOverlayIfNeeded(){ if(!poseEnabled) return; try{ await ensurePoseFallbackLoaded(); updatePoseCanvasVisibility(); await poseEngine.start(); }catch(e){ console.warn('Pose start failed',e); poseEnabled=false; updatePoseCanvasVisibility(); } }
-    function stopPoseOverlay(){ if(poseEngine) poseEngine.stop(); updatePoseCanvasVisibility(); }
+    function drawPoseResults(result){
+      poseCtx.setTransform(1,0,0,1,0,0); // no mirror on receiver
+      poseCtx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
+      if (!result?.landmarks) return;
+      for (const lmks of result.landmarks) {
+        drawing.drawConnectors(lmks, TV.PoseLandmarker.POSE_CONNECTIONS);
+        drawing.drawLandmarks(lmks, { radius: () => 3 });
+      }
+    }
 
-    document.getElementById('aiPose').addEventListener('change', async (e)=>{
-      poseEnabled = e.target.checked;
-      updatePoseCanvasVisibility();
-      if(poseEnabled){ await startPoseOverlayIfNeeded(); } else { stopPoseOverlay(); }
-      try{ send({type:'pose-toggle', enabled:!!poseEnabled}); }catch{}
-    });
+    async function poseLoop(){
+      if (!poseEnabled) return;
+
+      if (runningMode === 'IMAGE') {
+        runningMode = 'VIDEO';
+        await lm.setOptions({ runningMode: 'VIDEO' });
+      }
+
+      const t = performance.now();
+      if (remoteVideo.readyState >= 2 && remoteVideo.currentTime !== lastVideoTime) {
+        lastVideoTime = remoteVideo.currentTime;
+        lm.detectForVideo(remoteVideo, t, drawPoseResults);
+      }
+      poseLoopRAF = requestAnimationFrame(poseLoop);
+    }
+
+    async function startRemotePoseIfNeeded(){
+      if (!poseEnabled) return;
+      try {
+        await ensureLandmarker();
+        poseCanvas.style.display = 'block';
+        cancelAnimationFrame(poseLoopRAF); poseLoopRAF = 0;
+        lastVideoTime = -1;
+        await poseLoop();
+      } catch (e) {
+        console.warn('Receiver pose start failed', e);
+        poseEnabled = false;
+        poseCanvas.style.display = 'none';
+      }
+    }
+    function stopRemotePose(){
+      poseCanvas.style.display = 'none';
+      cancelAnimationFrame(poseLoopRAF); poseLoopRAF = 0;
+    }
+
+    // Go!
+    startNegotiation();
   </script>
 </body>
 </html>
