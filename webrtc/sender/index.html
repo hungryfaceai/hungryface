@@ -26,7 +26,7 @@
     }
     #cameraSel { font-size: 18px; padding: 14px 16px; height: 52px; border-radius: 12px; }
     input[type="number"]::-webkit-outer-spin-button,
-    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type="number"]::-webkit-inner-spin_button { -webkit-appearance: none; margin: 0; }
     button {
       width: 100%; padding: 14px 16px; border-radius: 12px; border: 0;
       background: #2a2a2a; color: #fff; font-size: 17px; font-weight: 600;
@@ -171,7 +171,7 @@
     videoOn.addEventListener('change', applyVideoToggle);
     audioOn.addEventListener('change', applyAudioToggle);
 
-    // --- UI helpers (preview/blackout/auto-hide like your working version) ---
+    // --- UI helpers ---
     function beginPreviewWindow(minutes) {
       const ms = Math.max(0, Math.round((Number(minutes) || 1) * 60000));
       if (ms === 0) { enterBlackout(); return; }
@@ -304,13 +304,13 @@
       }
     }
 
+    // CHANGED: do NOT stop local tracks here — only close that peer’s PC
     function handlePeerLeft(peerId) {
       const entry = peers.get(peerId);
       if (!entry) return;
-      try { entry.pc.getSenders().forEach(s => s.track && s.track.stop()); } catch {}
       try { entry.pc.close(); } catch {}
       peers.delete(peerId);
-      console.log('[INFO] receiver left', peerId);
+      console.log('[INFO] receiver left', peerId, '(kept camera tracks live)');
     }
 
     async function onSignal(evt) {
@@ -321,10 +321,16 @@
       if (msg.type === 'offer' && msg.from) {
         setStatus('Got offer, creating answer…');
         await handleOffer(msg.from, msg);
+
       } else if (msg.type === 'candidate' && msg.from && msg.candidate) {
         await handleCandidate(msg.from, msg.candidate);
+
       } else if (msg.type === 'peer-left' && msg.id) {
         handlePeerLeft(msg.id);
+
+      // NEW: also handle a receiver explicitly sending "bye"
+      } else if (msg.type === 'bye' && msg.from) {
+        handlePeerLeft(msg.from);
       }
     }
 
@@ -361,14 +367,15 @@
       if (previewTicker) clearInterval(previewTicker);
       previewTimer = previewTicker = null;
 
-      // close all PCs
+      // CHANGED: just close each peer PC (do NOT stop local tracks here)
       for (const [peerId, entry] of peers) {
-        try { entry.pc.getSenders().forEach(s => s.track && s.track.stop()); } catch {}
         try { entry.pc.close(); } catch {}
       }
       peers.clear();
 
+      // Now stop the actual camera/mic tracks once (since the user is stopping)
       try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
+
       try { ws && ws.close(); } catch {}
 
       localStream = null; ws = null; started = false;
