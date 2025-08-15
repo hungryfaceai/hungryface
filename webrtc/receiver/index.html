@@ -12,31 +12,22 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       overflow: hidden;
     }
-    /* Video fills screen, preserving aspect */
     video {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
       object-fit: contain; background: #000;
     }
-
-    /* Transparent button style */
     .btn {
       padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
       background: transparent; color: #fff; font-size: 16px; font-weight: 600;
-      cursor: pointer; box-shadow: none;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+      cursor: pointer; box-shadow: none; text-shadow: 0 1px 2px rgba(0,0,0,0.6);
     }
     .btn:active { transform: scale(0.99); }
-
-    /* Bottom-center controls overlay (audio + fullscreen) */
     #controls {
       position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
       display: flex; align-items: center; gap: 12px; z-index: 6;
     }
-    /* Only one of these two is shown at a time */
     #enableAudioBtn, #disableAudioBtn { display: none; }
-
-    /* Sender-style status overlay (center translucent card) */
     .overlay {
       position: fixed; inset: 0; display: flex;
       align-items: center; justify-content: center;
@@ -52,32 +43,27 @@
   </style>
 </head>
 <body>
-  <!-- Bottom overlay controls: Audio + Fullscreen -->
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
     <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
   </div>
 
-  <!-- Video -->
   <video id="remote" autoplay playsinline></video>
 
-  <!-- Center status box -->
   <div id="overlay" class="overlay">
     <div id="status" class="status">Idle</div>
   </div>
 
   <script>
-    // ---------- Config ----------
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
     const WS_KEEPALIVE_MS = 25000;
     const WS_RECONNECT_MIN_MS = 1000;
     const WS_RECONNECT_MAX_MS = 10000;
     const RESTART_ON_ICE_TIMEOUT_MS = 5000;
-    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000; // 10s
+    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
-    // ---------- Elements ----------
     const remoteVideo = document.getElementById('remote');
     const fsBtn = document.getElementById('fsBtn');
     const enableAudioBtn = document.getElementById('enableAudioBtn');
@@ -85,80 +71,53 @@
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
 
-    // ---------- State ----------
-    let ws = null, wsKeepalive = null, wsRetryMs = WS_RECONNECT_MIN_MS;
+    let ws = null, myId = null, wsKeepalive = null, wsRetryMs = WS_RECONNECT_MIN_MS;
     let pc = null;
     let remoteDescriptionSet = false;
     let lastAnswerSdp = null;
     const candidateQueue = [];
     let offerResendTimer = null;
     let iceDisconnectedSince = null;
-    let hideStatusTimer = null; // auto-hide timer for "Connected"
+    let hideStatusTimer = null;
 
-    // ---------- UI helpers ----------
+    // Target a specific sender (first in roster, or when one joins)
+    let senderId = null;
+
     function showStatus(msg) {
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
       console.log('[STATUS]', msg);
-
       if (msg === 'Connected') {
         if (hideStatusTimer) clearTimeout(hideStatusTimer);
-        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'),
-          STATUS_HIDE_AFTER_CONNECTED_MS);
+        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
       } else {
         if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
-        overlay.classList.remove('hidden');
       }
     }
 
     function updateAudioButtons() {
-      if (remoteVideo.muted) {
-        enableAudioBtn.style.display = 'block';
-        disableAudioBtn.style.display = 'none';
-      } else {
-        enableAudioBtn.style.display = 'none';
-        disableAudioBtn.style.display = 'block';
-      }
+      if (remoteVideo.muted) { enableAudioBtn.style.display = 'block'; disableAudioBtn.style.display = 'none'; }
+      else                   { enableAudioBtn.style.display = 'none';  disableAudioBtn.style.display = 'block'; }
     }
 
-    // Start with visible "Enable audio"
     enableAudioBtn.style.display = 'block';
-
     async function tryStartMuted() {
       try {
         remoteVideo.muted = true;
         remoteVideo.volume = 1.0;
         await remoteVideo.play();
-      } catch (e) {
-        console.warn('autoplay (muted) blocked:', e);
-      }
+      } catch {}
       updateAudioButtons();
     }
-
-    async function enableAudio(e) {
-      e?.stopPropagation?.();
-      e?.preventDefault?.();
-      try {
-        remoteVideo.muted = false;
-        remoteVideo.volume = 1.0;
-        await remoteVideo.play();
-      } catch (err) {
-        console.warn('unmute play blocked:', err);
-      }
+    enableAudioBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
       updateAudioButtons();
-    }
+    });
+    disableAudioBtn.addEventListener('click', (e) => {
+      e.preventDefault(); remoteVideo.muted = true; updateAudioButtons();
+    });
 
-    function disableAudio(e) {
-      e?.stopPropagation?.();
-      e?.preventDefault?.();
-      remoteVideo.muted = true;
-      updateAudioButtons();
-    }
-
-    enableAudioBtn.addEventListener('click', enableAudio);
-    disableAudioBtn.addEventListener('click', disableAudio);
-
-    // Fullscreen button + exit on tap/esc
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -166,44 +125,32 @@
           await (remoteVideo.requestFullscreen?.call(remoteVideo) || document.documentElement.requestFullscreen());
           fsBtn.textContent = 'Exit fullscreen';
         } else {
-          await document.exitFullscreen();
-          fsBtn.textContent = 'Fullscreen';
+          await document.exitFullscreen(); fsBtn.textContent = 'Fullscreen';
         }
-      } catch (err) { console.warn('fullscreen error', err); }
+      } catch {}
     });
     document.addEventListener('fullscreenchange', () => {
       fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
     });
-    // Tap anywhere to exit fullscreen
     document.addEventListener('click', () => {
       if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
     });
 
-    remoteVideo.addEventListener('loadedmetadata', () =>
-      console.log('metadata:', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight));
-    remoteVideo.addEventListener('playing', () => {
-      console.log('playing… muted=', remoteVideo.muted);
-      updateAudioButtons();
-    });
-
-    // ---------- WebSocket (auto-reconnect) ----------
+    // ---- WS w/ reconnect ----
     async function connectWS() {
       return new Promise((resolve, reject) => {
-        const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
-        showStatus('Connecting to signaling…');
-        const sock = new WebSocket(url);
+        const sock = new WebSocket(`${WS_ENDPOINT}?room=${encodeURIComponent(room)}`);
         ws = sock;
+        showStatus('Connecting to signaling…');
 
         let opened = false;
-        const openTimeout = setTimeout(() => {
-          if (!opened) { try { sock.close(); } catch{}; reject(new Error('WS timeout')); }
-        }, 15000);
+        const to = setTimeout(() => { if (!opened) { try { sock.close(); } catch{}; reject(new Error('WS timeout')); } }, 15000);
 
         sock.onopen = () => {
-          opened = true; clearTimeout(openTimeout);
+          opened = true; clearTimeout(to);
           showStatus('Signaling: connected');
           wsRetryMs = WS_RECONNECT_MIN_MS;
-          send({ type: 'join', room });
+          send({ type: 'join', room, role: 'receiver' });
 
           if (wsKeepalive) clearInterval(wsKeepalive);
           wsKeepalive = setInterval(() => {
@@ -213,7 +160,7 @@
           resolve();
         };
         sock.onmessage = onSignal;
-        sock.onerror = (e) => { console.warn('[WS error]', e); };
+        sock.onerror = (e) => console.warn('[WS error]', e);
         sock.onclose  = () => {
           showStatus('Signaling: closed');
           if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
@@ -221,19 +168,13 @@
         };
       });
     }
-
     function scheduleWSReconnect() {
       const delay = Math.min(wsRetryMs, WS_RECONNECT_MAX_MS);
-      console.log('[WS] reconnect in', delay,'ms');
-      setTimeout(() => {
-        wsRetryMs = Math.min(wsRetryMs * 2, WS_RECONNECT_MAX_MS);
-        startNegotiation();
-      }, delay);
+      setTimeout(() => { wsRetryMs = Math.min(wsRetryMs * 2, WS_RECONNECT_MAX_MS); startNegotiation(); }, delay);
     }
+    const send = (o) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(o)); } catch {} };
 
-    const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
-
-    // ---------- PeerConnection / Negotiation ----------
+    // ---- PC / negotiation (targeted to senderId) ----
     function createPC() {
       if (pc) { try { pc.close(); } catch{}; pc = null; }
       remoteDescriptionSet = false;
@@ -241,38 +182,29 @@
       candidateQueue.length = 0;
 
       pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
-      pc.onicecandidate = (ev) => { if (ev.candidate) send({ type:'candidate', candidate: ev.candidate }); };
+      pc.onicecandidate = (ev) => { if (ev.candidate && senderId) send({ type:'candidate', to: senderId, candidate: ev.candidate }); };
       pc.ontrack = (ev) => {
         if (remoteVideo.srcObject !== ev.streams[0]) {
           remoteVideo.srcObject = ev.streams[0];
-          tryStartMuted(); // start playback muted; user can enable audio
+          tryStartMuted();
         }
       };
-
       pc.oniceconnectionstatechange = () => {
-        const state = pc.iceConnectionState;
-        console.log('[ICE]', state);
+        const st = pc.iceConnectionState;
+        console.log('[ICE]', st);
+        showStatus(st === 'connected' ? 'Connected' : 'ICE: ' + st);
 
-        if (state === 'connected') {
-          showStatus('Connected'); // requested label
-        } else {
-          showStatus('ICE: ' + state);
-        }
-
-        if (state === 'disconnected') {
+        if (st === 'disconnected') {
           if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
           setTimeout(() => {
             if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= RESTART_ON_ICE_TIMEOUT_MS) {
-              console.log('[ICE] disconnected timeout - restarting negotiation');
               startNegotiation(true);
             }
           }, RESTART_ON_ICE_TIMEOUT_MS + 50);
-        } else if (state === 'failed') {
-          console.log('[ICE] failed - restarting negotiation');
+        } else if (st === 'failed') {
           startNegotiation(true);
         } else {
           iceDisconnectedSince = null;
@@ -281,12 +213,11 @@
     }
 
     async function sendCurrentOffer() {
+      if (!senderId) return;
       if (pc?.localDescription?.type === 'offer') {
-        console.log('[WS OUT] offer (send/resend)');
-        send(pc.localDescription);
+        send({ ...pc.localDescription.toJSON(), to: senderId });
       }
     }
-
     function startOfferResendLoop() {
       stopOfferResendLoop();
       offerResendTimer = setInterval(() => {
@@ -300,11 +231,10 @@
     }
 
     async function startNegotiation(forceNewPc = false) {
-      // Ensure WS is connected
       if (!ws || ws.readyState !== WebSocket.OPEN) {
-        try { await connectWS(); } catch(e) { scheduleWSReconnect(); return; }
+        try { await connectWS(); } catch { scheduleWSReconnect(); return; }
       }
-
+      if (!senderId) { showStatus('Waiting for sender…'); return; }
       if (!pc || forceNewPc) createPC();
 
       try {
@@ -321,25 +251,44 @@
 
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
-      console.log('[WS IN]', msg.type);
+
+      if (msg.type === 'hello') { myId = msg.id; return; }
+
+      if (msg.type === 'roster' && Array.isArray(msg.peers)) {
+        if (!senderId) {
+          const s = msg.peers.find(p => p.role === 'sender');
+          if (s) { senderId = s.id; startNegotiation(true); }
+        } else {
+          const stillThere = msg.peers.some(p => p.id === senderId && p.role === 'sender');
+          if (!stillThere) { senderId = null; startNegotiation(true); }
+        }
+        return;
+      }
+
+      if (msg.type === 'peer-joined') {
+        if (!senderId && msg.role === 'sender' && msg.id !== myId) {
+          senderId = msg.id; startNegotiation(true);
+        }
+        return;
+      }
+
+      if (msg.type === 'peer-left' && msg.id === senderId) {
+        senderId = null; startNegotiation(true);
+        return;
+      }
+
+      // Only process SDP/ICE from our chosen sender
+      if (msg.from !== senderId) return;
 
       if (msg.type === 'answer') {
-        if (pc.signalingState !== 'have-local-offer') {
-          console.log('[SKIP] answer in state', pc.signalingState);
-          return;
-        }
-        if (lastAnswerSdp === msg.sdp) {
-          console.log('[DUP] identical answer ignored');
-          return;
-        }
+        if (pc?.signalingState !== 'have-local-offer') return;
+        if (lastAnswerSdp === msg.sdp) return;
         lastAnswerSdp = msg.sdp;
 
         showStatus('Got answer, applying…');
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
         remoteDescriptionSet = true;
-        stopOfferResendLoop();
 
-        // Flush queued ICE
         for (const c of candidateQueue) {
           try { await pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
         }
@@ -353,15 +302,9 @@
           candidateQueue.push(cand);
         }
 
-      } else if (msg.type === 'peer-joined' || msg.type === 'need-offer') {
-        // Sender joined/asked → (re)send our offer
-        await sendCurrentOffer();
-
       } else if (msg.type === 'bye') {
-        // Sender is stopping: keep offering until it returns
-        console.log('[INFO] sender bye -> keep re-offering');
         remoteDescriptionSet = false;
-        startOfferResendLoop();
+        startNegotiation(true);
       }
     }
 
@@ -373,8 +316,8 @@
       if (hideStatusTimer) clearTimeout(hideStatusTimer);
     });
 
-    // Go!
-    startNegotiation();
+    // start
+    connectWS(); // join + wait for sender; negotiation kicks in when senderId known
   </script>
 </body>
 </html>
