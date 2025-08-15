@@ -5,7 +5,7 @@
   <title>Baby Monitor – Receiver</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 
-  <!-- MediaPipe Solutions (fallback) -->
+  <!-- MediaPipe (global UMD builds) -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
 
@@ -137,19 +137,23 @@
 
     window.addEventListener('beforeunload', ()=>{ try{ stopOfferResendLoop(); }catch{} try{ ws&&ws.close(); }catch{} try{ pc&&pc.close(); }catch{} if(wsKeepalive) clearInterval(wsKeepalive); if(hideStatusTimer) clearTimeout(hideStatusTimer); });
 
-    // -------- Receiver Pose (fixed: no ctx.scale) --------
+    // -------- Receiver Pose (correct constructor & connections) --------
     let poseEnabledRemote=false, rPoseEngine=null;
     const rPoseCanvas=document.getElementById('poseOverlay');
     const rPoseCtx=rPoseCanvas.getContext('2d',{alpha:true});
     const drawConnectorsFn = window.drawConnectors || (window.drawingUtils && window.drawingUtils.drawConnectors);
     const drawLandmarksFn  = window.drawLandmarks  || (window.drawingUtils && window.drawingUtils.drawLandmarks);
+    const POSE_CONNECTIONS_CONST = window.POSE_CONNECTIONS || (window.pose && window.pose.POSE_CONNECTIONS);
 
     function sizeRCanvas(){ const dpr=Math.max(1, window.devicePixelRatio||1); const w=Math.floor(innerWidth*dpr), h=Math.floor(innerHeight*dpr); if(rPoseCanvas.width!==w||rPoseCanvas.height!==h){ rPoseCanvas.width=w; rPoseCanvas.height=h; } }
     sizeRCanvas(); addEventListener('resize', sizeRCanvas);
 
     class ReceiverPoseEngine{
       constructor(videoEl, canvas, ctx){ this.video=videoEl; this.canvas=canvas; this.ctx=ctx; this.pose=null; this.running=false; }
-      async load(){ if(this.pose) return; this.pose=new Pose.Pose({ locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${f}` });
+      async load(){ if(this.pose) return;
+        const PoseCtor = window.Pose || (window.pose && window.pose.Pose);
+        if (!PoseCtor) throw new Error('MediaPipe Pose not loaded');
+        this.pose=new PoseCtor({ locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${f}` });
         this.pose.setOptions({ modelComplexity:1, smoothLandmarks:true, enableSegmentation:false, minDetectionConfidence:0.5, minTrackingConfidence:0.5, selfieMode:false });
         this.pose.onResults((res)=>this.onResults(res));
       }
@@ -157,10 +161,10 @@
         const w=this.canvas.width, h=this.canvas.height, ctx=this.ctx;
         ctx.clearRect(0,0,w,h);
         const lms=results.poseLandmarks||[];
-        if(lms.length && drawConnectorsFn && drawLandmarksFn){
+        if(lms.length && drawConnectorsFn && drawLandmarksFn && POSE_CONNECTIONS_CONST){
           const lw=Math.max(2, Math.round(w/400));
           const r =Math.max(2, Math.round(w/300));
-          drawConnectorsFn(ctx, lms, Pose.POSE_CONNECTIONS, { color:'#4DF3C3', lineWidth: lw });
+          drawConnectorsFn(ctx, lms, POSE_CONNECTIONS_CONST, { color:'#4DF3C3', lineWidth: lw });
           drawLandmarksFn (ctx, lms, { color:'#4DF3C3', radius: r });
         }
       }
@@ -174,7 +178,7 @@
     async function startRemotePoseIfNeeded(){ if(!poseEnabledRemote) return; if(!rPoseEngine) rPoseEngine=new ReceiverPoseEngine(remoteVideo, rPoseCanvas, rPoseCtx); try{ await rPoseEngine.start(); }catch(e){ console.warn('Receiver pose start failed',e); } updateRemoteOverlayVisibility(); }
     function stopRemotePose(){ if(rPoseEngine) rPoseEngine.stop(); updateRemoteOverlayVisibility(); }
 
-    // Kick off
+    // Go!
     startNegotiation();
   </script>
 </body>
