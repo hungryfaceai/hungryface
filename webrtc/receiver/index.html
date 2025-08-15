@@ -12,7 +12,7 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       overflow: hidden;
     }
-    /* Video fills screen, preserving aspect */
+    /* Video + overlay */
     video, canvas#poseCanvasReceiver {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
@@ -20,24 +20,21 @@
     }
     canvas#poseCanvasReceiver { pointer-events: none; z-index: 3; }
 
-    /* Transparent button style */
+    /* Transparent buttons */
     .btn {
       padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
       background: rgba(0,0,0,0.15); color: #fff; font-size: 16px; font-weight: 600;
-      cursor: pointer; box-shadow: none;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+      cursor: pointer; box-shadow: none; text-shadow: 0 1px 2px rgba(0,0,0,0.6);
       backdrop-filter: blur(2px);
     }
     .btn:active { transform: scale(0.99); }
 
-    /* Bottom-center controls overlay (audio + fullscreen) */
     #controls {
       position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
       display: flex; align-items: center; gap: 12px; z-index: 6;
     }
     #enableAudioBtn, #disableAudioBtn { display: none; }
 
-    /* Center status overlay */
     .overlay {
       position: fixed; inset: 0; display: flex;
       align-items: center; justify-content: center;
@@ -53,18 +50,15 @@
   </style>
 </head>
 <body>
-  <!-- Bottom overlay controls: Audio + Fullscreen -->
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
     <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
   </div>
 
-  <!-- Video + pose overlay -->
   <video id="remote" autoplay playsinline></video>
   <canvas id="poseCanvasReceiver"></canvas>
 
-  <!-- Center status box -->
   <div id="overlay" class="overlay">
     <div id="status" class="status">Idle</div>
   </div>
@@ -83,7 +77,7 @@
     const WS_RECONNECT_MIN_MS = 1000;
     const WS_RECONNECT_MAX_MS = 10000;
     const RESTART_ON_ICE_TIMEOUT_MS = 5000;
-    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000; // 10s
+    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
     // ---------- Elements ----------
     const remoteVideo = document.getElementById('remote');
@@ -106,19 +100,19 @@
     let iceDisconnectedSince = null;
     let hideStatusTimer = null;
 
-    // Pose: settings come from sender via WS 'pose-mode'
+    // Pose control (announced by sender)
     let poseEnabled = false;
-    let poseWhere = 'sender'; // 'sender'|'receiver'
-    let runLocally = false;   // enabled && where==='receiver'
-    let drawLocally = false;  // enabled && where==='sender'
+    let poseWhere = 'sender';
+    let runLocally = false;  // enabled && where==='receiver'
+    let drawLocally = false; // enabled && where==='sender'
     let poseTask = null;
     let poseLoopReq = null;
     let lastVideoTime = -1;
 
-    // Data channel (created here on receiver before offer)
+    // Data channel (created by receiver)
     let poseDC = null;
 
-    // ---------- UI helpers ----------
+    // ---------- UI ----------
     function showStatus(msg) {
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
@@ -143,7 +137,6 @@
         disableAudioBtn.style.display = 'block';
       }
     }
-
     enableAudioBtn.style.display = 'block';
 
     async function tryStartMuted() {
@@ -151,21 +144,16 @@
       catch (e) { console.warn('autoplay (muted) blocked:', e); }
       updateAudioButtons();
     }
-
-    async function enableAudio(e) {
-      e?.stopPropagation?.(); e?.preventDefault?.();
-      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); }
-      catch (err) { console.warn('unmute play blocked:', err); }
+    enableAudioBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try { remoteVideo.muted = false; await remoteVideo.play(); } catch (err) {}
       updateAudioButtons();
-    }
-    function disableAudio(e) {
-      e?.stopPropagation?.(); e?.preventDefault?.();
+    });
+    disableAudioBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
       remoteVideo.muted = true; updateAudioButtons();
-    }
-    enableAudioBtn.addEventListener('click', enableAudio);
-    disableAudioBtn.addEventListener('click', disableAudio);
+    });
 
-    // Fullscreen
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -185,15 +173,6 @@
       if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
     });
 
-    remoteVideo.addEventListener('loadedmetadata', () => {
-      resizeCanvasToVideo();
-      console.log('metadata:', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
-    });
-    remoteVideo.addEventListener('playing', () => {
-      console.log('playing… muted=', remoteVideo.muted);
-      updateAudioButtons();
-    });
-
     function resizeCanvasToVideo() {
       const w = remoteVideo.videoWidth || innerWidth;
       const h = remoteVideo.videoHeight || innerHeight;
@@ -203,9 +182,28 @@
       poseCanvas.style.width = '100vw';
       poseCanvas.style.height= '100vh';
     }
+    remoteVideo.addEventListener('loadedmetadata', () => {
+      console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
+      resizeCanvasToVideo();
+    });
+    remoteVideo.addEventListener('playing', () => {
+      console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
+      updateAudioButtons();
+    });
     window.addEventListener('resize', resizeCanvasToVideo);
 
-    // ---------- WebSocket (auto-reconnect) ----------
+    function clearCanvas(ctx) { ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height); }
+    async function ensureDrawingUtils() { if (!drawingUtils) drawingUtils = new DrawingUtils(poseCtx); }
+    function drawPoseWithDrawingUtils(normPts) {
+      if (!normPts?.length) { clearCanvas(poseCtx); return; }
+      poseCtx.save();
+      clearCanvas(poseCtx);
+      drawingUtils.drawConnectors(normPts, PoseLandmarker.POSE_CONNECTIONS);
+      drawingUtils.drawLandmarks(normPts);
+      poseCtx.restore();
+    }
+
+    // ---------- WS ----------
     async function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
@@ -250,7 +248,7 @@
     }
     const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
-    // ---------- PeerConnection / Negotiation ----------
+    // ---------- WebRTC ----------
     function createPC() {
       if (pc) { try { pc.close(); } catch{}; pc = null; }
       remoteDescriptionSet = false;
@@ -262,13 +260,12 @@
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
-      // Create the data channel *here* (offerer)
+      // Create DataChannel before offer
       poseDC = pc.createDataChannel('pose');
-      poseDC.onopen  = () => console.log('[POSE][receiver] DC open (receiver side)');
-      poseDC.onclose = () => console.log('[POSE][receiver] DC close (receiver side)');
-      poseDC.onerror = (e) => console.warn('[POSE][receiver] DC error', e);
+      poseDC.onopen  = () => console.log('[DC][receiver] pose DC open');
+      poseDC.onclose = () => console.log('[DC][receiver] pose DC close');
+      poseDC.onerror = (e) => console.warn('[DC][receiver] pose DC error:', e);
       poseDC.onmessage = async (e) => {
-        // sender-side inference → we draw locally using DrawingUtils
         try {
           const m = JSON.parse(e.data);
           if (m.t === 'pose' && Array.isArray(m.pts)) {
@@ -282,21 +279,16 @@
 
       pc.onicecandidate = (ev) => { if (ev.candidate) send({ type:'candidate', candidate: ev.candidate }); };
       pc.ontrack = (ev) => {
+        console.log('[TRACK][receiver] ontrack:', ev.track.kind);
         if (remoteVideo.srcObject !== ev.streams[0]) {
           remoteVideo.srcObject = ev.streams[0];
           tryStartMuted();
         }
       };
-
       pc.oniceconnectionstatechange = () => {
         const state = pc.iceConnectionState;
         console.log('[ICE]', state);
-
-        if (state === 'connected') {
-          showStatus('Connected');
-        } else {
-          showStatus('ICE: ' + state);
-        }
+        showStatus(state === 'connected' ? 'Connected' : ('ICE: ' + state));
 
         if (state === 'disconnected') {
           if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
@@ -338,7 +330,6 @@
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         try { await connectWS(); } catch(e) { scheduleWSReconnect(); return; }
       }
-
       if (!pc || forceNewPc) createPC();
 
       try {
@@ -355,7 +346,6 @@
 
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
-      // console.log('[WS IN]', msg.type);
 
       if (msg.type === 'answer') {
         if (pc.signalingState !== 'have-local-offer') {
@@ -373,7 +363,7 @@
         remoteDescriptionSet = true;
         stopOfferResendLoop();
 
-        // Flush queued ICE
+        // queue flush
         for (const c of candidateQueue) {
           try { await pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
         }
@@ -391,13 +381,12 @@
         await sendCurrentOffer();
 
       } else if (msg.type === 'bye') {
-        // sender stopping → keep re-offering
         console.log('[INFO] sender bye -> keep re-offering');
         remoteDescriptionSet = false;
         startOfferResendLoop();
 
       } else if (msg.type === 'pose-mode') {
-        // Sender announces pose mode
+        // Configure local behavior based on sender’s announcement
         poseEnabled = !!msg.enabled;
         poseWhere = msg.where === 'receiver' ? 'receiver' : 'sender';
         runLocally = poseEnabled && poseWhere === 'receiver';
@@ -405,41 +394,22 @@
         console.log('[POSE][receiver] settings → enabled:', poseEnabled, 'where:', poseWhere, '| runLocally:', runLocally, 'drawLocally:', drawLocally);
 
         if (!poseEnabled) {
-          stopReceiverPoseLoop();
-          clearCanvas(poseCtx);
+          stopReceiverPoseLoop(); clearCanvas(poseCtx);
           return;
         }
         if (runLocally) {
-          ensureReceiverPoseTask().then(() => {
-            startReceiverPoseLoop(); // run + send to sender
-          }).catch(err => {
+          ensureReceiverPoseTask().then(() => startReceiverPoseLoop()).catch(err => {
             console.warn('[POSE][receiver] task init failed', err);
-            // fall back: nothing
           });
         } else {
-          // sender runs → we only draw when datachannel messages arrive
+          // sender runs → we only draw via DC messages
           stopReceiverPoseLoop();
           clearCanvas(poseCtx);
         }
       }
     }
 
-    // ---------- Pose on receiver ----------
-    function clearCanvas(ctx) { ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height); }
-
-    async function ensureDrawingUtils() {
-      if (!drawingUtils) drawingUtils = new DrawingUtils(poseCtx);
-    }
-
-    function drawPoseWithDrawingUtils(normPts) {
-      if (!normPts?.length) { clearCanvas(poseCtx); return; }
-      poseCtx.save();
-      clearCanvas(poseCtx);
-      drawingUtils.drawConnectors(normPts, PoseLandmarker.POSE_CONNECTIONS);
-      drawingUtils.drawLandmarks(normPts);
-      poseCtx.restore();
-    }
-
+    // ---------- Pose (receiver-run) ----------
     async function ensureReceiverPoseTask() {
       if (poseTask) return;
       const vision = await FilesetResolver.forVisionTasks(
@@ -454,7 +424,7 @@
         runningMode: "VIDEO",
         numPoses: 1
       });
-      if (!drawingUtils) drawingUtils = new DrawingUtils(poseCtx); // we may still draw when sender runs
+      if (!drawingUtils) drawingUtils = new DrawingUtils(poseCtx);
       console.log('[POSE][receiver] task ready');
     }
 
@@ -480,7 +450,7 @@
           const res = await poseTask.detectForVideo(remoteVideo, now);
           const lm = (res?.landmarks && res.landmarks[0]) || null;
           if (lm) {
-            // We DO NOT draw locally in receiver-run mode (per spec)
+            // do NOT draw locally when receiver runs; send to sender
             sendPoseToSender(lm);
           }
         }
@@ -500,7 +470,7 @@
       stopReceiverPoseLoop();
     });
 
-    // Go!
+    // Go
     startNegotiation();
   </script>
 </body>
