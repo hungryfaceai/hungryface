@@ -12,55 +12,83 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       overflow: hidden;
     }
-    /* Auto-size to screen without cropping; switch to 'cover' if you want fill */
+    /* Video fills screen, preserving aspect */
     video {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
       object-fit: contain; background: #000;
     }
-    #status {
-      position: fixed; top: 10px; left: 10px;
-      font-size: 0.9em; opacity: 0.85; padding: 6px 10px;
-      background: rgba(0,0,0,0.35); border-radius: 8px;
-      z-index: 5;
-    }
-    #unmute {
-      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
-      padding: 12px 16px; border: 0; border-radius: 12px;
-      background:#1e90ff; color:#fff; cursor: pointer; font-weight: 700;
+
+    /* Sender-like button style */
+    .btn {
+      padding: 14px 16px; border-radius: 12px; border: 0;
+      background: #2a2a2a; color: #fff; font-size: 17px; font-weight: 600;
+      cursor: pointer;
       box-shadow: 0 6px 16px rgba(0,0,0,0.4);
-      z-index: 6; display: none;
     }
+    .btn:active { transform: scale(0.99); }
+
+    /* Fullscreen button (top-right) */
     #fsBtn {
       position: fixed; top: 12px; right: 12px;
-      padding: 10px 12px; border: 0; border-radius: 10px;
-      background:#333; color:#fff; cursor: pointer; font-weight: 600;
       z-index: 6;
     }
+
+    /* Audio buttons (bottom-center). Only one visible at a time */
+    #enableAudioBtn, #disableAudioBtn {
+      position: fixed; left: 50%; transform: translateX(-50%);
+      bottom: 16px; z-index: 6; display: none;
+    }
+
+    /* Sender-style status overlay (center translucent card) */
+    .overlay {
+      position: fixed; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      pointer-events: none; z-index: 5;
+    }
+    .status {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
+      text-align: center; white-space: pre-line;
+      max-width: 90vw;
+    }
+    .overlay.hidden { display: none; }
   </style>
 </head>
 <body>
-  <div id="status">Idle</div>
-  <button id="fsBtn" type="button">Fullscreen</button>
-  <button id="unmute" type="button">Tap to enable audio</button>
+  <!-- Controls -->
+  <button id="fsBtn" class="btn" type="button">Fullscreen</button>
+  <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
+  <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
+
+  <!-- Video -->
   <video id="remote" autoplay playsinline></video>
 
+  <!-- Sender-like status box in the middle -->
+  <div id="overlay" class="overlay">
+    <div id="status" class="status">Idle</div>
+  </div>
+
   <script>
-    // ----------------- Config -----------------
+    // ---------- Config ----------
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "baby1";
     const WS_KEEPALIVE_MS = 25000;
     const WS_RECONNECT_MIN_MS = 1000;
     const WS_RECONNECT_MAX_MS = 10000;
-    const RESTART_ON_ICE_TIMEOUT_MS = 5000; // restart if 'disconnected' lasts this long
+    const RESTART_ON_ICE_TIMEOUT_MS = 5000;
+    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000; // 10s
 
-    // ----------------- Elements -----------------
-    const statusEl = document.getElementById('status');
+    // ---------- Elements ----------
     const remoteVideo = document.getElementById('remote');
-    const unmuteBtn = document.getElementById('unmute');
     const fsBtn = document.getElementById('fsBtn');
+    const enableAudioBtn = document.getElementById('enableAudioBtn');
+    const disableAudioBtn = document.getElementById('disableAudioBtn');
+    const overlay = document.getElementById('overlay');
+    const statusEl = document.getElementById('status');
 
-    // ----------------- State -----------------
+    // ---------- State ----------
     let ws = null, wsKeepalive = null, wsRetryMs = WS_RECONNECT_MIN_MS;
     let pc = null;
     let remoteDescriptionSet = false;
@@ -68,48 +96,81 @@
     const candidateQueue = [];
     let offerResendTimer = null;
     let iceDisconnectedSince = null;
+    let hideStatusTimer = null;
+    let connectedShownOnce = false;
 
-    // ----------------- UI helpers -----------------
-    const setStatus = (msg) => { statusEl.textContent = msg; console.log('[STATUS]', msg); };
-    const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
+    // ---------- UI helpers ----------
+    function showStatus(msg) {
+      statusEl.textContent = msg;
+      overlay.classList.remove('hidden');
+      console.log('[STATUS]', msg);
 
-    // ---- Autoplay/unmute helpers ----
-    unmuteBtn.style.display = 'block'; // visible until we confirm audible playback
+      // Auto-hide 10s after first ICE: connected
+      if (msg === 'ICE: connected' && !connectedShownOnce) {
+        connectedShownOnce = true;
+        if (hideStatusTimer) clearTimeout(hideStatusTimer);
+        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'),
+          STATUS_HIDE_AFTER_CONNECTED_MS);
+      }
+
+      // If status changes to anything else after being hidden, show again
+      if (msg !== 'ICE: connected') {
+        if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
+        overlay.classList.remove('hidden');
+      }
+    }
+
+    function updateAudioButtons() {
+      // Show exactly one of the buttons depending on current audio state
+      if (remoteVideo.muted) {
+        enableAudioBtn.style.display = 'block';
+        disableAudioBtn.style.display = 'none';
+      } else {
+        enableAudioBtn.style.display = 'none';
+        disableAudioBtn.style.display = 'block';
+      }
+    }
+
+    // Start with visible "Enable audio"
+    enableAudioBtn.style.display = 'block';
 
     async function tryStartMuted() {
       try {
-        remoteVideo.muted = true;   // muted autoplay usually allowed
+        remoteVideo.muted = true;      // autoplay-friendly
         remoteVideo.volume = 1.0;
         await remoteVideo.play();
       } catch (e) {
         console.warn('autoplay (muted) blocked:', e);
       }
-      updateUnmuteVisibility();
+      updateAudioButtons();
     }
 
-    async function enableAudio() {
+    async function enableAudio(e) {
+      e?.stopPropagation?.();
+      e?.preventDefault?.();
       try {
         remoteVideo.muted = false;
         remoteVideo.volume = 1.0;
         await remoteVideo.play();
-      } catch (e) {
-        console.warn('unmute play blocked:', e);
+      } catch (err) {
+        console.warn('unmute play blocked:', err);
       }
-      updateUnmuteVisibility();
+      updateAudioButtons();
     }
 
-    function updateUnmuteVisibility() {
-      // Show the button unless we are playing and unmuted
-      const shouldHide = (!remoteVideo.paused && !remoteVideo.muted);
-      unmuteBtn.style.display = shouldHide ? 'none' : 'block';
+    function disableAudio(e) {
+      e?.stopPropagation?.();
+      e?.preventDefault?.();
+      remoteVideo.muted = true;
+      updateAudioButtons();
     }
 
-    unmuteBtn.addEventListener('click', enableAudio);
-    document.addEventListener('touchstart', enableAudio, { once: true });
-    document.addEventListener('click',      enableAudio, { once: true });
+    enableAudioBtn.addEventListener('click', enableAudio);
+    disableAudioBtn.addEventListener('click', disableAudio);
 
-    // Fullscreen: enter/exit with button; exit on tap/click/Esc
-    fsBtn.addEventListener('click', async () => {
+    // Fullscreen button + exit on tap/esc
+    fsBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
       try {
         if (!document.fullscreenElement) {
           await (remoteVideo.requestFullscreen?.call(remoteVideo) || document.documentElement.requestFullscreen());
@@ -118,31 +179,29 @@
           await document.exitFullscreen();
           fsBtn.textContent = 'Fullscreen';
         }
-      } catch (e) { console.warn('fullscreen error', e); }
+      } catch (err) { console.warn('fullscreen error', err); }
     });
     document.addEventListener('fullscreenchange', () => {
       fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
     });
-    // Tap anywhere to exit fullscreen (mobile)
+    // Tap anywhere (outside the audio buttons) to exit fullscreen
     document.addEventListener('click', () => {
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(()=>{});
-      }
+      if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
     });
 
-    // Optional logs
+    // Helpful logs
     remoteVideo.addEventListener('loadedmetadata', () =>
       console.log('metadata:', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight));
     remoteVideo.addEventListener('playing', () => {
       console.log('playing… muted=', remoteVideo.muted);
-      updateUnmuteVisibility();
+      updateAudioButtons();
     });
 
-    // ----------------- WebSocket (auto-reconnect) -----------------
+    // ---------- WebSocket (auto-reconnect) ----------
     async function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
-        setStatus('Connecting to signaling…');
+        showStatus('Connecting to signaling…');
         const sock = new WebSocket(url);
         ws = sock;
 
@@ -153,11 +212,10 @@
 
         sock.onopen = () => {
           opened = true; clearTimeout(openTimeout);
-          setStatus('Signaling: connected');
-          wsRetryMs = WS_RECONNECT_MIN_MS; // reset backoff
+          showStatus('Signaling: connected');
+          wsRetryMs = WS_RECONNECT_MIN_MS;
           send({ type: 'join', room });
 
-          // keepalive to avoid idle closes
           if (wsKeepalive) clearInterval(wsKeepalive);
           wsKeepalive = setInterval(() => {
             if (ws?.readyState === WebSocket.OPEN) send({ type:'keepalive', ts: Date.now() });
@@ -168,7 +226,7 @@
         sock.onmessage = onSignal;
         sock.onerror = (e) => { console.warn('[WS error]', e); };
         sock.onclose  = () => {
-          setStatus('Signaling: closed');
+          showStatus('Signaling: closed');
           if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
           scheduleWSReconnect();
         };
@@ -180,11 +238,13 @@
       console.log('[WS] reconnect in', delay,'ms');
       setTimeout(() => {
         wsRetryMs = Math.min(wsRetryMs * 2, WS_RECONNECT_MAX_MS);
-        startNegotiation(); // will reconnect WS if needed and re-offer
+        startNegotiation();
       }, delay);
     }
 
-    // ----------------- PeerConnection / Negotiation -----------------
+    const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
+
+    // ---------- PeerConnection / Negotiation ----------
     function createPC() {
       if (pc) { try { pc.close(); } catch{}; pc = null; }
       remoteDescriptionSet = false;
@@ -193,7 +253,6 @@
 
       pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
 
-      // We expect audio + video
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
@@ -201,17 +260,16 @@
       pc.ontrack = (ev) => {
         if (remoteVideo.srcObject !== ev.streams[0]) {
           remoteVideo.srcObject = ev.streams[0];
-          tryStartMuted(); // start playback muted; tap to unmute
+          tryStartMuted(); // start playback muted; user can enable audio
         }
       };
 
       pc.oniceconnectionstatechange = () => {
         console.log('[ICE]', pc.iceConnectionState);
-        setStatus('ICE: ' + pc.iceConnectionState);
+        showStatus('ICE: ' + pc.iceConnectionState);
 
         if (pc.iceConnectionState === 'disconnected') {
           if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
-          // If we stay disconnected long enough, restart negotiation
           setTimeout(() => {
             if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= RESTART_ON_ICE_TIMEOUT_MS) {
               console.log('[ICE] disconnected timeout - restarting negotiation');
@@ -247,7 +305,7 @@
     }
 
     async function startNegotiation(forceNewPc = false) {
-      // Ensure WS connected first
+      // Ensure WS is connected
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         try { await connectWS(); } catch(e) { scheduleWSReconnect(); return; }
       }
@@ -259,10 +317,10 @@
         await pc.setLocalDescription(offer);
         await sendCurrentOffer();
         startOfferResendLoop();
-        setStatus('Offer sent, waiting for answer…');
+        showStatus('Offer sent, waiting for answer…');
       } catch (e) {
         console.error('negotiation error', e);
-        setStatus('Negotiation error');
+        showStatus('Negotiation error');
       }
     }
 
@@ -281,7 +339,7 @@
         }
         lastAnswerSdp = msg.sdp;
 
-        setStatus('Got answer, applying…');
+        showStatus('Got answer, applying…');
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
         remoteDescriptionSet = true;
         stopOfferResendLoop();
@@ -305,8 +363,8 @@
         await sendCurrentOffer();
 
       } else if (msg.type === 'bye') {
-        // Sender explicitly said it's going away: prep to re-offer when it returns
-        console.log('[INFO] sender bye -> will keep offering until it returns');
+        // Sender is stopping: keep offering until it returns
+        console.log('[INFO] sender bye -> keep re-offering');
         remoteDescriptionSet = false;
         startOfferResendLoop();
       }
@@ -319,7 +377,7 @@
       if (wsKeepalive) clearInterval(wsKeepalive);
     });
 
-    // Kick things off
+    // Go!
     startNegotiation();
   </script>
 </body>
