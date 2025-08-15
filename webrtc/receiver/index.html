@@ -96,8 +96,7 @@
     const candidateQueue = [];
     let offerResendTimer = null;
     let iceDisconnectedSince = null;
-    let hideStatusTimer = null;
-    let connectedShownOnce = false;
+    let hideStatusTimer = null; // auto-hide timer for "Connected"
 
     // ---------- UI helpers ----------
     function showStatus(msg) {
@@ -105,16 +104,13 @@
       overlay.classList.remove('hidden');
       console.log('[STATUS]', msg);
 
-      // Auto-hide 10s after first ICE: connected
-      if (msg === 'ICE: connected' && !connectedShownOnce) {
-        connectedShownOnce = true;
+      if (msg === 'Connected') {
+        // Auto-hide after 10 seconds on each connection event
         if (hideStatusTimer) clearTimeout(hideStatusTimer);
         hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'),
           STATUS_HIDE_AFTER_CONNECTED_MS);
-      }
-
-      // If status changes to anything else after being hidden, show again
-      if (msg !== 'ICE: connected') {
+      } else {
+        // Any other status: cancel hide, show box
         if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
         overlay.classList.remove('hidden');
       }
@@ -183,10 +179,12 @@
     document.addEventListener('fullscreenchange', () => {
       fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
     });
+    // Tap anywhere to exit fullscreen
     document.addEventListener('click', () => {
       if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
     });
 
+    // Helpful logs
     remoteVideo.addEventListener('loadedmetadata', () =>
       console.log('metadata:', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight));
     remoteVideo.addEventListener('playing', () => {
@@ -262,10 +260,16 @@
       };
 
       pc.oniceconnectionstatechange = () => {
-        console.log('[ICE]', pc.iceConnectionState);
-        showStatus('ICE: ' + pc.iceConnectionState);
+        const state = pc.iceConnectionState;
+        console.log('[ICE]', state);
 
-        if (pc.iceConnectionState === 'disconnected') {
+        if (state === 'connected') {
+          showStatus('Connected'); // <-- label requested
+        } else {
+          showStatus('ICE: ' + state);
+        }
+
+        if (state === 'disconnected') {
           if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
           setTimeout(() => {
             if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= RESTART_ON_ICE_TIMEOUT_MS) {
@@ -273,7 +277,7 @@
               startNegotiation(true);
             }
           }, RESTART_ON_ICE_TIMEOUT_MS + 50);
-        } else if (pc.iceConnectionState === 'failed') {
+        } else if (state === 'failed') {
           console.log('[ICE] failed - restarting negotiation');
           startNegotiation(true);
         } else {
@@ -372,6 +376,7 @@
       try { ws && ws.close(); } catch {}
       try { pc && pc.close(); } catch {}
       if (wsKeepalive) clearInterval(wsKeepalive);
+      if (hideStatusTimer) clearTimeout(hideStatusTimer);
     });
 
     // Go!
