@@ -130,6 +130,12 @@
 
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
 
+    function currentRoom() {
+      const r = (roomInput.value || 'baby1').trim();
+      try { const u = new URL(location.href); u.searchParams.set('room', r); history.replaceState({}, '', u); } catch {}
+      return r;
+    }
+
     async function requestWakeLock() {
       try {
         if ('wakeLock' in navigator) {
@@ -143,17 +149,38 @@
       } catch {}
     }
 
-    function currentRoom() {
-      const r = (roomInput.value || 'baby1').trim();
-      try {
-        const u = new URL(location.href);
-        u.searchParams.set('room', r);
-        history.replaceState({}, '', u);
-      } catch {}
-      return r;
+    // --- NEW: live toggle handlers ---
+    function applyVideoToggle() {
+      if (!localStream) return; // will apply at start
+      const vt = localStream.getVideoTracks()[0];
+      if (vt) {
+        vt.enabled = videoOn.checked;
+        setStatus(videoOn.checked ? 'Video ON' : 'Video OFF');
+        // Hide local preview when video disabled during preview
+        if (document.body.classList.contains('previewing')) {
+          localVideo.style.display = videoOn.checked ? 'block' : 'none';
+        }
+      } else if (started && videoOn.checked) {
+        setStatus('Video not captured. Stop & Start to enable video.');
+      }
     }
 
+    function applyAudioToggle() {
+      if (!localStream) return; // will apply at start
+      const at = localStream.getAudioTracks()[0];
+      if (at) {
+        at.enabled = audioOn.checked;
+        setStatus(audioOn.checked ? 'Audio ON' : 'Audio OFF');
+      } else if (started && audioOn.checked) {
+        setStatus('Audio not captured. Stop & Start to enable audio.');
+      }
+    }
+
+    videoOn.addEventListener('change', applyVideoToggle);
+    audioOn.addEventListener('change', applyAudioToggle);
+
     async function getMedia() {
+      // Respect pre-start toggles (we capture only what’s requested)
       const wantVideo = videoOn.checked;
       const wantAudio = audioOn.checked;
       if (!wantVideo && !wantAudio) throw new Error('Both video and audio are OFF.');
@@ -167,10 +194,14 @@
         } : false,
         audio: wantAudio ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true } : false
       };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
-      const v = stream.getVideoTracks()[0];
-      if (v && 'contentHint' in v) { try { v.contentHint = 'motion'; } catch {} }
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      // Safety: apply toggles to the tracks we got (so they reflect checkboxes exactly)
+      const vt = stream.getVideoTracks()[0]; if (vt) vt.enabled = videoOn.checked;
+      const at = stream.getAudioTracks()[0]; if (at) at.enabled = audioOn.checked;
+
+      // Nudge camera pipeline for motion
+      if (vt && 'contentHint' in vt) { try { vt.contentHint = 'motion'; } catch {} }
 
       return stream;
     }
@@ -217,6 +248,7 @@
       });
       pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate }); };
       pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
+
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 
@@ -228,7 +260,7 @@
       document.body.classList.add('streaming');
       document.body.classList.remove('ui-visible');
       ui.style.display = '';
-      localVideo.style.display = 'block';
+      localVideo.style.display = videoOn.checked ? 'block' : 'none';
 
       previewEnd = Date.now() + ms;
       tickPreviewCountdown();
@@ -311,6 +343,10 @@
         localStream = await getMedia();
         localVideo.srcObject = localStream;
 
+        // Apply toggles to active tracks (and preview visibility)
+        applyVideoToggle();
+        applyAudioToggle();
+
         beginPreviewWindow(Number(previewMinsInput.value) || 1);
 
         await connectWS(room);
@@ -329,7 +365,6 @@
     }
 
     async function stopStreaming() {
-      // Tell receiver we're going away (helps it re-offer later)
       try { send({ type: 'bye' }); } catch {}
 
       if (previewTimer) clearTimeout(previewTimer);
@@ -359,43 +394,27 @@
       startBtn.textContent = 'Start streaming';
     }
 
+    // UI show/hide while streaming
     document.addEventListener('click', (e) => {
       if (document.body.classList.contains('previewing')) {
-        endPreviewNow();
-        return;
+        endPreviewNow(); return;
       }
       if (document.body.classList.contains('streaming') && !document.body.classList.contains('ui-visible')) {
-        document.body.classList.add('ui-visible');
-        setStatus('Streaming...');
-        scheduleAutoHideUI();
-        return;
+        document.body.classList.add('ui-visible'); setStatus('Streaming...'); scheduleAutoHideUI(); return;
       }
       if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
         const inCard = e.target.closest('.card');
-        if (!inCard) {
-          document.body.classList.remove('ui-visible');
-          setStatus('Streaming...');
-          clearTimeout(hideUITimer); hideUITimer = null;
-        } else {
-          resetAutoHideUI();
-        }
+        if (!inCard) { document.body.classList.remove('ui-visible'); setStatus('Streaming...'); clearTimeout(hideUITimer); hideUITimer = null; }
       }
     });
-
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        if (document.body.classList.contains('previewing')) {
-          endPreviewNow();
-        } else if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
-          document.body.classList.remove('ui-visible');
-          setStatus('Streaming...');
-          clearTimeout(hideUITimer); hideUITimer = null;
+        if (document.body.classList.contains('previewing')) { endPreviewNow(); }
+        else if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
+          document.body.classList.remove('ui-visible'); setStatus('Streaming...'); clearTimeout(hideUITimer); hideUITimer = null;
         }
-      } else {
-        resetAutoHideUI();
       }
     });
-
     function scheduleAutoHideUI() {
       clearTimeout(hideUITimer);
       hideUITimer = setTimeout(() => {
