@@ -5,7 +5,7 @@
   <title>Baby Monitor – Sender</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 
-  <!-- MediaPipe Solutions (fallback that works on GitHub Pages) -->
+  <!-- MediaPipe (global UMD builds) -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
 
@@ -34,7 +34,6 @@
     body.streaming:not(.ui-visible) #tap{ display:block; }
     body.streaming:not(.ui-visible) #ui{ display:none; }
 
-    /* AI features */
     fieldset.ai{ border:1px solid #222; border-radius:12px; padding:10px 12px; margin:10px 0; }
     fieldset.ai legend{ padding:0 8px; color:#aaa; font-size:14px; }
     fieldset.ai .cols{ display:flex; gap:16px; flex-wrap:wrap; }
@@ -100,9 +99,7 @@
     const startBtn = document.getElementById('startBtn');
     const localVideo = document.getElementById('local');
     const statusEl = document.getElementById('status');
-    const ui = document.getElementById('ui');
 
-    // AI
     const aiPoseEl = document.getElementById('aiPose');
 
     let ws=null, pc=null, localStream=null, wakeLock=null;
@@ -118,7 +115,6 @@
 
     function applyVideoToggle(){ if(!localStream) return; const vt=localStream.getVideoTracks()[0]; if(vt){ vt.enabled=videoOn.checked; setStatus(videoOn.checked?'Video ON':'Video OFF'); if(document.body.classList.contains('previewing')) localVideo.style.display=videoOn.checked?'block':'none'; } }
     function applyAudioToggle(){ if(!localStream) return; const at=localStream.getAudioTracks()[0]; if(at){ at.enabled=audioOn.checked; setStatus(audioOn.checked?'Audio ON':'Audio OFF'); } }
-
     videoOn.addEventListener('change', applyVideoToggle);
     audioOn.addEventListener('change', applyAudioToggle);
 
@@ -186,7 +182,6 @@
         if(remoteDescriptionSet && pc){ try{ await pc.addIceCandidate(cand); }catch(e){ console.warn('ICE add failed',e); } }
         else candidateQueue.push(cand);
       } else if (msg.type === 'pose-toggle') {
-        // In case a receiver toggles (if you ever wire that), honor it
         poseEnabled = !!msg.enabled;
         if (poseEnabled) { await startPoseOverlayIfNeeded(); } else { stopPoseOverlay(); }
       }
@@ -205,7 +200,6 @@
         await connectWS(room);
         await requestWakeLock();
 
-        // Autostart pose if already checked
         if (aiPoseEl.checked) {
           poseEnabled = true;
           await startPoseOverlayIfNeeded();
@@ -237,12 +231,13 @@
 
       stopPoseOverlay();
 
-      document.body.classList.remove('previewing','streaming','ui-visible'); document.body.classList.add('blackout');
+      document.body.classList.remove('previewing','streaming','ui-visible');
+      document.body.classList.add('blackout');
       localVideo.style.display='none'; setStatus('Stopped');
       startBtn.textContent='Start streaming';
     }
 
-    // UI show/hide logic (unchanged)
+    // UI show/hide (unchanged)
     document.addEventListener('click', (e)=>{
       if(document.body.classList.contains('previewing')){ endPreviewNow(); return; }
       if(document.body.classList.contains('streaming') && !document.body.classList.contains('ui-visible')){ document.body.classList.add('ui-visible'); setStatus('Streaming...'); scheduleAutoHideUI(); return; }
@@ -256,21 +251,23 @@
     window.addEventListener('beforeunload', stopStreaming);
     startBtn.addEventListener('click', startOrStop);
 
-    // ---------------- Pose FALLBACK (fixed: no ctx.scale) ----------------
+    // -------- Pose fallback (correct constructor & connections) --------
     let poseEnabled=false;
     const poseCanvas=document.getElementById('poseOverlay');
-    const poseCtx=poseCanvas.getContext('2d', {alpha:true});
+    const poseCtx=poseCanvas.getContext('2d',{alpha:true});
     const drawConnectorsFn = window.drawConnectors || (window.drawingUtils && window.drawingUtils.drawConnectors);
     const drawLandmarksFn  = window.drawLandmarks  || (window.drawingUtils && window.drawingUtils.drawLandmarks);
+    const POSE_CONNECTIONS_CONST = window.POSE_CONNECTIONS || (window.pose && window.pose.POSE_CONNECTIONS);
 
-    function sizePoseCanvas(){ const dpr=Math.max(1, window.devicePixelRatio||1); const w=Math.floor(innerWidth*dpr), h=Math.floor(innerHeight*dpr);
-      if(poseCanvas.width!==w||poseCanvas.height!==h){ poseCanvas.width=w; poseCanvas.height=h; } }
+    function sizePoseCanvas(){ const dpr=Math.max(1, window.devicePixelRatio||1); const w=Math.floor(innerWidth*dpr), h=Math.floor(innerHeight*dpr); if(poseCanvas.width!==w||poseCanvas.height!==h){ poseCanvas.width=w; poseCanvas.height=h; } }
     sizePoseCanvas(); addEventListener('resize', sizePoseCanvas);
 
     class SolutionsPoseEngine{
       constructor(videoEl, canvas, ctx, getSelfieMode){ this.video=videoEl; this.canvas=canvas; this.ctx=ctx; this.getSelfieMode=getSelfieMode; this.pose=null; this.running=false; }
       async load(){ if(this.pose) return;
-        this.pose=new Pose.Pose({ locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${f}` });
+        const PoseCtor = window.Pose || (window.pose && window.pose.Pose);
+        if (!PoseCtor) throw new Error('MediaPipe Pose not loaded');
+        this.pose=new PoseCtor({ locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${f}` });
         this.pose.setOptions({ modelComplexity:1, smoothLandmarks:true, enableSegmentation:false, minDetectionConfidence:0.5, minTrackingConfidence:0.5, selfieMode:!!this.getSelfieMode() });
         this.pose.onResults((res)=>this.onResults(res));
       }
@@ -279,10 +276,10 @@
         const w=this.canvas.width, h=this.canvas.height, ctx=this.ctx;
         ctx.clearRect(0,0,w,h);
         const lms=results.poseLandmarks||[];
-        if(lms.length && drawConnectorsFn && drawLandmarksFn){
-          const lw=Math.max(2, Math.round(w/400));   // pixel line width
-          const r =Math.max(2, Math.round(w/300));   // pixel radius
-          drawConnectorsFn(ctx, lms, Pose.POSE_CONNECTIONS, { color:'#4DF3C3', lineWidth: lw });
+        if(lms.length && drawConnectorsFn && drawLandmarksFn && POSE_CONNECTIONS_CONST){
+          const lw=Math.max(2, Math.round(w/400));
+          const r =Math.max(2, Math.round(w/300));
+          drawConnectorsFn(ctx, lms, POSE_CONNECTIONS_CONST, { color:'#4DF3C3', lineWidth: lw });
           drawLandmarksFn (ctx, lms, { color:'#4DF3C3', radius: r });
         }
       }
@@ -302,8 +299,8 @@
     async function startPoseOverlayIfNeeded(){ if(!poseEnabled) return; try{ await ensurePoseFallbackLoaded(); updatePoseCanvasVisibility(); await poseEngine.start(); }catch(e){ console.warn('Pose start failed',e); poseEnabled=false; updatePoseCanvasVisibility(); } }
     function stopPoseOverlay(){ if(poseEngine) poseEngine.stop(); updatePoseCanvasVisibility(); }
 
-    aiPoseEl.addEventListener('change', async ()=>{
-      poseEnabled = aiPoseEl.checked;
+    document.getElementById('aiPose').addEventListener('change', async (e)=>{
+      poseEnabled = e.target.checked;
       updatePoseCanvasVisibility();
       if(poseEnabled){ await startPoseOverlayIfNeeded(); } else { stopPoseOverlay(); }
       try{ send({type:'pose-toggle', enabled:!!poseEnabled}); }catch{}
