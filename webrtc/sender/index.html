@@ -32,14 +32,13 @@
       background: #2a2a2a; color: #fff; font-size: 17px; font-weight: 600;
     }
     button:active { transform: scale(0.99); }
-    .hint { opacity: .7; font-size: 13px; }
 
     /* Local video + overlay canvas */
     video#local, canvas#poseCanvasSender {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
       object-fit: cover; background: #000; z-index: 1;
-      display: none; /* shown only during preview or when drawing */
+      display: none; /* shown only during preview/visible streaming */
     }
     body.previewing video#local { display: block; }
     body.previewing canvas#poseCanvasSender { display: block; }
@@ -120,7 +119,7 @@
           </select>
         </div>
 
-        <!-- Future: Audio / Face (placeholders, not running yet) -->
+        <!-- Future (placeholders) -->
         <div class="ai-row">
           <label><input type="checkbox" disabled> <span>Audio</span></label>
           <select disabled><option>On sender</option><option>On receiver</option></select>
@@ -140,7 +139,6 @@
   <div id="tap" aria-hidden="true"></div>
   <div class="overlay"><div class="status" id="status">Idle</div></div>
 
-  <!-- local preview (muted) + pose overlay -->
   <video id="local" playsinline autoplay muted></video>
   <canvas id="poseCanvasSender"></canvas>
 
@@ -175,7 +173,7 @@
 
     // Overlay canvas (sender)
     const poseCanvas = document.getElementById('poseCanvasSender');
-    const poseCtx = poseCanvas.getContext('2d', { willReadFrequently: false });
+    const poseCtx = poseCanvas.getContext('2d');
     let drawingUtils = null;
 
     // ----- State -----
@@ -194,7 +192,7 @@
     let poseDC = null;
 
     // Pose inference
-    const poseState = { enabled: false, where: 'sender' }; // where: 'sender' | 'receiver'
+    const posePrefs = { enabled: false, where: 'sender' }; // UI prefs
     let poseTask = null;
     let poseLoopReq = null;
     let lastVideoTime = -1;
@@ -231,10 +229,8 @@
         setStatus(videoOn.checked ? 'Video ON' : 'Video OFF');
         if (document.body.classList.contains('previewing')) {
           localVideo.style.display = videoOn.checked ? 'block' : 'none';
-          poseCanvas.style.display = videoOn.checked ? 'block' : 'none';
+          poseCanvas.style.display = (videoOn.checked && started) ? 'block' : 'none';
         }
-      } else if (started && videoOn.checked) {
-        setStatus('Video not captured. Stop & Start to enable video.');
       }
     }
 
@@ -244,8 +240,6 @@
       if (at) {
         at.enabled = audioOn.checked;
         setStatus(audioOn.checked ? 'Audio ON' : 'Audio OFF');
-      } else if (started && audioOn.checked) {
-        setStatus('Audio not captured. Stop & Start to enable audio.');
       }
     }
 
@@ -271,7 +265,7 @@
       const vt = stream.getVideoTracks()[0]; if (vt) vt.enabled = videoOn.checked;
       const at = stream.getAudioTracks()[0]; if (at) at.enabled = audioOn.checked;
 
-      // Mirror canvas if front camera
+      // Mirror if front camera
       const isFront = facing === 'user';
       localVideo.style.transform = isFront ? 'scaleX(-1)' : 'none';
       poseCanvas.style.transform = isFront ? 'scaleX(-1)' : 'none';
@@ -280,8 +274,8 @@
     }
 
     function resizeCanvasToVideo() {
-      const w = localVideo.videoWidth || poseCanvas.clientWidth || innerWidth;
-      const h = localVideo.videoHeight || poseCanvas.clientHeight || innerHeight;
+      const w = localVideo.videoWidth || innerWidth;
+      const h = localVideo.videoHeight || innerHeight;
       const dpr = devicePixelRatio || 1;
       poseCanvas.width = Math.max(1, Math.round(w * dpr));
       poseCanvas.height = Math.max(1, Math.round(h * dpr));
@@ -289,7 +283,10 @@
       poseCanvas.style.height= '100vh';
     }
 
-    localVideo.addEventListener('loadedmetadata', resizeCanvasToVideo);
+    localVideo.addEventListener('loadedmetadata', () => {
+      console.log('[MEDIA] local video meta', localVideo.videoWidth, 'x', localVideo.videoHeight);
+      resizeCanvasToVideo();
+    });
     window.addEventListener('resize', () => { if (started) resizeCanvasToVideo(); });
 
     // ----- WebSocket -----
@@ -334,8 +331,8 @@
         sdpSemantics: 'unified-plan'
       });
 
-      // Accept data channel created by the receiver
       pc.ondatachannel = (ev) => {
+        console.log('[DC][sender] ondatachannel:', ev.channel?.label);
         if (ev.channel.label !== 'pose') return;
         poseDC = ev.channel;
         poseDC.onopen  = () => logP('DC open (sender side)');
@@ -345,8 +342,8 @@
           try {
             const m = JSON.parse(ev.data);
             if (m.t === 'pose' && Array.isArray(m.pts)) {
-              if (poseState.enabled && poseState.where === 'receiver') {
-                drawPoseOnSender(m.pts); // draw when receiver runs inference
+              if (started && posePrefs.enabled && posePrefs.where === 'receiver') {
+                drawPoseOnSender(m.pts);
               }
             }
           } catch {}
@@ -356,7 +353,15 @@
       pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate }); };
       pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
 
-      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      pc.ontrack = (e) => {
+        console.log('[TRACK][sender] ontrack (shouldn’t normally fire here):', e.track.kind);
+      };
+
+      // add tracks
+      localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream);
+        console.log('[TRACK][sender] addTrack', track.kind);
+      });
     }
 
     function beginPreviewWindow(minutes) {
@@ -368,7 +373,7 @@
       document.body.classList.remove('ui-visible');
       ui.style.display = '';
       localVideo.style.display = videoOn.checked ? 'block' : 'none';
-      poseCanvas.style.display = videoOn.checked ? 'block' : 'none';
+      poseCanvas.style.display = (videoOn.checked && started) ? 'block' : 'none';
 
       previewEnd = Date.now() + ms;
       tickPreviewCountdown();
@@ -403,10 +408,7 @@
 
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
-      if (msg.type === 'pose-mode') {
-        // Sent by *this* page as announcement; ignore mirrored copies
-        return;
-      }
+      if (msg.type === 'pose-mode') return; // ignore own echoes
       console.log('[WS IN]', msg.type);
 
       if (msg.type === 'offer') {
@@ -464,26 +466,17 @@
       logP('task ready');
     }
 
-    function clearCanvas(ctx) {
-      ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
-    }
+    function clearCanvas(ctx) { ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height); }
 
-    function drawLandmarksWithUtils(landmarks) {
+    function drawPoseOnSender(normPts) {
+      if (!started) return;
+      if (!normPts?.length) { clearCanvas(poseCtx); return; }
       if (!drawingUtils) drawingUtils = new DrawingUtils(poseCtx);
       poseCtx.save();
       clearCanvas(poseCtx);
-      // DrawingUtils expects normalized landmarks (0..1), but scaled by canvas dims internally.
-      // We'll scale manually for circles thickness; still looks fine with defaults.
-      drawingUtils.drawConnectors(landmarks, PoseLandmarker.POSE_CONNECTIONS);
-      drawingUtils.drawLandmarks(landmarks);
+      drawingUtils.drawConnectors(normPts, PoseLandmarker.POSE_CONNECTIONS);
+      drawingUtils.drawLandmarks(normPts);
       poseCtx.restore();
-    }
-
-    function drawPoseOnSender(normPts) {
-      // normPts: [{x,y,z?,visibility?}] in [0,1] coords
-      if (!normPts?.length) { clearCanvas(poseCtx); return; }
-      // DrawingUtils wants same structure; we can feed directly.
-      drawLandmarksWithUtils(normPts);
     }
 
     function sendPoseToPeer(normPts) {
@@ -495,18 +488,15 @@
     async function startSenderPoseLoop() {
       if (poseLoopReq) cancelAnimationFrame(poseLoopReq);
       const loop = async () => {
-        if (!started || !poseState.enabled || poseState.where !== 'sender' || !poseTask) return;
+        if (!started || !posePrefs.enabled || posePrefs.where !== 'sender' || !poseTask) return;
         const now = performance.now();
         if (localVideo.currentTime !== lastVideoTime) {
           lastVideoTime = localVideo.currentTime;
           const res = await poseTask.detectForVideo(localVideo, now);
           const lm = (res?.landmarks && res.landmarks[0]) || null;
-
           if (lm) {
-            // Draw locally
-            drawPoseOnSender(lm);
-            // Stream to receiver so it can draw too
-            sendPoseToPeer(lm);
+            drawPoseOnSender(lm);   // local overlay
+            sendPoseToPeer(lm);     // send to receiver to draw there too
           } else {
             clearCanvas(poseCtx);
           }
@@ -526,48 +516,57 @@
 
     function announcePoseMode() {
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      send({ type:'pose-mode', enabled: poseState.enabled, where: poseState.where });
-      logP('announce inference-mode:', poseState.where);
+      send({ type:'pose-mode', enabled: posePrefs.enabled, where: posePrefs.where });
+      logP('announce inference-mode:', posePrefs.where, '(enabled:', posePrefs.enabled, ')');
     }
 
     function applyPoseUI() {
-      // called on any UI change; enforce modes
-      const enabled = !!poseEnabledChk.checked;
-      const where = poseWhereSel.value === 'receiver' ? 'receiver' : 'sender';
-      poseState.enabled = enabled;
-      poseState.where = where;
+      // Only RUN / DRAW if streaming has started.
+      if (!started) {
+        console.log('[POSE][sender] prefs updated (deferred until start):', {enabled: posePrefs.enabled, where: posePrefs.where});
+        return;
+      }
 
-      console.log('[POSE][sender] UI → enabled:', enabled, '| where:', where);
-
-      if (!enabled) {
+      if (!posePrefs.enabled) {
         stopSenderPoseLoop();
+        poseCanvas.style.display = document.body.classList.contains('previewing') ? 'block' : 'none'; // visible only during preview
         announcePoseMode();
         return;
       }
 
-      if (where === 'sender') {
+      if (posePrefs.where === 'sender') {
         ensureSenderPoseTask().then(() => {
           resizeCanvasToVideo();
-          poseCanvas.style.display = 'block';
+          poseCanvas.style.display = document.body.classList.contains('previewing') ? 'block' : 'none';
           startSenderPoseLoop();
           announcePoseMode();
         }).catch(err => {
-          console.warn('pose init failed', err);
+          console.warn('[POSE][sender] pose init failed', err);
+          posePrefs.enabled = false;
           poseEnabledChk.checked = false;
-          poseState.enabled = false;
+          stopSenderPoseLoop();
           announcePoseMode();
         });
-      } else {
-        // where === 'receiver' → we draw only when DC messages arrive
+      } else { // receiver
         stopSenderPoseLoop();
         clearCanvas(poseCtx);
-        poseCanvas.style.display = 'block'; // keep canvas ready to draw incoming
+        // keep canvas only during preview
+        poseCanvas.style.display = document.body.classList.contains('previewing') ? 'block' : 'none';
         announcePoseMode();
       }
     }
 
-    poseEnabledChk.addEventListener('change', applyPoseUI);
-    poseWhereSel.addEventListener('change', applyPoseUI);
+    // UI listeners (update prefs only; gating happens in applyPoseUI)
+    poseEnabledChk.addEventListener('change', () => {
+      posePrefs.enabled = !!poseEnabledChk.checked;
+      console.log('[POSE][sender] UI → enabled:', posePrefs.enabled, '| where:', posePrefs.where);
+      applyPoseUI();
+    });
+    poseWhereSel.addEventListener('change', () => {
+      posePrefs.where = (poseWhereSel.value === 'receiver') ? 'receiver' : 'sender';
+      console.log('[POSE][sender] UI → enabled:', posePrefs.enabled, '| where:', posePrefs.where);
+      applyPoseUI();
+    });
 
     // ----- Start/Stop -----
     async function startOrStop() {
@@ -593,7 +592,7 @@
         startBtn.textContent = 'Stop streaming';
         startBtn.disabled = false;
 
-        // Apply pose setting (may start loops or only announce)
+        // Only now apply pose (may start loops or just announce)
         applyPoseUI();
 
       } catch (err) {
