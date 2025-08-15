@@ -24,6 +24,10 @@
       width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222; background:#0b0b0b; color:#ddd;
       -moz-appearance:textfield;
     }
+    /* Larger camera dropdown */
+    #cameraSel {
+      font-size: 18px; padding: 14px 16px; height: 52px; border-radius: 12px;
+    }
     input[type="number"]::-webkit-outer-spin-button,
     input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     button {
@@ -78,7 +82,7 @@
       </div>
 
       <div class="row">
-        <input id="room" type="text" placeholder="Room (e.g., baby1)" value="baby1" autocomplete="off">
+        <input id="room" type="text" placeholder="Room (e.g., Baby)" value="Baby" autocomplete="off">
       </div>
 
       <div class="row">
@@ -89,8 +93,6 @@
       <div class="row">
         <button id="startBtn">Start streaming</button>
       </div>
-
-      <p class="hint">After starting, the camera preview shows for N minutes. When it ends, the screen turns fully black and shows “Streaming…”. Tap to bring this screen back (button will say “Stop streaming”).</p>
     </div>
   </div>
 
@@ -131,7 +133,7 @@
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
 
     function currentRoom() {
-      const r = (roomInput.value || 'baby1').trim();
+      const r = (roomInput.value || 'Baby').trim();
       try { const u = new URL(location.href); u.searchParams.set('room', r); history.replaceState({}, '', u); } catch {}
       return r;
     }
@@ -149,14 +151,12 @@
       } catch {}
     }
 
-    // --- NEW: live toggle handlers ---
     function applyVideoToggle() {
-      if (!localStream) return; // will apply at start
+      if (!localStream) return;
       const vt = localStream.getVideoTracks()[0];
       if (vt) {
         vt.enabled = videoOn.checked;
         setStatus(videoOn.checked ? 'Video ON' : 'Video OFF');
-        // Hide local preview when video disabled during preview
         if (document.body.classList.contains('previewing')) {
           localVideo.style.display = videoOn.checked ? 'block' : 'none';
         }
@@ -166,7 +166,7 @@
     }
 
     function applyAudioToggle() {
-      if (!localStream) return; // will apply at start
+      if (!localStream) return;
       const at = localStream.getAudioTracks()[0];
       if (at) {
         at.enabled = audioOn.checked;
@@ -180,7 +180,6 @@
     audioOn.addEventListener('change', applyAudioToggle);
 
     async function getMedia() {
-      // Respect pre-start toggles (we capture only what’s requested)
       const wantVideo = videoOn.checked;
       const wantAudio = audioOn.checked;
       if (!wantVideo && !wantAudio) throw new Error('Both video and audio are OFF.');
@@ -196,13 +195,9 @@
       };
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      // Safety: apply toggles to the tracks we got (so they reflect checkboxes exactly)
       const vt = stream.getVideoTracks()[0]; if (vt) vt.enabled = videoOn.checked;
       const at = stream.getAudioTracks()[0]; if (at) at.enabled = audioOn.checked;
-
-      // Nudge camera pipeline for motion
       if (vt && 'contentHint' in vt) { try { vt.contentHint = 'motion'; } catch {} }
-
       return stream;
     }
 
@@ -343,7 +338,6 @@
         localStream = await getMedia();
         localVideo.srcObject = localStream;
 
-        // Apply toggles to active tracks (and preview visibility)
         applyVideoToggle();
         applyAudioToggle();
 
@@ -394,11 +388,8 @@
       startBtn.textContent = 'Start streaming';
     }
 
-    // UI show/hide while streaming
     document.addEventListener('click', (e) => {
-      if (document.body.classList.contains('previewing')) {
-        endPreviewNow(); return;
-      }
+      if (document.body.classList.contains('previewing')) { endPreviewNow(); return; }
       if (document.body.classList.contains('streaming') && !document.body.classList.contains('ui-visible')) {
         document.body.classList.add('ui-visible'); setStatus('Streaming...'); scheduleAutoHideUI(); return;
       }
