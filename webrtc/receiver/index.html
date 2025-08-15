@@ -8,43 +8,21 @@
     :root { color-scheme: dark; }
     html, body { margin: 0; height: 100%; background: #000; color: #fff; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif; overflow: hidden; }
 
-    /* Video covers screen with object-fit: contain */
-    video {
-      position: fixed; inset: 0;
-      width: 100vw; height: 100vh;
-      object-fit: contain; background: #000;
-    }
+    video { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; background: #000; }
 
-    /* Pose canvas is sized & positioned to the letterboxed video rect */
-    #poseCanvas {
-      position: fixed; /* left/top/width/height set in JS */
-      pointer-events: none;
-      z-index: 4;
-    }
+    #poseCanvas { position: fixed; pointer-events: none; z-index: 4; /* left/top/size set in JS */ }
 
-    /* Transparent buttons */
     .btn {
       padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
       background: transparent; color: #fff; font-size: 16px; font-weight: 600; cursor: pointer;
       text-shadow: 0 1px 2px rgba(0,0,0,0.6);
     }
     .btn:active { transform: scale(0.99); }
-
-    /* Bottom-center controls */
-    #controls {
-      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
-      display: flex; align-items: center; gap: 12px; z-index: 6;
-    }
+    #controls { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; z-index: 6; }
     #enableAudioBtn, #disableAudioBtn { display: none; }
 
-    /* Sender-style status overlay */
     .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 5; }
-    .status {
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
-      text-align: center; white-space: pre-line; max-width: 90vw;
-    }
+    .status { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px; text-align: center; white-space: pre-line; max-width: 90vw; }
     .overlay.hidden { display: none; }
   </style>
 </head>
@@ -61,7 +39,7 @@
   <div id="overlay" class="overlay"><div id="status" class="status">Idle</div></div>
 
   <script>
-    /* ---------------- Config / elements ---------------- */
+    /* --------- Config / elements --------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
     const WS_KEEPALIVE_MS = 25000, WS_RECONNECT_MIN_MS = 1000, WS_RECONNECT_MAX_MS = 10000,
@@ -76,17 +54,22 @@
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
 
+    const logR = (...a) => console.log('[RECEIVER]', ...a);
+    const logP = (...a) => console.log('[POSE][receiver]', ...a);
+
+    /* --------- State --------- */
     let ws=null, wsKeepalive=null, wsRetryMs=WS_RECONNECT_MIN_MS;
     let pc=null, poseDC=null;
     let remoteDescriptionSet=false, lastAnswerSdp=null;
     const candidateQueue=[]; let offerResendTimer=null; let iceDisconnectedSince=null; let hideStatusTimer=null;
 
-    // Pose mode: default run locally; switch off if sender announces "sender"
-    let runPoseLocally = true;
+    // inference control (from sender)
+    let runPoseLocally = false;  // actual compute location
+    let drawLocally    = false;  // draw overlay on receiver?
     let poseFromSender = false;
 
-    /* ---------------- UI helpers ---------------- */
-    function showStatus(msg){
+    /* --------- UI helpers --------- */
+    function showStatus(msg) {
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
       console.log('[STATUS]', msg);
@@ -114,23 +97,21 @@
     document.addEventListener('fullscreenchange', () => { fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen'; });
     document.addEventListener('click', () => { if (document.fullscreenElement) document.exitFullscreen().catch(()=>{}); });
 
-    /* ---------------- Canvas sizing (match letterboxed video) ---------------- */
+    /* --------- Canvas sizing to letterboxed video --------- */
     function sizeCanvasToVideoRect(){
       const bodyRect = document.body.getBoundingClientRect();
-      const cw = bodyRect.width, ch = bodyRect.height;      // CSS pixels
+      const cw = bodyRect.width, ch = bodyRect.height;
       const vw = remoteVideo.videoWidth  || 1280;
       const vh = remoteVideo.videoHeight || 720;
       const scale = Math.min(cw / vw, ch / vh);
-      const rw = vw * scale, rh = vh * scale;               // CSS px draw area
+      const rw = vw * scale, rh = vh * scale;
       const ox = (cw - rw) / 2, oy = (ch - rh) / 2;
 
-      // CSS size/pos
       poseCanvas.style.left = ox + 'px';
       poseCanvas.style.top  = oy + 'px';
       poseCanvas.style.width  = rw + 'px';
       poseCanvas.style.height = rh + 'px';
 
-      // Backing store (device pixels)
       const dpr = window.devicePixelRatio || 1;
       poseCanvas.width  = Math.max(1, Math.round(rw * dpr));
       poseCanvas.height = Math.max(1, Math.round(rh * dpr));
@@ -147,51 +128,60 @@
       poseCtx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
     }
 
-    /* ---------------- WebSocket (auto-reconnect) ---------------- */
+    /* --------- WebSocket (auto-reconnect) --------- */
     async function connectWS(){
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
         showStatus('Connecting to signaling…');
         const sock = new WebSocket(url); ws = sock;
         let opened = false;
-        const openTimeout = setTimeout(()=>{ if(!opened){ try{sock.close();}catch{}; reject(new Error('WS timeout')); } },15000);
+        const openTimeout = setTimeout(()=>{ if (!opened) { try{sock.close();}catch{}; reject(new Error('WS timeout')); } }, 15000);
         sock.onopen = () => {
           opened = true; clearTimeout(openTimeout);
           showStatus('Signaling: connected'); wsRetryMs = WS_RECONNECT_MIN_MS;
           send({ type:'join', room });
+          send({ type:'hello', who:'receiver' });
           if (wsKeepalive) clearInterval(wsKeepalive);
-          wsKeepalive = setInterval(()=>{ if(ws?.readyState===WebSocket.OPEN) send({type:'keepalive',ts:Date.now()}); }, WS_KEEPALIVE_MS);
+          wsKeepalive = setInterval(()=>{ if (ws?.readyState===WebSocket.OPEN) send({ type:'keepalive', ts: Date.now() }); }, WS_KEEPALIVE_MS);
           resolve();
         };
         sock.onmessage = onSignal;
         sock.onerror = (e)=>{ console.warn('[WS error]', e); };
-        sock.onclose  = ()=>{ showStatus('Signaling: closed'); if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive=null; } scheduleWSReconnect(); };
+        sock.onclose  = ()=>{ showStatus('Signaling: closed'); if (wsKeepalive){ clearInterval(wsKeepalive); wsKeepalive=null; } scheduleWSReconnect(); };
       });
     }
-    function scheduleWSReconnect(){ const delay = Math.min(wsRetryMs, WS_RECONNECT_MAX_MS); setTimeout(()=>{ wsRetryMs = Math.min(wsRetryMs*2, WS_RECONNECT_MAX_MS); startNegotiation(); }, delay); }
+    function scheduleWSReconnect(){ const d = Math.min(wsRetryMs, WS_RECONNECT_MAX_MS); setTimeout(()=>{ wsRetryMs = Math.min(wsRetryMs*2, WS_RECONNECT_MAX_MS); startNegotiation(); }, d); }
     const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
-    /* ---------------- RTCPeerConnection + DataChannel ---------------- */
+    /* --------- PeerConnection + DataChannel --------- */
     function createPC(){
-      if (pc) { try{ pc.close(); }catch{}; pc=null; }
+      if (pc) { try{pc.close();}catch{}; pc=null; }
       remoteDescriptionSet=false; lastAnswerSdp=null; candidateQueue.length=0;
 
-      pc = new RTCPeerConnection({ iceServers: [{ urls:'stun:stun.l.google.com:19302' }] });
+      pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
       pc.addTransceiver('video', { direction:'recvonly' });
       pc.addTransceiver('audio', { direction:'recvonly' });
 
-      // receive landmarks from sender (if sender-side inference)
-      poseDC = pc.createDataChannel('pose');
-      poseDC.onopen = ()=>console.log('[DC] pose channel open (receiver)');
-      poseDC.onmessage = async (e) => {
-        try {
-          const m = JSON.parse(e.data);
-          if (m.t === 'pose' && Array.isArray(m.pts)) {
-            poseFromSender = true;
-            await ensureDrawingUtils();                 // just DrawingUtils, no local inference needed
-            drawPoseWithDrawingUtils(m.pts);
-          }
-        } catch {}
+      // The sender creates the DC; we listen for it
+      pc.ondatachannel = (ev) => {
+        if (ev.channel.label === 'pose') {
+          poseDC = ev.channel;
+          poseDC.onopen = ()=>logP('datachannel open');
+          poseDC.onclose = ()=>logP('datachannel close');
+          poseDC.onerror = (e)=>console.warn('[POSE][receiver] DC error', e);
+          poseDC.onmessage = async (e) => {
+            try {
+              const m = JSON.parse(e.data);
+              if (m.t === 'pose' && Array.isArray(m.pts)) {
+                // Only draw locally when sender runs inference (spec: draw on both)
+                if (drawLocally) {
+                  await ensureDrawingUtils();
+                  drawPoseWithDrawingUtils(m.pts);
+                }
+              }
+            } catch {}
+          };
+        }
       };
 
       pc.onicecandidate = (ev)=>{ if (ev.candidate) send({ type:'candidate', candidate: ev.candidate }); };
@@ -202,16 +192,18 @@
         if (st === 'disconnected') {
           if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
           setTimeout(()=>{ if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= RESTART_ON_ICE_TIMEOUT_MS) startNegotiation(true); }, RESTART_ON_ICE_TIMEOUT_MS+50);
-        } else if (st === 'failed') { startNegotiation(true); } else { iceDisconnectedSince = null; }
+        } else if (st === 'failed') {
+          startNegotiation(true);
+        } else { iceDisconnectedSince = null; }
       };
     }
 
     async function sendCurrentOffer(){ if (pc?.localDescription?.type === 'offer') { console.log('[WS OUT] offer (send/resend)'); send(pc.localDescription); } }
     function startOfferResendLoop(){ stopOfferResendLoop(); offerResendTimer = setInterval(()=>{ if (!remoteDescriptionSet) sendCurrentOffer(); else stopOfferResendLoop(); }, 2000); }
-    function stopOfferResendLoop(){ if (offerResendTimer) { clearInterval(offerResendTimer); } offerResendTimer=null; }
+    function stopOfferResendLoop(){ if (offerResendTimer) clearInterval(offerResendTimer); offerResendTimer=null; }
 
     async function startNegotiation(force=false){
-      if (!ws || ws.readyState !== WebSocket.OPEN) { try { await connectWS(); } catch(e) { scheduleWSReconnect(); return; } }
+      if (!ws || ws.readyState !== WebSocket.OPEN) { try { await connectWS(); } catch(e){ scheduleWSReconnect(); return; } }
       if (!pc || force) createPC();
       try {
         const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
@@ -221,7 +213,8 @@
 
     async function onSignal(evt){
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
-      if (!msg?.type) return; console.log('[WS IN]', msg.type);
+      if (!msg?.type) return;
+      // console.log('[WS IN]', msg.type);
 
       if (msg.type === 'answer') {
         if (pc.signalingState !== 'have-local-offer') { console.log('[SKIP] answer in', pc.signalingState); return; }
@@ -243,43 +236,44 @@
       } else if (msg.type === 'bye') {
         remoteDescriptionSet = false; startOfferResendLoop();
 
-      } else if (msg.type === 'inference-mode') {
-        const prev = runPoseLocally;
-        runPoseLocally = (msg.mode !== 'sender'); // 'sender' -> false (we’ll draw from DC)
-        console.log('[POSE] inference-mode from sender:', msg.mode, '=> runPoseLocally:', runPoseLocally);
-        if (runPoseLocally && !prev) {
-          poseFromSender = false;
-          startReceiverPose();
-        } else if (!runPoseLocally && prev) {
-          clearPoseCanvas();
+      } else if (msg.type === 'inference-mode' && msg.task === 'pose') {
+        // 'sender' => sender runs inference; receiver draws locally from DC
+        // 'receiver' => receiver runs inference; DO NOT draw locally (spec), send to sender
+        // 'off' => no inference/drawing anywhere
+        if (msg.mode === 'off') {
+          runPoseLocally = false; drawLocally = false; stopReceiverPose(); clearPoseCanvas();
+          logP('mode=OFF (no inference)');
+        } else if (msg.mode === 'sender') {
+          runPoseLocally = false; drawLocally = true; stopReceiverPose(); clearPoseCanvas();
+          logP('mode=SENDER (receiver draws from DC)');
+        } else if (msg.mode === 'receiver') {
+          runPoseLocally = true;  drawLocally = false; startReceiverPose(); clearPoseCanvas();
+          logP('mode=RECEIVER (receiver computes; draws only on sender)');
         }
       }
     }
 
     window.addEventListener('beforeunload', () => {
+      try { stopOfferResendLoop(); } catch {}
       try { ws && ws.close(); } catch {}
       try { pc && pc.close(); } catch {}
       if (wsKeepalive) clearInterval(wsKeepalive);
       if (hideStatusTimer) clearTimeout(hideStatusTimer);
     });
 
-    /* ---------------- MediaPipe Tasks (receiver-side) ---------------- */
-    let PoseLandmarker=null, FilesetResolver=null, DrawingUtils=null, drawingUtils=null;
-    let poseTask=null, poseLoopRunning=false, lastVideoTimeLocal=-1;
+    /* --------- MediaPipe Tasks on receiver (for receiver mode) --------- */
+    let PoseLandmarker=null, FilesetResolver=null, DrawingUtils=null, drawingUtils=null, poseTask=null;
+    let poseLoopRunning=false, lastVideoTimeLocal=-1;
 
     async function ensureDrawingUtils(){
       if (drawingUtils) return;
-      if (!DrawingUtils) {
-        const mod = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0');
-        DrawingUtils = mod.DrawingUtils; PoseLandmarker = mod.PoseLandmarker; FilesetResolver = mod.FilesetResolver;
-        console.log('[POSE] receiver tasks module (DrawingUtils) loaded');
-      }
+      const mod = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0');
+      DrawingUtils = mod.DrawingUtils; PoseLandmarker = mod.PoseLandmarker; FilesetResolver = mod.FilesetResolver;
       drawingUtils = new DrawingUtils(poseCtx);
+      logP('DrawingUtils loaded');
     }
-
-    async function ensureReceiverTasks(){
+    async function ensureReceiverPoseTask(){
       if (poseTask) return;
-      // ensure drawing too
       await ensureDrawingUtils();
       try {
         const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm');
@@ -288,7 +282,7 @@
           runningMode:'VIDEO', numPoses:1
         });
       } catch (gpuErr) {
-        console.warn('[POSE] (receiver) GPU failed, fallback CPU:', gpuErr);
+        console.warn('[POSE][receiver] GPU failed, fallback CPU:', gpuErr);
         const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm');
         poseTask = await PoseLandmarker.createFromOptions(vision, {
           baseOptions:{ modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task', delegate:'CPU' },
@@ -297,65 +291,48 @@
       }
     }
 
-    function toLandmarkObjectsFromArray(pts){
-      // pts: [[x,y], ...] -> [{x,y}, ...]
-      return pts.map(p => ({ x: p[0], y: p[1] }));
+    function drawPoseWithDrawingUtils(pts){
+      if (!drawingUtils) return;
+      poseCtx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
+      const lms = pts.map(p => ({ x: p[0], y: p[1] }));
+      drawingUtils.drawLandmarks(lms, { radius: () => 4 * (window.devicePixelRatio || 1) });
+      drawingUtils.drawConnectors(lms, PoseLandmarker.POSE_CONNECTIONS, { lineWidth: 2 });
     }
 
-    function drawPoseWithDrawingUtils(pts){
-      // pts are normalized to video; canvas is sized to letterboxed rect -> OK
-      if (!pts || !pts.length) { clearPoseCanvas(); return; }
-      drawingUtils && poseCtx && (function(){
-        poseCtx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
-        const lms = toLandmarkObjectsFromArray(pts);
-        // Pretty defaults (like official demos)
-        drawingUtils.drawLandmarks(lms, {
-          radius: () => 4 * (window.devicePixelRatio || 1)
-        });
-        drawingUtils.drawConnectors(lms, PoseLandmarker.POSE_CONNECTIONS, { lineWidth: 2 });
-      })();
+    function sendPoseToSender(pts){
+      if (!poseDC || poseDC.readyState !== 'open') return;
+      try { poseDC.send(JSON.stringify({ t:'pose', pts })); } catch {}
     }
 
     async function startReceiverPose(){
       if (!runPoseLocally) return;
-      try {
-        await ensureReceiverTasks();
-        poseLoopRunning = true; lastVideoTimeLocal = -1;
-        console.log('[POSE] receiver pose started');
-        requestAnimationFrame(poseReceiverLoop);
-      } catch (e){ console.warn('Receiver pose failed', e); }
+      await ensureReceiverPoseTask();
+      poseLoopRunning = true; lastVideoTimeLocal = -1;
+      logP('inference START (receiver)');
+      requestAnimationFrame(receiverPoseLoop);
     }
-    function stopReceiverPose(){ poseLoopRunning = false; }
+    function stopReceiverPose(){ poseLoopRunning = false; logP('inference STOP (receiver)'); }
 
-    function drawLocalResult(res){
-      const lmsArr = res.landmarks || [];
-      poseCtx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
-      for (const lms of lmsArr) {
-        drawingUtils.drawLandmarks(lms, {
-          radius: () => 4 * (window.devicePixelRatio || 1)
-        });
-        drawingUtils.drawConnectors(lms, PoseLandmarker.POSE_CONNECTIONS, { lineWidth: 2 });
-      }
-    }
-
-    function poseReceiverLoop(){
+    function receiverPoseLoop(){
       if (!poseLoopRunning || !runPoseLocally) return;
-      if (!remoteVideo.videoWidth || !remoteVideo.videoHeight) { requestAnimationFrame(poseReceiverLoop); return; }
+      if (!remoteVideo.videoWidth || !remoteVideo.videoHeight) { requestAnimationFrame(receiverPoseLoop); return; }
 
       const now = performance.now();
-      if (lastVideoTimeLocal === remoteVideo.currentTime) { requestAnimationFrame(poseReceiverLoop); return; }
+      if (lastVideoTimeLocal === remoteVideo.currentTime) { requestAnimationFrame(receiverPoseLoop); return; }
       lastVideoTimeLocal = remoteVideo.currentTime;
 
       try {
         const res = poseTask.detectForVideo(remoteVideo, now);
-        drawLocalResult(res);
-      } catch(e){ /* keep going */ }
+        const arr = (res.landmarks && res.landmarks[0]) ? res.landmarks[0].map(l => [l.x, l.y]) : [];
+        // Spec: in receiver-mode we DO NOT draw locally; we send to sender so it can draw
+        if (arr.length) sendPoseToSender(arr);
+        if (!drawLocally) clearPoseCanvas();
+      } catch (e) { /* keep going */ }
 
-      requestAnimationFrame(poseReceiverLoop);
+      requestAnimationFrame(receiverPoseLoop);
     }
 
-    // Keep canvas aligned with the displayed video rectangle
-    remoteVideo.addEventListener('playing', () => { sizeCanvasToVideoRect(); startReceiverPose(); });
+    remoteVideo.addEventListener('playing', sizeCanvasToVideoRect);
     window.addEventListener('resize', sizeCanvasToVideoRect);
 
     // Go!
