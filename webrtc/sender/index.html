@@ -13,7 +13,7 @@
     }
     #ui { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 20px; }
     .card {
-      width: 100%; max-width: 560px;
+      width: 100%; max-width: 520px;
       background: #0b0b0b; border: 1px solid #141414; border-radius: 14px;
       padding: 18px; box-sizing: border-box;
     }
@@ -21,54 +21,32 @@
     label.switch { display: flex; align-items: center; gap: 10px; font-size: 16px; }
     input[type="checkbox"] { width: 22px; height: 22px; }
     input[type="text"], select, input[type="number"] {
-      width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid #222; background:#0b0b0b; color:#ddd;
+      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222; background:#0b0b0b; color:#ddd;
       -moz-appearance:textfield;
     }
-    /* Larger camera dropdown */
-    #cameraSel {
-      font-size: 18px; padding: 14px 16px; height: 52px; border-radius: 12px;
-    }
+    #cameraSel { font-size: 18px; padding: 14px 16px; height: 52px; border-radius: 12px; }
     input[type="number"]::-webkit-outer-spin-button,
     input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     button {
       width: 100%; padding: 14px 16px; border-radius: 12px; border: 0;
       background: #2a2a2a; color: #fff; font-size: 17px; font-weight: 600;
-      cursor: pointer;
     }
     button:active { transform: scale(0.99); }
+    .hint { opacity: .7; font-size: 13px; }
 
-    /* AI features group */
-    fieldset.ai {
-      margin-top: 12px; border: 1px solid #222; border-radius: 12px; padding: 12px;
-    }
-    fieldset.ai legend { padding: 0 8px; color: #bbb; }
-    .ai-row {
-      display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px;
-      padding: 6px 0;
-    }
-    .ai-row + .ai-row { border-top: 1px solid #161616; }
-
-    /* Local video + overlay (only visible during preview/UI) */
-    video#local {
-      display: none;
+    /* Local video + overlay canvas */
+    video#local, canvas#poseCanvasSender {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
-      object-fit: contain; background: #000; z-index: 1;
-      transform-origin: center center;
-    }
-    canvas#poseCanvas {
-      display: none;
-      position: fixed; z-index: 2; pointer-events: none;
-      /* left/top/size are set in JS to match letterboxed video rect */
+      object-fit: cover; background: #000; z-index: 1;
+      display: none; /* shown only during preview or when drawing */
     }
     body.previewing video#local { display: block; }
-    body.previewing canvas#poseCanvas { display: block; }
-    body.streaming.ui-visible video#local { display: block; }
-    body.streaming.ui-visible canvas#poseCanvas { display: block; }
+    body.previewing canvas#poseCanvasSender { display: block; }
 
     body.blackout { background: #000; }
     body.streaming.ui-visible .overlay { display: none !important; }
-    .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; z-index: 3; }
+    .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; z-index: 2; }
     body.streaming .overlay, body.previewing .overlay { display: flex; }
     .status {
       background: rgba(255,255,255,0.05);
@@ -76,9 +54,26 @@
       color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
       text-align: center; white-space: pre-line;
     }
-    #tap { position: fixed; inset: 0; display: none; z-index: 4; }
+
+    #tap { position: fixed; inset: 0; display: none; z-index: 3; }
     body.streaming:not(.ui-visible) #tap { display: block; }
     body.streaming:not(.ui-visible) #ui { display: none; }
+
+    /* AI Features box */
+    fieldset.ai {
+      margin-top: 12px;
+      border: 1px solid #222; border-radius: 12px; padding: 10px 12px;
+    }
+    fieldset.ai legend { padding: 0 6px; color: #ddd; }
+    .ai-row {
+      display: grid;
+      grid-template-columns: 1fr 160px;
+      gap: 10px;
+      align-items: center;
+      margin: 8px 0;
+    }
+    .ai-row label { display: flex; align-items: center; gap: 10px; }
+    .ai-row select { width: 100%; }
   </style>
 </head>
 <body class="blackout">
@@ -110,39 +105,33 @@
 
       <div class="row">
         <input id="previewMins" type="number" min="0" step="1" value="1" aria-label="Preview minutes">
-        <span style="opacity:.7;font-size:13px;">Preview minutes</span>
+        <span class="hint">Preview minutes</span>
       </div>
 
-      <!-- AI features -->
       <fieldset class="ai">
         <legend>AI features</legend>
 
+        <!-- Pose -->
         <div class="ai-row">
-          <label class="switch"><input id="cbAudioAI" type="checkbox" disabled> <span>Audio</span></label>
-          <select id="selAudioAI" disabled>
-            <option value="sender">On sender</option>
+          <label><input id="poseEnabled" type="checkbox"> <span>Pose</span></label>
+          <select id="poseWhere">
+            <option value="sender" selected>On sender</option>
             <option value="receiver">On receiver</option>
           </select>
         </div>
 
+        <!-- Future: Audio / Face (placeholders, not running yet) -->
         <div class="ai-row">
-          <label class="switch"><input id="cbPose" type="checkbox"> <span>Pose</span></label>
-          <select id="selPose">
-            <option value="sender">On sender</option>
-            <option value="receiver">On receiver</option>
-          </select>
+          <label><input type="checkbox" disabled> <span>Audio</span></label>
+          <select disabled><option>On sender</option><option>On receiver</option></select>
         </div>
-
         <div class="ai-row">
-          <label class="switch"><input id="cbFace" type="checkbox" disabled> <span>Face</span></label>
-          <select id="selFace" disabled>
-            <option value="sender">On sender</option>
-            <option value="receiver">On receiver</option>
-          </select>
+          <label><input type="checkbox" disabled> <span>Face</span></label>
+          <select disabled><option>On sender</option><option>On receiver</option></select>
         </div>
       </fieldset>
 
-      <div class="row" style="margin-top:14px;">
+      <div class="row">
         <button id="startBtn">Start streaming</button>
       </div>
     </div>
@@ -151,16 +140,22 @@
   <div id="tap" aria-hidden="true"></div>
   <div class="overlay"><div class="status" id="status">Idle</div></div>
 
-  <!-- local preview & overlay -->
+  <!-- local preview (muted) + pose overlay -->
   <video id="local" playsinline autoplay muted></video>
-  <canvas id="poseCanvas"></canvas>
+  <canvas id="poseCanvasSender"></canvas>
 
-  <script>
-    /* ================== Config / elements ================== */
+  <script type="module">
+    import {
+      PoseLandmarker,
+      FilesetResolver,
+      DrawingUtils
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
     const NEED_OFFER_INTERVAL_MS = 3000;
 
+    // ----- UI -----
     const qsRoom = new URLSearchParams(location.search).get('room');
     const roomInput = document.getElementById('room');
     if (qsRoom) roomInput.value = qsRoom;
@@ -173,44 +168,38 @@
     const localVideo= document.getElementById('local');
     const statusEl  = document.getElementById('status');
     const ui        = document.getElementById('ui');
-    const tap       = document.getElementById('tap');
 
-    // AI controls
-    const cbAudioAI = document.getElementById('cbAudioAI');
-    const selAudioAI = document.getElementById('selAudioAI');
-    const cbPose   = document.getElementById('cbPose');
-    const selPose  = document.getElementById('selPose');
-    const cbFace   = document.getElementById('cbFace');
-    const selFace  = document.getElementById('selFace');
+    // Pose UI
+    const poseEnabledChk = document.getElementById('poseEnabled');
+    const poseWhereSel   = document.getElementById('poseWhere');
 
-    // pose overlay
-    const poseCanvas = document.getElementById('poseCanvas');
-    const poseCtx    = poseCanvas.getContext('2d');
+    // Overlay canvas (sender)
+    const poseCanvas = document.getElementById('poseCanvasSender');
+    const poseCtx = poseCanvas.getContext('2d', { willReadFrequently: false });
+    let drawingUtils = null;
 
-    /* ================== State ================== */
-    let ws=null, pc=null, poseDC=null, localStream=null;
-    let wakeLock=null;
-    let previewTimer=null, previewTicker=null, previewEnd=0;
-    let started=false, hideUITimer=null;
+    // ----- State -----
+    let ws = null, pc = null, localStream = null;
+    let wakeLock = null;
+    let previewTimer = null, previewTicker = null, previewEnd = 0;
+    let started = false;
+    let hideUITimer = null;
 
-    let remoteDescriptionSet=false; const candidateQueue=[];
-    let needOfferTimer=null; let lastOfferSdp=null;
+    let remoteDescriptionSet = false;
+    const candidateQueue = [];
+    let needOfferTimer = null;
+    let lastOfferSdp = null;
 
-    // camera/front-state
-    let isFront = false;
+    // Data channel for pose (created by receiver; we accept it here)
+    let poseDC = null;
 
-    // Pose inference state (sender side)
-    let PoseLandmarker=null, FilesetResolver=null, DrawingUtils=null, drawingUtils=null, poseTask=null;
-    let poseLoopRunning=false, lastVideoTime=-1;
+    // Pose inference
+    const poseState = { enabled: false, where: 'sender' }; // where: 'sender' | 'receiver'
+    let poseTask = null;
+    let poseLoopReq = null;
+    let lastVideoTime = -1;
 
-    // UI flags → logic
-    const poseState = {
-      enabled: false,
-      where: 'sender',   // 'sender' | 'receiver'
-    };
-
-    /* ================== Helpers ================== */
-    const logS = (...a) => console.log('[SENDER]', ...a);
+    // ----- Helpers -----
     const logP = (...a) => console.log('[POSE][sender]', ...a);
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
 
@@ -233,45 +222,7 @@
       } catch {}
     }
 
-    function isOverlayVisibleOnSender(){
-      return document.body.classList.contains('previewing') || document.body.classList.contains('ui-visible');
-    }
-
-    /* ===== Fit overlay canvas to letterboxed local video ===== */
-    function sizeCanvasToLocalVideoRect(){
-      const bodyRect = document.body.getBoundingClientRect();
-      const cw = bodyRect.width, ch = bodyRect.height;                // CSS px
-      const vw = localVideo.videoWidth  || 1280;
-      const vh = localVideo.videoHeight || 720;
-      const scale = Math.min(cw / vw, ch / vh);
-      const rw = vw * scale, rh = vh * scale;
-      const ox = (cw - rw) / 2, oy = (ch - rh) / 2;
-
-      // CSS size/pos to match visible video
-      poseCanvas.style.left = ox + 'px';
-      poseCanvas.style.top  = oy + 'px';
-      poseCanvas.style.width  = rw + 'px';
-      poseCanvas.style.height = rh + 'px';
-
-      // Backing store (device pixels)
-      const dpr = window.devicePixelRatio || 1;
-      poseCanvas.width  = Math.max(1, Math.round(rw * dpr));
-      poseCanvas.height = Math.max(1, Math.round(rh * dpr));
-
-      // Mirror canvas exactly as video (for front camera)
-      const t = isFront ? 'scaleX(-1)' : 'none';
-      poseCanvas.style.transform = t;
-      localVideo.style.transform = t;
-
-      // clear
-      poseCtx.setTransform(1,0,0,1,0,0);
-      poseCtx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
-    }
-    window.addEventListener('resize', sizeCanvasToLocalVideoRect);
-    localVideo.addEventListener('loadedmetadata', sizeCanvasToLocalVideoRect);
-    localVideo.addEventListener('resize', sizeCanvasToLocalVideoRect);
-
-    /* ================== Media capture ================== */
+    // ----- Media -----
     function applyVideoToggle() {
       if (!localStream) return;
       const vt = localStream.getVideoTracks()[0];
@@ -280,12 +231,13 @@
         setStatus(videoOn.checked ? 'Video ON' : 'Video OFF');
         if (document.body.classList.contains('previewing')) {
           localVideo.style.display = videoOn.checked ? 'block' : 'none';
-          poseCanvas.style.display = (videoOn.checked && isOverlayVisibleOnSender()) ? 'block' : 'none';
+          poseCanvas.style.display = videoOn.checked ? 'block' : 'none';
         }
       } else if (started && videoOn.checked) {
         setStatus('Video not captured. Stop & Start to enable video.');
       }
     }
+
     function applyAudioToggle() {
       if (!localStream) return;
       const at = localStream.getAudioTracks()[0];
@@ -296,6 +248,7 @@
         setStatus('Audio not captured. Stop & Start to enable audio.');
       }
     }
+
     videoOn.addEventListener('change', applyVideoToggle);
     audioOn.addEventListener('change', applyAudioToggle);
 
@@ -305,8 +258,6 @@
       if (!wantVideo && !wantAudio) throw new Error('Both video and audio are OFF.');
 
       const facing = cameraSel.value || 'environment';
-      isFront = (facing === 'user');
-
       const constraints = {
         video: wantVideo ? {
           facingMode: facing,
@@ -317,14 +268,31 @@
       };
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      const vt = stream.getVideoTracks()[0]; if (vt) vt.enabled = wantVideo;
-      const at = stream.getAudioTracks()[0]; if (at) at.enabled = wantAudio;
-      if (vt && 'contentHint' in vt) { try { vt.contentHint = 'motion'; } catch {} }
+      const vt = stream.getVideoTracks()[0]; if (vt) vt.enabled = videoOn.checked;
+      const at = stream.getAudioTracks()[0]; if (at) at.enabled = audioOn.checked;
+
+      // Mirror canvas if front camera
+      const isFront = facing === 'user';
+      localVideo.style.transform = isFront ? 'scaleX(-1)' : 'none';
+      poseCanvas.style.transform = isFront ? 'scaleX(-1)' : 'none';
 
       return stream;
     }
 
-    /* ================== Signaling ================== */
+    function resizeCanvasToVideo() {
+      const w = localVideo.videoWidth || poseCanvas.clientWidth || innerWidth;
+      const h = localVideo.videoHeight || poseCanvas.clientHeight || innerHeight;
+      const dpr = devicePixelRatio || 1;
+      poseCanvas.width = Math.max(1, Math.round(w * dpr));
+      poseCanvas.height = Math.max(1, Math.round(h * dpr));
+      poseCanvas.style.width = '100vw';
+      poseCanvas.style.height= '100vh';
+    }
+
+    localVideo.addEventListener('loadedmetadata', resizeCanvasToVideo);
+    window.addEventListener('resize', () => { if (started) resizeCanvasToVideo(); });
+
+    // ----- WebSocket -----
     function connectWS(room) {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
@@ -340,8 +308,6 @@
           opened = true; clearTimeout(timer);
           setStatus('Signaling: connected');
           send({ type: 'join', room });
-          send({ type: 'hello', who: 'sender' });
-          // Ask for offers until we get one
           send({ type: 'need-offer' });
           needOfferTimer = setInterval(() => {
             if (!remoteDescriptionSet) {
@@ -360,40 +326,88 @@
     }
     const send = (obj) => { try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); } catch {} };
 
+    // ----- PeerConnection -----
     function createPC() {
       pc = new RTCPeerConnection({
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
         bundlePolicy: 'max-bundle',
         sdpSemantics: 'unified-plan'
       });
+
+      // Accept data channel created by the receiver
+      pc.ondatachannel = (ev) => {
+        if (ev.channel.label !== 'pose') return;
+        poseDC = ev.channel;
+        poseDC.onopen  = () => logP('DC open (sender side)');
+        poseDC.onclose = () => logP('DC close (sender side)');
+        poseDC.onerror = (e) => console.warn('[POSE][sender] DC error', e);
+        poseDC.onmessage = (ev) => {
+          try {
+            const m = JSON.parse(ev.data);
+            if (m.t === 'pose' && Array.isArray(m.pts)) {
+              if (poseState.enabled && poseState.where === 'receiver') {
+                drawPoseOnSender(m.pts); // draw when receiver runs inference
+              }
+            }
+          } catch {}
+        };
+      };
+
       pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate }); };
       pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
 
-      // Add media tracks
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    }
 
-      // Create a single bidirectional data channel for pose
-      poseDC = pc.createDataChannel('pose');
-      poseDC.onopen = () => logP('datachannel open');
-      poseDC.onclose = () => logP('datachannel close');
-      poseDC.onerror = (e) => console.warn('[POSE][sender] DC error', e);
-      poseDC.onmessage = (ev) => {
-        // Landmarks coming from receiver (when receiver runs inference):
-        try {
-          const m = JSON.parse(ev.data);
-          if (m.t === 'pose' && Array.isArray(m.pts)) {
-            // Draw on sender only if overlay visible and Pose enabled (receiver-side mode)
-            if (poseState.enabled && poseState.where === 'receiver' && isOverlayVisibleOnSender()) {
-              drawPoseOnSender(m.pts);
-            }
-          }
-        } catch {}
-      };
+    function beginPreviewWindow(minutes) {
+      const ms = Math.max(0, Math.round((Number(minutes) || 1) * 60000));
+      if (ms === 0) { enterBlackout(); return; }
+
+      document.body.classList.add('previewing');
+      document.body.classList.add('streaming');
+      document.body.classList.remove('ui-visible');
+      ui.style.display = '';
+      localVideo.style.display = videoOn.checked ? 'block' : 'none';
+      poseCanvas.style.display = videoOn.checked ? 'block' : 'none';
+
+      previewEnd = Date.now() + ms;
+      tickPreviewCountdown();
+      previewTicker = setInterval(tickPreviewCountdown, 1000);
+      previewTimer  = setTimeout(endPreviewNow, ms);
+    }
+
+    function tickPreviewCountdown() {
+      const remain = Math.max(0, previewEnd - Date.now());
+      const sec = Math.ceil(remain / 1000);
+      const mm = String(Math.floor(sec / 60)).padStart(2,'0');
+      const ss = String(sec % 60).padStart(2,'0');
+      setStatus(`Preview ends in ${mm}:${ss}`);
+    }
+
+    function endPreviewNow() {
+      if (previewTimer) clearTimeout(previewTimer);
+      if (previewTicker) clearInterval(previewTicker);
+      previewTimer = previewTicker = null;
+      enterBlackout();
+    }
+
+    function enterBlackout() {
+      document.body.classList.remove('previewing');
+      document.body.classList.add('streaming');
+      document.body.classList.remove('ui-visible');
+      localVideo.style.display = 'none';
+      poseCanvas.style.display = 'none';
+      setStatus('Streaming...');
+      clearTimeout(hideUITimer); hideUITimer = null;
     }
 
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
-      // console.log('[WS IN]', msg.type);
+      if (msg.type === 'pose-mode') {
+        // Sent by *this* page as announcement; ignore mirrored copies
+        return;
+      }
+      console.log('[WS IN]', msg.type);
 
       if (msg.type === 'offer') {
         setStatus('Got offer, creating answer…');
@@ -421,9 +435,6 @@
         await pc.setLocalDescription(answer);
         send(answer);
 
-        // Re-announce current inference mode to the receiver
-        announcePoseMode();
-
       } else if (msg.type === 'candidate' && msg.candidate) {
         const cand = new RTCIceCandidate(msg.candidate);
         if (remoteDescriptionSet && pc) {
@@ -431,192 +442,144 @@
         } else {
           candidateQueue.push(cand);
         }
-      } else if (msg.type === 'peer-joined') {
-        // new receiver → tell it our current mode
-        announcePoseMode();
       }
     }
 
-    /* ================== Pose (sender) ================== */
-    async function ensureSenderDrawing(){
-      if (drawingUtils) return;
-      const mod = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0');
-      DrawingUtils = mod.DrawingUtils; PoseLandmarker = mod.PoseLandmarker; FilesetResolver = mod.FilesetResolver;
-      drawingUtils = new DrawingUtils(poseCtx);
-      logP('DrawingUtils loaded');
-    }
-    async function ensureSenderPoseTask(){
+    // ----- Pose (sender side) -----
+    async function ensureSenderPoseTask() {
       if (poseTask) return;
-      await ensureSenderDrawing();
-      try {
-        const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm');
-        poseTask = await PoseLandmarker.createFromOptions(vision, {
-          baseOptions:{ modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task', delegate:'GPU' },
-          runningMode:'VIDEO', numPoses:1
-        });
-      } catch (gpuErr) {
-        console.warn('[POSE][sender] GPU failed, fallback CPU:', gpuErr);
-        const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm');
-        poseTask = await PoseLandmarker.createFromOptions(vision, {
-          baseOptions:{ modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task', delegate:'CPU' },
-          runningMode:'VIDEO', numPoses:1
-        });
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+      );
+      poseTask = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+          delegate: "GPU"
+        },
+        runningMode: "VIDEO",
+        numPoses: 1
+      });
+      if (!drawingUtils) drawingUtils = new DrawingUtils(poseCtx);
+      logP('task ready');
+    }
+
+    function clearCanvas(ctx) {
+      ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
+    }
+
+    function drawLandmarksWithUtils(landmarks) {
+      if (!drawingUtils) drawingUtils = new DrawingUtils(poseCtx);
+      poseCtx.save();
+      clearCanvas(poseCtx);
+      // DrawingUtils expects normalized landmarks (0..1), but scaled by canvas dims internally.
+      // We'll scale manually for circles thickness; still looks fine with defaults.
+      drawingUtils.drawConnectors(landmarks, PoseLandmarker.POSE_CONNECTIONS);
+      drawingUtils.drawLandmarks(landmarks);
+      poseCtx.restore();
+    }
+
+    function drawPoseOnSender(normPts) {
+      // normPts: [{x,y,z?,visibility?}] in [0,1] coords
+      if (!normPts?.length) { clearCanvas(poseCtx); return; }
+      // DrawingUtils wants same structure; we can feed directly.
+      drawLandmarksWithUtils(normPts);
+    }
+
+    function sendPoseToPeer(normPts) {
+      if (poseDC && poseDC.readyState === 'open') {
+        try { poseDC.send(JSON.stringify({ t:'pose', pts: normPts })); } catch {}
       }
     }
 
-    function clearSenderOverlay(){
-      poseCtx.setTransform(1,0,0,1,0,0);
-      poseCtx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
-    }
+    async function startSenderPoseLoop() {
+      if (poseLoopReq) cancelAnimationFrame(poseLoopReq);
+      const loop = async () => {
+        if (!started || !poseState.enabled || poseState.where !== 'sender' || !poseTask) return;
+        const now = performance.now();
+        if (localVideo.currentTime !== lastVideoTime) {
+          lastVideoTime = localVideo.currentTime;
+          const res = await poseTask.detectForVideo(localVideo, now);
+          const lm = (res?.landmarks && res.landmarks[0]) || null;
 
-    function drawPoseOnSender(pts){
-      // pts are normalized [0..1] coords; our canvas already sized to visible rect and mirrored via CSS if front
-      if (!drawingUtils) return;
-      clearSenderOverlay();
-      const lms = pts.map(p => ({ x: p[0], y: p[1] }));
-      drawingUtils.drawLandmarks(lms, { radius: () => 4 * (window.devicePixelRatio || 1) });
-      drawingUtils.drawConnectors(lms, PoseLandmarker.POSE_CONNECTIONS, { lineWidth: 2 });
-    }
-
-    function sendPoseToPeer(pts){
-      if (!poseDC || poseDC.readyState !== 'open') return;
-      try { poseDC.send(JSON.stringify({ t:'pose', pts })); } catch {}
-    }
-
-    async function startSenderPoseLoop(){
-      if (poseLoopRunning) return;
-      await ensureSenderPoseTask();  // task + drawing
-      poseLoopRunning = true; lastVideoTime = -1;
+          if (lm) {
+            // Draw locally
+            drawPoseOnSender(lm);
+            // Stream to receiver so it can draw too
+            sendPoseToPeer(lm);
+          } else {
+            clearCanvas(poseCtx);
+          }
+        }
+        poseLoopReq = requestAnimationFrame(loop);
+      };
+      poseLoopReq = requestAnimationFrame(loop);
       logP('inference START (sender)');
-      requestAnimationFrame(poseLoop);
     }
-    function stopSenderPoseLoop(){
-      poseLoopRunning = false;
+
+    function stopSenderPoseLoop() {
+      if (poseLoopReq) cancelAnimationFrame(poseLoopReq);
+      poseLoopReq = null;
+      clearCanvas(poseCtx);
       logP('inference STOP (sender)');
-      clearSenderOverlay();
     }
 
-    function poseLoop(){
-      if (!poseLoopRunning) return;
-      if (!localVideo.videoWidth || !localVideo.videoHeight) { requestAnimationFrame(poseLoop); return; }
-
-      const now = performance.now();
-      if (lastVideoTime === localVideo.currentTime) { requestAnimationFrame(poseLoop); return; }
-      lastVideoTime = localVideo.currentTime;
-
-      try {
-        const res = poseTask.detectForVideo(localVideo, now);
-        const arr = (res.landmarks && res.landmarks[0]) ? res.landmarks[0].map(l => [l.x, l.y]) : [];
-        // Draw locally if visible
-        if (poseState.enabled && poseState.where === 'sender' && isOverlayVisibleOnSender() && arr.length) {
-          drawPoseOnSender(arr);
-        } else {
-          clearSenderOverlay();
-        }
-        // Always send to peer in sender-mode
-        if (poseState.enabled && poseState.where === 'sender' && arr.length) {
-          sendPoseToPeer(arr);
-        }
-      } catch (e) { /* keep going */ }
-
-      requestAnimationFrame(poseLoop);
+    function announcePoseMode() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      send({ type:'pose-mode', enabled: poseState.enabled, where: poseState.where });
+      logP('announce inference-mode:', poseState.where);
     }
 
-    // Broadcast our current pose mode to the receiver
-    function announcePoseMode(){
-      const mode = (!poseState.enabled) ? 'off' : (poseState.where === 'sender' ? 'sender' : 'receiver');
-      logP('announce inference-mode:', mode);
-      send({ type:'inference-mode', task:'pose', mode });
-    }
+    function applyPoseUI() {
+      // called on any UI change; enforce modes
+      const enabled = !!poseEnabledChk.checked;
+      const where = poseWhereSel.value === 'receiver' ? 'receiver' : 'sender';
+      poseState.enabled = enabled;
+      poseState.where = where;
 
-    // React to UI changes for Pose
-    function applyPoseUI(){
-      poseState.enabled = cbPose.checked;
-      poseState.where = selPose.value; // 'sender' | 'receiver'
-      // enable/disable dropdown
-      selPose.disabled = !poseState.enabled;
+      console.log('[POSE][sender] UI → enabled:', enabled, '| where:', where);
 
-      logP('UI → enabled:', poseState.enabled, '| where:', poseState.where);
-
-      if (!started) {
-        // Not streaming: only update mode announcement later on connect
-        clearSenderOverlay();
-        return;
-      }
-
-      if (!poseState.enabled) {
-        // stop all local compute & drawing; notify receiver to stop
+      if (!enabled) {
         stopSenderPoseLoop();
         announcePoseMode();
         return;
       }
 
-      if (poseState.where === 'sender') {
-        // run here, draw here (when visible) and send to receiver for drawing
-        startSenderPoseLoop();
-        announcePoseMode();
+      if (where === 'sender') {
+        ensureSenderPoseTask().then(() => {
+          resizeCanvasToVideo();
+          poseCanvas.style.display = 'block';
+          startSenderPoseLoop();
+          announcePoseMode();
+        }).catch(err => {
+          console.warn('pose init failed', err);
+          poseEnabledChk.checked = false;
+          poseState.enabled = false;
+          announcePoseMode();
+        });
       } else {
-        // run on receiver: stop local compute, we will draw ONLY on sender from DC-incoming points
+        // where === 'receiver' → we draw only when DC messages arrive
         stopSenderPoseLoop();
+        clearCanvas(poseCtx);
+        poseCanvas.style.display = 'block'; // keep canvas ready to draw incoming
         announcePoseMode();
-        // No local drawing until DC messages arrive
-        clearSenderOverlay();
       }
     }
-    cbPose.addEventListener('change', applyPoseUI);
-    selPose.addEventListener('change', applyPoseUI);
 
-    /* ================== Preview + UI flow ================== */
-    function beginPreviewWindow(minutes) {
-      const ms = Math.max(0, Math.round((Number(minutes) || 1) * 60000));
-      if (ms === 0) { enterBlackout(); return; }
+    poseEnabledChk.addEventListener('change', applyPoseUI);
+    poseWhereSel.addEventListener('change', applyPoseUI);
 
-      document.body.classList.add('previewing');
-      document.body.classList.add('streaming');
-      document.body.classList.remove('ui-visible');
-      ui.style.display = '';
-      localVideo.style.display = videoOn.checked ? 'block' : 'none';
-      poseCanvas.style.display = (videoOn.checked ? 'block' : 'none');
-
-      previewEnd = Date.now() + ms;
-      tickPreviewCountdown();
-      previewTicker = setInterval(tickPreviewCountdown, 1000);
-      previewTimer  = setTimeout(endPreviewNow, ms);
-    }
-    function tickPreviewCountdown() {
-      const remain = Math.max(0, previewEnd - Date.now());
-      const sec = Math.ceil(remain / 1000);
-      const mm = String(Math.floor(sec / 60)).padStart(2,'0');
-      const ss = String(sec % 60).padStart(2,'0');
-      setStatus(`Preview ends in ${mm}:${ss}`);
-    }
-    function endPreviewNow() {
-      if (previewTimer) clearTimeout(previewTimer);
-      if (previewTicker) clearInterval(previewTicker);
-      previewTimer = previewTicker = null;
-      enterBlackout();
-    }
-    function enterBlackout() {
-      document.body.classList.remove('previewing');
-      document.body.classList.add('streaming');
-      document.body.classList.remove('ui-visible');
-      localVideo.style.display = 'none';
-      poseCanvas.style.display = 'none';
-      setStatus('Streaming...');
-      clearTimeout(hideUITimer); hideUITimer = null;
-    }
-
+    // ----- Start/Stop -----
     async function startOrStop() {
       try {
         if (started) { await stopStreaming(); return; }
 
         startBtn.disabled = true;
-        const room = currentRoom();
 
+        const room = currentRoom();
         setStatus('Starting camera…');
         localStream = await getMedia();
         localVideo.srcObject = localStream;
-        sizeCanvasToLocalVideoRect();
 
         applyVideoToggle();
         applyAudioToggle();
@@ -630,7 +593,7 @@
         startBtn.textContent = 'Stop streaming';
         startBtn.disabled = false;
 
-        // Apply current Pose UI after start (may start loops / announce mode)
+        // Apply pose setting (may start loops or only announce)
         applyPoseUI();
 
       } catch (err) {
@@ -650,7 +613,6 @@
       if (needOfferTimer) clearInterval(needOfferTimer);
       previewTimer = previewTicker = hideUITimer = needOfferTimer = null;
 
-      // Stop pose loop
       stopSenderPoseLoop();
 
       try { pc && pc.getSenders().forEach(s => s.track && s.track.stop()); } catch {}
@@ -658,7 +620,9 @@
       try { pc && pc.close(); } catch {}
       try { ws && ws.close(); } catch {}
 
-      localStream = null; pc = null; ws = null; poseDC = null;
+      poseDC = null;
+
+      localStream = null; pc = null; ws = null;
       started = false;
 
       remoteDescriptionSet = false;
@@ -670,7 +634,6 @@
       ui.style.display = '';
       localVideo.style.display = 'none';
       poseCanvas.style.display = 'none';
-      clearSenderOverlay();
       setStatus('Stopped');
 
       startBtn.textContent = 'Start streaming';
@@ -678,9 +641,7 @@
 
     // UI show/hide while streaming
     document.addEventListener('click', (e) => {
-      if (document.body.classList.contains('previewing')) {
-        endPreviewNow(); return;
-      }
+      if (document.body.classList.contains('previewing')) { endPreviewNow(); return; }
       if (document.body.classList.contains('streaming') && !document.body.classList.contains('ui-visible')) {
         document.body.classList.add('ui-visible'); setStatus('Streaming...'); scheduleAutoHideUI(); return;
       }
@@ -716,12 +677,6 @@
 
     window.addEventListener('beforeunload', stopStreaming);
     startBtn.addEventListener('click', startOrStop);
-
-    // Camera change re-gets media when not streaming; when streaming, ask user to stop/start
-    cameraSel.addEventListener('change', () => {
-      if (!started) return;
-      alert('Change camera requires Stop streaming, then Start again.');
-    });
   </script>
 </body>
 </html>
