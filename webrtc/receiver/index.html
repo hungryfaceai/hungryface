@@ -10,6 +10,7 @@
       margin: 0; height: 100%;
       background: #000; color: #fff;
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+      overflow: hidden;
     }
     /* Auto-size to screen without cropping; switch to 'cover' if you want fill */
     video {
@@ -21,37 +22,58 @@
       position: fixed; top: 10px; left: 10px;
       font-size: 0.9em; opacity: 0.85; padding: 6px 10px;
       background: rgba(0,0,0,0.35); border-radius: 8px;
+      z-index: 5;
     }
     #unmute {
-      position: fixed; bottom: 16px; left: 16px;
-      padding: 10px 14px; border: 0; border-radius: 10px;
-      background:#333; color:#fff; display:none; cursor: pointer;
+      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+      padding: 12px 16px; border: 0; border-radius: 12px;
+      background:#1e90ff; color:#fff; cursor: pointer; font-weight: 700;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+      z-index: 6; display: none;
+    }
+    #fsBtn {
+      position: fixed; top: 12px; right: 12px;
+      padding: 10px 12px; border: 0; border-radius: 10px;
+      background:#333; color:#fff; cursor: pointer; font-weight: 600;
+      z-index: 6;
     }
   </style>
 </head>
 <body>
   <div id="status">Idle</div>
-  <button id="unmute">Tap to enable audio</button>
+  <button id="fsBtn" type="button">Fullscreen</button>
+  <button id="unmute" type="button">Tap to enable audio</button>
   <video id="remote" autoplay playsinline></video>
 
   <script>
+    // ----------------- Config -----------------
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "baby1";
+    const WS_KEEPALIVE_MS = 25000;
+    const WS_RECONNECT_MIN_MS = 1000;
+    const WS_RECONNECT_MAX_MS = 10000;
+    const RESTART_ON_ICE_TIMEOUT_MS = 5000; // restart if 'disconnected' lasts this long
 
+    // ----------------- Elements -----------------
     const statusEl = document.getElementById('status');
     const remoteVideo = document.getElementById('remote');
     const unmuteBtn = document.getElementById('unmute');
+    const fsBtn = document.getElementById('fsBtn');
 
-    let ws, pc;
+    // ----------------- State -----------------
+    let ws = null, wsKeepalive = null, wsRetryMs = WS_RECONNECT_MIN_MS;
+    let pc = null;
     let remoteDescriptionSet = false;
+    let lastAnswerSdp = null;
     const candidateQueue = [];
     let offerResendTimer = null;
-    let lastAnswerSdp = null;    // de-dupe identical answers
+    let iceDisconnectedSince = null;
 
+    // ----------------- UI helpers -----------------
     const setStatus = (msg) => { statusEl.textContent = msg; console.log('[STATUS]', msg); };
     const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
-    // ----- Autoplay patch: start muted, show button to unmute -----
+    // ---- Autoplay/unmute helpers ----
     unmuteBtn.style.display = 'block'; // visible until we confirm audible playback
 
     async function tryStartMuted() {
@@ -62,6 +84,7 @@
       } catch (e) {
         console.warn('autoplay (muted) blocked:', e);
       }
+      updateUnmuteVisibility();
     }
 
     async function enableAudio() {
@@ -71,53 +94,106 @@
         await remoteVideo.play();
       } catch (e) {
         console.warn('unmute play blocked:', e);
-      } finally {
-        // hide only if truly playing with audio
-        unmuteBtn.style.display = (!remoteVideo.paused && !remoteVideo.muted) ? 'none' : 'block';
       }
+      updateUnmuteVisibility();
+    }
+
+    function updateUnmuteVisibility() {
+      // Show the button unless we are playing and unmuted
+      const shouldHide = (!remoteVideo.paused && !remoteVideo.muted);
+      unmuteBtn.style.display = shouldHide ? 'none' : 'block';
     }
 
     unmuteBtn.addEventListener('click', enableAudio);
-    // One-time gesture hooks help Safari/iOS
     document.addEventListener('touchstart', enableAudio, { once: true });
     document.addEventListener('click',      enableAudio, { once: true });
 
-    // (optional) helpful logs
+    // Fullscreen: enter/exit with button; exit on tap/click/Esc
+    fsBtn.addEventListener('click', async () => {
+      try {
+        if (!document.fullscreenElement) {
+          await (remoteVideo.requestFullscreen?.call(remoteVideo) || document.documentElement.requestFullscreen());
+          fsBtn.textContent = 'Exit fullscreen';
+        } else {
+          await document.exitFullscreen();
+          fsBtn.textContent = 'Fullscreen';
+        }
+      } catch (e) { console.warn('fullscreen error', e); }
+    });
+    document.addEventListener('fullscreenchange', () => {
+      fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+    });
+    // Tap anywhere to exit fullscreen (mobile)
+    document.addEventListener('click', () => {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(()=>{});
+      }
+    });
+
+    // Optional logs
     remoteVideo.addEventListener('loadedmetadata', () =>
       console.log('metadata:', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight));
-    remoteVideo.addEventListener('playing', () =>
-      console.log('playing… muted=', remoteVideo.muted));
+    remoteVideo.addEventListener('playing', () => {
+      console.log('playing… muted=', remoteVideo.muted);
+      updateUnmuteVisibility();
+    });
 
-    // ----- Signaling / WebRTC -----
-    function connectWS() {
+    // ----------------- WebSocket (auto-reconnect) -----------------
+    async function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
         setStatus('Connecting to signaling…');
-        ws = new WebSocket(url);
+        const sock = new WebSocket(url);
+        ws = sock;
 
         let opened = false;
-        const timer = setTimeout(() => {
-          if (!opened) { try { ws.close(); } catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); }
+        const openTimeout = setTimeout(() => {
+          if (!opened) { try { sock.close(); } catch{}; reject(new Error('WS timeout')); }
         }, 15000);
 
-        ws.onopen = () => {
-          opened = true; clearTimeout(timer);
+        sock.onopen = () => {
+          opened = true; clearTimeout(openTimeout);
           setStatus('Signaling: connected');
+          wsRetryMs = WS_RECONNECT_MIN_MS; // reset backoff
           send({ type: 'join', room });
+
+          // keepalive to avoid idle closes
+          if (wsKeepalive) clearInterval(wsKeepalive);
+          wsKeepalive = setInterval(() => {
+            if (ws?.readyState === WebSocket.OPEN) send({ type:'keepalive', ts: Date.now() });
+          }, WS_KEEPALIVE_MS);
+
           resolve();
         };
-        ws.onmessage = onSignal;
-        ws.onerror = (e) => { console.error('[WS error]', e); setStatus('Signaling: error'); };
-        ws.onclose  = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); };
+        sock.onmessage = onSignal;
+        sock.onerror = (e) => { console.warn('[WS error]', e); };
+        sock.onclose  = () => {
+          setStatus('Signaling: closed');
+          if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
+          scheduleWSReconnect();
+        };
       });
     }
 
-    function createPC() {
-      pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-      });
+    function scheduleWSReconnect() {
+      const delay = Math.min(wsRetryMs, WS_RECONNECT_MAX_MS);
+      console.log('[WS] reconnect in', delay,'ms');
+      setTimeout(() => {
+        wsRetryMs = Math.min(wsRetryMs * 2, WS_RECONNECT_MAX_MS);
+        startNegotiation(); // will reconnect WS if needed and re-offer
+      }, delay);
+    }
 
-      // Explicitly request both tracks in the SDP
+    // ----------------- PeerConnection / Negotiation -----------------
+    function createPC() {
+      if (pc) { try { pc.close(); } catch{}; pc = null; }
+      remoteDescriptionSet = false;
+      lastAnswerSdp = null;
+      candidateQueue.length = 0;
+
+      pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+
+      // We expect audio + video
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
@@ -125,12 +201,29 @@
       pc.ontrack = (ev) => {
         if (remoteVideo.srcObject !== ev.streams[0]) {
           remoteVideo.srcObject = ev.streams[0];
-          tryStartMuted(); // start playback muted; user can unmute
+          tryStartMuted(); // start playback muted; tap to unmute
         }
       };
+
       pc.oniceconnectionstatechange = () => {
         console.log('[ICE]', pc.iceConnectionState);
         setStatus('ICE: ' + pc.iceConnectionState);
+
+        if (pc.iceConnectionState === 'disconnected') {
+          if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
+          // If we stay disconnected long enough, restart negotiation
+          setTimeout(() => {
+            if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= RESTART_ON_ICE_TIMEOUT_MS) {
+              console.log('[ICE] disconnected timeout - restarting negotiation');
+              startNegotiation(true);
+            }
+          }, RESTART_ON_ICE_TIMEOUT_MS + 50);
+        } else if (pc.iceConnectionState === 'failed') {
+          console.log('[ICE] failed - restarting negotiation');
+          startNegotiation(true);
+        } else {
+          iceDisconnectedSince = null;
+        }
       };
     }
 
@@ -153,20 +246,23 @@
       offerResendTimer = null;
     }
 
-    async function startReceiver() {
-      try {
-        await connectWS();
-        createPC();
+    async function startNegotiation(forceNewPc = false) {
+      // Ensure WS connected first
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        try { await connectWS(); } catch(e) { scheduleWSReconnect(); return; }
+      }
 
-        // Initial offer
+      if (!pc || forceNewPc) createPC();
+
+      try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         await sendCurrentOffer();
         startOfferResendLoop();
         setStatus('Offer sent, waiting for answer…');
       } catch (e) {
-        console.error(e);
-        setStatus('Error: ' + (e.message || e));
+        console.error('negotiation error', e);
+        setStatus('Negotiation error');
       }
     }
 
@@ -175,12 +271,10 @@
       console.log('[WS IN]', msg.type);
 
       if (msg.type === 'answer') {
-        // Apply answer only in the correct state
         if (pc.signalingState !== 'have-local-offer') {
           console.log('[SKIP] answer in state', pc.signalingState);
           return;
         }
-        // Ignore identical answers
         if (lastAnswerSdp === msg.sdp) {
           console.log('[DUP] identical answer ignored');
           return;
@@ -206,19 +300,27 @@
           candidateQueue.push(cand);
         }
 
-      } else if (msg.type === 'need-offer' || msg.type === 'peer-joined') {
-        // Sender joined or explicitly asked → (re)send our offer
+      } else if (msg.type === 'peer-joined' || msg.type === 'need-offer') {
+        // Sender joined/asked → (re)send our offer
         await sendCurrentOffer();
+
+      } else if (msg.type === 'bye') {
+        // Sender explicitly said it's going away: prep to re-offer when it returns
+        console.log('[INFO] sender bye -> will keep offering until it returns');
+        remoteDescriptionSet = false;
+        startOfferResendLoop();
       }
     }
 
     window.addEventListener('beforeunload', () => {
-      stopOfferResendLoop();
+      try { stopOfferResendLoop(); } catch {}
       try { ws && ws.close(); } catch {}
       try { pc && pc.close(); } catch {}
+      if (wsKeepalive) clearInterval(wsKeepalive);
     });
 
-    startReceiver();
+    // Kick things off
+    startNegotiation();
   </script>
 </body>
 </html>
