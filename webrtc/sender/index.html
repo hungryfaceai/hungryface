@@ -11,7 +11,19 @@
       background: #000; color: #ccc; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       touch-action: manipulation;
     }
-    #ui { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 20px; position: relative; z-index: 5; }
+    /* Stacking: video + pose canvas full-bleed */
+    #stage { position: fixed; inset: 0; }
+    video#local, canvas#poseCanvas {
+      position: absolute; inset: 0;
+      width: 100vw; height: 100vh;
+      object-fit: cover; background: #000;
+      display: none;
+    }
+    /* Mirror video + canvas together for front camera preview only (not for inference) */
+    .mirror #local, .mirror #poseCanvas { transform: scaleX(-1); }
+
+    /* UI card */
+    #ui { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 20px; }
     .card {
       width: 100%; max-width: 520px;
       background: #0b0b0b; border: 1px solid #141414; border-radius: 14px;
@@ -34,35 +46,42 @@
     }
     button:active { transform: scale(0.99); }
 
-    /* Stage layering */
-    video#local {
-      display: none;
-      position: fixed; inset: 0;
-      width: 100vw; height: 100vh;
-      object-fit: cover; background: #000; z-index: 3;
-    }
-    body.previewing video#local { display: block; }
-    body.blackout { background: #000; }
-
-    /* Center status overlay (under the UI card, over video) */
-    .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; z-index: 4; }
+    /* Sender-style status overlay */
+    .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; z-index: 5; }
     body.streaming .overlay, body.previewing .overlay { display: flex; }
     .status {
       background: rgba(255,255,255,0.05);
       border: 1px solid rgba(255,255,255,0.1);
       color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
-      text-align: center; white-space: pre-line;
+      text-align: center; white-space: pre-line; max-width: 90vw;
     }
 
-    /* Tap layer when UI hidden */
+    /* tap layer while streaming & UI hidden */
     #tap { position: fixed; inset: 0; display: none; z-index: 6; }
     body.streaming:not(.ui-visible) #tap { display: block; }
 
-    /* Hide UI when streaming unless visible */
+    /* hide UI while streaming unless explicitly visible */
     body.streaming:not(.ui-visible) #ui { display: none; }
+
+    body.blackout { background: #000; }
+
+    /* AI features group */
+    fieldset.ai {
+      border: 1px solid #222; border-radius: 12px; padding: 10px 12px;
+    }
+    fieldset.ai legend { padding: 0 6px; color: #bbb; }
+    .ai-row { display: grid; grid-template-columns: 1fr 140px; gap: 8px; align-items: center; margin: 10px 0; }
+    .ai-row select { width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid #222; background:#0b0b0b; color:#ddd; }
   </style>
 </head>
 <body class="blackout">
+  <!-- Full-bleed stage -->
+  <div id="stage">
+    <video id="local" playsinline autoplay muted></video>
+    <canvas id="poseCanvas"></canvas>
+  </div>
+
+  <!-- UI -->
   <div id="ui">
     <div class="card">
       <h2 style="margin:0 0 8px 0;">Camera Sender</h2>
@@ -91,10 +110,41 @@
 
       <div class="row">
         <input id="previewMins" type="number" min="0" step="1" value="1" aria-label="Preview minutes">
-        <span class="hint">Preview minutes</span>
+        <span style="opacity:.7;font-size:13px;">Preview minutes</span>
       </div>
 
-      <div class="row">
+      <fieldset class="ai">
+        <legend>AI features</legend>
+
+        <div class="ai-row">
+          <label class="switch">
+            <input id="poseOn" type="checkbox">
+            <span>Pose</span>
+          </label>
+          <select id="poseWhere">
+            <option value="sender" selected>On sender</option>
+            <option value="receiver">On receiver</option>
+          </select>
+        </div>
+
+        <div class="ai-row">
+          <label class="switch">
+            <input type="checkbox" disabled>
+            <span>Audio</span>
+          </label>
+          <select disabled><option>On sender</option><option>On receiver</option></select>
+        </div>
+
+        <div class="ai-row">
+          <label class="switch">
+            <input type="checkbox" disabled>
+            <span>Face</span>
+          </label>
+          <select disabled><option>On sender</option><option>On receiver</option></select>
+        </div>
+      </fieldset>
+
+      <div class="row" style="margin-top:14px;">
         <button id="startBtn">Start streaming</button>
       </div>
     </div>
@@ -102,93 +152,82 @@
 
   <div id="tap" aria-hidden="true"></div>
   <div class="overlay"><div class="status" id="status">Idle</div></div>
-  <video id="local" playsinline autoplay muted></video>
 
-  <script>
-    console.log('[ROLE] sender');
+  <script type="module">
+    /********** Config **********/
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
     const NEED_OFFER_INTERVAL_MS = 3000;
+    const TASKS_URL  = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+    const WASM_DIR   = TASKS_URL + "/wasm";
 
-    // UI refs
-    const qsRoom = new URLSearchParams(location.search).get('room');
+    /********** Elements **********/
     const roomInput = document.getElementById('room');
-    if (qsRoom) roomInput.value = qsRoom;
-
     const videoOn   = document.getElementById('videoOn');
     const audioOn   = document.getElementById('audioOn');
     const cameraSel = document.getElementById('cameraSel');
     const previewMinsInput = document.getElementById('previewMins');
     const startBtn  = document.getElementById('startBtn');
     const localVideo= document.getElementById('local');
+    const poseCanvas= document.getElementById('poseCanvas');
     const statusEl  = document.getElementById('status');
     const ui        = document.getElementById('ui');
+    const tap       = document.getElementById('tap');
 
-    // State
+    const poseOn    = document.getElementById('poseOn');
+    const poseWhere = document.getElementById('poseWhere');
+
+    /********** State **********/
     let ws = null, pc = null, localStream = null;
-    let wakeLock = null;
+    let started = false, hideUITimer = null;
+    let remoteDescriptionSet = false, candidateQueue = [];
+    let needOfferTimer = null, lastOfferSdp = null;
     let previewTimer = null, previewTicker = null, previewEnd = 0;
-    let started = false;
-    let hideUITimer = null;
 
-    // Answerer-side SDP state
-    let remoteDescriptionSet = false;
-    const candidateQueue = [];
-    let lastOfferSdp = null;
-    let needOfferTimer = null;
+    // DataChannel(s): one per receiver (receiver creates it; we receive via ondatachannel)
+    const poseDCs = new Set();
 
+    // MediaPipe Tasks – lazy loaded only when needed
+    let PoseLandmarker, FilesetResolver, DrawingUtils;
+    let poseTask = null, poseLoopRunning = false;
+    const ctx = poseCanvas.getContext('2d', { alpha: true });
+
+    /********** Helpers **********/
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
+    const currentRoom = () => (roomInput.value || 'Baby').trim();
+    const isFront = () => (cameraSel.value === 'user');
 
-    function currentRoom() {
-      const r = (roomInput.value || 'Baby').trim();
-      try { const u = new URL(location.href); u.searchParams.set('room', r); history.replaceState({}, '', u); } catch {}
-      return r;
+    // reflect mirror class for front camera preview
+    function updateMirrorClass() {
+      document.body.classList.toggle('mirror', isFront());
     }
 
-    async function requestWakeLock() {
-      try {
-        if ('wakeLock' in navigator) {
-          wakeLock = await navigator.wakeLock.request('screen');
-          document.addEventListener('visibilitychange', async () => {
-            if (document.visibilityState === 'visible') {
-              try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
-            }
-          });
-        }
-      } catch {}
+    function resizeCanvasToVideo() {
+      const dpr = window.devicePixelRatio || 1;
+      poseCanvas.width  = Math.max(1, Math.round(localVideo.videoWidth * dpr));
+      poseCanvas.height = Math.max(1, Math.round(localVideo.videoHeight * dpr));
+      poseCanvas.style.width  = '100vw';
+      poseCanvas.style.height = '100vh';
+      ctx.setTransform(1,0,0,1,0,0);
+      // draw overlay in screen coords; video itself is mirrored by CSS when front cam selected
     }
 
-    function applyVideoToggle() {
-      if (!localStream) return;
-      const vt = localStream.getVideoTracks()[0];
-      if (vt) {
-        vt.enabled = videoOn.checked;
-        setStatus(videoOn.checked ? 'Video ON' : 'Video OFF');
-        if (document.body.classList.contains('previewing')) {
-          localVideo.style.display = videoOn.checked ? 'block' : 'none';
-        }
-      }
-    }
-    function applyAudioToggle() {
-      if (!localStream) return;
-      const at = localStream.getAudioTracks()[0];
-      if (at) {
-        at.enabled = audioOn.checked;
-        setStatus(audioOn.checked ? 'Audio ON' : 'Audio OFF');
-      }
-    }
-    videoOn.addEventListener('change', applyVideoToggle);
-    audioOn.addEventListener('change', applyAudioToggle);
+    localVideo.addEventListener('loadedmetadata', () => {
+      console.log('[MEDIA] local video meta', localVideo.videoWidth, 'x', localVideo.videoHeight);
+      resizeCanvasToVideo();
+      localVideo.style.display = videoOn.checked ? 'block' : 'none'; // ensure visible on meta
+      poseCanvas.style.display = (poseOn.checked && videoOn.checked) ? 'block' : 'none';
+    });
 
+    /********** Media capture **********/
     async function getMedia() {
       const wantVideo = videoOn.checked;
       const wantAudio = audioOn.checked;
       if (!wantVideo && !wantAudio) throw new Error('Both video and audio are OFF.');
 
-      const facing = cameraSel.value || 'environment';
       const constraints = {
         video: wantVideo ? {
-          facingMode: facing,
+          facingMode: cameraSel.value || 'environment',
           width: { ideal: 1280 }, height: { ideal: 720 },
           frameRate: { ideal: 30, max: 30 }
         } : false,
@@ -196,28 +235,49 @@
       };
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      const vt = stream.getVideoTracks()[0]; if (vt) vt.enabled = videoOn.checked;
-      const at = stream.getAudioTracks()[0]; if (at) at.enabled = audioOn.checked;
+      const vt = stream.getVideoTracks()[0];
+      const at = stream.getAudioTracks()[0];
+      if (vt) vt.enabled = wantVideo;
+      if (at) at.enabled = wantAudio;
       if (vt && 'contentHint' in vt) { try { vt.contentHint = 'motion'; } catch {} }
       return stream;
     }
 
+    function applyVideoToggle() {
+      if (!localStream) return;
+      const vt = localStream.getVideoTracks()[0];
+      if (vt) vt.enabled = videoOn.checked;
+      localVideo.style.display = (document.body.classList.contains('previewing') && videoOn.checked) ? 'block' : 'none';
+      poseCanvas.style.display = (poseOn.checked && videoOn.checked) ? 'block' : 'none';
+      setStatus(videoOn.checked ? 'Video ON' : 'Video OFF');
+    }
+    function applyAudioToggle() {
+      if (!localStream) return;
+      const at = localStream.getAudioTracks()[0];
+      if (at) at.enabled = audioOn.checked;
+      setStatus(audioOn.checked ? 'Audio ON' : 'Audio OFF');
+    }
+    videoOn.addEventListener('change', applyVideoToggle);
+    audioOn.addEventListener('change', applyAudioToggle);
+    cameraSel.addEventListener('change', updateMirrorClass);
+
+    /********** WebSocket **********/
     function connectWS(room) {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
         setStatus('Connecting to signaling…');
-        ws = new WebSocket(url);
+        const sock = new WebSocket(url);
+        ws = sock;
 
         let opened = false;
-        const timer = setTimeout(() => {
-          if (!opened) { try { ws.close(); } catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); }
+        const t = setTimeout(() => {
+          if (!opened) { try { sock.close(); } catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); }
         }, 15000);
 
-        ws.onopen = () => {
-          opened = true; clearTimeout(timer);
+        sock.onopen = () => {
+          opened = true; clearTimeout(t);
           setStatus('Signaling: connected');
           send({ type: 'join', room });
-          // Ask receiver to send a fresh offer until we’re set
           send({ type: 'need-offer' });
           needOfferTimer = setInterval(() => {
             if (!remoteDescriptionSet) {
@@ -229,68 +289,41 @@
           }, NEED_OFFER_INTERVAL_MS);
           resolve();
         };
-        ws.onmessage = onSignal;
-        ws.onerror = (e) => { console.error('[WS error]', e); setStatus('Signaling: error'); };
-        ws.onclose = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); };
+        sock.onmessage = onSignal;
+        sock.onerror = (e) => { console.warn('[WS error]', e); };
+        sock.onclose  = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); };
       });
     }
+    const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
-    function send(obj) { try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); } catch {} }
-
+    /********** RTCPeerConnection **********/
     function createPC() {
-      if (pc) { try { pc.close(); } catch{} }
       pc = new RTCPeerConnection({
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
         bundlePolicy: 'max-bundle',
         sdpSemantics: 'unified-plan'
       });
 
+      // receiver (the viewer) is the offerer and creates the DC; we receive it here:
+      pc.ondatachannel = (ev) => {
+        if (ev.channel?.label === 'pose') {
+          const ch = ev.channel;
+          console.log('[DC][sender] ondatachannel: pose');
+          ch.onopen = () => { console.log('[POSE][sender] DC open (sender side)'); poseDCs.add(ch); announcePoseMode(); };
+          ch.onclose = () => { console.log('[POSE][sender] DC close (sender side)'); poseDCs.delete(ch); };
+          ch.onerror = (e) => { console.log('[POSE][sender] DC error', e); };
+          ch.onmessage = onPoseMessageFromReceiver;
+        }
+      };
+
       pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate }); };
       pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
 
-      // Attach tracks we already captured
-      if (localStream) localStream.getTracks().forEach(track => {
+      // add media tracks
+      localStream.getTracks().forEach(track => {
         console.log('[TRACK][sender] addTrack', track.kind);
         pc.addTrack(track, localStream);
       });
-    }
-
-    function beginPreviewWindow(minutes) {
-      const ms = Math.max(0, Math.round((Number(minutes) || 1) * 60000));
-      if (ms === 0) { enterBlackout(); return; }
-
-      document.body.classList.add('previewing', 'streaming');
-      document.body.classList.remove('ui-visible');
-      localVideo.style.display = videoOn.checked ? 'block' : 'none';
-
-      previewEnd = Date.now() + ms;
-      tickPreviewCountdown();
-      previewTicker = setInterval(tickPreviewCountdown, 1000);
-      previewTimer  = setTimeout(endPreviewNow, ms);
-    }
-
-    function tickPreviewCountdown() {
-      const remain = Math.max(0, previewEnd - Date.now());
-      const sec = Math.ceil(remain / 1000);
-      const mm = String(Math.floor(sec / 60)).padStart(2,'0');
-      const ss = String(sec % 60).padStart(2,'0');
-      setStatus(`Preview ends in ${mm}:${ss}`);
-    }
-
-    function endPreviewNow() {
-      if (previewTimer) clearTimeout(previewTimer);
-      if (previewTicker) clearInterval(previewTicker);
-      previewTimer = previewTicker = null;
-      enterBlackout();
-    }
-
-    function enterBlackout() {
-      document.body.classList.remove('previewing');
-      document.body.classList.add('streaming');
-      document.body.classList.remove('ui-visible');
-      localVideo.style.display = 'none';
-      setStatus('Streaming...');
-      clearTimeout(hideUITimer); hideUITimer = null;
     }
 
     async function onSignal(evt) {
@@ -298,26 +331,18 @@
       console.log('[WS IN]', msg.type);
 
       if (msg.type === 'offer') {
-        // Sender is the ANSWERER: apply remote offer, send answer
         setStatus('Got offer, creating answer…');
-
         if (!pc) createPC();
 
-        // Avoid glare / invalid state
         if (pc.signalingState === 'have-local-offer') {
           try { await pc.setLocalDescription({ type: 'rollback' }); } catch {}
         }
-
-        if (lastOfferSdp === msg.sdp) {
-          console.log('[DUP] identical offer ignored');
-          return;
-        }
+        if (lastOfferSdp === msg.sdp) { console.log('[DUP] identical offer ignored'); return; }
         lastOfferSdp = msg.sdp;
 
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
         remoteDescriptionSet = true;
 
-        // Flush queued ICE
         while (candidateQueue.length) {
           const c = candidateQueue.shift();
           try { await pc.addIceCandidate(c); } catch (err) { console.warn('late ICE add failed', err); }
@@ -335,87 +360,57 @@
           candidateQueue.push(cand);
         }
 
-      } else if (msg.type === 'bye') {
-        // Receiver stopped; no-op here.
-      } else {
-        // hello / roster / keepalive / need-offer → ignore on sender
+      } else if (msg.type === 'peer-left') {
+        // a receiver went away — keep streaming for others
       }
     }
 
-    async function startOrStop() {
-      try {
-        if (started) { await stopStreaming(); return; }
+    /********** Preview window & UI **********/
+    function beginPreviewWindow(minutes) {
+      const ms = Math.max(0, Math.round((Number(minutes) || 1) * 60000));
+      if (ms === 0) { enterBlackout(); return; }
 
-        startBtn.disabled = true;
+      // ensure not blacked out while previewing
+      document.body.classList.remove('blackout');
 
-        const room = currentRoom();
-        setStatus('Starting camera…');
+      document.body.classList.add('previewing');
+      document.body.classList.add('streaming');
+      document.body.classList.remove('ui-visible');
+      ui.style.display = '';
 
-        // 1) Capture media
-        localStream = await getMedia();
-        localVideo.srcObject = localStream;
+      localVideo.style.display = videoOn.checked ? 'block' : 'none';
+      poseCanvas.style.display = (poseOn.checked && videoOn.checked) ? 'block' : 'none';
 
-        // Preview immediately
-        localVideo.style.display = videoOn.checked ? 'block' : 'none';
-        try { await localVideo.play(); } catch (e) { console.warn('local play blocked', e); }
-        localVideo.onloadedmetadata = () => console.log('[MEDIA] local video meta', localVideo.videoWidth, 'x', localVideo.videoHeight);
-
-        applyVideoToggle();
-        applyAudioToggle();
-
-        // 2) Start preview window
-        beginPreviewWindow(Number(previewMinsInput.value) || 1);
-
-        // 3) Connect WS and wait for offer(s) from receiver(s)
-        await connectWS(room);
-
-        // 4) Prepare RTCPeerConnection (answerer)
-        createPC();
-
-        await requestWakeLock();
-
-        started = true;
-        startBtn.textContent = 'Stop streaming';
-        startBtn.disabled = false;
-
-      } catch (err) {
-        console.error(err);
-        alert(err.message || err);
-        setStatus('Idle');
-        startBtn.disabled = false;
-      }
+      previewEnd = Date.now() + ms;
+      tickPreviewCountdown();
+      previewTicker = setInterval(tickPreviewCountdown, 1000);
+      previewTimer  = setTimeout(endPreviewNow, ms);
     }
-
-    async function stopStreaming() {
-      try { ws && send({ type: 'bye' }); } catch {}
-
+    function tickPreviewCountdown() {
+      const remain = Math.max(0, previewEnd - Date.now());
+      const sec = Math.ceil(remain / 1000);
+      const mm = String(Math.floor(sec / 60)).padStart(2,'0');
+      const ss = String(sec % 60).padStart(2,'0');
+      setStatus(`Preview ends in ${mm}:${ss}`);
+    }
+    function endPreviewNow() {
       if (previewTimer) clearTimeout(previewTimer);
       if (previewTicker) clearInterval(previewTicker);
-      if (hideUITimer) clearTimeout(hideUITimer);
-      if (needOfferTimer) clearInterval(needOfferTimer);
-      previewTimer = previewTicker = hideUITimer = needOfferTimer = null;
-
-      try { pc && pc.getSenders().forEach(s => s.track && s.track.stop()); } catch {}
-      try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
-      try { pc && pc.close(); } catch {}
-      try { ws && ws.close(); } catch {}
-
-      localStream = null; pc = null; ws = null;
-      started = false;
-
-      remoteDescriptionSet = false;
-      candidateQueue.length = 0;
-      lastOfferSdp = null;
-
-      document.body.classList.remove('previewing','streaming','ui-visible');
-      document.body.classList.add('blackout');
+      previewTimer = previewTicker = null;
+      enterBlackout();
+    }
+    function enterBlackout() {
+      document.body.classList.remove('previewing');
+      document.body.classList.add('streaming');
+      document.body.classList.remove('ui-visible');
       localVideo.style.display = 'none';
-      setStatus('Stopped');
-
-      startBtn.textContent = 'Start streaming';
+      // keep pose overlay visible if pose is on (so you can still see landmarks while black screen)
+      poseCanvas.style.display = poseOn.checked ? 'block' : 'none';
+      setStatus('Streaming...');
+      clearTimeout(hideUITimer); hideUITimer = null;
     }
 
-    // UI/tap handling during streaming
+    // show/hide UI while streaming
     document.addEventListener('click', (e) => {
       if (document.body.classList.contains('previewing')) { endPreviewNow(); return; }
       if (document.body.classList.contains('streaming') && !document.body.classList.contains('ui-visible')) {
@@ -426,7 +421,6 @@
         if (!inCard) { document.body.classList.remove('ui-visible'); setStatus('Streaming...'); clearTimeout(hideUITimer); hideUITimer = null; }
       }
     });
-
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         if (document.body.classList.contains('previewing')) { endPreviewNow(); }
@@ -435,7 +429,6 @@
         }
       }
     });
-
     function scheduleAutoHideUI() {
       clearTimeout(hideUITimer);
       hideUITimer = setTimeout(() => {
@@ -445,18 +438,212 @@
         }
       }, UI_AUTOHIDE_MS);
     }
-    function resetAutoHideUI() {
-      if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
-        scheduleAutoHideUI();
+
+    /********** Start / Stop **********/
+    async function startOrStop() {
+      try {
+        if (started) { await stopStreaming(); return; }
+
+        startBtn.disabled = true;
+
+        updateMirrorClass();
+        const room = currentRoom();
+        setStatus('Starting camera…');
+        localStream = await getMedia();
+        localVideo.srcObject = localStream;
+        try { await localVideo.play(); } catch (e) { console.warn('local play blocked', e); }  // ✅ ensure preview appears
+        localVideo.style.display = videoOn.checked ? 'block' : 'none';
+
+        beginPreviewWindow(Number(previewMinsInput.value) || 1);
+
+        await connectWS(room);
+        started = true;
+        startBtn.textContent = 'Stop streaming';
+        startBtn.disabled = false;
+
+        // If Pose was toggled on & the dropdown says "sender", start sender inference now
+        applyPoseUI();
+
+      } catch (err) {
+        console.error(err);
+        alert(err.message || err);
+        setStatus('Idle');
+        startBtn.disabled = false;
       }
     }
-    document.addEventListener('mousemove', resetAutoHideUI, { passive: true });
-    document.addEventListener('touchstart', resetAutoHideUI, { passive: true });
+
+    async function stopStreaming() {
+      try { send({ type: 'bye' }); } catch {}
+
+      if (previewTimer) clearTimeout(previewTimer);
+      if (previewTicker) clearInterval(previewTicker);
+      if (hideUITimer) clearTimeout(hideUITimer);
+      if (needOfferTimer) clearInterval(needOfferTimer);
+      previewTimer = previewTicker = hideUITimer = needOfferTimer = null;
+
+      try { poseLoopRunning = false; } catch {}
+      try { poseTask && poseTask.close && poseTask.close(); } catch {}
+      poseTask = null;
+
+      try { pc && pc.getSenders().forEach(s => s.track && s.track.stop()); } catch {}
+      try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
+      try { pc && pc.close(); } catch {}
+      try { ws && ws.close(); } catch {}
+
+      poseDCs.clear();
+
+      localStream = null; pc = null; ws = null;
+      started = false;
+
+      remoteDescriptionSet = false;
+      candidateQueue.length = 0;
+      lastOfferSdp = null;
+
+      document.body.classList.remove('previewing','streaming','ui-visible');
+      document.body.classList.add('blackout');
+
+      ui.style.display = '';
+      localVideo.style.display = 'none';
+      poseCanvas.style.display = 'none';
+      ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
+
+      setStatus('Stopped');
+      startBtn.textContent = 'Start streaming';
+    }
 
     window.addEventListener('beforeunload', stopStreaming);
-
-    // Button
     startBtn.addEventListener('click', startOrStop);
+
+    /********** Pose inference + DC **********/
+    function announcePoseMode() {
+      const enabled = !!poseOn.checked;
+      const where   = poseWhere.value;
+      for (const ch of poseDCs) {
+        if (ch.readyState === 'open') {
+          ch.send(JSON.stringify({ type:'pose-mode', enabled, where }));
+        }
+      }
+      console.log(`[POSE][sender] announce inference-mode: ${where} (enabled: ${enabled} )`);
+    }
+
+    async function ensureTasksLoaded() {
+      if (PoseLandmarker) return;
+      ({ PoseLandmarker, FilesetResolver, DrawingUtils } = await import(TASKS_URL));
+      console.log('[POSE][sender] DrawingUtils loaded');
+    }
+
+    async function ensurePoseTask() {
+      await ensureTasksLoaded();
+      if (poseTask) return poseTask;
+      const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
+      poseTask = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+          delegate: "GPU"
+        },
+        runningMode: "VIDEO",
+        numPoses: 1
+      });
+      return poseTask;
+    }
+
+    function sendPoseToReceivers(landmarks) {
+      const payload = JSON.stringify({ type:'pose', landmarks, ts: performance.now() });
+      for (const ch of poseDCs) {
+        if (ch.readyState === 'open') ch.send(payload);
+      }
+    }
+
+    function drawPoseOnSender(landmarks) {
+      if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
+      ctx.save();
+      ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+      const draw = new DrawingUtils(ctx);
+      for (const lm of landmarks) {
+        // landmarks are normalized; project to canvas pixels
+        const scaled = lm.map(p => ({ x: p.x * poseCanvas.width, y: p.y * poseCanvas.height, z: p.z, visibility: p.visibility }));
+        draw.drawLandmarks(scaled, { radius: 3 });
+        draw.drawConnectors(scaled, PoseLandmarker.POSE_CONNECTIONS);
+      }
+      ctx.restore();
+    }
+
+    async function startSenderPoseLoop() {
+      if (!started || !poseOn.checked || poseWhere.value !== 'sender') return;
+      const task = await ensurePoseTask();
+      poseLoopRunning = true;
+      console.log('[POSE][sender] inference START (sender)');
+
+      const dutils = new DrawingUtils(ctx);
+
+      const loop = async () => {
+        if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') { console.log('[POSE][sender] inference STOP (sender)'); return; }
+        const ts = performance.now();
+        const result = task.detectForVideo(localVideo, ts);
+        ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+
+        if (result?.landmarks?.length) {
+          // draw locally
+          for (const lm of result.landmarks) {
+            const scaled = lm.map(p => ({ x: p.x * poseCanvas.width, y: p.y * poseCanvas.height, z: p.z, visibility: p.visibility }));
+            dutils.drawLandmarks(scaled, { radius: 3 });
+            dutils.drawConnectors(scaled, PoseLandmarker.POSE_CONNECTIONS);
+          }
+          // send normalized to receivers
+          sendPoseToReceivers(result.landmarks);
+        }
+        requestAnimationFrame(loop);
+      };
+      loop();
+    }
+
+    function stopSenderPoseLoop() {
+      poseLoopRunning = false;
+      ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+    }
+
+    // Messages arriving from a receiver that is doing inference
+    function onPoseMessageFromReceiver(ev) {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'pose') {
+          // Draw overlay on the sender (requirement: when inference runs on receiver, draw only on sender)
+          drawPoseOnSender(msg.landmarks);
+        } else if (msg.type === 'pose-mode') {
+          // ignore on sender
+        }
+      } catch {}
+    }
+
+    // Apply UI state of Pose
+    function applyPoseUI() {
+      // announce current mode to receivers (if any)
+      announcePoseMode();
+
+      // visibility of overlay canvas
+      poseCanvas.style.display = (poseOn.checked && videoOn.checked) ? 'block' : 'none';
+      if (!poseOn.checked) { stopSenderPoseLoop(); return; }
+
+      // only start if we’re streaming and mode is "sender"
+      if (started && poseWhere.value === 'sender') startSenderPoseLoop();
+      else stopSenderPoseLoop();
+    }
+
+    poseOn.addEventListener('change', () => {
+      console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`);
+      applyPoseUI();
+    });
+    poseWhere.addEventListener('change', () => {
+      console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`);
+      applyPoseUI();
+    });
+
+    /********** Kickoff **********/
+    // If ?room= is present, use it
+    const qsRoom = new URLSearchParams(location.search).get('room');
+    if (qsRoom) roomInput.value = qsRoom;
+
   </script>
 </body>
 </html>
