@@ -13,22 +13,15 @@
     }
     /* Full-bleed stage (video + overlay) sits behind UI */
     #stage { position: fixed; inset: 0; z-index: 1; }
-    #stage > * {
-      position: absolute; inset: 0; width: 100vw; height: 100vh;
-      object-fit: contain; /* keep geometry aligned with normalized landmarks */
-      display: none; pointer-events: none;
-    }
-    /* Video under, canvas over */
-    #local { background: #000; z-index: 1; }
-    #poseCanvas { background: transparent !important; z-index: 2; }
+    #stage > * { position: absolute; inset: 0; width: 100vw; height: 100vh; object-fit: cover; background: #000; display: none; pointer-events: none; }
 
     /* Mirror video + canvas together for front camera preview only (visual mirror) */
     .mirror #local, .mirror #poseCanvas { transform: scaleX(-1); }
 
     /* UI card */
     #ui {
-      position: relative;
-      z-index: 5; /* above stage & overlay */
+      position: relative;              /* create own stacking layer */
+      z-index: 5;                      /* above stage & overlay */
       min-height: 100%;
       display: flex; align-items: center; justify-content: center; padding: 20px;
     }
@@ -215,6 +208,21 @@
     function updateMirrorClass() {
       document.body.classList.toggle('mirror', isFront());
     }
+
+    /* NEW: overlay visibility is ONLY during preview + Pose ON + Video ON */
+    function overlayShouldBeVisible() {
+      return poseOn.checked && videoOn.checked && document.body.classList.contains('previewing');
+    }
+    function updateOverlayVisibility() {
+      const visible = overlayShouldBeVisible();
+      if (!visible) {
+        poseCanvas.style.display = 'none';
+        ctx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+      } else {
+        poseCanvas.style.display = 'block';
+      }
+    }
+
     function resizeCanvasToVideo() {
       const dpr = window.devicePixelRatio || 1;
       const w = Math.max(1, Math.round(localVideo.videoWidth  * dpr));
@@ -222,10 +230,9 @@
       if (!w || !h) return;
       poseCanvas.width  = w;
       poseCanvas.height = h;
-      poseCanvas.style.display = (poseOn.checked && videoOn.checked) ? 'block' : 'none';
-      localVideo.style.display = videoOn.checked ? 'block' : 'none';
       ctx.setTransform(1,0,0,1,0,0);
       ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
+      updateOverlayVisibility();
     }
     localVideo.addEventListener('loadedmetadata', () => {
       console.log('[MEDIA] local video meta', localVideo.videoWidth, 'x', localVideo.videoHeight);
@@ -259,7 +266,7 @@
       const vt = localStream.getVideoTracks()[0];
       if (vt) vt.enabled = videoOn.checked;
       localVideo.style.display = (document.body.classList.contains('previewing') && videoOn.checked) ? 'block' : 'none';
-      poseCanvas.style.display = (poseOn.checked && videoOn.checked) ? 'block' : 'none';
+      updateOverlayVisibility();
       setStatus(videoOn.checked ? 'Video ON' : 'Video OFF');
     }
     function applyAudioToggle() {
@@ -270,7 +277,7 @@
     }
     videoOn.addEventListener('change', applyVideoToggle);
     audioOn.addEventListener('change', applyAudioToggle);
-    cameraSel.addEventListener('change', () => { updateMirrorClass(); resizeCanvasToVideo(); });
+    cameraSel.addEventListener('change', updateMirrorClass);
 
     /********** WebSocket **********/
     function connectWS(room) {
@@ -378,11 +385,12 @@
       if (ms === 0) { enterBlackout(); return; }
 
       document.body.classList.remove('blackout');
-      document.body.classList.add('previewing', 'streaming');
+      document.body.classList.add('previewing');
+      document.body.classList.add('streaming');
       document.body.classList.remove('ui-visible');
 
       localVideo.style.display = videoOn.checked ? 'block' : 'none';
-      poseCanvas.style.display = (poseOn.checked && videoOn.checked) ? 'block' : 'none';
+      updateOverlayVisibility();
 
       previewEnd = Date.now() + ms;
       tickPreviewCountdown();
@@ -407,7 +415,7 @@
       document.body.classList.add('streaming');
       document.body.classList.remove('ui-visible');
       localVideo.style.display = 'none';
-      poseCanvas.style.display = poseOn.checked ? 'block' : 'none';
+      updateOverlayVisibility();  // hides + clears the canvas
       setStatus('Streaming...');
       clearTimeout(hideUITimer); hideUITimer = null;
     }
@@ -555,17 +563,15 @@
       }
     }
     function drawPoseOnSender(landmarks) {
+      if (!document.body.classList.contains('previewing')) return; // draw only during preview
       if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
       ctx.save();
       ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
       const dutils = new DrawingUtils(ctx);
-      // IMPORTANT: use normalized landmarks directly (like your working sample)
       for (const lm of landmarks) {
-        dutils.drawLandmarks(lm, {
-          radius: (data) =>
-            DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
-        });
-        dutils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+        const scaled = lm.map(p => ({ x: p.x * poseCanvas.width, y: p.y * poseCanvas.height, z: p.z, visibility: p.visibility }));
+        dutils.drawLandmarks(scaled, { radius: 3 });
+        dutils.drawConnectors(scaled, PoseLandmarker.POSE_CONNECTIONS);
       }
       ctx.restore();
     }
@@ -576,7 +582,6 @@
       console.log('[POSE][sender] inference START (sender)');
       const loop = async () => {
         if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') { console.log('[POSE][sender] inference STOP (sender)'); return; }
-        if (localVideo.readyState < 2) { requestAnimationFrame(loop); return; }
         const ts = performance.now();
         const result = task.detectForVideo(localVideo, ts);
         ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
@@ -590,20 +595,20 @@
     }
     function stopSenderPoseLoop() {
       poseLoopRunning = false;
-      ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
+      ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
     function onPoseMessageFromReceiver(ev) {
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'pose') {
-          // Draw on sender when receiver side inference is on
+          if (!document.body.classList.contains('previewing')) return; // draw only during preview
           drawPoseOnSender(msg.landmarks);
         }
       } catch {}
     }
     function applyPoseUI() {
       announcePoseMode();
-      poseCanvas.style.display = (poseOn.checked && videoOn.checked) ? 'block' : 'none';
+      updateOverlayVisibility();
       if (!poseOn.checked) { stopSenderPoseLoop(); return; }
       if (started && poseWhere.value === 'sender') startSenderPoseLoop();
       else stopSenderPoseLoop();
