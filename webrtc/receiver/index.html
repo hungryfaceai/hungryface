@@ -12,13 +12,13 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       overflow: hidden;
     }
-    /* Remote video is letterboxed (no crop) */
+    /* Remote video fills viewport, content is letterboxed via contain */
     video#remote {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
       object-fit: contain; background: #000; z-index: 1;
     }
-    /* Overlay canvas is positioned by JS to match remote's visible box */
+    /* Overlay canvas is positioned to the actual visible video box */
     canvas#poseCanvas {
       position: fixed; /* left/top/width/height set via JS */
       z-index: 2; pointer-events: none; background: transparent; display: none;
@@ -167,6 +167,7 @@
     });
     document.addEventListener('fullscreenchange', () => {
       fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+      resizeCanvasToVideo();
     });
     document.addEventListener('click', () => {
       if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
@@ -182,18 +183,24 @@
       resizeCanvasToVideo();
     });
 
-    // --- Canvas alignment (same strategy as sender) ---
-    function calcViewportContainRect() {
-      const vw = window.innerWidth, vh = window.innerHeight;
-      const vwVid = remoteVideo.videoWidth || 1, vhVid = remoteVideo.videoHeight || 1;
-      const scale = Math.min(vw / vwVid, vh / vhVid);
-      const w = vwVid * scale, h = vhVid * scale;
-      const x = (vw - w) / 2, y = (vh - h) / 2;
+    // ---------- Canvas alignment (compute the real "contain" box) ----------
+    function containRect(viewW, viewH, videoW, videoH) {
+      const scale = Math.min(viewW / (videoW||1), viewH / (videoH||1));
+      const w = Math.round(videoW * scale);
+      const h = Math.round(videoH * scale);
+      const x = Math.floor((viewW - w) / 2);
+      const y = Math.floor((viewH - h) / 2);
       return { left:x, top:y, width:w, height:h };
     }
+
     function resizeCanvasToVideo() {
-      let rect = remoteVideo.getBoundingClientRect();
-      if (!rect.width || !rect.height) rect = calcViewportContainRect();
+      // Use the viewport size; the video element itself is full-viewport with object-fit:contain
+      const viewW = window.innerWidth;
+      const viewH = window.innerHeight;
+      const vidW  = remoteVideo.videoWidth  || 1;
+      const vidH  = remoteVideo.videoHeight || 1;
+
+      const rect = containRect(viewW, viewH, vidW, vidH);
 
       poseCanvas.style.left   = rect.left + 'px';
       poseCanvas.style.top    = rect.top  + 'px';
@@ -205,6 +212,7 @@
       poseCanvas.height = Math.max(1, Math.round(rect.height * dpr));
       poseCtx.setTransform(1,0,0,1,0,0);
     }
+
     ['resize','orientationchange','scroll'].forEach(ev =>
       window.addEventListener(ev, resizeCanvasToVideo)
     );
@@ -214,11 +222,12 @@
       );
     }
 
-    // --- Drawing (normalized landmarks using DrawingUtils) ---
+    // ---------- Drawing (normalized landmarks using DrawingUtils) ----------
     function clearPose() {
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
     function setOverlayVisible(v) {
+      if (v) resizeCanvasToVideo();
       poseCanvas.style.display = v ? 'block' : 'none';
       if (!v) clearPose();
     }
@@ -239,7 +248,8 @@
       poseCtx.restore();
     }
 
-    // --- Signaling + WebRTC ---
+    // ---------- Signaling + WebRTC ----------
+    let wsOpenResolve;
     async function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
@@ -296,11 +306,11 @@
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
       // Create the pose DataChannel from the receiver side
-      poseDC = pc.createDataChannel('pose');
-      poseDC.onopen = () => { console.log('[DC][receiver] pose DC open'); };
-      poseDC.onclose = () => { console.log('[DC][receiver] pose DC close'); };
-      poseDC.onerror = (e) => { console.warn('[DC][receiver] pose DC error', e); };
-      poseDC.onmessage = (ev) => {
+      const ch = pc.createDataChannel('pose');
+      ch.onopen = () => { console.log('[DC][receiver] pose DC open'); };
+      ch.onclose = () => { console.log('[DC][receiver] pose DC close'); };
+      ch.onerror = (e) => { console.warn('[DC][receiver] pose DC error', e); };
+      ch.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
           if (msg.type === 'pose-mode') {
@@ -310,13 +320,12 @@
             setOverlayVisible(poseEnabled && poseWhere === 'sender');
             if (!(poseEnabled && poseWhere === 'sender')) clearPose();
           } else if (msg.type === 'pose') {
-            // Keep drawing even after sender preview ends (sender continues sending)
-            if (poseEnabled && poseWhere === 'sender') {
-              drawPoseLandmarks(msg.landmarks);
-            }
+            // Keep drawing even after sender preview ends — sender continues sending
+            if (poseEnabled && poseWhere === 'sender') drawPoseLandmarks(msg.landmarks);
           }
-        } catch (e) { /* ignore */ }
+        } catch {}
       };
+      poseDC = ch;
 
       pc.onicecandidate = (ev) => { if (ev.candidate) send({ type:'candidate', candidate: ev.candidate }); };
       pc.ontrack = (ev) => {
@@ -325,6 +334,8 @@
           tryStartMuted();
         }
         console.log('[TRACK][receiver] ontrack:', ev.track.kind);
+        // Make sure overlay gets sized when first media arrives
+        requestAnimationFrame(resizeCanvasToVideo);
       };
 
       pc.oniceconnectionstatechange = () => {
