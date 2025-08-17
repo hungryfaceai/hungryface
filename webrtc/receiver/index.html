@@ -12,11 +12,13 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       overflow: hidden;
     }
-    video {
+    /* Video and overlay */
+    #remote, #poseCanvas {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
-      object-fit: contain; background: #000; z-index: 1;
     }
+    #remote { object-fit: contain; background: #000; z-index: 1; }
+    #poseCanvas { background: transparent !important; z-index: 2; pointer-events: none; }
 
     .btn {
       padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
@@ -54,12 +56,15 @@
   </div>
 
   <video id="remote" autoplay playsinline></video>
+  <canvas id="poseCanvas"></canvas>
 
   <div id="overlay" class="overlay">
     <div id="status" class="status">Idle</div>
   </div>
 
-  <script>
+  <script type="module">
+    import { DrawingUtils, PoseLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
     const WS_KEEPALIVE_MS = 25000;
@@ -69,6 +74,10 @@
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
     const remoteVideo = document.getElementById('remote');
+    const poseCanvas  = document.getElementById('poseCanvas');
+    const ctx = poseCanvas.getContext('2d', { alpha: true });
+    let drawingUtils = new DrawingUtils(ctx);
+
     const fsBtn = document.getElementById('fsBtn');
     const enableAudioBtn = document.getElementById('enableAudioBtn');
     const disableAudioBtn = document.getElementById('disableAudioBtn');
@@ -83,6 +92,29 @@
     let offerResendTimer = null;
     let iceDisconnectedSince = null;
     let hideStatusTimer = null;
+
+    // Pose DC
+    let poseDC = null;
+    let poseDrawEnabled = false; // true when sender runs inference (pose-mode enabled && where=sender)
+
+    function resizeCanvasToVideo() {
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.max(1, Math.round(remoteVideo.videoWidth  * dpr));
+      const h = Math.max(1, Math.round(remoteVideo.videoHeight * dpr));
+      if (!w || !h) return;
+      poseCanvas.width = w; poseCanvas.height = h;
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
+    }
+    remoteVideo.addEventListener('loadedmetadata', () => {
+      console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
+      resizeCanvasToVideo();
+    });
+    remoteVideo.addEventListener('playing', () => {
+      console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
+      updateAudioButtons();
+      resizeCanvasToVideo();
+    });
 
     function showStatus(msg) {
       statusEl.textContent = msg;
@@ -164,13 +196,6 @@
       if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
     });
 
-    remoteVideo.addEventListener('loadedmetadata', () =>
-      console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight));
-    remoteVideo.addEventListener('playing', () => {
-      console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
-      updateAudioButtons();
-    });
-
     async function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
@@ -227,6 +252,32 @@
 
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
+
+      // Create pose data channel (sender will see ondatachannel)
+      poseDC = pc.createDataChannel('pose');
+      poseDC.onopen = () => { console.log('[DC][receiver] pose DC open'); };
+      poseDC.onclose = () => { console.log('[DC][receiver] pose DC close'); };
+      poseDC.onerror = (e) => { console.log('[DC][receiver] pose DC error', e); };
+      poseDC.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'pose-mode') {
+            // Sender tells us whether it’s running inference and where to draw
+            poseDrawEnabled = !!msg.enabled && msg.where === 'sender';
+            if (!poseDrawEnabled) { ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height); }
+          } else if (msg.type === 'pose' && poseDrawEnabled) {
+            const lmsList = msg.landmarks; // normalized landmarks from sender
+            ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
+            for (const lm of lmsList) {
+              drawingUtils.drawLandmarks(lm, {
+                radius: (data) =>
+                  DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
+              });
+              drawingUtils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+            }
+          }
+        } catch {}
+      };
 
       pc.onicecandidate = (ev) => { if (ev.candidate) send({ type:'candidate', candidate: ev.candidate }); };
       pc.ontrack = (ev) => {
