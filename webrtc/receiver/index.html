@@ -16,8 +16,8 @@
     /* Stage holds BOTH the video and the canvas and is what we fullscreen */
     #stage {
       position: fixed; inset: 0;
-      width: 100vw; height: 100vh;          /* fallback */
-      width: 100dvw; height: 100dvh;        /* iOS dynamic viewport */
+      width: 100vw; height: 100vh;
+      width: 100dvw; height: 100dvh;
       z-index: 1; background: #000;
     }
     #stage > video {
@@ -26,7 +26,7 @@
       object-fit: contain; background: #000;
     }
     #stage > canvas {
-      position: absolute;                    /* aligned via JS inside stage */
+      position: absolute;
       z-index: 2; pointer-events: none; background: transparent; display: none;
     }
 
@@ -65,7 +65,7 @@
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
   </div>
 
-  <!-- NEW: fullscreen wrapper for video + canvas -->
+  <!-- Fullscreen wrapper for video + canvas -->
   <div id="stage">
     <video id="remote" autoplay playsinline></video>
     <canvas id="poseCanvas"></canvas>
@@ -76,7 +76,7 @@
   </div>
 
   <script type="module">
-    import { DrawingUtils, PoseLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+    import { DrawingUtils, PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
 
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
@@ -86,7 +86,11 @@
     const RESTART_ON_ICE_TIMEOUT_MS = 5000;
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
-    const stage       = document.getElementById('stage');        // NEW
+    // MediaPipe Tasks loader
+    const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+    const WASM_DIR  = TASKS_URL + "/wasm";
+
+    const stage       = document.getElementById('stage');
     const remoteVideo = document.getElementById('remote');
     const poseCanvas  = document.getElementById('poseCanvas');
     const poseCtx     = poseCanvas.getContext('2d', { alpha: true });
@@ -106,10 +110,15 @@
     let iceDisconnectedSince = null;
     let hideStatusTimer = null;
 
-    // Pose DC + draw state
+    // Pose channel + mode
     let poseDC = null;
     let poseEnabled = false;
     let poseWhere   = 'sender';
+
+    // Receiver-side inference state
+    let receiverPoseTask = null;
+    let receiverLoopOn = false;
+    let lastVideoTime = -1;
 
     // ---------- Status ----------
     function showStatus(msg) {
@@ -137,11 +146,8 @@
     }
     enableAudioBtn.style.display = 'block';
     async function tryStartMuted() {
-      try {
-        remoteVideo.muted = true;
-        remoteVideo.volume = 1.0;
-        await remoteVideo.play();
-      } catch (e) { console.warn('autoplay (muted) blocked:', e); }
+      try { remoteVideo.muted = true; remoteVideo.volume = 1.0; await remoteVideo.play(); }
+      catch (e) { console.warn('autoplay (muted) blocked:', e); }
       updateAudioButtons();
     }
     enableAudioBtn.addEventListener('click', async (e) => {
@@ -156,7 +162,7 @@
       updateAudioButtons();
     });
 
-    // ---------- Fullscreen (make the STAGE fullscreen so canvas stays visible) ----------
+    // ---------- Fullscreen (fullscreen the STAGE) ----------
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -168,25 +174,26 @@
           fsBtn.textContent = 'Fullscreen';
         }
       } catch (err) { console.warn('fullscreen error', err); }
-      beginViewportSettle(); // snap after FS toggle
+      beginViewportSettle();
     });
     document.addEventListener('fullscreenchange', () => {
       fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
-      beginViewportSetle();
+      beginViewportSettle();
     });
-    // NOTE: removed the “click anywhere to exit fullscreen” handler so FS is stable
 
     remoteVideo.addEventListener('loadedmetadata', () => {
       console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
       beginViewportSettle();
+      maybeStartReceiverLoop();
     });
     remoteVideo.addEventListener('playing', () => {
       console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
       updateAudioButtons();
       beginViewportSettle();
+      maybeStartReceiverLoop();
     });
 
-    // ---------- Canvas alignment (wrapper-aware) ----------
+    // ---------- Canvas alignment ----------
     function containRect(containerW, containerH, contentW, contentH) {
       const scale = Math.min(containerW / (contentW||1), containerH / (contentH||1));
       const w = Math.round(contentW * scale);
@@ -195,10 +202,9 @@
       const y = Math.floor((containerH - h) / 2);
       return { left:x, top:y, width:w, height:h };
     }
-
     function alignCanvasToVideo() {
       const stageBox = stage.getBoundingClientRect();
-      const videoBox = remoteVideo.getBoundingClientRect(); // inside stage
+      const videoBox = remoteVideo.getBoundingClientRect();
       const containerW = Math.round(videoBox.width);
       const containerH = Math.round(videoBox.height);
       const vidW = remoteVideo.videoWidth  || 1;
@@ -206,7 +212,6 @@
 
       const fit = containRect(containerW, containerH, vidW, vidH);
 
-      // Position canvas *inside the stage* (absolute), offset from stage's top-left
       const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
       const topCSS  = Math.round((videoBox.top  - stageBox.top)  + fit.top);
 
@@ -224,8 +229,6 @@
       }
       poseCtx.setTransform(1,0,0,1,0,0);
     }
-
-    // Post-change settle loop (iOS toolbars/orientation)
     let settleRAF = 0, settleUntil = 0;
     function beginViewportSettle(durationMs = 1000) {
       settleUntil = performance.now() + durationMs;
@@ -241,7 +244,6 @@
       };
       tick();
     }
-
     ['resize','orientationchange','scroll'].forEach(ev =>
       window.addEventListener(ev, () => beginViewportSettle(), { passive: true })
     );
@@ -250,17 +252,16 @@
         window.visualViewport.addEventListener(ev, () => beginViewportSettle(), { passive: true })
       );
     }
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) beginViewportSettle();
-    });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) beginViewportSettle(); });
 
-    // ---------- Drawing ----------
+    // ---------- Drawing on receiver (only when sender runs inference) ----------
     function setOverlayVisible(v) {
       poseCanvas.style.display = v ? 'block' : 'none';
       if (v) beginViewportSettle();
       else poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
     function drawPoseLandmarks(landmarks) {
+      // Draw only when we are DISPLAYING sender-produced landmarks
       if (!poseEnabled || poseWhere !== 'sender') return;
       if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
 
@@ -277,8 +278,63 @@
       poseCtx.restore();
     }
 
+    // ---------- Receiver-side inference (compute here, draw on sender) ----------
+    async function ensureReceiverPoseTask() {
+      if (receiverPoseTask) return receiverPoseTask;
+      const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
+      receiverPoseTask = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+          delegate: "GPU"
+        },
+        runningMode: "VIDEO",
+        numPoses: 1
+      });
+      return receiverPoseTask;
+    }
+
+    function maybeStartReceiverLoop() {
+      if (!poseEnabled || poseWhere !== 'receiver') return;
+      if (!remoteVideo.videoWidth || !remoteVideo.videoHeight) return; // wait for metadata
+      if (receiverLoopOn) return;
+      startReceiverPoseLoop();
+    }
+
+    async function startReceiverPoseLoop() {
+      if (!poseEnabled || poseWhere !== 'receiver') return;
+      if (!poseDC || poseDC.readyState !== 'open') { console.log('[POSE][receiver] no DC yet'); return; }
+
+      const task = await ensureReceiverPoseTask();
+      receiverLoopOn = true;
+      console.log('[POSE][receiver] inference START (receiver)');
+
+      const loop = () => {
+        if (!receiverLoopOn || !poseEnabled || poseWhere !== 'receiver') {
+          console.log('[POSE][receiver] inference STOP (receiver)');
+          return;
+        }
+
+        // Only process when a new frame is available
+        if (lastVideoTime !== remoteVideo.currentTime) {
+          lastVideoTime = remoteVideo.currentTime;
+          const ts = performance.now();
+          const result = task.detectForVideo(remoteVideo, ts);
+          if (result?.landmarks?.length && poseDC?.readyState === 'open') {
+            // Send normalized landmarks to the sender
+            poseDC.send(JSON.stringify({ type:'pose', landmarks: result.landmarks, ts }));
+          }
+        }
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+    }
+
+    function stopReceiverPoseLoop() {
+      receiverLoopOn = false;
+    }
+
     // ---------- WebSocket / WebRTC ----------
-    let wsKeepaliveId;
     async function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
@@ -336,7 +392,11 @@
 
       // Pose DC (receiver initiates)
       const ch = pc.createDataChannel('pose');
-      ch.onopen = () => { console.log('[DC][receiver] pose DC open'); };
+      ch.onopen = () => {
+        console.log('[DC][receiver] pose DC open');
+        // If we were asked to run on receiver, (re)start the loop now that DC is ready
+        maybeStartReceiverLoop();
+      };
       ch.onclose = () => { console.log('[DC][receiver] pose DC close'); };
       ch.onerror = (e) => { console.warn('[DC][receiver] pose DC error', e); };
       ch.onmessage = (ev) => {
@@ -347,10 +407,16 @@
             poseWhere   = msg.where || 'sender';
             console.log('[POSE][receiver] mode:', { poseEnabled, poseWhere });
             setOverlayVisible(poseEnabled && poseWhere === 'sender');
-            if (!(poseEnabled && poseWhere === 'sender')) {
+
+            if (poseEnabled && poseWhere === 'receiver') {
+              beginViewportSettle(); // ensures alignment if we later choose to preview locally
+              stopReceiverPoseLoop(); lastVideoTime = -1; maybeStartReceiverLoop();
+            } else {
+              stopReceiverPoseLoop();
               poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
             }
           } else if (msg.type === 'pose') {
+            // Sender-side inference -> we display here
             if (poseEnabled && poseWhere === 'sender') drawPoseLandmarks(msg.landmarks);
           }
         } catch {}
@@ -365,6 +431,7 @@
         }
         console.log('[TRACK][receiver] ontrack:', ev.track.kind);
         beginViewportSettle(); // align when media arrives
+        maybeStartReceiverLoop();
       };
 
       pc.oniceconnectionstatechange = () => {
@@ -460,6 +527,7 @@
       } else if (msg.type === 'bye') {
         console.log('[INFO] sender bye -> keep re-offering');
         remoteDescriptionSet = false;
+        stopReceiverPoseLoop();
         startOfferResendLoop();
       }
     }
@@ -470,13 +538,11 @@
       try { pc && pc.close(); } catch {}
       if (wsKeepalive) clearInterval(wsKeepalive);
       if (hideStatusTimer) clearTimeout(hideStatusTimer);
+      stopReceiverPoseLoop();
     });
 
     // Go!
     startNegotiation();
-
-    // tiny typo guard
-    function beginViewportSetle(){ beginViewportSettle(); }
   </script>
 </body>
 </html>
