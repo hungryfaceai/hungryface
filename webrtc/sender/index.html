@@ -13,7 +13,14 @@
     }
     /* Full-bleed stage (video + overlay) sits behind UI */
     #stage { position: fixed; inset: 0; z-index: 1; }
-    #stage > * { position: absolute; inset: 0; width: 100vw; height: 100vh; object-fit: cover; background: #000; display: none; pointer-events: none; }
+    #stage > * {
+      position: absolute; inset: 0; width: 100vw; height: 100vh;
+      object-fit: cover; /* applies to video; harmless for canvas */
+      display: none; pointer-events: none;
+    }
+    /* Only the VIDEO gets a black background; canvas stays transparent */
+    #stage > video { background: #000; }
+    #poseCanvas { background: transparent !important; }
 
     /* Mirror video + canvas together for front camera preview only (visual mirror) */
     .mirror #local, .mirror #poseCanvas { transform: scaleX(-1); }
@@ -187,7 +194,6 @@
     let ws = null, pc = null, localStream = null;
     let started = false, hideUITimer = null;
 
-    // ✅ keep only ONE declaration block
     let remoteDescriptionSet = false;
     const candidateQueue = [];
     let needOfferTimer = null, lastOfferSdp = null;
@@ -216,6 +222,8 @@
       poseCanvas.style.display = (poseOn.checked && videoOn.checked) ? 'block' : 'none';
       localVideo.style.display = videoOn.checked ? 'block' : 'none';
       ctx.setTransform(1,0,0,1,0,0);
+      // ensure transparent before first draw
+      ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
     }
     localVideo.addEventListener('loadedmetadata', () => {
       console.log('[MEDIA] local video meta', localVideo.videoWidth, 'x', localVideo.videoHeight);
@@ -368,8 +376,7 @@
       if (ms === 0) { enterBlackout(); return; }
 
       document.body.classList.remove('blackout');
-      document.body.classList.add('previewing');
-      document.body.classList.add('streaming');
+      document.body.classList.add('previewing', 'streaming');
       document.body.classList.remove('ui-visible');
 
       localVideo.style.display = videoOn.checked ? 'block' : 'none';
@@ -577,7 +584,7 @@
     }
     function stopSenderPoseLoop() {
       poseLoopRunning = false;
-      ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+      ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
     }
     function onPoseMessageFromReceiver(ev) {
       try {
