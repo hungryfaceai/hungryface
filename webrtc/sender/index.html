@@ -12,10 +12,10 @@
       touch-action: manipulation;
     }
 
-    /* === Stage (video + overlay) behind UI === */
+    /* Stage (video + overlay) behind UI */
     #stage { position: fixed; inset: 0; z-index: 1; }
 
-    /* Letterboxed preview (no zoom/crop) */
+    /* Letterboxed preview (no crop) */
     #stage > video#local {
       position: absolute; inset: 0; width: 100vw; height: 100vh;
       object-fit: contain; background: #000; display: none; pointer-events: none;
@@ -30,10 +30,10 @@
     /* Visual mirror for preview when using front camera */
     .mirror #local, .mirror #poseCanvas { transform: scaleX(-1); }
 
-    /* === UI card === */
+    /* UI card */
     #ui {
       position: relative;
-      z-index: 5; /* above stage & status overlay */
+      z-index: 5;
       min-height: 100%;
       display: flex; align-items: center; justify-content: center; padding: 20px;
     }
@@ -49,7 +49,6 @@
       width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222; background:#0b0b0b; color:#ddd;
       -moz-appearance:textfield;
     }
-    /* Larger camera dropdown */
     #cameraSel { font-size: 18px; padding: 14px 16px; height: 52px; border-radius: 12px; }
     input[type="number"]::-webkit-outer-spin-button,
     input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
@@ -60,7 +59,7 @@
     }
     button:active { transform: scale(0.99); }
 
-    /* Sender-style status overlay */
+    /* Status overlay */
     .overlay {
       position: fixed; inset: 0;
       display: none; align-items: center; justify-content: center;
@@ -204,7 +203,7 @@
     let needOfferTimer = null, lastOfferSdp = null;
 
     let previewTimer = null, previewTicker = null, previewEnd = 0;
-    const poseDCs = new Set(); // per-receiver DataChannels
+    const poseDCs = new Set();
 
     // MediaPipe Tasks – lazy
     let PoseLandmarker, FilesetResolver, DrawingUtils;
@@ -216,8 +215,12 @@
     const currentRoom = () => (roomInput.value || 'Baby').trim();
     const isFront = () => (cameraSel.value === 'user');
 
-    /* Compute letterboxed rect for object-fit: contain */
-    function getContainRect() {
+    function updateMirrorClass() {
+      document.body.classList.toggle('mirror', isFront());
+    }
+
+    /* Fallback viewport “contain” rect (when video is hidden) */
+    function calcViewportContainRect() {
       const vw = window.innerWidth;
       const vh = window.innerHeight;
       const vidW = localVideo.videoWidth || 1;
@@ -230,28 +233,36 @@
       return { x, y, w, h };
     }
 
-    function updateMirrorClass() {
-      document.body.classList.toggle('mirror', isFront());
-    }
-
-    /* Size/position the overlay canvas to the visible video box */
+    /* Size/position the overlay canvas to match the *actual* video box.
+       On iOS Safari 100vh vs innerHeight can diverge as the URL bar shows/hides.
+       Measuring the real rendered rect avoids drift. */
     function resizeCanvasToVideo() {
-      const dpr = window.devicePixelRatio || 1;
-      const r = getContainRect(); // in CSS px
+      // Show/hide video in preview
+      const showVideo = document.body.classList.contains('previewing') && videoOn.checked;
+      localVideo.style.display = showVideo ? 'block' : 'none';
+
+      // Measure the video’s real on-screen box
+      let rect = localVideo.getBoundingClientRect();
+      if (!rect.width || !rect.height) {
+        // Fallback if video is temporarily hidden
+        rect = calcViewportContainRect();
+      }
 
       // Position the canvas (CSS pixels)
-      poseCanvas.style.left   = r.x + 'px';
-      poseCanvas.style.top    = r.y + 'px';
-      poseCanvas.style.width  = r.w + 'px';
-      poseCanvas.style.height = r.h + 'px';
+      poseCanvas.style.left   = rect.left + 'px';
+      poseCanvas.style.top    = rect.top  + 'px';
+      poseCanvas.style.width  = rect.width  + 'px';
+      poseCanvas.style.height = rect.height + 'px';
 
-      // Match backing resolution for crisp drawing
-      poseCanvas.width  = Math.max(1, Math.round(r.w * dpr));
-      poseCanvas.height = Math.max(1, Math.round(r.h * dpr));
+      // Backing store for crisp drawing
+      const dpr = window.devicePixelRatio || 1;
+      poseCanvas.width  = Math.max(1, Math.round(rect.width  * dpr));
+      poseCanvas.height = Math.max(1, Math.round(rect.height * dpr));
 
-      // Show/hide during preview only
-      localVideo.style.display = (document.body.classList.contains('previewing') && videoOn.checked) ? 'block' : 'none';
-      poseCanvas.style.display = (poseOn.checked && videoOn.checked && document.body.classList.contains('previewing')) ? 'block' : 'none';
+      // Show overlay only in preview (never in blackout/streaming)
+      poseCanvas.style.display =
+        (poseOn.checked && videoOn.checked && document.body.classList.contains('previewing'))
+          ? 'block' : 'none';
 
       ctx.setTransform(1,0,0,1,0,0);
     }
@@ -260,9 +271,25 @@
       console.log('[MEDIA] local video meta', localVideo.videoWidth, 'x', localVideo.videoHeight);
       resizeCanvasToVideo();
     });
+
+    // Keep aligned when iOS URL bar / safe-area changes
     window.addEventListener('resize', () => {
       if (document.body.classList.contains('previewing')) resizeCanvasToVideo();
     });
+    window.addEventListener('orientationchange', () => {
+      setTimeout(() => { if (document.body.classList.contains('previewing')) resizeCanvasToVideo(); }, 50);
+    });
+    window.addEventListener('scroll', () => {
+      if (document.body.classList.contains('previewing')) resizeCanvasToVideo();
+    });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', () => {
+        if (document.body.classList.contains('previewing')) resizeCanvasToVideo();
+      });
+      window.visualViewport.addEventListener('scroll', () => {
+        if (document.body.classList.contains('previewing')) resizeCanvasToVideo();
+      });
+    }
 
     /********** Media capture **********/
     async function getMedia() {
@@ -286,6 +313,7 @@
       if (at) at.enabled = wantAudio;
       return stream;
     }
+
     function applyVideoToggle() {
       if (!localStream) return;
       const vt = localStream.getVideoTracks()[0];
@@ -360,7 +388,6 @@
       pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'candidate', candidate: e.candidate }); };
       pc.oniceconnectionstatechange = () => setStatus('ICE: ' + pc.iceConnectionState);
 
-      // add media tracks
       localStream.getTracks().forEach(track => {
         console.log('[TRACK][sender] addTrack', track.kind);
         pc.addTrack(track, localStream);
@@ -437,7 +464,6 @@
       document.body.classList.remove('previewing');
       document.body.classList.add('streaming');
       document.body.classList.remove('ui-visible');
-      // Hide video + overlay during blackout
       localVideo.style.display = 'none';
       poseCanvas.style.display = 'none';
       setStatus('Streaming...');
@@ -586,7 +612,6 @@
         if (ch.readyState === 'open') ch.send(payload);
       }
     }
-    // Use normalized landmarks directly (DrawingUtils handles scaling)
     function drawPoseOnSender(landmarks) {
       if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
       ctx.save();
@@ -627,7 +652,6 @@
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'pose') {
-          // Draw on sender when receiver-side inference is on
           if (document.body.classList.contains('previewing')) {
             drawPoseOnSender(msg.landmarks);
           }
@@ -636,7 +660,7 @@
     }
     function applyPoseUI() {
       announcePoseMode();
-      resizeCanvasToVideo(); // handles show/hide based on preview state
+      resizeCanvasToVideo();
       if (!poseOn.checked) { stopSenderPoseLoop(); return; }
       if (started && poseWhere.value === 'sender') startSenderPoseLoop();
       else stopSenderPoseLoop();
