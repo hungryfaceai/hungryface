@@ -12,11 +12,13 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       overflow: hidden;
     }
+    /* Remote video fills viewport, content is letterboxed via contain */
     video#remote {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
       object-fit: contain; background: #000; z-index: 1;
     }
+    /* Overlay canvas is positioned to the actual visible video box */
     canvas#poseCanvas {
       position: fixed; /* left/top/width/height set via JS */
       z-index: 2; pointer-events: none; background: transparent; display: none;
@@ -42,8 +44,7 @@
       pointer-events: none; z-index: 5;
     }
     .status {
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
       color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
       text-align: center; white-space: pre-line; max-width: 90vw;
     }
@@ -96,8 +97,8 @@
 
     // Pose DC + draw state
     let poseDC = null;
-    let poseEnabled = false;
-    let poseWhere   = 'sender';
+    let poseEnabled = false;   // whether sender enabled "Pose"
+    let poseWhere   = 'sender';// where inference runs (sender/receiver); we draw only if 'sender'
     const dutils = new DrawingUtils(poseCtx);
 
     function showStatus(msg) {
@@ -142,11 +143,13 @@
       catch (err) { console.warn('unmute play blocked:', err); }
       updateAudioButtons();
     }
+
     function disableAudio(e) {
       e?.stopPropagation?.(); e?.preventDefault?.();
       remoteVideo.muted = true;
       updateAudioButtons();
     }
+
     enableAudioBtn.addEventListener('click', enableAudio);
     disableAudioBtn.addEventListener('click', disableAudio);
 
@@ -180,12 +183,7 @@
       resizeCanvasToVideo();
     });
 
-    // ---------- Canvas alignment helpers ----------
-    function getViewportSize() {
-      const vv = window.visualViewport;
-      if (vv) return { w: Math.round(vv.width), h: Math.round(vv.height) }; // CSS px
-      return { w: window.innerWidth, h: window.innerHeight };
-    }
+    // ---------- Canvas alignment (compute the real "contain" box) ----------
     function containRect(viewW, viewH, videoW, videoH) {
       const scale = Math.min(viewW / (videoW||1), viewH / (videoH||1));
       const w = Math.round(videoW * scale);
@@ -196,7 +194,9 @@
     }
 
     function resizeCanvasToVideo() {
-      const { w: viewW, h: viewH } = getViewportSize();
+      // Use the viewport size; the video element itself is full-viewport with object-fit:contain
+      const viewW = window.innerWidth;
+      const viewH = window.innerHeight;
       const vidW  = remoteVideo.videoWidth  || 1;
       const vidH  = remoteVideo.videoHeight || 1;
 
@@ -213,55 +213,38 @@
       poseCtx.setTransform(1,0,0,1,0,0);
     }
 
-    // iOS rotation settle: reflow happens over multiple frames; keep aligning for ~700ms
-    let settleRAF = 0, settleUntil = 0;
-    function beginViewportSettle(durationMs = 700) {
-      settleUntil = performance.now() + durationMs;
-      if (settleRAF) return;
-      const tick = () => {
-        resizeCanvasToVideo();
-        if (performance.now() < settleUntil) {
-          settleRAF = requestAnimationFrame(tick);
-        } else {
-          cancelAnimationFrame(settleRAF); settleRAF = 0;
-          resizeCanvasToVideo(); // final snap
-        }
-      };
-      tick();
-    }
-
-    // Keep canvas aligned when the viewport changes (toolbars, rotation, pinch, etc.)
     ['resize','orientationchange','scroll'].forEach(ev =>
-      window.addEventListener(ev, () => beginViewportSettle())
+      window.addEventListener(ev, resizeCanvasToVideo)
     );
     if (window.visualViewport) {
       ['resize','scroll'].forEach(ev =>
-        window.visualViewport.addEventListener(ev, () => beginViewportSettle(), { passive: true })
+        window.visualViewport.addEventListener(ev, resizeCanvasToVideo)
       );
     }
-    // Also when the tab becomes visible again
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) beginViewportSettle();
-    });
 
-    // ---------- Drawing ----------
-    function clearPose() { poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height); }
+    // ---------- Drawing (normalized landmarks using DrawingUtils) ----------
+    function clearPose() {
+      poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+    }
     function setOverlayVisible(v) {
-      if (v) beginViewportSettle();
+      if (v) resizeCanvasToVideo();
       poseCanvas.style.display = v ? 'block' : 'none';
       if (!v) clearPose();
     }
     function drawPoseLandmarks(landmarks) {
-      if (!poseEnabled || poseWhere !== 'sender') return;
+      if (!poseEnabled || poseWhere !== 'sender') return;   // draw only when sender runs inference
       if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
+
       poseCtx.save();
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+
       for (const lm of landmarks) {
-        (new DrawingUtils(poseCtx)).drawLandmarks(lm, {
+        dutils.drawLandmarks(lm, {
           radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
         });
-        (new DrawingUtils(poseCtx)).drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+        dutils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
       }
+
       poseCtx.restore();
     }
 
@@ -322,7 +305,7 @@
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
-      // Pose DC (receiver creates the channel)
+      // Create the pose DataChannel from the receiver side
       const ch = pc.createDataChannel('pose');
       ch.onopen = () => { console.log('[DC][receiver] pose DC open'); };
       ch.onclose = () => { console.log('[DC][receiver] pose DC close'); };
@@ -337,6 +320,7 @@
             setOverlayVisible(poseEnabled && poseWhere === 'sender');
             if (!(poseEnabled && poseWhere === 'sender')) clearPose();
           } else if (msg.type === 'pose') {
+            // Keep drawing even after sender preview ends — sender continues sending
             if (poseEnabled && poseWhere === 'sender') drawPoseLandmarks(msg.landmarks);
           }
         } catch {}
@@ -350,8 +334,8 @@
           tryStartMuted();
         }
         console.log('[TRACK][receiver] ontrack:', ev.track.kind);
-        // Align overlay when media arrives (and after device rotations)
-        beginViewportSettle();
+        // Make sure overlay gets sized when first media arrives
+        requestAnimationFrame(resizeCanvasToVideo);
       };
 
       pc.oniceconnectionstatechange = () => {
