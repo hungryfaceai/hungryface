@@ -35,7 +35,7 @@
   </div>
 
   <script type="module">
-    // ⬆️ Upgraded to latest stable 0.10.21
+    // ▶️ MediaPipe Tasks Vision (latest stable)
     import { DrawingUtils, PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
 
     /* -------------------- tiny env helpers -------------------- */
@@ -56,13 +56,13 @@
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
 
-    /* -------------------- signaling/webrtc (unchanged) -------------------- */
+    /* -------------------- signaling/webrtc -------------------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
     const WS_KEEPALIVE_MS = 25000, WS_RECONNECT_MIN_MS = 1000, WS_RECONNECT_MAX_MS = 10000;
     const RESTART_ON_ICE_TIMEOUT_MS = 5000, STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
-    // ⬆️ Upgraded to 0.10.21 and pointed WASM base at /wasm
+    // WASM base
     const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
     const WASM_DIR  = TASKS_URL + "/wasm";
 
@@ -226,7 +226,7 @@
           if (!poseDC || poseDC.readyState!=='open'){ remoteVideo.requestVideoFrameCallback(onFrame); return; }
           if (!canProcessNow()){ remoteVideo.requestVideoFrameCallback(onFrame); return; }
 
-          // Use video mediaTime (s) -> ms, enforce strictly increasing
+          // Use mediaTime (s) -> ms; enforce strictly increasing
           const candidate = Math.floor((metadata?.mediaTime ?? remoteVideo.currentTime) * 1000);
           const ts = Math.max(lastTs + 1, candidate);
           lastTs = ts;
@@ -396,6 +396,7 @@
       try{ pc && pc.close(); }catch{}
       if (wsKeepalive) clearInterval(wsKeepalive);
       if (hideStatusTimer) clearTimeout(hideStatusTimer);
+      if (settleRAF) { cancelAnimationFrame(settleRAF); settleRAF = 0; }
       stopReceiverPoseLoop();
       try{ receiverPoseTask?.close(); }catch{}
     });
