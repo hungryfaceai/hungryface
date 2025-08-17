@@ -551,18 +551,20 @@
         if (ch.readyState === 'open') ch.send(payload);
       }
     }
-    function drawPoseOnSender(landmarks) {
-      if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
-      ctx.save();
-      ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-      const dutils = new DrawingUtils(ctx);
-      for (const lm of landmarks) {
-        const scaled = lm.map(p => ({ x: p.x * poseCanvas.width, y: p.y * poseCanvas.height, z: p.z, visibility: p.visibility }));
-        dutils.drawLandmarks(scaled, { radius: 3 });
-        dutils.drawConnectors(scaled, PoseLandmarker.POSE_CONNECTIONS);
-      }
-      ctx.restore();
-    }
+function drawPoseOnSender(landmarks) {
+  if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
+  ctx.save();
+  ctx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+
+  const dutils = new DrawingUtils(ctx);
+  for (const lm of landmarks) {
+    // ✅ Pass normalized points directly; DrawingUtils scales to canvas.
+    dutils.drawLandmarks(lm, {
+      radius: (data) =>
+        DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
+    });
+    dutils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+  }
     async function startSenderPoseLoop() {
       if (!started || !poseOn.checked || poseWhere.value !== 'sender') return;
       const task = await ensurePoseTask();
