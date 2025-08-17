@@ -6,56 +6,16 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
   <style>
     :root { color-scheme: dark; }
-    html, body {
-      margin: 0; height: 100%;
-      background: #000; color: #fff;
-      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
-      overflow: hidden;
-    }
-
-    /* Stage holds BOTH the video and the canvas and is what we fullscreen */
-    #stage {
-      position: fixed; inset: 0;
-      width: 100vw; height: 100vh;
-      width: 100dvw; height: 100dvh;
-      z-index: 1; background: #000;
-    }
-    #stage > video {
-      position: absolute; inset: 0;
-      width: 100%; height: 100%;
-      object-fit: contain; background: #000;
-    }
-    #stage > canvas {
-      position: absolute;
-      z-index: 2; pointer-events: none; background: transparent; display: none;
-    }
-
-    .btn {
-      padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
-      background: transparent; color: #fff; font-size: 16px; font-weight: 600;
-      cursor: pointer; box-shadow: none;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
-    }
-    .btn:active { transform: scale(0.99); }
-
-    #controls {
-      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
-      display: flex; align-items: center; gap: 12px; z-index: 6;
-    }
-    #enableAudioBtn, #disableAudioBtn { display: none; }
-
-    .overlay {
-      position: fixed; inset: 0; display: flex;
-      align-items: center; justify-content: center;
-      pointer-events: none; z-index: 5;
-    }
-    .status {
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
-      text-align: center; white-space: pre-line; max-width: 90vw;
-    }
-    .overlay.hidden { display: none; }
+    html, body { margin:0; height:100%; background:#000; color:#fff; font-family:-apple-system, system-ui, Segoe UI, Roboto, sans-serif; overflow:hidden; }
+    #stage { position:fixed; inset:0; width:100vw; height:100vh; width:100dvw; height:100dvh; background:#000; }
+    #stage>video { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#000; }
+    #stage>canvas { position:absolute; z-index:2; pointer-events:none; background:transparent; display:none; }
+    .btn{padding:12px 14px; border-radius:12px; border:1px solid rgba(255,255,255,.6); background:transparent; color:#fff; font-size:16px; font-weight:600; cursor:pointer}
+    #controls{position:fixed; left:50%; bottom:16px; transform:translateX(-50%); display:flex; gap:12px; z-index:6}
+    #enableAudioBtn,#disableAudioBtn{display:none}
+    .overlay{position:fixed; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; z-index:5}
+    .status{background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); color:#ddd; font-size:14px; padding:10px 14px; border-radius:12px; text-align:center; white-space:pre-line; max-width:90vw}
+    .overlay.hidden{display:none}
   </style>
 </head>
 <body>
@@ -65,7 +25,6 @@
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
   </div>
 
-  <!-- Fullscreen wrapper for video + canvas -->
   <div id="stage">
     <video id="remote" autoplay playsinline></video>
     <canvas id="poseCanvas"></canvas>
@@ -78,215 +37,143 @@
   <script type="module">
     import { DrawingUtils, PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
 
-    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
-    const room = new URLSearchParams(location.search).get("room") || "Baby";
-    const WS_KEEPALIVE_MS = 25000;
-    const WS_RECONNECT_MIN_MS = 1000;
-    const WS_RECONNECT_MAX_MS = 10000;
-    const RESTART_ON_ICE_TIMEOUT_MS = 5000;
-    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
+    /* -------------------- tiny env helpers -------------------- */
+    const ua = navigator.userAgent;
+    const IS_IOS = /iP(hone|ad|od)/.test(ua);
+    const IS_SAFARI = /^((?!chrome|android).)*safari/i.test(ua);
+    const USE_CPU_DELEGATE = IS_IOS || IS_SAFARI; // GPU is flaky with remote <video> on WebKit
+    const HAS_RVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
 
-    // MediaPipe Tasks loader
-    const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
-    const WASM_DIR  = TASKS_URL + "/wasm";
-
-    const stage       = document.getElementById('stage');
+    /* -------------------- DOM -------------------- */
+    const stage = document.getElementById('stage');
     const remoteVideo = document.getElementById('remote');
     const poseCanvas  = document.getElementById('poseCanvas');
     const poseCtx     = poseCanvas.getContext('2d', { alpha: true });
-
     const fsBtn = document.getElementById('fsBtn');
     const enableAudioBtn = document.getElementById('enableAudioBtn');
     const disableAudioBtn = document.getElementById('disableAudioBtn');
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
 
-    let ws = null, wsKeepalive = null, wsRetryMs = WS_RECONNECT_MIN_MS;
-    let pc = null;
-    let remoteDescriptionSet = false;
-    let lastAnswerSdp = null;
-    const candidateQueue = [];
-    let offerResendTimer = null;
-    let iceDisconnectedSince = null;
-    let hideStatusTimer = null;
+    /* -------------------- signaling/webrtc (unchanged) -------------------- */
+    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const room = new URLSearchParams(location.search).get("room") || "Baby";
+    const WS_KEEPALIVE_MS = 25000, WS_RECONNECT_MIN_MS = 1000, WS_RECONNECT_MAX_MS = 10000;
+    const RESTART_ON_ICE_TIMEOUT_MS = 5000, STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
-    // Pose channel + mode
-    let poseDC = null;
-    let poseEnabled = false;
-    let poseWhere   = 'sender';
+    const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+    const WASM_DIR  = TASKS_URL + "/wasm";
 
-    // Receiver-side inference state
-    let receiverPoseTask = null;
-    let receiverLoopOn = false;
-    let lastVideoTime = -1;
+    let ws=null, wsKeepalive=null, wsRetryMs=WS_RECONNECT_MIN_MS;
+    let pc=null, remoteDescriptionSet=false, lastAnswerSdp=null;
+    const candidateQueue=[];
+    let offerResendTimer=null, iceDisconnectedSince=null, hideStatusTimer=null;
 
-    // ---------- Status ----------
-    function showStatus(msg) {
+    let poseDC=null;
+    let poseEnabled=false;
+    let poseWhere='sender';
+
+    /* -------------------- status & audio UI -------------------- */
+    function showStatus(msg){
       statusEl.textContent = msg;
-      overlay.classList.remove('hidden');
-      console.log('[STATUS]', msg);
-      if (msg === 'Connected') {
+      if (msg==='Connected'){
+        overlay.classList.remove('hidden');
         if (hideStatusTimer) clearTimeout(hideStatusTimer);
-        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
+        hideStatusTimer = setTimeout(()=>overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
       } else {
-        if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
         overlay.classList.remove('hidden');
       }
+      console.log('[STATUS]', msg);
     }
+    function updateAudioButtons(){
+      if (remoteVideo.muted){ enableAudioBtn.style.display='block'; disableAudioBtn.style.display='none'; }
+      else { enableAudioBtn.style.display='none'; disableAudioBtn.style.display='block'; }
+    }
+    async function tryStartMuted(){
+      try{ remoteVideo.muted = true; remoteVideo.volume = 1.0; await remoteVideo.play(); }catch{}
+      updateAudioButtons();
+    }
+    enableAudioBtn.style.display='block';
+    enableAudioBtn.onclick = async (e)=>{ e.preventDefault(); try{ remoteVideo.muted=false; await remoteVideo.play(); }catch{} updateAudioButtons(); };
+    disableAudioBtn.onclick = (e)=>{ e.preventDefault(); remoteVideo.muted=true; updateAudioButtons(); };
 
-    // ---------- Audio UI ----------
-    function updateAudioButtons() {
-      if (remoteVideo.muted) {
-        enableAudioBtn.style.display = 'block';
-        disableAudioBtn.style.display = 'none';
-      } else {
-        enableAudioBtn.style.display = 'none';
-        disableAudioBtn.style.display = 'block';
-      }
-    }
-    enableAudioBtn.style.display = 'block';
-    async function tryStartMuted() {
-      try { remoteVideo.muted = true; remoteVideo.volume = 1.0; await remoteVideo.play(); }
-      catch (e) { console.warn('autoplay (muted) blocked:', e); }
-      updateAudioButtons();
-    }
-    enableAudioBtn.addEventListener('click', async (e) => {
-      e?.stopPropagation?.(); e?.preventDefault?.();
-      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); }
-      catch (err) { console.warn('unmute play blocked:', err); }
-      updateAudioButtons();
-    });
-    disableAudioBtn.addEventListener('click', (e) => {
-      e?.stopPropagation?.(); e?.preventDefault?.();
-      remoteVideo.muted = true;
-      updateAudioButtons();
-    });
-
-    // ---------- Fullscreen (fullscreen the STAGE) ----------
-    fsBtn.addEventListener('click', async (e) => {
+    /* -------------------- fullscreen + alignment -------------------- */
+    fsBtn.onclick = async (e)=>{
       e.stopPropagation();
-      try {
-        if (!document.fullscreenElement) {
-          await (stage.requestFullscreen?.call(stage) || document.documentElement.requestFullscreen());
-          fsBtn.textContent = 'Exit fullscreen';
-        } else {
-          await document.exitFullscreen();
-          fsBtn.textContent = 'Fullscreen';
-        }
-      } catch (err) { console.warn('fullscreen error', err); }
+      try{
+        if (!document.fullscreenElement){ await (stage.requestFullscreen?.call(stage) || document.documentElement.requestFullscreen()); fsBtn.textContent='Exit fullscreen'; }
+        else { await document.exitFullscreen(); fsBtn.textContent='Fullscreen'; }
+      }catch(e){ console.warn('fullscreen error', e); }
       beginViewportSettle();
-    });
-    document.addEventListener('fullscreenchange', () => {
-      fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
-      beginViewportSettle();
-    });
+    };
+    document.addEventListener('fullscreenchange', ()=>{ fsBtn.textContent = document.fullscreenElement?'Exit fullscreen':'Fullscreen'; beginViewportSettle(); });
 
-    remoteVideo.addEventListener('loadedmetadata', () => {
-      console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
-      beginViewportSettle();
-      maybeStartReceiverLoop();
-    });
-    remoteVideo.addEventListener('playing', () => {
-      console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
-      updateAudioButtons();
-      beginViewportSettle();
-      maybeStartReceiverLoop();
-    });
-
-    // ---------- Canvas alignment ----------
-    function containRect(containerW, containerH, contentW, contentH) {
-      const scale = Math.min(containerW / (contentW||1), containerH / (contentH||1));
-      const w = Math.round(contentW * scale);
-      const h = Math.round(contentH * scale);
-      const x = Math.floor((containerW - w) / 2);
-      const y = Math.floor((containerH - h) / 2);
-      return { left:x, top:y, width:w, height:h };
+    function containRect(containerW, containerH, contentW, contentH){
+      const scale = Math.min(containerW/(contentW||1), containerH/(contentH||1));
+      const w = Math.round(contentW*scale), h=Math.round(contentH*scale);
+      const x = Math.floor((containerW-w)/2), y=Math.floor((containerH-h)/2);
+      return {left:x, top:y, width:w, height:h};
     }
-    function alignCanvasToVideo() {
+    function alignCanvasToVideo(){
       const stageBox = stage.getBoundingClientRect();
       const videoBox = remoteVideo.getBoundingClientRect();
-      const containerW = Math.round(videoBox.width);
-      const containerH = Math.round(videoBox.height);
-      const vidW = remoteVideo.videoWidth  || 1;
-      const vidH = remoteVideo.videoHeight || 1;
-
-      const fit = containRect(containerW, containerH, vidW, vidH);
-
-      const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
-      const topCSS  = Math.round((videoBox.top  - stageBox.top)  + fit.top);
-
-      poseCanvas.style.left   = leftCSS + 'px';
-      poseCanvas.style.top    = topCSS  + 'px';
-      poseCanvas.style.width  = fit.width  + 'px';
-      poseCanvas.style.height = fit.height + 'px';
-
-      const dpr = window.devicePixelRatio || 1;
-      const needW = Math.max(1, Math.round(fit.width  * dpr));
-      const needH = Math.max(1, Math.round(fit.height * dpr));
-      if (poseCanvas.width !== needW || poseCanvas.height !== needH) {
-        poseCanvas.width  = needW;
-        poseCanvas.height = needH;
+      const fit = containRect(videoBox.width|0, videoBox.height|0, remoteVideo.videoWidth||1, remoteVideo.videoHeight||1);
+      poseCanvas.style.left = Math.round((videoBox.left-stageBox.left)+fit.left)+'px';
+      poseCanvas.style.top  = Math.round((videoBox.top -stageBox.top )+fit.top )+'px';
+      poseCanvas.style.width  = fit.width+'px';
+      poseCanvas.style.height = fit.height+'px';
+      const dpr = window.devicePixelRatio||1;
+      const needW = Math.max(1, Math.round(fit.width*dpr));
+      const needH = Math.max(1, Math.round(fit.height*dpr));
+      if (poseCanvas.width!==needW || poseCanvas.height!==needH){
+        poseCanvas.width=needW; poseCanvas.height=needH;
       }
       poseCtx.setTransform(1,0,0,1,0,0);
     }
-    let settleRAF = 0, settleUntil = 0;
-    function beginViewportSettle(durationMs = 1000) {
-      settleUntil = performance.now() + durationMs;
+    let settleRAF=0, settleUntil=0;
+    function beginViewportSettle(ms=1000){
+      settleUntil = performance.now()+ms;
       if (settleRAF) return;
-      const tick = () => {
+      const tick=()=>{
         alignCanvasToVideo();
-        if (performance.now() < settleUntil) {
-          settleRAF = requestAnimationFrame(tick);
-        } else {
-          cancelAnimationFrame(settleRAF); settleRAF = 0;
-          alignCanvasToVideo();
-        }
+        if (performance.now()<settleUntil){ settleRAF=requestAnimationFrame(tick); }
+        else { cancelAnimationFrame(settleRAF); settleRAF=0; alignCanvasToVideo(); }
       };
       tick();
     }
-    ['resize','orientationchange','scroll'].forEach(ev =>
-      window.addEventListener(ev, () => beginViewportSettle(), { passive: true })
-    );
-    if (window.visualViewport) {
-      ['resize','scroll'].forEach(ev =>
-        window.visualViewport.addEventListener(ev, () => beginViewportSettle(), { passive: true })
-      );
-    }
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) beginViewportSettle(); });
+    ['resize','orientationchange','scroll'].forEach(ev=>window.addEventListener(ev, ()=>beginViewportSettle(), {passive:true}));
+    if (window.visualViewport){ ['resize','scroll'].forEach(ev=>window.visualViewport.addEventListener(ev, ()=>beginViewportSettle(), {passive:true})); }
+    document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) beginViewportSettle(); });
 
-    // ---------- Drawing on receiver (only when sender runs inference) ----------
-    function setOverlayVisible(v) {
-      poseCanvas.style.display = v ? 'block' : 'none';
-      if (v) beginViewportSettle();
-      else poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+    function setOverlayVisible(v){
+      poseCanvas.style.display = v?'block':'none';
+      if (v) beginViewportSettle(); else poseCtx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
     }
-    function drawPoseLandmarks(landmarks) {
-      // Draw only when we are DISPLAYING sender-produced landmarks
-      if (!poseEnabled || poseWhere !== 'sender') return;
+
+    /* -------------------- draw (sender-produced landmarks only) -------------------- */
+    function drawPoseLandmarks(landmarks){
+      if (!poseEnabled || poseWhere!=='sender') return;
       if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
-
       poseCtx.save();
-      poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-
+      poseCtx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
       const utils = new DrawingUtils(poseCtx);
-      for (const lm of landmarks) {
-        utils.drawLandmarks(lm, {
-          radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
-        });
+      for (const lm of landmarks){
+        utils.drawLandmarks(lm, { radius:(d)=>DrawingUtils.lerp((d.from&&d.from.z)||0, -0.15, 0.1, 5, 1) });
         utils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
       }
       poseCtx.restore();
     }
 
-    // ---------- Receiver-side inference (compute here, draw on sender) ----------
-    async function ensureReceiverPoseTask() {
+    /* -------------------- receiver-side inference -------------------- */
+    let receiverPoseTask=null, receiverLoopOn=false, lastVideoTime=-1, consecutiveErrors=0, errorCooldownUntil=0;
+
+    async function ensureReceiverPoseTask(){
       if (receiverPoseTask) return receiverPoseTask;
       const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
       receiverPoseTask = await PoseLandmarker.createFromOptions(vision, {
         baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
-          delegate: "GPU"
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+          delegate: USE_CPU_DELEGATE ? "CPU" : "GPU"
         },
         runningMode: "VIDEO",
         numPoses: 1
@@ -294,254 +181,219 @@
       return receiverPoseTask;
     }
 
-    function maybeStartReceiverLoop() {
-      if (!poseEnabled || poseWhere !== 'receiver') return;
-      if (!remoteVideo.videoWidth || !remoteVideo.videoHeight) return; // wait for metadata
+    function canProcessNow(){
+      if (document.hidden) return false;
+      if (!remoteVideo.videoWidth || !remoteVideo.videoHeight) return false;
+      if (remoteVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return false;
+      if (performance.now() < errorCooldownUntil) return false;
+      return true;
+    }
+
+    function maybeStartReceiverLoop(){
+      if (!poseEnabled || poseWhere!=='receiver') return;
+      if (!remoteVideo.videoWidth || !remoteVideo.videoHeight) return; // wait for meta
       if (receiverLoopOn) return;
       startReceiverPoseLoop();
     }
 
-    async function startReceiverPoseLoop() {
-      if (!poseEnabled || poseWhere !== 'receiver') return;
-      if (!poseDC || poseDC.readyState !== 'open') { console.log('[POSE][receiver] no DC yet'); return; }
+    async function softResetTask(){
+      try { await receiverPoseTask?.close(); } catch {}
+      receiverPoseTask = null;
+      await ensureReceiverPoseTask();
+      consecutiveErrors = 0;
+    }
 
-      const task = await ensureReceiverPoseTask();
+    async function startReceiverPoseLoop(){
+      if (!poseEnabled || poseWhere!=='receiver') return;
+      if (!poseDC || poseDC.readyState!=='open') return;
+
+      await ensureReceiverPoseTask();
       receiverLoopOn = true;
       console.log('[POSE][receiver] inference START (receiver)');
 
-      const loop = () => {
-        if (!receiverLoopOn || !poseEnabled || poseWhere !== 'receiver') {
-          console.log('[POSE][receiver] inference STOP (receiver)');
-          return;
-        }
+      if (HAS_RVFC){
+        const onFrame = async (now/*highResTs*/, metadata)=>{
+          if (!receiverLoopOn || !poseEnabled || poseWhere!=='receiver') return;
+          if (!poseDC || poseDC.readyState!=='open'){ remoteVideo.requestVideoFrameCallback(onFrame); return; }
+          if (!canProcessNow()){ remoteVideo.requestVideoFrameCallback(onFrame); return; }
 
-        // Only process when a new frame is available
-        if (lastVideoTime !== remoteVideo.currentTime) {
-          lastVideoTime = remoteVideo.currentTime;
-          const ts = performance.now();
-          const result = task.detectForVideo(remoteVideo, ts);
-          if (result?.landmarks?.length && poseDC?.readyState === 'open') {
-            // Send normalized landmarks to the sender
-            poseDC.send(JSON.stringify({ type:'pose', landmarks: result.landmarks, ts }));
+          try{
+            const result = receiverPoseTask.detectForVideo(remoteVideo, now);
+            consecutiveErrors = 0;
+            if (result?.landmarks?.length){
+              poseDC.send(JSON.stringify({ type:'pose', landmarks: result.landmarks, ts: now }));
+            }
+          }catch(e){
+            console.warn('[POSE][receiver] detect error', e?.message||e);
+            consecutiveErrors++;
+            if (consecutiveErrors >= 3){ // brief cool-down and task refresh
+              errorCooldownUntil = performance.now() + 500;
+              await softResetTask();
+            }
           }
-        }
+          remoteVideo.requestVideoFrameCallback(onFrame);
+        };
+        remoteVideo.requestVideoFrameCallback(onFrame);
+      } else {
+        // Fallback: RAF + currentTime gate
+        const loop = async ()=>{
+          if (!receiverLoopOn || !poseEnabled || poseWhere!=='receiver') return;
+          if (!poseDC || poseDC.readyState!=='open'){ requestAnimationFrame(loop); return; }
+          if (!canProcessNow()){ requestAnimationFrame(loop); return; }
+
+          const t = remoteVideo.currentTime;
+          if (t !== lastVideoTime){
+            lastVideoTime = t;
+            try{
+              const ts = performance.now();
+              const result = receiverPoseTask.detectForVideo(remoteVideo, ts);
+              consecutiveErrors = 0;
+              if (result?.landmarks?.length){
+                poseDC.send(JSON.stringify({ type:'pose', landmarks: result.landmarks, ts }));
+              }
+            }catch(e){
+              console.warn('[POSE][receiver] detect error', e?.message||e);
+              consecutiveErrors++;
+              if (consecutiveErrors >= 3){
+                errorCooldownUntil = performance.now() + 500;
+                await softResetTask();
+              }
+            }
+          }
+          requestAnimationFrame(loop);
+        };
         requestAnimationFrame(loop);
-      };
-      requestAnimationFrame(loop);
+      }
     }
 
-    function stopReceiverPoseLoop() {
-      receiverLoopOn = false;
+    function stopReceiverPoseLoop(){ receiverLoopOn=false; }
+
+    /* -------------------- signaling / rtc wiring -------------------- */
+    function setOverlayModeFromMsg(enabled, where){
+      poseEnabled = !!enabled; poseWhere = where || 'sender';
+      setOverlayVisible(poseEnabled && poseWhere==='sender');
+      if (poseEnabled && poseWhere==='receiver'){ stopReceiverPoseLoop(); lastVideoTime=-1; maybeStartReceiverLoop(); }
+      else { stopReceiverPoseLoop(); poseCtx.clearRect(0,0,poseCanvas.width, poseCanvas.height); }
     }
 
-    // ---------- WebSocket / WebRTC ----------
-    async function connectWS() {
-      return new Promise((resolve, reject) => {
-        const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
+    const sendWS = (obj)=>{ try { ws?.readyState===WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch{} };
+
+    async function connectWS(){
+      return new Promise((resolve, reject)=>{
+        const sock = new WebSocket(`${WS_ENDPOINT}?room=${encodeURIComponent(room)}`);
+        ws = sock; let opened=false;
+        const openTimeout = setTimeout(()=>{ if(!opened){ try{sock.close();}catch{}; reject(new Error('WS timeout')); } }, 15000);
         showStatus('Connecting to signaling…');
-        const sock = new WebSocket(url);
-        ws = sock;
-
-        let opened = false;
-        const openTimeout = setTimeout(() => {
-          if (!opened) { try { sock.close(); } catch{}; reject(new Error('WS timeout')); }
-        }, 15000);
-
-        sock.onopen = () => {
-          opened = true; clearTimeout(openTimeout);
-          showStatus('Signaling: connected');
-          wsRetryMs = WS_RECONNECT_MIN_MS;
-          send({ type: 'join', room });
-
+        sock.onopen = ()=>{ opened=true; clearTimeout(openTimeout); showStatus('Signaling: connected'); wsRetryMs=WS_RECONNECT_MIN_MS;
+          sendWS({type:'join', room});
           if (wsKeepalive) clearInterval(wsKeepalive);
-          wsKeepalive = setInterval(() => {
-            if (ws?.readyState === WebSocket.OPEN) send({ type:'keepalive', ts: Date.now() });
-          }, WS_KEEPALIVE_MS);
-
+          wsKeepalive = setInterval(()=>{ if (ws?.readyState===WebSocket.OPEN) sendWS({type:'keepalive', ts:Date.now()}); }, WS_KEEPALIVE_MS);
           resolve();
         };
         sock.onmessage = onSignal;
-        sock.onerror = (e) => { console.warn('[WS error]', e); };
-        sock.onclose  = () => {
-          showStatus('Signaling: closed');
-          if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
-          scheduleWSReconnect();
-        };
+        sock.onerror = (e)=>console.warn('[WS error]', e);
+        sock.onclose  = ()=>{ showStatus('Signaling: closed'); if (wsKeepalive){clearInterval(wsKeepalive); wsKeepalive=null;} scheduleWSReconnect(); };
       });
     }
-    function scheduleWSReconnect() {
+    function scheduleWSReconnect(){
       const delay = Math.min(wsRetryMs, WS_RECONNECT_MAX_MS);
-      console.log('[WS] reconnect in', delay,'ms');
-      setTimeout(() => {
-        wsRetryMs = Math.min(wsRetryMs * 2, WS_RECONNECT_MAX_MS);
-        startNegotiation();
-      }, delay);
+      setTimeout(()=>{ wsRetryMs=Math.min(wsRetryMs*2, WS_RECONNECT_MAX_MS); startNegotiation(); }, delay);
     }
-    const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
-    function createPC() {
-      if (pc) { try { pc.close(); } catch{}; pc = null; }
-      remoteDescriptionSet = false;
-      lastAnswerSdp = null;
-      candidateQueue.length = 0;
+    function createPC(){
+      try{ pc?.close(); }catch{}; pc=null;
+      remoteDescriptionSet=false; lastAnswerSdp=null; candidateQueue.length=0;
 
-      pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      pc = new RTCPeerConnection({ iceServers:[{urls:'stun:stun.l.google.com:19302'}] });
+      pc.addTransceiver('video', {direction:'recvonly'});
+      pc.addTransceiver('audio', {direction:'recvonly'});
 
-      pc.addTransceiver('video', { direction: 'recvonly' });
-      pc.addTransceiver('audio', { direction: 'recvonly' });
-
-      // Pose DC (receiver initiates)
       const ch = pc.createDataChannel('pose');
-      ch.onopen = () => {
-        console.log('[DC][receiver] pose DC open');
-        // If we were asked to run on receiver, (re)start the loop now that DC is ready
-        maybeStartReceiverLoop();
-      };
-      ch.onclose = () => { console.log('[DC][receiver] pose DC close'); };
-      ch.onerror = (e) => { console.warn('[DC][receiver] pose DC error', e); };
-      ch.onmessage = (ev) => {
-        try {
+      ch.onopen = ()=>{ console.log('[DC][receiver] pose DC open'); maybeStartReceiverLoop(); };
+      ch.onclose = ()=>{ console.log('[DC][receiver] pose DC close'); };
+      ch.onerror = (e)=>{ console.warn('[DC][receiver] pose DC error', e); };
+      ch.onmessage = (ev)=>{
+        try{
           const msg = JSON.parse(ev.data);
-          if (msg.type === 'pose-mode') {
-            poseEnabled = !!msg.enabled;
-            poseWhere   = msg.where || 'sender';
-            console.log('[POSE][receiver] mode:', { poseEnabled, poseWhere });
-            setOverlayVisible(poseEnabled && poseWhere === 'sender');
-
-            if (poseEnabled && poseWhere === 'receiver') {
-              beginViewportSettle(); // ensures alignment if we later choose to preview locally
-              stopReceiverPoseLoop(); lastVideoTime = -1; maybeStartReceiverLoop();
-            } else {
-              stopReceiverPoseLoop();
-              poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-            }
-          } else if (msg.type === 'pose') {
-            // Sender-side inference -> we display here
-            if (poseEnabled && poseWhere === 'sender') drawPoseLandmarks(msg.landmarks);
-          }
-        } catch {}
+          if (msg.type==='pose-mode'){ setOverlayModeFromMsg(!!msg.enabled, msg.where); }
+          else if (msg.type==='pose'){ if (poseEnabled && poseWhere==='sender') drawPoseLandmarks(msg.landmarks); }
+        }catch{}
       };
       poseDC = ch;
 
-      pc.onicecandidate = (ev) => { if (ev.candidate) send({ type:'candidate', candidate: ev.candidate }); };
-      pc.ontrack = (ev) => {
-        if (remoteVideo.srcObject !== ev.streams[0]) {
-          remoteVideo.srcObject = ev.streams[0];
-          tryStartMuted();
-        }
+      pc.onicecandidate = (ev)=>{ if (ev.candidate) sendWS({type:'candidate', candidate: ev.candidate}); };
+      pc.ontrack = (ev)=>{
+        if (remoteVideo.srcObject !== ev.streams[0]){ remoteVideo.srcObject = ev.streams[0]; tryStartMuted(); }
         console.log('[TRACK][receiver] ontrack:', ev.track.kind);
-        beginViewportSettle(); // align when media arrives
-        maybeStartReceiverLoop();
+        beginViewportSettle(); maybeStartReceiverLoop();
       };
-
-      pc.oniceconnectionstatechange = () => {
-        const state = pc.iceConnectionState;
-        console.log('[ICE]', state);
-        if (state === 'connected') showStatus('Connected'); else showStatus('ICE: ' + state);
-
-        if (state === 'disconnected') {
-          if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
-          setTimeout(() => {
-            if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= RESTART_ON_ICE_TIMEOUT_MS) {
-              console.log('[ICE] disconnected timeout - restarting negotiation');
-              startNegotiation(true);
-            }
-          }, RESTART_ON_ICE_TIMEOUT_MS + 50);
-        } else if (state === 'failed') {
-          console.log('[ICE] failed - restarting negotiation');
-          startNegotiation(true);
-        } else {
-          iceDisconnectedSince = null;
-        }
+      pc.oniceconnectionstatechange = ()=>{
+        const s = pc.iceConnectionState; console.log('[ICE]', s);
+        showStatus(s==='connected'?'Connected':'ICE: '+s);
+        if (s==='disconnected'){
+          if (!iceDisconnectedSince) iceDisconnectedSince=Date.now();
+          setTimeout(()=>{ if (iceDisconnectedSince && Date.now()-iceDisconnectedSince>=RESTART_ON_ICE_TIMEOUT_MS){ startNegotiation(true); } }, RESTART_ON_ICE_TIMEOUT_MS+50);
+        } else if (s==='failed'){ startNegotiation(true); } else { iceDisconnectedSince=null; }
       };
     }
 
-    async function sendCurrentOffer() {
-      if (pc?.localDescription?.type === 'offer') {
-        console.log('[WS OUT] offer (send/resend)');
-        send(pc.localDescription);
-      }
-    }
-    function startOfferResendLoop() {
-      stopOfferResendLoop();
-      offerResendTimer = setInterval(() => {
-        if (!remoteDescriptionSet) sendCurrentOffer();
-        else stopOfferResendLoop();
-      }, 2000);
-    }
-    function stopOfferResendLoop() {
-      if (offerResendTimer) clearInterval(offerResendTimer);
-      offerResendTimer = null;
-    }
+    async function sendCurrentOffer(){ if (pc?.localDescription?.type==='offer'){ console.log('[WS OUT] offer (send/resend)'); sendWS(pc.localDescription); } }
+    function startOfferResendLoop(){ stopOfferResendLoop(); offerResendTimer=setInterval(()=>{ if (!remoteDescriptionSet) sendCurrentOffer(); else stopOfferResendLoop(); }, 2000); }
+    function stopOfferResendLoop(){ if (offerResendTimer) clearInterval(offerResendTimer); offerResendTimer=null; }
 
-    async function startNegotiation(forceNewPc = false) {
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        try { await connectWS(); } catch(e) { scheduleWSReconnect(); return; }
-      }
-      if (!pc || forceNewPc) createPC();
-
-      try {
+    async function startNegotiation(forceNew=false){
+      if (!ws || ws.readyState!==WebSocket.OPEN){ try{ await connectWS(); }catch{ scheduleWSReconnect(); return; } }
+      if (!pc || forceNew) createPC();
+      try{
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         await sendCurrentOffer();
         startOfferResendLoop();
         showStatus('Offer sent, waiting for answer…');
-      } catch (e) {
-        console.error('negotiation error', e);
-        showStatus('Negotiation error');
-      }
+      }catch(e){ console.error('negotiation error', e); showStatus('Negotiation error'); }
     }
 
-    async function onSignal(evt) {
-      let msg; try { msg = JSON.parse(evt.data); } catch { return; }
-      console.log('[WS IN]', msg.type);
-
-      if (msg.type === 'answer') {
-        if (pc.signalingState !== 'have-local-offer') {
-          console.log('[SKIP] answer in state', pc.signalingState);
-          return;
-        }
-        if (lastAnswerSdp === msg.sdp) { console.log('[DUP] identical answer ignored'); return; }
-        lastAnswerSdp = msg.sdp;
-
-        showStatus('Got answer, applying…');
+    async function onSignal(evt){
+      let msg; try{ msg=JSON.parse(evt.data);}catch{ return; }
+      if (msg.type==='answer'){
+        if (pc.signalingState!=='have-local-offer') return;
+        if (lastAnswerSdp===msg.sdp) return;
+        lastAnswerSdp=msg.sdp; showStatus('Got answer, applying…');
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
-        remoteDescriptionSet = true;
-        stopOfferResendLoop();
-
-        for (const c of candidateQueue) {
-          try { await pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
-        }
-        candidateQueue.length = 0;
-
-      } else if (msg.type === 'candidate' && msg.candidate) {
+        remoteDescriptionSet=true; stopOfferResendLoop();
+        for (const c of candidateQueue){ try{ await pc.addIceCandidate(c);}catch{} }
+        candidateQueue.length=0;
+      } else if (msg.type==='candidate' && msg.candidate){
         const cand = new RTCIceCandidate(msg.candidate);
-        if (remoteDescriptionSet) {
-          try { await pc.addIceCandidate(cand); } catch (e) { console.warn('ICE add failed', e); }
-        } else {
-          candidateQueue.push(cand);
-        }
-
-      } else if (msg.type === 'peer-joined' || msg.type === 'need-offer') {
+        if (remoteDescriptionSet){ try{ await pc.addIceCandidate(cand);}catch{} } else { candidateQueue.push(cand); }
+      } else if (msg.type==='peer-joined' || msg.type==='need-offer'){
         await sendCurrentOffer();
-      } else if (msg.type === 'bye') {
-        console.log('[INFO] sender bye -> keep re-offering');
-        remoteDescriptionSet = false;
-        stopReceiverPoseLoop();
-        startOfferResendLoop();
+      } else if (msg.type==='bye'){
+        remoteDescriptionSet=false; stopReceiverPoseLoop(); startOfferResendLoop();
       }
     }
 
-    window.addEventListener('beforeunload', () => {
-      try { stopOfferResendLoop(); } catch {}
-      try { ws && ws.close(); } catch {}
-      try { pc && pc.close(); } catch {}
+    window.addEventListener('beforeunload', ()=>{
+      try{ stopOfferResendLoop(); }catch{}
+      try{ ws && ws.close(); }catch{}
+      try{ pc && pc.close(); }catch{}
       if (wsKeepalive) clearInterval(wsKeepalive);
       if (hideStatusTimer) clearTimeout(hideStatusTimer);
       stopReceiverPoseLoop();
+      try{ receiverPoseTask?.close(); }catch{}
     });
 
-    // Go!
+    /* -------------------- media events to kick alignment/inference -------------------- */
+    remoteVideo.addEventListener('loadedmetadata', ()=>{
+      console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
+      beginViewportSettle(); maybeStartReceiverLoop();
+    });
+    remoteVideo.addEventListener('playing', ()=>{
+      console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
+      updateAudioButtons(); beginViewportSettle(); maybeStartReceiverLoop();
+    });
+
+    /* -------------------- start -------------------- */
     startNegotiation();
   </script>
 </body>
