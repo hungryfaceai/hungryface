@@ -15,20 +15,20 @@
     #stage { position: fixed; inset: 0; z-index: 1; }
     #stage > * {
       position: absolute; inset: 0; width: 100vw; height: 100vh;
-      object-fit: cover; /* applies to video; harmless for canvas */
+      object-fit: contain; /* keep geometry aligned with normalized landmarks */
       display: none; pointer-events: none;
     }
-    /* Only the VIDEO gets a black background; canvas stays transparent */
-    #stage > video { background: #000; }
-    #poseCanvas { background: transparent !important; }
+    /* Video under, canvas over */
+    #local { background: #000; z-index: 1; }
+    #poseCanvas { background: transparent !important; z-index: 2; }
 
     /* Mirror video + canvas together for front camera preview only (visual mirror) */
     .mirror #local, .mirror #poseCanvas { transform: scaleX(-1); }
 
     /* UI card */
     #ui {
-      position: relative;              /* create own stacking layer */
-      z-index: 5;                      /* above stage & overlay */
+      position: relative;
+      z-index: 5; /* above stage & overlay */
       min-height: 100%;
       display: flex; align-items: center; justify-content: center; padding: 20px;
     }
@@ -217,12 +217,14 @@
     }
     function resizeCanvasToVideo() {
       const dpr = window.devicePixelRatio || 1;
-      poseCanvas.width  = Math.max(1, Math.round(localVideo.videoWidth * dpr));
-      poseCanvas.height = Math.max(1, Math.round(localVideo.videoHeight * dpr));
+      const w = Math.max(1, Math.round(localVideo.videoWidth  * dpr));
+      const h = Math.max(1, Math.round(localVideo.videoHeight * dpr));
+      if (!w || !h) return;
+      poseCanvas.width  = w;
+      poseCanvas.height = h;
       poseCanvas.style.display = (poseOn.checked && videoOn.checked) ? 'block' : 'none';
       localVideo.style.display = videoOn.checked ? 'block' : 'none';
       ctx.setTransform(1,0,0,1,0,0);
-      // ensure transparent before first draw
       ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
     }
     localVideo.addEventListener('loadedmetadata', () => {
@@ -268,7 +270,7 @@
     }
     videoOn.addEventListener('change', applyVideoToggle);
     audioOn.addEventListener('change', applyAudioToggle);
-    cameraSel.addEventListener('change', updateMirrorClass);
+    cameraSel.addEventListener('change', () => { updateMirrorClass(); resizeCanvasToVideo(); });
 
     /********** WebSocket **********/
     function connectWS(room) {
@@ -557,10 +559,13 @@
       ctx.save();
       ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
       const dutils = new DrawingUtils(ctx);
+      // IMPORTANT: use normalized landmarks directly (like your working sample)
       for (const lm of landmarks) {
-        const scaled = lm.map(p => ({ x: p.x * poseCanvas.width, y: p.y * poseCanvas.height, z: p.z, visibility: p.visibility }));
-        dutils.drawLandmarks(scaled, { radius: 3 });
-        dutils.drawConnectors(scaled, PoseLandmarker.POSE_CONNECTIONS);
+        dutils.drawLandmarks(lm, {
+          radius: (data) =>
+            DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
+        });
+        dutils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
       }
       ctx.restore();
     }
@@ -571,6 +576,7 @@
       console.log('[POSE][sender] inference START (sender)');
       const loop = async () => {
         if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') { console.log('[POSE][sender] inference STOP (sender)'); return; }
+        if (localVideo.readyState < 2) { requestAnimationFrame(loop); return; }
         const ts = performance.now();
         const result = task.detectForVideo(localVideo, ts);
         ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
