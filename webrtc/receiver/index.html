@@ -12,15 +12,15 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       overflow: hidden;
     }
-    /* Remote video fills viewport, content is letterboxed via contain */
+    /* Prefer dynamic viewport units (iOS 16+), fall back to classic */
     video#remote {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
+      width: 100dvw; height: 100dvh;
       object-fit: contain; background: #000; z-index: 1;
     }
-    /* Overlay canvas is positioned to the actual visible video box */
     canvas#poseCanvas {
-      position: fixed; /* left/top/width/height set via JS */
+      position: fixed; /* left/top/width/height set via JS to match video’s painted box */
       z-index: 2; pointer-events: none; background: transparent; display: none;
     }
 
@@ -44,7 +44,8 @@
       pointer-events: none; z-index: 5;
     }
     .status {
-      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
       color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
       text-align: center; white-space: pre-line; max-width: 90vw;
     }
@@ -97,10 +98,10 @@
 
     // Pose DC + draw state
     let poseDC = null;
-    let poseEnabled = false;   // whether sender enabled "Pose"
-    let poseWhere   = 'sender';// where inference runs (sender/receiver); we draw only if 'sender'
-    const dutils = new DrawingUtils(poseCtx);
+    let poseEnabled = false;
+    let poseWhere   = 'sender';
 
+    // ---------- Status ----------
     function showStatus(msg) {
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
@@ -114,6 +115,7 @@
       }
     }
 
+    // ---------- Audio UI ----------
     function updateAudioButtons() {
       if (remoteVideo.muted) {
         enableAudioBtn.style.display = 'block';
@@ -123,36 +125,28 @@
         disableAudioBtn.style.display = 'block';
       }
     }
-
     enableAudioBtn.style.display = 'block';
-
     async function tryStartMuted() {
       try {
         remoteVideo.muted = true;
         remoteVideo.volume = 1.0;
         await remoteVideo.play();
-      } catch (e) {
-        console.warn('autoplay (muted) blocked:', e);
-      }
+      } catch (e) { console.warn('autoplay (muted) blocked:', e); }
       updateAudioButtons();
     }
-
-    async function enableAudio(e) {
+    enableAudioBtn.addEventListener('click', async (e) => {
       e?.stopPropagation?.(); e?.preventDefault?.();
       try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); }
       catch (err) { console.warn('unmute play blocked:', err); }
       updateAudioButtons();
-    }
-
-    function disableAudio(e) {
+    });
+    disableAudioBtn.addEventListener('click', (e) => {
       e?.stopPropagation?.(); e?.preventDefault?.();
       remoteVideo.muted = true;
       updateAudioButtons();
-    }
+    });
 
-    enableAudioBtn.addEventListener('click', enableAudio);
-    disableAudioBtn.addEventListener('click', disableAudio);
-
+    // ---------- Fullscreen ----------
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -164,92 +158,118 @@
           fsBtn.textContent = 'Fullscreen';
         }
       } catch (err) { console.warn('fullscreen error', err); }
+      alignCanvasToVideo(); // snap after FS toggle
     });
-    document.addEventListener('fullscreenchange', () => {
-      fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
-      resizeCanvasToVideo();
-    });
+    document.addEventListener('fullscreenchange', alignCanvasToVideo);
     document.addEventListener('click', () => {
       if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
     });
 
     remoteVideo.addEventListener('loadedmetadata', () => {
       console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
-      resizeCanvasToVideo();
+      beginViewportSettle();
     });
     remoteVideo.addEventListener('playing', () => {
       console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
       updateAudioButtons();
-      resizeCanvasToVideo();
+      beginViewportSettle();
     });
 
-    // ---------- Canvas alignment (compute the real "contain" box) ----------
-    function containRect(viewW, viewH, videoW, videoH) {
-      const scale = Math.min(viewW / (videoW||1), viewH / (videoH||1));
-      const w = Math.round(videoW * scale);
-      const h = Math.round(videoH * scale);
-      const x = Math.floor((viewW - w) / 2);
-      const y = Math.floor((viewH - h) / 2);
+    // ---------- Canvas alignment (robust to iOS rotation/toolbars) ----------
+    function containRect(containerW, containerH, contentW, contentH) {
+      const scale = Math.min(containerW / (contentW||1), containerH / (contentH||1));
+      const w = Math.round(contentW * scale);
+      const h = Math.round(contentH * scale);
+      const x = Math.floor((containerW - w) / 2);
+      const y = Math.floor((containerH - h) / 2);
       return { left:x, top:y, width:w, height:h };
     }
 
-    function resizeCanvasToVideo() {
-      // Use the viewport size; the video element itself is full-viewport with object-fit:contain
-      const viewW = window.innerWidth;
-      const viewH = window.innerHeight;
-      const vidW  = remoteVideo.videoWidth  || 1;
-      const vidH  = remoteVideo.videoHeight || 1;
+    function alignCanvasToVideo() {
+      // Where is the <video> element *on screen*?
+      const box = remoteVideo.getBoundingClientRect(); // in CSS px, viewport coords
+      const containerW = Math.round(box.width);
+      const containerH = Math.round(box.height);
+      const vidW = remoteVideo.videoWidth  || 1;
+      const vidH = remoteVideo.videoHeight || 1;
 
-      const rect = containRect(viewW, viewH, vidW, vidH);
+      // What is the painted image rect *inside* that element (object-fit: contain)?
+      const fit = containRect(containerW, containerH, vidW, vidH);
 
-      poseCanvas.style.left   = rect.left + 'px';
-      poseCanvas.style.top    = rect.top  + 'px';
-      poseCanvas.style.width  = rect.width  + 'px';
-      poseCanvas.style.height = rect.height + 'px';
+      // Place canvas exactly over that painted rect (position: fixed uses viewport coords)
+      const leftCSS = Math.round(box.left + fit.left);
+      const topCSS  = Math.round(box.top  + fit.top);
+
+      poseCanvas.style.left   = leftCSS + 'px';
+      poseCanvas.style.top    = topCSS  + 'px';
+      poseCanvas.style.width  = fit.width  + 'px';
+      poseCanvas.style.height = fit.height + 'px';
 
       const dpr = window.devicePixelRatio || 1;
-      poseCanvas.width  = Math.max(1, Math.round(rect.width  * dpr));
-      poseCanvas.height = Math.max(1, Math.round(rect.height * dpr));
+      const needW = Math.max(1, Math.round(fit.width  * dpr));
+      const needH = Math.max(1, Math.round(fit.height * dpr));
+      if (poseCanvas.width !== needW || poseCanvas.height !== needH) {
+        poseCanvas.width  = needW;
+        poseCanvas.height = needH;
+      }
       poseCtx.setTransform(1,0,0,1,0,0);
     }
 
+    // Re-align through the “settle” period after rotation / toolbar animation
+    let settleRAF = 0, settleUntil = 0;
+    function beginViewportSettle(durationMs = 1000) {
+      settleUntil = performance.now() + durationMs;
+      if (settleRAF) return;
+      const tick = () => {
+        alignCanvasToVideo();
+        if (performance.now() < settleUntil) {
+          settleRAF = requestAnimationFrame(tick);
+        } else {
+          cancelAnimationFrame(settleRAF); settleRAF = 0;
+          alignCanvasToVideo();
+        }
+      };
+      tick();
+    }
+
+    // Keep aligned as environment changes
     ['resize','orientationchange','scroll'].forEach(ev =>
-      window.addEventListener(ev, resizeCanvasToVideo)
+      window.addEventListener(ev, () => beginViewportSettle(), { passive: true })
     );
     if (window.visualViewport) {
       ['resize','scroll'].forEach(ev =>
-        window.visualViewport.addEventListener(ev, resizeCanvasToVideo)
+        window.visualViewport.addEventListener(ev, () => beginViewportSettle(), { passive: true })
       );
     }
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) beginViewportSettle();
+    });
 
-    // ---------- Drawing (normalized landmarks using DrawingUtils) ----------
-    function clearPose() {
-      poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-    }
+    // ---------- Drawing ----------
     function setOverlayVisible(v) {
-      if (v) resizeCanvasToVideo();
       poseCanvas.style.display = v ? 'block' : 'none';
-      if (!v) clearPose();
+      if (v) beginViewportSettle();
+      else poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
     function drawPoseLandmarks(landmarks) {
-      if (!poseEnabled || poseWhere !== 'sender') return;   // draw only when sender runs inference
+      if (!poseEnabled || poseWhere !== 'sender') return;
       if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
 
       poseCtx.save();
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
 
+      const utils = new DrawingUtils(poseCtx);
       for (const lm of landmarks) {
-        dutils.drawLandmarks(lm, {
+        utils.drawLandmarks(lm, {
           radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
         });
-        dutils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+        utils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
       }
-
       poseCtx.restore();
     }
 
-    // ---------- Signaling + WebRTC ----------
-    let wsOpenResolve;
+    // ---------- WebSocket / WebRTC ----------
+    let wsKeepaliveId;
     async function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
@@ -305,7 +325,7 @@
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
-      // Create the pose DataChannel from the receiver side
+      // Pose DC (receiver initiates)
       const ch = pc.createDataChannel('pose');
       ch.onopen = () => { console.log('[DC][receiver] pose DC open'); };
       ch.onclose = () => { console.log('[DC][receiver] pose DC close'); };
@@ -318,9 +338,10 @@
             poseWhere   = msg.where || 'sender';
             console.log('[POSE][receiver] mode:', { poseEnabled, poseWhere });
             setOverlayVisible(poseEnabled && poseWhere === 'sender');
-            if (!(poseEnabled && poseWhere === 'sender')) clearPose();
+            if (!(poseEnabled && poseWhere === 'sender')) {
+              poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+            }
           } else if (msg.type === 'pose') {
-            // Keep drawing even after sender preview ends — sender continues sending
             if (poseEnabled && poseWhere === 'sender') drawPoseLandmarks(msg.landmarks);
           }
         } catch {}
@@ -334,8 +355,7 @@
           tryStartMuted();
         }
         console.log('[TRACK][receiver] ontrack:', ev.track.kind);
-        // Make sure overlay gets sized when first media arrives
-        requestAnimationFrame(resizeCanvasToVideo);
+        beginViewportSettle(); // align when media arrives
       };
 
       pc.oniceconnectionstatechange = () => {
@@ -443,6 +463,7 @@
       if (hideStatusTimer) clearTimeout(hideStatusTimer);
     });
 
+    // Go!
     startNegotiation();
   </script>
 </body>
