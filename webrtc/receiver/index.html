@@ -12,13 +12,17 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       overflow: hidden;
     }
-    /* Video and overlay */
-    #remote, #poseCanvas {
+    /* Remote video is letterboxed (no crop) */
+    video#remote {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;
+      object-fit: contain; background: #000; z-index: 1;
     }
-    #remote { object-fit: contain; background: #000; z-index: 1; }
-    #poseCanvas { background: transparent !important; z-index: 2; pointer-events: none; }
+    /* Overlay canvas is positioned by JS to match remote's visible box */
+    canvas#poseCanvas {
+      position: fixed; /* left/top/width/height set via JS */
+      z-index: 2; pointer-events: none; background: transparent; display: none;
+    }
 
     .btn {
       padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
@@ -40,8 +44,7 @@
       pointer-events: none; z-index: 5;
     }
     .status {
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
       color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
       text-align: center; white-space: pre-line; max-width: 90vw;
     }
@@ -75,8 +78,7 @@
 
     const remoteVideo = document.getElementById('remote');
     const poseCanvas  = document.getElementById('poseCanvas');
-    const ctx = poseCanvas.getContext('2d', { alpha: true });
-    let drawingUtils = new DrawingUtils(ctx);
+    const poseCtx     = poseCanvas.getContext('2d', { alpha: true });
 
     const fsBtn = document.getElementById('fsBtn');
     const enableAudioBtn = document.getElementById('enableAudioBtn');
@@ -93,38 +95,19 @@
     let iceDisconnectedSince = null;
     let hideStatusTimer = null;
 
-    // Pose DC
+    // Pose DC + draw state
     let poseDC = null;
-    let poseDrawEnabled = false; // true when sender runs inference (pose-mode enabled && where=sender)
-
-    function resizeCanvasToVideo() {
-      const dpr = window.devicePixelRatio || 1;
-      const w = Math.max(1, Math.round(remoteVideo.videoWidth  * dpr));
-      const h = Math.max(1, Math.round(remoteVideo.videoHeight * dpr));
-      if (!w || !h) return;
-      poseCanvas.width = w; poseCanvas.height = h;
-      ctx.setTransform(1,0,0,1,0,0);
-      ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
-    }
-    remoteVideo.addEventListener('loadedmetadata', () => {
-      console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
-      resizeCanvasToVideo();
-    });
-    remoteVideo.addEventListener('playing', () => {
-      console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
-      updateAudioButtons();
-      resizeCanvasToVideo();
-    });
+    let poseEnabled = false;   // whether sender enabled "Pose"
+    let poseWhere   = 'sender';// where inference runs (sender/receiver); we draw only if 'sender'
+    const dutils = new DrawingUtils(poseCtx);
 
     function showStatus(msg) {
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
       console.log('[STATUS]', msg);
-
       if (msg === 'Connected') {
         if (hideStatusTimer) clearTimeout(hideStatusTimer);
-        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'),
-          STATUS_HIDE_AFTER_CONNECTED_MS);
+        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
       } else {
         if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
         overlay.classList.remove('hidden');
@@ -155,21 +138,14 @@
     }
 
     async function enableAudio(e) {
-      e?.stopPropagation?.();
-      e?.preventDefault?.();
-      try {
-        remoteVideo.muted = false;
-        remoteVideo.volume = 1.0;
-        await remoteVideo.play();
-      } catch (err) {
-        console.warn('unmute play blocked:', err);
-      }
+      e?.stopPropagation?.(); e?.preventDefault?.();
+      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); }
+      catch (err) { console.warn('unmute play blocked:', err); }
       updateAudioButtons();
     }
 
     function disableAudio(e) {
-      e?.stopPropagation?.();
-      e?.preventDefault?.();
+      e?.stopPropagation?.(); e?.preventDefault?.();
       remoteVideo.muted = true;
       updateAudioButtons();
     }
@@ -196,6 +172,74 @@
       if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
     });
 
+    remoteVideo.addEventListener('loadedmetadata', () => {
+      console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
+      resizeCanvasToVideo();
+    });
+    remoteVideo.addEventListener('playing', () => {
+      console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
+      updateAudioButtons();
+      resizeCanvasToVideo();
+    });
+
+    // --- Canvas alignment (same strategy as sender) ---
+    function calcViewportContainRect() {
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const vwVid = remoteVideo.videoWidth || 1, vhVid = remoteVideo.videoHeight || 1;
+      const scale = Math.min(vw / vwVid, vh / vhVid);
+      const w = vwVid * scale, h = vhVid * scale;
+      const x = (vw - w) / 2, y = (vh - h) / 2;
+      return { left:x, top:y, width:w, height:h };
+    }
+    function resizeCanvasToVideo() {
+      let rect = remoteVideo.getBoundingClientRect();
+      if (!rect.width || !rect.height) rect = calcViewportContainRect();
+
+      poseCanvas.style.left   = rect.left + 'px';
+      poseCanvas.style.top    = rect.top  + 'px';
+      poseCanvas.style.width  = rect.width  + 'px';
+      poseCanvas.style.height = rect.height + 'px';
+
+      const dpr = window.devicePixelRatio || 1;
+      poseCanvas.width  = Math.max(1, Math.round(rect.width  * dpr));
+      poseCanvas.height = Math.max(1, Math.round(rect.height * dpr));
+      poseCtx.setTransform(1,0,0,1,0,0);
+    }
+    ['resize','orientationchange','scroll'].forEach(ev =>
+      window.addEventListener(ev, resizeCanvasToVideo)
+    );
+    if (window.visualViewport) {
+      ['resize','scroll'].forEach(ev =>
+        window.visualViewport.addEventListener(ev, resizeCanvasToVideo)
+      );
+    }
+
+    // --- Drawing (normalized landmarks using DrawingUtils) ---
+    function clearPose() {
+      poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+    }
+    function setOverlayVisible(v) {
+      poseCanvas.style.display = v ? 'block' : 'none';
+      if (!v) clearPose();
+    }
+    function drawPoseLandmarks(landmarks) {
+      if (!poseEnabled || poseWhere !== 'sender') return;   // draw only when sender runs inference
+      if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
+
+      poseCtx.save();
+      poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+
+      for (const lm of landmarks) {
+        dutils.drawLandmarks(lm, {
+          radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
+        });
+        dutils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+      }
+
+      poseCtx.restore();
+    }
+
+    // --- Signaling + WebRTC ---
     async function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
@@ -230,7 +274,6 @@
         };
       });
     }
-
     function scheduleWSReconnect() {
       const delay = Math.min(wsRetryMs, WS_RECONNECT_MAX_MS);
       console.log('[WS] reconnect in', delay,'ms');
@@ -239,7 +282,6 @@
         startNegotiation();
       }, delay);
     }
-
     const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
     function createPC() {
@@ -253,30 +295,27 @@
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
-      // Create pose data channel (sender will see ondatachannel)
+      // Create the pose DataChannel from the receiver side
       poseDC = pc.createDataChannel('pose');
       poseDC.onopen = () => { console.log('[DC][receiver] pose DC open'); };
       poseDC.onclose = () => { console.log('[DC][receiver] pose DC close'); };
-      poseDC.onerror = (e) => { console.log('[DC][receiver] pose DC error', e); };
+      poseDC.onerror = (e) => { console.warn('[DC][receiver] pose DC error', e); };
       poseDC.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
           if (msg.type === 'pose-mode') {
-            // Sender tells us whether it’s running inference and where to draw
-            poseDrawEnabled = !!msg.enabled && msg.where === 'sender';
-            if (!poseDrawEnabled) { ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height); }
-          } else if (msg.type === 'pose' && poseDrawEnabled) {
-            const lmsList = msg.landmarks; // normalized landmarks from sender
-            ctx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
-            for (const lm of lmsList) {
-              drawingUtils.drawLandmarks(lm, {
-                radius: (data) =>
-                  DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
-              });
-              drawingUtils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+            poseEnabled = !!msg.enabled;
+            poseWhere   = msg.where || 'sender';
+            console.log('[POSE][receiver] mode:', { poseEnabled, poseWhere });
+            setOverlayVisible(poseEnabled && poseWhere === 'sender');
+            if (!(poseEnabled && poseWhere === 'sender')) clearPose();
+          } else if (msg.type === 'pose') {
+            // Keep drawing even after sender preview ends (sender continues sending)
+            if (poseEnabled && poseWhere === 'sender') {
+              drawPoseLandmarks(msg.landmarks);
             }
           }
-        } catch {}
+        } catch (e) { /* ignore */ }
       };
 
       pc.onicecandidate = (ev) => { if (ev.candidate) send({ type:'candidate', candidate: ev.candidate }); };
@@ -316,7 +355,6 @@
         send(pc.localDescription);
       }
     }
-
     function startOfferResendLoop() {
       stopOfferResendLoop();
       offerResendTimer = setInterval(() => {
@@ -356,10 +394,7 @@
           console.log('[SKIP] answer in state', pc.signalingState);
           return;
         }
-        if (lastAnswerSdp === msg.sdp) {
-          console.log('[DUP] identical answer ignored');
-          return;
-        }
+        if (lastAnswerSdp === msg.sdp) { console.log('[DUP] identical answer ignored'); return; }
         lastAnswerSdp = msg.sdp;
 
         showStatus('Got answer, applying…');
