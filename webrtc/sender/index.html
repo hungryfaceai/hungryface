@@ -547,7 +547,9 @@
           delegate: USE_CPU_DELEGATE ? "CPU" : "GPU"
         },
         runningMode: "VIDEO",
-        numPoses: 1
+        numPoses: 1,
+        // ⬇️ Enable person-vs-background mask (local preview only)
+        outputSegmentationMasks: true
       });
       return poseTask;
     }
@@ -555,16 +557,29 @@
       const payload = JSON.stringify({ type:'pose', landmarks, ts: performance.now() });
       for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
     }
-    function drawPoseOnSender(landmarks) {
-      if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
-      const dutils = new DrawingUtils(ctx);
+    function drawPoseOnSender(landmarks, mask) {
+      if (!poseCanvas.width || !poseCanvas.height) return;
+      const w = poseCanvas.width, h = poseCanvas.height;
+
       ctx.save();
-      ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-      for (const lm of landmarks) {
-        dutils.drawLandmarks(lm, {
-          radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
-        });
-        dutils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+      ctx.clearRect(0,0, w, h);
+
+      // Draw silhouette first (semi-transparent)
+      if (mask) {
+        ctx.globalAlpha = 0.35;           // adjust opacity to taste
+        ctx.drawImage(mask, 0, 0, w, h);  // mask is already aligned to the video frame
+        ctx.globalAlpha = 1.0;
+      }
+
+      // Then draw landmarks on top
+      if (landmarks?.length) {
+        const dutils = new DrawingUtils(ctx);
+        for (const lm of landmarks) {
+          dutils.drawLandmarks(lm, {
+            radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
+          });
+          dutils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+        }
       }
       ctx.restore();
     }
@@ -586,12 +601,17 @@
 
           try {
             const result = task.detectForVideo(localVideo, now);
-            if (result?.landmarks?.length) {
-              if (document.body.classList.contains('previewing')) drawPoseOnSender(result.landmarks);
-              sendPoseToReceivers(result.landmarks);
-            } else if (document.body.classList.contains('previewing')) {
-              ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+            const landmarks = result?.landmarks;
+            const mask = result?.segmentationMasks?.[0];
+
+            // Draw locally only during preview
+            if (document.body.classList.contains('previewing')) {
+              if (landmarks?.length || mask) drawPoseOnSender(landmarks, mask);
+              else ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
             }
+
+            // Keep sending just the landmarks (no mask)
+            if (landmarks?.length) sendPoseToReceivers(landmarks);
           } catch (e) {
             console.warn('[POSE][sender] detect error', e?.message || e);
           }
@@ -600,17 +620,19 @@
         localVideo.requestVideoFrameCallback(onFrame);
       } else {
         const loop = () => {
-          if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') { return; }
+          if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') return;
           if (canProcessNow()) {
             const ts = performance.now();
             try {
               const result = task.detectForVideo(localVideo, ts);
-              if (result?.landmarks?.length) {
-                if (document.body.classList.contains('previewing')) drawPoseOnSender(result.landmarks);
-                sendPoseToReceivers(result.landmarks);
-              } else if (document.body.classList.contains('previewing')) {
-                ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+              const landmarks = result?.landmarks;
+              const mask = result?.segmentationMasks?.[0];
+
+              if (document.body.classList.contains('previewing')) {
+                if (landmarks?.length || mask) drawPoseOnSender(landmarks, mask);
+                else ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
               }
+              if (landmarks?.length) sendPoseToReceivers(landmarks);
             } catch (e) {
               console.warn('[POSE][sender] detect error', e?.message || e);
             }
@@ -629,7 +651,7 @@
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'pose' && document.body.classList.contains('previewing')) {
-          drawPoseOnSender(msg.landmarks);
+          drawPoseOnSender(msg.landmarks, null);
         }
       } catch {}
     }
