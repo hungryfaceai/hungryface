@@ -12,15 +12,21 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       overflow: hidden;
     }
-    /* Prefer dynamic viewport units (iOS 16+), fall back to classic */
-    video#remote {
+
+    /* Stage holds BOTH the video and the canvas and is what we fullscreen */
+    #stage {
       position: fixed; inset: 0;
-      width: 100vw; height: 100vh;
-      width: 100dvw; height: 100dvh;
-      object-fit: contain; background: #000; z-index: 1;
+      width: 100vw; height: 100vh;          /* fallback */
+      width: 100dvw; height: 100dvh;        /* iOS dynamic viewport */
+      z-index: 1; background: #000;
     }
-    canvas#poseCanvas {
-      position: fixed; /* left/top/width/height set via JS to match video’s painted box */
+    #stage > video {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: contain; background: #000;
+    }
+    #stage > canvas {
+      position: absolute;                    /* aligned via JS inside stage */
       z-index: 2; pointer-events: none; background: transparent; display: none;
     }
 
@@ -59,8 +65,11 @@
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
   </div>
 
-  <video id="remote" autoplay playsinline></video>
-  <canvas id="poseCanvas"></canvas>
+  <!-- NEW: fullscreen wrapper for video + canvas -->
+  <div id="stage">
+    <video id="remote" autoplay playsinline></video>
+    <canvas id="poseCanvas"></canvas>
+  </div>
 
   <div id="overlay" class="overlay">
     <div id="status" class="status">Idle</div>
@@ -77,6 +86,7 @@
     const RESTART_ON_ICE_TIMEOUT_MS = 5000;
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
+    const stage       = document.getElementById('stage');        // NEW
     const remoteVideo = document.getElementById('remote');
     const poseCanvas  = document.getElementById('poseCanvas');
     const poseCtx     = poseCanvas.getContext('2d', { alpha: true });
@@ -146,24 +156,25 @@
       updateAudioButtons();
     });
 
-    // ---------- Fullscreen ----------
+    // ---------- Fullscreen (make the STAGE fullscreen so canvas stays visible) ----------
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
         if (!document.fullscreenElement) {
-          await (remoteVideo.requestFullscreen?.call(remoteVideo) || document.documentElement.requestFullscreen());
+          await (stage.requestFullscreen?.call(stage) || document.documentElement.requestFullscreen());
           fsBtn.textContent = 'Exit fullscreen';
         } else {
           await document.exitFullscreen();
           fsBtn.textContent = 'Fullscreen';
         }
       } catch (err) { console.warn('fullscreen error', err); }
-      alignCanvasToVideo(); // snap after FS toggle
+      beginViewportSettle(); // snap after FS toggle
     });
-    document.addEventListener('fullscreenchange', alignCanvasToVideo);
-    document.addEventListener('click', () => {
-      if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+    document.addEventListener('fullscreenchange', () => {
+      fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+      beginViewportSetle();
     });
+    // NOTE: removed the “click anywhere to exit fullscreen” handler so FS is stable
 
     remoteVideo.addEventListener('loadedmetadata', () => {
       console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
@@ -175,7 +186,7 @@
       beginViewportSettle();
     });
 
-    // ---------- Canvas alignment (robust to iOS rotation/toolbars) ----------
+    // ---------- Canvas alignment (wrapper-aware) ----------
     function containRect(containerW, containerH, contentW, contentH) {
       const scale = Math.min(containerW / (contentW||1), containerH / (contentH||1));
       const w = Math.round(contentW * scale);
@@ -186,19 +197,18 @@
     }
 
     function alignCanvasToVideo() {
-      // Where is the <video> element *on screen*?
-      const box = remoteVideo.getBoundingClientRect(); // in CSS px, viewport coords
-      const containerW = Math.round(box.width);
-      const containerH = Math.round(box.height);
+      const stageBox = stage.getBoundingClientRect();
+      const videoBox = remoteVideo.getBoundingClientRect(); // inside stage
+      const containerW = Math.round(videoBox.width);
+      const containerH = Math.round(videoBox.height);
       const vidW = remoteVideo.videoWidth  || 1;
       const vidH = remoteVideo.videoHeight || 1;
 
-      // What is the painted image rect *inside* that element (object-fit: contain)?
       const fit = containRect(containerW, containerH, vidW, vidH);
 
-      // Place canvas exactly over that painted rect (position: fixed uses viewport coords)
-      const leftCSS = Math.round(box.left + fit.left);
-      const topCSS  = Math.round(box.top  + fit.top);
+      // Position canvas *inside the stage* (absolute), offset from stage's top-left
+      const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
+      const topCSS  = Math.round((videoBox.top  - stageBox.top)  + fit.top);
 
       poseCanvas.style.left   = leftCSS + 'px';
       poseCanvas.style.top    = topCSS  + 'px';
@@ -215,7 +225,7 @@
       poseCtx.setTransform(1,0,0,1,0,0);
     }
 
-    // Re-align through the “settle” period after rotation / toolbar animation
+    // Post-change settle loop (iOS toolbars/orientation)
     let settleRAF = 0, settleUntil = 0;
     function beginViewportSettle(durationMs = 1000) {
       settleUntil = performance.now() + durationMs;
@@ -232,7 +242,6 @@
       tick();
     }
 
-    // Keep aligned as environment changes
     ['resize','orientationchange','scroll'].forEach(ev =>
       window.addEventListener(ev, () => beginViewportSettle(), { passive: true })
     );
@@ -465,6 +474,9 @@
 
     // Go!
     startNegotiation();
+
+    // tiny typo guard
+    function beginViewportSetle(){ beginViewportSettle(); }
   </script>
 </body>
 </html>
