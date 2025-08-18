@@ -5,7 +5,7 @@
   <title>Baby Monitor – Receiver</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
   <style>
-    :root { color-scheme: dark; --ui-pad:12px; /* also controls hamburger offset */ }
+    :root { color-scheme: dark; --ui-pad:12px; }
 
     html, body {
       margin: 0; height: 100%;
@@ -61,7 +61,7 @@
     /* ---------- Left Sidebar (auto-hide; no dragger) ---------- */
     #sidebar {
       position: fixed; top: 0; bottom: 0; left: 0;
-      width: min(240px, 80vw);              /* responsive, no resizer/drag */
+      width: min(240px, 80vw);              /* fixed width; no resizer/drag */
       background: rgba(0,0,0,0.92);
       border-right: 1px solid rgba(255,255,255,0.1);
       backdrop-filter: blur(2px);
@@ -72,8 +72,9 @@
       display: flex; flex-direction: column;
     }
     #sidebar.visible { transform: translateX(0); }
+
     #sidebar .menu {
-      padding: 8px; /* extra top padding so text never sits under buttons */
+      padding: 8px;
       overflow-y: auto; -webkit-overflow-scrolling: touch;
     }
     #sidebar .nav-item {
@@ -96,11 +97,12 @@
       border-radius: 10px; border: 1px solid rgba(255,255,255,0.2);
       background: rgba(0,0,0,0.6);
       cursor: pointer; z-index: 30; user-select: none;
-      transition: opacity .25s ease, left .25s ease; /* slide to the right of drawer */
+      transition: opacity .25s ease;
     }
     #hamburger span { display: block; height: 2px; border-radius: 2px; background: #fff; }
     #hamburger[aria-expanded="true"] { background: rgba(255,255,255,0.08); }
     #hamburger.faded { opacity: 0; pointer-events: none; }
+    #hamburger.hidden { display: none; } /* hide entirely while drawer open */
   </style>
 </head>
 <body>
@@ -170,72 +172,66 @@
     let sidebarTimer = null;
     function hideSidebar() {
       sidebar.classList.remove('visible');
+      hamburger.classList.remove('hidden');         // show button when drawer closes
       hamburger.setAttribute('aria-expanded', 'false');
       clearTimeout(sidebarTimer); sidebarTimer = null;
-      positionHamburger();
+      resetHamburgerFade();                         // resume fade behavior
     }
     function showSidebar() {
       sidebar.classList.add('visible');
+      hamburger.classList.add('hidden');            // hide button entirely while open
       hamburger.setAttribute('aria-expanded', 'true');
-      resetSidebarAutohide();
-      showHamburger(); // keep hamburger visible while interacting
-      positionHamburger();
+      clearTimeout(sidebarTimer);
+      sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
     }
     function toggleSidebar() {
       if (sidebar.classList.contains('visible')) hideSidebar();
       else showSidebar();
     }
-    function resetSidebarAutohide() {
-      clearTimeout(sidebarTimer);
-      sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
-    }
 
-    // Ensure hamburger never overlaps the menu text:
-    // when the drawer is open, move it just to the right of the sidebar.
-    function positionHamburger() {
-      const pad = 12; // keep in sync with --ui-pad
-      const w = sidebar.classList.contains('visible') ? Math.round(sidebar.getBoundingClientRect().width) : 0;
-      document.documentElement.style.setProperty('--hamburger-left', (w + pad) + 'px');
-    }
-
-    // Hamburger auto-fade in fullscreen
+    // Hamburger auto-fade in fullscreen (only when visible)
     const HAMBURGER_FADE_MS = 4000;
     let hamburgerFadeTimer = null;
     function showHamburger() {
       hamburger.classList.remove('faded');
       hamburger.setAttribute('aria-hidden', 'false');
     }
-    function hideHamburger() {
+    function hideHamburgerBtn() {
       hamburger.classList.add('faded');
       hamburger.setAttribute('aria-hidden', 'true');
     }
     function resetHamburgerFade() {
+      if (hamburger.classList.contains('hidden')) return; // don't touch while drawer open
       showHamburger();
       clearTimeout(hamburgerFadeTimer);
       if (document.fullscreenElement) {
         hamburgerFadeTimer = setTimeout(() => {
-          if (!sidebar.classList.contains('visible')) hideHamburger();
+          if (!sidebar.classList.contains('visible') && !hamburger.classList.contains('hidden')) {
+            hideHamburgerBtn();
+          }
         }, HAMBURGER_FADE_MS);
       } else {
         showHamburger(); // keep visible when not in fullscreen
       }
     }
 
-    // Discoverability: show once on load
+    // Discoverability: open once on load, then auto-hide -> hamburger returns
     showSidebar();
-    resetHamburgerFade();
-    positionHamburger();
 
     // Toggle via hamburger
     hamburger.addEventListener('click', (e) => {
       e.stopPropagation();
       toggleSidebar();
+      // if we just closed the drawer, fade timer should start
       resetHamburgerFade();
     });
 
-    // Keep drawer open while interacting, and keep hamburger visible
+    // Keep drawer open while interacting
     ['mousemove','pointermove','wheel','touchstart','click','keydown'].forEach(ev =>
-      sidebar.addEventListener(ev, () => { resetSidebarAutohide(); resetHamburgerFade(); }, { passive: true })
+      sidebar.addEventListener(ev, () => {
+        clearTimeout(sidebarTimer);
+        sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
+      }, { passive: true })
     );
 
     // Global activity revives hamburger (mainly in fullscreen)
@@ -243,17 +239,9 @@
       window.addEventListener(ev, () => resetHamburgerFade(), { passive: true })
     );
 
-    // Reposition hamburger on resize/orientation/fullscreen (drawer width may change)
-    ['resize','orientationchange'].forEach(ev =>
-      window.addEventListener(ev, () => positionHamburger(), { passive: true })
-    );
-
     // Close drawer with Escape
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        hideSidebar();
-        resetHamburgerFade();
-      }
+      if (e.key === 'Escape') hideSidebar();
     });
 
     // ---------- Status ----------
@@ -290,7 +278,7 @@
         remoteVideo.muted = true;
         remoteVideo.volume = 1.0;
         await remoteVideo.play();
-      } catch (e) { /* autoplay blocked */ }
+      } catch (e) { /* autoplay might be blocked */ }
       updateAudioButtons();
     }
     enableAudioBtn.addEventListener('click', async (e) => {
@@ -317,15 +305,17 @@
         }
       } catch {}
       beginViewportSettle();
-      positionHamburger();
+      resetHamburgerFade();
     });
 
     document.addEventListener('fullscreenchange', () => {
       fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
       beginViewportSetle();
-      if (sidebar.classList.contains('visible')) resetSidebarAutohide();
+      if (sidebar.classList.contains('visible')) {
+        clearTimeout(sidebarTimer);
+        sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
+      }
       resetHamburgerFade();
-      positionHamburger();
     });
 
     // ---------- Canvas alignment ----------
@@ -394,7 +384,7 @@
       if (!document.hidden) beginViewportSettle();
     });
 
-    // ---------- Drawing ----------
+    // ---------- WebSocket / WebRTC ----------
     let ws = null, wsKeepalive = null, wsRetryMs = WS_RECONNECT_MIN_MS;
     let pc = null;
     let remoteDescriptionSet = false;
@@ -430,7 +420,6 @@
       poseCtx.restore();
     }
 
-    // ---------- WebSocket / WebRTC ----------
     const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
     async function connectWS() {
@@ -488,8 +477,8 @@
 
       // Pose DC (receiver initiates)
       const ch = pc.createDataChannel('pose');
-      ch.onopen = () => { /* ready */ };
-      ch.onclose = () => { /* closed */ };
+      ch.onopen = () => {};
+      ch.onclose = () => {};
       ch.onerror = (e) => { console.warn('[DC][receiver] pose DC error', e); };
       ch.onmessage = (ev) => {
         try {
