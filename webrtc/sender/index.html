@@ -142,23 +142,12 @@
   <div class="overlay"><div class="status" id="status">Idle</div></div>
 
   <script type="module">
-    /* ---------- env / feature flags ---------- */
-    const ua = navigator.userAgent;
-    const IS_IOS    = /iP(hone|ad|od)/.test(ua);
-    const IS_SAFARI = /^((?!chrome|android).)*safari/i.test(ua);
-    const USE_CPU_DELEGATE = IS_IOS || IS_SAFARI; // GPU is flaky on WebKit
-    const HAS_RVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
-
-    /* ---------- constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
     const NEED_OFFER_INTERVAL_MS = 3000;
-
-    // ▶️ Upgraded to latest stable Tasks Vision (pinned)
-    const TASKS_URL  = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
+    const TASKS_URL  = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     const WASM_DIR   = TASKS_URL + "/wasm";
 
-    /* ---------- DOM ---------- */
     const roomInput = document.getElementById('room');
     const videoOn   = document.getElementById('videoOn');
     const audioOn   = document.getElementById('audioOn');
@@ -174,7 +163,6 @@
     const poseOn    = document.getElementById('poseOn');
     const poseWhere = document.getElementById('poseWhere');
 
-    /* ---------- state ---------- */
     let ws = null, pc = null, localStream = null;
     let started = false, hideUITimer = null;
 
@@ -189,7 +177,6 @@
     let poseTask = null, poseLoopRunning = false;
     const ctx = poseCanvas.getContext('2d', { alpha: true });
 
-    /* ---------- UI helpers ---------- */
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
     const currentRoom = () => (roomInput.value || 'Baby').trim();
     const isFront = () => (cameraSel.value === 'user');
@@ -247,7 +234,6 @@
       );
     }
 
-    /* ---------- media ---------- */
     async function getMedia() {
       const wantVideo = videoOn.checked;
       const wantAudio = audioOn.checked;
@@ -287,7 +273,6 @@
     audioOn.addEventListener('change', applyAudioToggle);
     cameraSel.addEventListener('change', () => { updateMirrorClass(); resizeCanvasToVideo(); });
 
-    /* ---------- signaling ---------- */
     function connectWS(room) {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
@@ -378,7 +363,6 @@
       }
     }
 
-    /* ---------- preview / overlay ---------- */
     function beginPreviewWindow(minutes) {
       const ms = Math.max(0, Math.round((Number(minutes) || 1) * 60000));
       if (ms === 0) { enterBlackout(); return; }
@@ -446,7 +430,6 @@
       }, UI_AUTOHIDE_MS);
     }
 
-    /* ---------- lifecycle ---------- */
     async function startOrStop() {
       try {
         if (started) { await stopStreaming(); return; }
@@ -522,7 +505,6 @@
     window.addEventListener('beforeunload', stopStreaming);
     startBtn.addEventListener('click', startOrStop);
 
-    /* ---------- pose (MediaPipe Tasks Vision) ---------- */
     function announcePoseMode() {
       const enabled = !!poseOn.checked;
       const where   = poseWhere.value;
@@ -534,7 +516,7 @@
     async function ensureTasksLoaded() {
       if (PoseLandmarker) return;
       ({ PoseLandmarker, FilesetResolver, DrawingUtils } = await import(TASKS_URL));
-      console.log('[POSE][sender] tasks-vision loaded');
+      console.log('[POSE][sender] DrawingUtils loaded');
     }
     async function ensurePoseTask() {
       await ensureTasksLoaded();
@@ -544,7 +526,7 @@
         baseOptions: {
           modelAssetPath:
             "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
-          delegate: USE_CPU_DELEGATE ? "CPU" : "GPU"
+          delegate: "GPU"
         },
         runningMode: "VIDEO",
         numPoses: 1
@@ -568,57 +550,26 @@
       }
       ctx.restore();
     }
-    function canProcessNow() {
-      if (!localVideo.videoWidth || !localVideo.videoHeight) return false;
-      if (localVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return false;
-      return true;
-    }
     async function startSenderPoseLoop() {
       if (!started || !poseOn.checked || poseWhere.value !== 'sender') return;
       const task = await ensurePoseTask();
       poseLoopRunning = true;
       console.log('[POSE][sender] inference START (sender)');
-
-      if (HAS_RVFC) {
-        const onFrame = (now) => {
-          if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') return;
-          if (!canProcessNow()) { localVideo.requestVideoFrameCallback(onFrame); return; }
-
-          try {
-            const result = task.detectForVideo(localVideo, now);
-            if (result?.landmarks?.length) {
-              if (document.body.classList.contains('previewing')) drawPoseOnSender(result.landmarks);
-              sendPoseToReceivers(result.landmarks);
-            } else if (document.body.classList.contains('previewing')) {
-              ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-            }
-          } catch (e) {
-            console.warn('[POSE][sender] detect error', e?.message || e);
+      const loop = async () => {
+        if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') { console.log('[POSE][sender] inference STOP (sender)'); return; }
+        const ts = performance.now();
+        const result = task.detectForVideo(localVideo, ts);
+        ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+        if (result?.landmarks?.length) {
+          // ⬇️ Keep sending after preview; only draw locally during preview
+          if (document.body.classList.contains('previewing')) {
+            drawPoseOnSender(result.landmarks);
           }
-          localVideo.requestVideoFrameCallback(onFrame);
-        };
-        localVideo.requestVideoFrameCallback(onFrame);
-      } else {
-        const loop = () => {
-          if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') { return; }
-          if (canProcessNow()) {
-            const ts = performance.now();
-            try {
-              const result = task.detectForVideo(localVideo, ts);
-              if (result?.landmarks?.length) {
-                if (document.body.classList.contains('previewing')) drawPoseOnSender(result.landmarks);
-                sendPoseToReceivers(result.landmarks);
-              } else if (document.body.classList.contains('previewing')) {
-                ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-              }
-            } catch (e) {
-              console.warn('[POSE][sender] detect error', e?.message || e);
-            }
-          }
-          requestAnimationFrame(loop);
-        };
+          sendPoseToReceivers(result.landmarks);
+        }
         requestAnimationFrame(loop);
-      }
+      };
+      loop();
     }
     function stopSenderPoseLoop() {
       poseLoopRunning = false;
@@ -643,7 +594,6 @@
     poseOn.addEventListener('change', () => { console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`); applyPoseUI(); });
     poseWhere.addEventListener('change', () => { console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`); applyPoseUI(); });
 
-    /* ---------- init ---------- */
     const qsRoom = new URLSearchParams(location.search).get('room');
     if (qsRoom) roomInput.value = qsRoom;
   </script>
