@@ -5,7 +5,8 @@
   <title>Baby Monitor – Receiver</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
   <style>
-    :root { color-scheme: dark; }
+    :root { color-scheme: dark; --ui-pad:12px; /* also controls hamburger offset */ }
+
     html, body {
       margin: 0; height: 100%;
       background: #000; color: #fff;
@@ -26,7 +27,7 @@
       object-fit: contain; background: #000;
     }
     #stage > canvas {
-      position: absolute;                    /* aligned via JS inside stage */
+      position: absolute;
       z-index: 2; pointer-events: none; background: transparent; display: none;
     }
 
@@ -60,7 +61,7 @@
     /* ---------- Left Sidebar (auto-hide; no dragger) ---------- */
     #sidebar {
       position: fixed; top: 0; bottom: 0; left: 0;
-      width: 240px; max-width: 80vw;
+      width: min(240px, 80vw);              /* responsive, no resizer/drag */
       background: rgba(0,0,0,0.92);
       border-right: 1px solid rgba(255,255,255,0.1);
       backdrop-filter: blur(2px);
@@ -71,9 +72,9 @@
       display: flex; flex-direction: column;
     }
     #sidebar.visible { transform: translateX(0); }
-
     #sidebar .menu {
-      padding: 8px; overflow-y: auto; -webkit-overflow-scrolling: touch;
+      padding: 8px; /* extra top padding so text never sits under buttons */
+      overflow-y: auto; -webkit-overflow-scrolling: touch;
     }
     #sidebar .nav-item {
       all: unset; display: block; width: 100%;
@@ -89,13 +90,13 @@
 
     /* ---------- Tiny Hamburger Button (fades in FS) ---------- */
     #hamburger {
-      position: fixed; top: 12px; left: 12px;
+      position: fixed; top: var(--ui-pad); left: var(--hamburger-left, var(--ui-pad));
       width: 38px; height: 38px; padding: 8px;
       display: flex; flex-direction: column; justify-content: center; gap: 5px;
       border-radius: 10px; border: 1px solid rgba(255,255,255,0.2);
       background: rgba(0,0,0,0.6);
       cursor: pointer; z-index: 30; user-select: none;
-      transition: opacity .25s ease;
+      transition: opacity .25s ease, left .25s ease; /* slide to the right of drawer */
     }
     #hamburger span { display: block; height: 2px; border-radius: 2px; background: #fff; }
     #hamburger[aria-expanded="true"] { background: rgba(255,255,255,0.08); }
@@ -159,10 +160,10 @@
     const statusEl = document.getElementById('status');
 
     // ---------- Sidebar + hamburger ----------
-    const sidebar = document.getElementById('sidebar');
+    const sidebar   = document.getElementById('sidebar');
     const hamburger = document.getElementById('hamburger');
     const menuAudio = document.getElementById('menuAudio');
-    const navItems = Array.from(sidebar.querySelectorAll('.nav-item'));
+    const navItems  = Array.from(sidebar.querySelectorAll('.nav-item'));
 
     // Auto-hide drawer (no dragger)
     const SIDEBAR_AUTOHIDE_MS = 10000;
@@ -171,12 +172,14 @@
       sidebar.classList.remove('visible');
       hamburger.setAttribute('aria-expanded', 'false');
       clearTimeout(sidebarTimer); sidebarTimer = null;
+      positionHamburger();
     }
     function showSidebar() {
       sidebar.classList.add('visible');
       hamburger.setAttribute('aria-expanded', 'true');
       resetSidebarAutohide();
       showHamburger(); // keep hamburger visible while interacting
+      positionHamburger();
     }
     function toggleSidebar() {
       if (sidebar.classList.contains('visible')) hideSidebar();
@@ -185,6 +188,14 @@
     function resetSidebarAutohide() {
       clearTimeout(sidebarTimer);
       sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
+    }
+
+    // Ensure hamburger never overlaps the menu text:
+    // when the drawer is open, move it just to the right of the sidebar.
+    function positionHamburger() {
+      const pad = 12; // keep in sync with --ui-pad
+      const w = sidebar.classList.contains('visible') ? Math.round(sidebar.getBoundingClientRect().width) : 0;
+      document.documentElement.style.setProperty('--hamburger-left', (w + pad) + 'px');
     }
 
     // Hamburger auto-fade in fullscreen
@@ -213,9 +224,14 @@
     // Discoverability: show once on load
     showSidebar();
     resetHamburgerFade();
+    positionHamburger();
 
     // Toggle via hamburger
-    hamburger.addEventListener('click', (e) => { e.stopPropagation(); toggleSidebar(); resetHamburgerFade(); });
+    hamburger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSidebar();
+      resetHamburgerFade();
+    });
 
     // Keep drawer open while interacting, and keep hamburger visible
     ['mousemove','pointermove','wheel','touchstart','click','keydown'].forEach(ev =>
@@ -227,27 +243,17 @@
       window.addEventListener(ev, () => resetHamburgerFade(), { passive: true })
     );
 
-    // Close drawer with Escape
-    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideSidebar(); resetHamburgerFade(); } });
+    // Reposition hamburger on resize/orientation/fullscreen (drawer width may change)
+    ['resize','orientationchange'].forEach(ev =>
+      window.addEventListener(ev, () => positionHamburger(), { passive: true })
+    );
 
-    // Menu interactions
-    function setActive(itemName) {
-      navItems.forEach(btn => btn.classList.toggle('active', btn.dataset.item === itemName));
-    }
-    sidebar.addEventListener('click', (e) => {
-      const btn = e.target.closest('.nav-item');
-      if (!btn) return;
-      const item = btn.dataset.item;
-      setActive(item);
-      if (item === 'audio') {
-        const wantUnmute = remoteVideo.muted;
-        remoteVideo.muted = !wantUnmute;
-        try { remoteVideo.volume = 1.0; remoteVideo.play().catch(()=>{}); } catch {}
-        updateAudioButtons();
-      } else {
-        console.log('[SIDEBAR] Selected:', item);
+    // Close drawer with Escape
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        hideSidebar();
+        resetHamburgerFade();
       }
-      resetSidebarAutohide();
     });
 
     // ---------- Status ----------
@@ -255,7 +261,6 @@
     function showStatus(msg) {
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
-      console.log('[STATUS]', msg);
       if (msg === 'Connected') {
         if (hideStatusTimer) clearTimeout(hideStatusTimer);
         hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
@@ -285,13 +290,12 @@
         remoteVideo.muted = true;
         remoteVideo.volume = 1.0;
         await remoteVideo.play();
-      } catch (e) { console.warn('autoplay (muted) blocked:', e); }
+      } catch (e) { /* autoplay blocked */ }
       updateAudioButtons();
     }
     enableAudioBtn.addEventListener('click', async (e) => {
       e?.stopPropagation?.(); e?.preventDefault?.();
-      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); }
-      catch (err) { console.warn('unmute play blocked:', err); }
+      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
       updateAudioButtons();
     });
     disableAudioBtn.addEventListener('click', (e) => {
@@ -311,8 +315,9 @@
           await document.exitFullscreen();
           fsBtn.textContent = 'Fullscreen';
         }
-      } catch (err) { console.warn('fullscreen error', err); }
+      } catch {}
       beginViewportSettle();
+      positionHamburger();
     });
 
     document.addEventListener('fullscreenchange', () => {
@@ -320,6 +325,7 @@
       beginViewportSetle();
       if (sidebar.classList.contains('visible')) resetSidebarAutohide();
       resetHamburgerFade();
+      positionHamburger();
     });
 
     // ---------- Canvas alignment ----------
@@ -334,7 +340,7 @@
 
     function alignCanvasToVideo() {
       const stageBox = stage.getBoundingClientRect();
-      const videoBox = remoteVideo.getBoundingClientRect(); // inside stage
+      const videoBox = remoteVideo.getBoundingClientRect();
       const containerW = Math.round(videoBox.width);
       const containerH = Math.round(videoBox.height);
       const vidW = remoteVideo.videoWidth  || 1;
@@ -389,6 +395,15 @@
     });
 
     // ---------- Drawing ----------
+    let ws = null, wsKeepalive = null, wsRetryMs = WS_RECONNECT_MIN_MS;
+    let pc = null;
+    let remoteDescriptionSet = false;
+    let lastAnswerSdp = null;
+    const candidateQueue = [];
+    let offerResendTimer = null;
+    let iceDisconnectedSince = null;
+
+    // Pose DC + draw state
     let poseDC = null;
     let poseEnabled = false;
     let poseWhere   = 'sender';
@@ -416,14 +431,6 @@
     }
 
     // ---------- WebSocket / WebRTC ----------
-    let ws = null, wsKeepalive = null, wsRetryMs = WS_RECONNECT_MIN_MS;
-    let pc = null;
-    let remoteDescriptionSet = false;
-    let lastAnswerSdp = null;
-    const candidateQueue = [];
-    let offerResendTimer = null;
-    let iceDisconnectedSince = null;
-
     const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
     async function connectWS() {
@@ -462,7 +469,6 @@
     }
     function scheduleWSReconnect() {
       const delay = Math.min(wsRetryMs, WS_RECONNECT_MAX_MS);
-      console.log('[WS] reconnect in', delay,'ms');
       setTimeout(() => {
         wsRetryMs = Math.min(wsRetryMs * 2, WS_RECONNECT_MAX_MS);
         startNegotiation();
@@ -482,8 +488,8 @@
 
       // Pose DC (receiver initiates)
       const ch = pc.createDataChannel('pose');
-      ch.onopen = () => { console.log('[DC][receiver] pose DC open'); };
-      ch.onclose = () => { console.log('[DC][receiver] pose DC close'); };
+      ch.onopen = () => { /* ready */ };
+      ch.onclose = () => { /* closed */ };
       ch.onerror = (e) => { console.warn('[DC][receiver] pose DC error', e); };
       ch.onmessage = (ev) => {
         try {
@@ -491,7 +497,6 @@
           if (msg.type === 'pose-mode') {
             poseEnabled = !!msg.enabled;
             poseWhere   = msg.where || 'sender';
-            console.log('[POSE][receiver] mode:', { poseEnabled, poseWhere });
             setOverlayVisible(poseEnabled && poseWhere === 'sender');
             if (!(poseEnabled && poseWhere === 'sender')) {
               poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
@@ -509,25 +514,21 @@
           remoteVideo.srcObject = ev.streams[0];
           tryStartMuted();
         }
-        console.log('[TRACK][receiver] ontrack:', ev.track.kind);
-        beginViewportSettle(); // align when media arrives
+        beginViewportSettle();
       };
 
       pc.oniceconnectionstatechange = () => {
         const state = pc.iceConnectionState;
-        console.log('[ICE]', state);
         if (state === 'connected') showStatus('Connected'); else showStatus('ICE: ' + state);
 
         if (state === 'disconnected') {
           if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
           setTimeout(() => {
             if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= RESTART_ON_ICE_TIMEOUT_MS) {
-              console.log('[ICE] disconnected timeout - restarting negotiation');
               startNegotiation(true);
             }
           }, RESTART_ON_ICE_TIMEOUT_MS + 50);
         } else if (state === 'failed') {
-          console.log('[ICE] failed - restarting negotiation');
           startNegotiation(true);
         } else {
           iceDisconnectedSince = null;
@@ -536,10 +537,7 @@
     }
 
     async function sendCurrentOffer() {
-      if (pc?.localDescription?.type === 'offer') {
-        console.log('[WS OUT] offer (send/resend)');
-        send(pc.localDescription);
-      }
+      if (pc?.localDescription?.type === 'offer') send(pc.localDescription);
     }
     function startOfferResendLoop() {
       stopOfferResendLoop();
@@ -566,21 +564,16 @@
         startOfferResendLoop();
         showStatus('Offer sent, waiting for answer…');
       } catch (e) {
-        console.error('negotiation error', e);
         showStatus('Negotiation error');
       }
     }
 
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
-      console.log('[WS IN]', msg.type);
 
       if (msg.type === 'answer') {
-        if (pc.signalingState !== 'have-local-offer') {
-          console.log('[SKIP] answer in state', pc.signalingState);
-          return;
-        }
-        if (lastAnswerSdp === msg.sdp) { console.log('[DUP] identical answer ignored'); return; }
+        if (pc.signalingState !== 'have-local-offer') return;
+        if (lastAnswerSdp === msg.sdp) return;
         lastAnswerSdp = msg.sdp;
 
         showStatus('Got answer, applying…');
@@ -589,14 +582,14 @@
         stopOfferResendLoop();
 
         for (const c of candidateQueue) {
-          try { await pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
+          try { await pc.addIceCandidate(c); } catch {}
         }
         candidateQueue.length = 0;
 
       } else if (msg.type === 'candidate' && msg.candidate) {
         const cand = new RTCIceCandidate(msg.candidate);
         if (remoteDescriptionSet) {
-          try { await pc.addIceCandidate(cand); } catch (e) { console.warn('ICE add failed', e); }
+          try { await pc.addIceCandidate(cand); } catch {}
         } else {
           candidateQueue.push(cand);
         }
@@ -604,7 +597,6 @@
       } else if (msg.type === 'peer-joined' || msg.type === 'need-offer') {
         await sendCurrentOffer();
       } else if (msg.type === 'bye') {
-        console.log('[INFO] sender bye -> keep re-offering');
         remoteDescriptionSet = false;
         startOfferResendLoop();
       }
