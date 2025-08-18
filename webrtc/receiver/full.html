@@ -118,9 +118,7 @@
     /* ---------- Tiny Hamburger Button (hides when drawer open) ---------- */
     #hamburger {
       position: fixed;
-      /* Baseline positions that always work */
       top: 12px; left: 12px;
-      /* Safe-area enhanced positions (ignored if not supported) */
       top: calc(12px + env(safe-area-inset-top));
       left: calc(12px + env(safe-area-inset-left));
 
@@ -128,7 +126,7 @@
       display: flex; align-items: center; justify-content: center;
       border-radius: 10px; border: 1px solid rgba(255,255,255,0.25);
       background: rgba(0,0,0,0.7);
-      color: #fff;                 /* for SVG currentColor */
+      color: #fff;
       cursor: pointer; z-index: 30; user-select: none;
       -webkit-tap-highlight-color: transparent;
       -webkit-appearance: none; appearance: none;
@@ -185,11 +183,16 @@
     .share-row {
       display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center;
     }
+    /* NEW: make URL field an input that can scroll and move the caret */
     .share-url {
+      width: 100%;
       background: rgba(255,255,255,0.06);
       border: 1px solid rgba(255,255,255,0.18);
-      color: #fff; padding: 10px 12px; border-radius: 10px; overflow: hidden;
-      text-overflow: ellipsis; white-space: nowrap; font-size: 13px;
+      color: #fff; padding: 10px 12px; border-radius: 10px;
+      font-size: 13px; line-height: 1.2;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      white-space: nowrap; overflow-x: auto; overflow-y: hidden;
+      text-overflow: clip; direction: ltr;
     }
     .small-btn {
       all: unset; cursor: pointer;
@@ -331,7 +334,8 @@
         <img id="inviteQR" alt="QR code to open this room"/>
       </div>
       <div class="share-row">
-        <div id="inviteUrl" class="share-url" title=""></div>
+        <!-- CHANGED: div -> readonly input so user can move caret & scroll -->
+        <input id="inviteUrl" class="share-url" type="text" inputmode="url" readonly />
         <button id="inviteCopy" class="small-btn" type="button">Copy</button>
         <button id="inviteShare" class="small-btn" type="button">Share</button>
       </div>
@@ -403,7 +407,7 @@
       else showSidebar();
     }
 
-    // Click/tap outside the sidebar closes it (but ignore clicks on hamburger or modal)
+    // Click/tap outside the sidebar closes it (ignore clicks on hamburger or modal)
     function clickOutsideHandler(e) {
       if (!sidebar.classList.contains('visible')) return;
       const insideSidebar   = e.target.closest('#sidebar');
@@ -447,15 +451,8 @@
       }
     }
 
-    // Discoverability:
-    // - On touch devices, start CLOSED so the hamburger is immediately visible.
-    // - On non-touch (desktop), open once then auto-hide.
-    if (isTouch) {
-      hideSidebar();
-      showHamburger();
-    } else {
-      showSidebar();
-    }
+    // Discoverability
+    if (isTouch) { hideSidebar(); showHamburger(); } else { showSidebar(); }
 
     // Toggle via hamburger
     hamburger.addEventListener('click', (e) => {
@@ -531,12 +528,25 @@
 
     // ---------- Invite modal ----------
     function openInvite() {
-      const shareUrl = location.href;
+      // Build the new canonical share URL: /webrtc/receiver (+ ?room=...)
+      const base = new URL('https://hungryfaceai.github.io/hungryface/webrtc/receiver');
+      if (room) base.searchParams.set('room', room);
+      const shareUrl = base.toString();
+
       const qrEndpoint = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&format=svg&data=';
       inviteQR.src = qrEndpoint + encodeURIComponent(shareUrl);
       inviteQR.alt = 'QR code for ' + shareUrl;
-      inviteUrlEl.textContent = shareUrl;
+
+      inviteUrlEl.value = shareUrl;
       inviteUrlEl.title = shareUrl;
+
+      // Put caret at the end and scroll to the right so the end is visible
+      requestAnimationFrame(() => {
+        inviteUrlEl.focus({ preventScroll: true });
+        const len = inviteUrlEl.value.length;
+        try { inviteUrlEl.setSelectionRange(len, len); } catch {}
+        inviteUrlEl.scrollLeft = inviteUrlEl.scrollWidth;
+      });
 
       inviteModal.classList.add('visible');
     }
@@ -551,19 +561,21 @@
 
     inviteCopy.addEventListener('click', async () => {
       try {
-        await navigator.clipboard.writeText(inviteUrlEl.textContent);
+        await navigator.clipboard.writeText(inviteUrlEl.value);
         showToast('Link copied to clipboard');
       } catch {
+        // Fallback: select text so user can copy manually
+        inviteUrlEl.focus();
+        inviteUrlEl.select?.();
         showToast('Copy failed — select text to copy');
       }
     });
 
     inviteShare.addEventListener('click', async () => {
-      const url = inviteUrlEl.textContent;
+      const url = inviteUrlEl.value;
       if (navigator.share) {
-        try {
-          await navigator.share({ title: 'Join my Baby Monitor', url });
-        } catch {}
+        try { await navigator.share({ title: 'Join my Baby Monitor', url }); }
+        catch {}
       } else {
         try {
           await navigator.clipboard.writeText(url);
