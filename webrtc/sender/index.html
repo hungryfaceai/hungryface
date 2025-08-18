@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <title>Baby Monitor – Sender</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <!-- prevent favicon 404 noise -->
   <link rel="icon" href="data:,">
   <style>
     :root { color-scheme: dark; }
@@ -88,14 +87,12 @@
   <div class="overlay"><div class="status" id="status">Idle</div></div>
 
   <script type="module">
-    /* ---------- env ---------- */
     const ua = navigator.userAgent;
     const IS_IOS = /iP(hone|ad|od)/.test(ua);
     const IS_SAFARI = /^((?!chrome|android).)*safari/i.test(ua);
     const USE_CPU_DELEGATE = IS_IOS || IS_SAFARI;
     const HAS_RVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
 
-    /* ---------- constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
     const NEED_OFFER_INTERVAL_MS = 3000;
@@ -103,12 +100,10 @@
     const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
     const WASM_DIR  = TASKS_URL + "/wasm";
 
-    // keepalive/backoff (as in your last version)
     const WS_KEEPALIVE_MS = 25000;
     const WS_RECONNECT_MIN_MS = 1000;
     const WS_RECONNECT_MAX_MS = 10000;
 
-    /* ---------- DOM ---------- */
     const roomInput = document.getElementById('room');
     const videoOn   = document.getElementById('videoOn');
     const audioOn   = document.getElementById('audioOn');
@@ -123,7 +118,6 @@
     const poseOn    = document.getElementById('poseOn');
     const poseWhere = document.getElementById('poseWhere');
 
-    /* ---------- state ---------- */
     let ws=null, pc=null, localStream=null;
     let started=false, hideUITimer=null;
     let remoteDescriptionSet=false;
@@ -141,7 +135,6 @@
     let lastTs = 0;
     const ctx = poseCanvas.getContext('2d', { alpha:true });
 
-    /* ---------- ui helpers ---------- */
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
     const currentRoom = () => (roomInput.value || 'Baby').trim();
     const isFront = () => (cameraSel.value === 'user');
@@ -189,7 +182,6 @@
       }));
     }
 
-    /* ---------- media ---------- */
     async function getMedia(){
       const wantVideo = videoOn.checked;
       const wantAudio = audioOn.checked;
@@ -212,7 +204,6 @@
     audioOn.addEventListener('change', applyAudioToggle);
     cameraSel.addEventListener('change', ()=>{ updateMirrorClass(); resizeCanvasToVideo(); });
 
-    /* ---------- signaling ---------- */
     function connectWS(room){
       return new Promise((resolve, reject)=>{
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
@@ -251,29 +242,8 @@
           console.warn('[WS closed]', e.code, e.reason);
           setStatus('Signaling: closed');
           if (wsKeepalive){ clearInterval(wsKeepalive); wsKeepalive=null; }
-          if (started) scheduleWSReconnect();
         };
       });
-    }
-    function scheduleWSReconnect(){
-      const delay = Math.min(wsRetryMs, WS_RECONNECT_MAX_MS);
-      setTimeout(async ()=>{
-        wsRetryMs = Math.min(wsRetryMs*2, WS_RECONNECT_MAX_MS);
-        try{
-          await connectWS(currentRoom());
-          if (!remoteDescriptionSet){
-            send({type:'need-offer'});
-            if (!needOfferTimer){
-              needOfferTimer = setInterval(()=>{
-                if(!remoteDescriptionSet) send({type:'need-offer'});
-                else { clearInterval(needOfferTimer); needOfferTimer=null; }
-              }, NEED_OFFER_INTERVAL_MS);
-            }
-          }
-        } catch {
-          scheduleWSReconnect();
-        }
-      }, delay);
     }
     const send = (obj)=>{ try { ws?.readyState===WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
@@ -320,7 +290,6 @@
       }
     }
 
-    /* ---------- preview ---------- */
     function beginPreviewWindow(minutes){
       const ms = Math.max(0, Math.round((Number(minutes)||1)*60000));
       if (ms === 0){ enterBlackout(); return; }
@@ -366,7 +335,6 @@
       hideUITimer = setTimeout(()=>{ if (document.body.classList.contains('streaming')){ document.body.classList.remove('ui-visible'); setStatus('Streaming...'); }}, UI_AUTOHIDE_MS);
     }
 
-    /* ---------- lifecycle ---------- */
     async function startOrStop(){
       try{
         if (started){ await stopStreaming(); return; }
@@ -427,7 +395,6 @@
     window.addEventListener('beforeunload', stopStreaming);
     startBtn.addEventListener('click', startOrStop);
 
-    /* ---------- pose ---------- */
     function announcePoseMode(){
       const enabled = !!poseOn.checked;
       const where   = poseWhere.value;
@@ -583,7 +550,6 @@
     poseOn.addEventListener('change', ()=>{ console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`); applyPoseUI(); });
     poseWhere.addEventListener('change', ()=>{ console.log(`[POSE][sender] UI → enabled: ${poseWhere.value}`); applyPoseUI(); });
 
-    /* ---------- init ---------- */
     const qsRoom = new URLSearchParams(location.search).get('room');
     if (qsRoom) roomInput.value = qsRoom;
   </script>
