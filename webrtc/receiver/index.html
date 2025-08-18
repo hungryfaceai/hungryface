@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <title>Baby Monitor – Receiver</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <!-- prevent favicon 404 noise -->
+  <link rel="icon" href="data:,">
   <style>
     :root { color-scheme: dark; }
     html, body { margin:0; height:100%; background:#000; color:#fff; font-family:-apple-system, system-ui, Segoe UI, Roboto, sans-serif; overflow:hidden; }
@@ -26,7 +28,8 @@
   </div>
 
   <div id="stage">
-    <video id="remote" autoplay playsinline></video>
+    <!-- keep default muted so autoplay always works; button will unmute -->
+    <video id="remote" autoplay playsinline muted></video>
     <canvas id="poseCanvas"></canvas>
   </div>
 
@@ -35,14 +38,13 @@
   </div>
 
   <script type="module">
-    // ▶️ MediaPipe Tasks Vision (latest stable)
     import { DrawingUtils, PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
 
     /* -------------------- tiny env helpers -------------------- */
     const ua = navigator.userAgent;
     const IS_IOS = /iP(hone|ad|od)/.test(ua);
     const IS_SAFARI = /^((?!chrome|android).)*safari/i.test(ua);
-    const USE_CPU_DELEGATE = IS_IOS || IS_SAFARI; // GPU is flaky with remote <video> on WebKit
+    const USE_CPU_DELEGATE = IS_IOS || IS_SAFARI;
     const HAS_RVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
 
     /* -------------------- DOM -------------------- */
@@ -62,7 +64,6 @@
     const WS_KEEPALIVE_MS = 25000, WS_RECONNECT_MIN_MS = 1000, WS_RECONNECT_MAX_MS = 10000;
     const RESTART_ON_ICE_TIMEOUT_MS = 5000, STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
-    // WASM base
     const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
     const WASM_DIR  = TASKS_URL + "/wasm";
 
@@ -92,7 +93,12 @@
       else { enableAudioBtn.style.display='none'; disableAudioBtn.style.display='block'; }
     }
     async function tryStartMuted(){
-      try{ remoteVideo.muted = true; remoteVideo.volume = 1.0; await remoteVideo.play(); }catch{}
+      try{
+        remoteVideo.muted = true;      // ensure autoplay allowed
+        remoteVideo.playsInline = true;
+        const p = remoteVideo.play();
+        if (p && typeof p.then === 'function') await p;
+      }catch{}
       updateAudioButtons();
     }
     enableAudioBtn.style.display='block';
@@ -168,7 +174,7 @@
 
     /* -------------------- receiver-side inference -------------------- */
     let receiverPoseTask=null, receiverLoopOn=false, lastVideoTime=-1, consecutiveErrors=0, errorCooldownUntil=0;
-    let lastTs = 0; // ensure strictly increasing timestamps for detectForVideo()
+    let lastTs = 0;
 
     async function ensureReceiverPoseTask(){
       if (receiverPoseTask) return receiverPoseTask;
@@ -198,7 +204,7 @@
 
     function maybeStartReceiverLoop(){
       if (!poseEnabled || poseWhere!=='receiver') return;
-      if (!remoteVideo.videoWidth || !remoteVideo.videoHeight) return; // wait for meta
+      if (!remoteVideo.videoWidth || !remoteVideo.videoHeight) return;
       if (receiverLoopOn) return;
       startReceiverPoseLoop();
     }
@@ -208,7 +214,7 @@
       receiverPoseTask = null;
       await ensureReceiverPoseTask();
       consecutiveErrors = 0;
-      lastTs = 0; // reset timestamp guard on soft reset
+      lastTs = 0;
     }
 
     async function startReceiverPoseLoop(){
@@ -226,7 +232,6 @@
           if (!poseDC || poseDC.readyState!=='open'){ remoteVideo.requestVideoFrameCallback(onFrame); return; }
           if (!canProcessNow()){ remoteVideo.requestVideoFrameCallback(onFrame); return; }
 
-          // Use mediaTime (s) -> ms; enforce strictly increasing
           const candidate = Math.floor((metadata?.mediaTime ?? remoteVideo.currentTime) * 1000);
           const ts = Math.max(lastTs + 1, candidate);
           lastTs = ts;
@@ -240,7 +245,7 @@
           }catch(e){
             console.warn('[POSE][receiver] detect error', e?.message||e);
             consecutiveErrors++;
-            if (consecutiveErrors >= 3){ // brief cool-down and task refresh
+            if (consecutiveErrors >= 3){
               errorCooldownUntil = performance.now() + 500;
               await softResetTask();
             }
@@ -249,7 +254,6 @@
         };
         remoteVideo.requestVideoFrameCallback(onFrame);
       } else {
-        // Fallback: RAF + currentTime gate
         const loop = async ()=>{
           if (!receiverLoopOn || !poseEnabled || poseWhere!=='receiver') return;
           if (!poseDC || poseDC.readyState!=='open'){ requestAnimationFrame(loop); return; }
@@ -340,7 +344,13 @@
 
       pc.onicecandidate = (ev)=>{ if (ev.candidate) sendWS({type:'candidate', candidate: ev.candidate}); };
       pc.ontrack = (ev)=>{
-        if (remoteVideo.srcObject !== ev.streams[0]){ remoteVideo.srcObject = ev.streams[0]; tryStartMuted(); }
+        if (remoteVideo.srcObject !== ev.streams[0]){
+          remoteVideo.srcObject = ev.streams[0];
+          // Robustly start playback on every browser
+          remoteVideo.muted = true;
+          remoteVideo.playsInline = true;
+          try { const p = remoteVideo.play(); if (p && typeof p.then === 'function') p.catch(()=>{}); } catch {}
+        }
         console.log('[TRACK][receiver] ontrack:', ev.track.kind);
         beginViewportSettle(); maybeStartReceiverLoop();
       };
@@ -377,42 +387,4 @@
         if (lastAnswerSdp===msg.sdp) return;
         lastAnswerSdp=msg.sdp; showStatus('Got answer, applying…');
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
-        remoteDescriptionSet=true; stopOfferResendLoop();
-        for (const c of candidateQueue){ try{ await pc.addIceCandidate(c);}catch{} }
-        candidateQueue.length=0;
-      } else if (msg.type==='candidate' && msg.candidate){
-        const cand = new RTCIceCandidate(msg.candidate);
-        if (remoteDescriptionSet){ try{ await pc.addIceCandidate(cand);}catch{} } else { candidateQueue.push(cand); }
-      } else if (msg.type==='peer-joined' || msg.type==='need-offer'){
-        await sendCurrentOffer();
-      } else if (msg.type==='bye'){
-        remoteDescriptionSet=false; stopReceiverPoseLoop(); startOfferResendLoop();
-      }
-    }
-
-    window.addEventListener('beforeunload', ()=>{
-      try{ stopOfferResendLoop(); }catch{}
-      try{ ws && ws.close(); }catch{}
-      try{ pc && pc.close(); }catch{}
-      if (wsKeepalive) clearInterval(wsKeepalive);
-      if (hideStatusTimer) clearTimeout(hideStatusTimer);
-      if (settleRAF) { cancelAnimationFrame(settleRAF); settleRAF = 0; }
-      stopReceiverPoseLoop();
-      try{ receiverPoseTask?.close(); }catch{}
-    });
-
-    /* -------------------- media events to kick alignment/inference -------------------- */
-    remoteVideo.addEventListener('loadedmetadata', ()=>{
-      console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
-      beginViewportSettle(); maybeStartReceiverLoop();
-    });
-    remoteVideo.addEventListener('playing', ()=>{
-      console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
-      updateAudioButtons(); beginViewportSettle(); maybeStartReceiverLoop();
-    });
-
-    /* -------------------- start -------------------- */
-    startNegotiation();
-  </script>
-</body>
-</html>
+        remoteDescriptionSet=true; stopOfferR
