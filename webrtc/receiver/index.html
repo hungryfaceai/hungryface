@@ -12,6 +12,8 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       overflow: hidden;
     }
+
+    /* Fullscreen wrapper so video+canvas scale together */
     #stage {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;   /* fallback */
@@ -27,6 +29,7 @@
       position: absolute;
       z-index: 2; pointer-events: none; background: transparent; display: none;
     }
+
     .btn {
       padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
       background: transparent; color: #fff; font-size: 16px; font-weight: 600;
@@ -34,11 +37,13 @@
       text-shadow: 0 1px 2px rgba(0,0,0,0.6);
     }
     .btn:active { transform: scale(0.99); }
+
     #controls {
       position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
       display: flex; align-items: center; gap: 12px; z-index: 6;
     }
     #enableAudioBtn, #disableAudioBtn { display: none; }
+
     .overlay {
       position: fixed; inset: 0; display: flex;
       align-items: center; justify-content: center;
@@ -72,20 +77,25 @@
   <script type="module">
     import { DrawingUtils, PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
 
+    /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
+
     const WS_KEEPALIVE_MS = 25000;
     const WS_RECONNECT_MIN_MS = 1000;
     const WS_RECONNECT_MAX_MS = 10000;
-    const RESTART_ON_ICE_TIMEOUT_MS = 5000;
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
-    // MediaPipe assets (same version as import)
+    // Mediapipe assets (same version as import)
     const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     const WASM_DIR  = TASKS_URL + "/wasm";
     const POSE_MODEL_URL =
       "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
 
+    // Video readyState helpers
+    const HAVE_CURRENT_DATA = 2;
+
+    /* ---------- DOM ---------- */
     const stage       = document.getElementById('stage');
     const remoteVideo = document.getElementById('remote');
     const poseCanvas  = document.getElementById('poseCanvas');
@@ -97,23 +107,24 @@
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
 
+    /* ---------- State ---------- */
     let ws = null, wsKeepalive = null, wsRetryMs = WS_RECONNECT_MIN_MS;
     let pc = null;
     let remoteDescriptionSet = false;
     let lastAnswerSdp = null;
     const candidateQueue = [];
     let offerResendTimer = null;
-    let iceDisconnectedSince = null;
     let hideStatusTimer = null;
+    let iceDisconnectedSince = null;
 
     // Pose state
     let poseDC = null;
     let poseEnabled = false;
-    let poseWhere   = 'sender';
+    let poseWhere   = 'sender'; // 'sender' | 'receiver'
     let poseTask = null;
     let poseLoopRunning = false;
 
-    // ---------- Status ----------
+    /* ---------- Status overlay ---------- */
     function showStatus(msg) {
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
@@ -127,7 +138,7 @@
       }
     }
 
-    // ---------- Audio UI ----------
+    /* ---------- Audio UI ---------- */
     function updateAudioButtons() {
       if (remoteVideo.muted) {
         enableAudioBtn.style.display = 'block';
@@ -138,6 +149,7 @@
       }
     }
     enableAudioBtn.style.display = 'block';
+
     async function tryStartMuted() {
       try {
         remoteVideo.muted = true;
@@ -158,7 +170,7 @@
       updateAudioButtons();
     });
 
-    // ---------- Fullscreen ----------
+    /* ---------- Fullscreen ---------- */
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -187,7 +199,7 @@
       beginViewportSettle();
     });
 
-    // ---------- Canvas alignment ----------
+    /* ---------- Canvas alignment ---------- */
     function containRect(containerW, containerH, contentW, contentH) {
       const scale = Math.min(containerW / (contentW||1), containerH / (contentH||1));
       const w = Math.round(contentW * scale);
@@ -196,6 +208,7 @@
       const y = Math.floor((containerH - h) / 2);
       return { left:x, top:y, width:w, height:h };
     }
+
     function alignCanvasToVideo() {
       const stageBox = stage.getBoundingClientRect();
       const videoBox = remoteVideo.getBoundingClientRect();
@@ -203,13 +216,16 @@
       const containerH = Math.round(videoBox.height);
       const vidW = remoteVideo.videoWidth  || 1;
       const vidH = remoteVideo.videoHeight || 1;
+
       const fit = containRect(containerW, containerH, vidW, vidH);
       const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
       const topCSS  = Math.round((videoBox.top  - stageBox.top)  + fit.top);
+
       poseCanvas.style.left   = leftCSS + 'px';
       poseCanvas.style.top    = topCSS  + 'px';
       poseCanvas.style.width  = fit.width  + 'px';
       poseCanvas.style.height = fit.height + 'px';
+
       const dpr = window.devicePixelRatio || 1;
       const needW = Math.max(1, Math.round(fit.width  * dpr));
       const needH = Math.max(1, Math.round(fit.height * dpr));
@@ -219,6 +235,7 @@
       }
       poseCtx.setTransform(1,0,0,1,0,0);
     }
+
     let settleRAF = 0, settleUntil = 0;
     function beginViewportSettle(durationMs = 1000) {
       settleUntil = performance.now() + durationMs;
@@ -246,12 +263,13 @@
       if (!document.hidden) beginViewportSettle();
     });
 
-    // ---------- Overlay helpers ----------
+    /* ---------- Overlay helpers ---------- */
     function setOverlayVisible(v) {
       poseCanvas.style.display = v ? 'block' : 'none';
       if (v) beginViewportSettle();
       else poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
+
     function drawPoseLandmarks(landmarks) {
       if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
       poseCtx.save();
@@ -266,7 +284,7 @@
       poseCtx.restore();
     }
 
-    // ---------- MediaPipe on RECEIVER ----------
+    /* ---------- MediaPipe on RECEIVER ---------- */
     async function ensurePoseTask() {
       if (poseTask) return poseTask;
       const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
@@ -277,54 +295,99 @@
       });
       return poseTask;
     }
+
+    function videoHasFrame(v) {
+      return v &&
+        v.readyState >= HAVE_CURRENT_DATA &&
+        v.videoWidth  > 0 &&
+        v.videoHeight > 0;
+    }
+
+    function waitForVideoFrame(video) {
+      if (videoHasFrame(video)) return Promise.resolve();
+      return new Promise((resolve) => {
+        const check = () => { if (videoHasFrame(video)) { cleanup(); resolve(); } };
+        const cleanup = () => {
+          video.removeEventListener('loadedmetadata', check);
+          video.removeEventListener('playing', check);
+          video.removeEventListener('resize', check);
+        };
+        video.addEventListener('loadedmetadata', check);
+        video.addEventListener('playing', check);
+        video.addEventListener('resize',  check);
+      });
+    }
+
     async function startReceiverPoseLoop() {
       if (poseLoopRunning) return;
       await ensurePoseTask();
+      await waitForVideoFrame(remoteVideo);
+
       poseLoopRunning = true;
       console.log('[POSE][receiver] inference START (receiver)');
-      const loop = () => {
+
+      const useRVFC = 'requestVideoFrameCallback' in remoteVideo;
+
+      const onFrame = () => {
         if (!poseLoopRunning || !poseEnabled || poseWhere !== 'receiver') {
           console.log('[POSE][receiver] inference STOP (receiver)');
           return;
         }
-        const ts = performance.now();
-        const result = poseTask.detectForVideo(remoteVideo, ts);
-        if (result?.landmarks?.length) {
-          drawPoseLandmarks(result.landmarks);
 
-          // Optional: echo back to sender so it can draw during its preview
-          try {
+        if (!videoHasFrame(remoteVideo)) {
+          // transient hiccup during renegotiation; clear and retry next frame
+          poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+          scheduleNext();
+          return;
+        }
+
+        try {
+          const ts = performance.now();
+          const result = poseTask.detectForVideo(remoteVideo, ts);
+          if (result?.landmarks?.length) {
+            drawPoseLandmarks(result.landmarks);
+            // Optional: echo to sender so it can draw during preview when "On receiver"
             if (poseDC?.readyState === 'open') {
               poseDC.send(JSON.stringify({ type:'pose', landmarks: result.landmarks, ts }));
             }
-          } catch {}
-        } else {
-          poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+          } else {
+            poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+          }
+        } catch (err) {
+          // Swallow transient ROI errors; keep loop alive
+          console.warn('[POSE][receiver] detect error (retrying next frame)', err);
+        } finally {
+          scheduleNext();
         }
-        requestAnimationFrame(loop);
       };
-      requestAnimationFrame(loop);
+
+      const scheduleNext = () => {
+        if (useRVFC) remoteVideo.requestVideoFrameCallback(onFrame);
+        else requestAnimationFrame(onFrame);
+      };
+
+      scheduleNext();
     }
+
     function stopReceiverPoseLoop() {
       poseLoopRunning = false;
-      // keep task warm; just stop drawing
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
 
     function applyPoseMode() {
-      // Show overlay whenever Pose is enabled (sender overlay or local overlay)
+      // Show the overlay area whenever Pose is enabled (sender-drawn or local-drawn)
       setOverlayVisible(poseEnabled);
       if (!poseEnabled) { stopReceiverPoseLoop(); return; }
 
       if (poseWhere === 'receiver') {
         startReceiverPoseLoop();
       } else {
-        // sender mode: we draw only what comes over DC
+        // sender mode: only draw what comes over DC
         stopReceiverPoseLoop();
       }
     }
 
-    // ---------- WebSocket / WebRTC ----------
+    /* ---------- WebSocket / WebRTC ---------- */
     async function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
@@ -359,14 +422,16 @@
         };
       });
     }
+
     function scheduleWSReconnect() {
       const delay = Math.min(wsRetryMs, WS_RECONNECT_MAX_MS);
-      console.log('[WS] reconnect in', delay,'ms');
+      console.log('[WS] reconnect in', delay, 'ms');
       setTimeout(() => {
         wsRetryMs = Math.min(wsRetryMs * 2, WS_RECONNECT_MAX_MS);
         startNegotiation();
       }, delay);
     }
+
     const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
     function createPC() {
@@ -380,7 +445,7 @@
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
-      // Data channel (receiver-initiated; bidirectional)
+      // Pose DC (receiver initiates; bidirectional)
       const ch = pc.createDataChannel('pose');
       ch.onopen = () => { console.log('[DC][receiver] pose DC open'); };
       ch.onclose = () => { console.log('[DC][receiver] pose DC close'); };
@@ -410,24 +475,28 @@
         beginViewportSettle();
       };
 
+      // --- Be less jumpy on ICE disconnected (restart only if persists ≥15s; restart immediately on failed)
       pc.oniceconnectionstatechange = () => {
         const state = pc.iceConnectionState;
         console.log('[ICE]', state);
-        if (state === 'connected') showStatus('Connected'); else showStatus('ICE: ' + state);
 
-        if (state === 'disconnected') {
-          if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
-          setTimeout(() => {
-            if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= RESTART_ON_ICE_TIMEOUT_MS) {
-              console.log('[ICE] disconnected timeout - restarting negotiation');
-              startNegotiation(true);
-            }
-          }, RESTART_ON_ICE_TIMEOUT_MS + 50);
+        if (state === 'connected' || state === 'completed') {
+          showStatus('Connected');
+          iceDisconnectedSince = null;
         } else if (state === 'failed') {
           console.log('[ICE] failed - restarting negotiation');
           startNegotiation(true);
+        } else if (state === 'disconnected') {
+          if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
+          setTimeout(() => {
+            if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= 15000) {
+              console.log('[ICE] disconnected >15s - restarting negotiation');
+              startNegotiation(true);
+            }
+          }, 15100);
+          showStatus('ICE: disconnected');
         } else {
-          iceDisconnectedSince = null;
+          showStatus('ICE: ' + state);
         }
       };
     }
@@ -438,6 +507,7 @@
         send(pc.localDescription);
       }
     }
+
     function startOfferResendLoop() {
       stopOfferResendLoop();
       offerResendTimer = setInterval(() => {
@@ -455,6 +525,7 @@
         try { await connectWS(); } catch(e) { scheduleWSReconnect(); return; }
       }
       if (!pc || forceNewPc) createPC();
+
       try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
@@ -474,6 +545,8 @@
       if (msg.type === 'answer') {
         if (pc.signalingState !== 'have-local-offer') {
           console.log('[SKIP] answer in state', pc.signalingState);
+          // Stop re-sending if we already stabilized
+          if (pc.signalingState === 'stable') stopOfferResendLoop();
           return;
         }
         if (lastAnswerSdp === msg.sdp) { console.log('[DUP] identical answer ignored'); return; }
@@ -496,12 +569,14 @@
         } else {
           candidateQueue.push(cand);
         }
+
       } else if (msg.type === 'peer-joined' || msg.type === 'need-offer') {
         await sendCurrentOffer();
       } else if (msg.type === 'bye') {
-        console.log('[INFO] sender bye -> keep re-offering');
+        // Don’t spam offers while the sender is gone
+        console.log('[INFO] sender bye -> pause offers until peer rejoins');
         remoteDescriptionSet = false;
-        startOfferResendLoop();
+        stopOfferResendLoop();
       }
     }
 
@@ -517,7 +592,7 @@
     // Go!
     startNegotiation();
 
-    // tiny typo guard
+    // tiny typo guard used in logs
     function beginViewportSetle(){ beginViewportSettle(); }
   </script>
 </body>
