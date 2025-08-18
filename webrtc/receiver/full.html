@@ -181,9 +181,12 @@
     }
     .qr-wrap img { width: 220px; height: 220px; border-radius: 10px; background: #fff; }
     .share-row {
-      display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center;
+      display: grid;
+      /* FIX: prevent URL input from overlapping buttons */
+      grid-template-columns: minmax(0,1fr) auto auto;
+      gap: 8px; align-items: center;
     }
-    /* NEW: make URL field an input that can scroll and move the caret */
+    /* URL input: scrollable + caret + no overlap */
     .share-url {
       width: 100%;
       background: rgba(255,255,255,0.06);
@@ -193,6 +196,9 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
       white-space: nowrap; overflow-x: auto; overflow-y: hidden;
       text-overflow: clip; direction: ltr;
+      box-sizing: border-box;
+      min-width: 0;               /* <-- crucial for CSS grid */
+      max-width: 100%;
     }
     .small-btn {
       all: unset; cursor: pointer;
@@ -213,7 +219,12 @@
   <!-- Inline SVG icon set (no external deps) -->
   <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
     <defs>
-      <!-- Camera -->
+      <!-- Video (camcorder) -->
+      <symbol id="i-video" viewBox="0 0 24 24" stroke-width="2">
+        <rect x="2" y="6" width="14" height="12" rx="2" ry="2"></rect>
+        <polygon points="18 8 22 10 22 14 18 16 18 8"></polygon>
+      </symbol>
+      <!-- Camera (photo) -->
       <symbol id="i-camera" viewBox="0 0 24 24" stroke-width="2">
         <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3l2-3h8l2 3h3a2 2 0 0 1 2 2z"></path>
         <circle cx="12" cy="13" r="4"></circle>
@@ -231,7 +242,7 @@
         <path d="M9 10l3 3 3-3"></path>
         <path d="M8 21l4-7 4 7"></path>
       </symbol>
-      <!-- Face (simple stylized) -->
+      <!-- Face -->
       <symbol id="i-face" viewBox="0 0 24 24" stroke-width="2">
         <circle cx="12" cy="12" r="8.5"></circle>
         <path d="M9.25 10.5h.01M14.75 10.5h.01"></path>
@@ -280,9 +291,15 @@
   <!-- Sidebar -->
   <nav id="sidebar" aria-label="Main">
     <div class="menu">
+      <!-- Renamed Camera -> Video (uses video icon) -->
+      <button class="nav-item" data-item="video" aria-label="Video">
+        <svg class="nav-icon"><use href="#i-video"/></svg><span class="nav-label">Video</span>
+      </button>
+      <!-- New Camera item (sender) just below Video -->
       <button class="nav-item" data-item="camera" aria-label="Camera">
         <svg class="nav-icon"><use href="#i-camera"/></svg><span class="nav-label">Camera</span>
       </button>
+
       <button class="nav-item" data-item="audio" id="menuAudio" aria-label="Audio">
         <svg class="nav-icon"><use href="#i-audio"/></svg><span class="nav-label">Audio</span>
       </button>
@@ -334,7 +351,7 @@
         <img id="inviteQR" alt="QR code to open this room"/>
       </div>
       <div class="share-row">
-        <!-- CHANGED: div -> readonly input so user can move caret & scroll -->
+        <!-- readonly input so user can move caret & scroll -->
         <input id="inviteUrl" class="share-url" type="text" inputmode="url" readonly />
         <button id="inviteCopy" class="small-btn" type="button">Copy</button>
         <button id="inviteShare" class="small-btn" type="button">Share</button>
@@ -507,7 +524,15 @@
       const item = btn.dataset.item;
       setActive(item);
 
-      if (item === 'audio') {
+      if (item === 'video') {
+        // Redirect to receiver with fixed room=Baby
+        window.location.href = "https://hungryfaceai.github.io/hungryface/webrtc/receiver/?room=Baby";
+        return;
+      } else if (item === 'camera') {
+        // Redirect to sender page
+        window.location.href = "https://hungryfaceai.github.io/hungryface/webrtc/sender";
+        return;
+      } else if (item === 'audio') {
         const wantUnmute = remoteVideo.muted;
         remoteVideo.muted = !wantUnmute;
         try { remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
@@ -528,7 +553,7 @@
 
     // ---------- Invite modal ----------
     function openInvite() {
-      // Build the new canonical share URL: /webrtc/receiver (+ ?room=...)
+      // Canonical share URL: /webrtc/receiver (+ ?room=...)
       const base = new URL('https://hungryfaceai.github.io/hungryface/webrtc/receiver');
       if (room) base.searchParams.set('room', room);
       const shareUrl = base.toString();
@@ -564,7 +589,6 @@
         await navigator.clipboard.writeText(inviteUrlEl.value);
         showToast('Link copied to clipboard');
       } catch {
-        // Fallback: select text so user can copy manually
         inviteUrlEl.focus();
         inviteUrlEl.select?.();
         showToast('Copy failed — select text to copy');
