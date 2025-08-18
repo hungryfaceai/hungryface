@@ -741,4 +741,162 @@
         sock.onmessage = onSignal;
         sock.onerror = (e) => { console.warn('[WS error]', e); };
         sock.onclose  = () => {
-          showSta
+          showStatus('Signaling: closed');
+          if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
+          scheduleWSReconnect();
+        };
+      });
+    }
+    function scheduleWSReconnect() {
+      const delay = Math.min(wsRetryMs, WS_RECONNECT_MAX_MS);
+      setTimeout(() => {
+        wsRetryMs = Math.min(wsRetryMs * 2, WS_RECONNECT_MAX_MS);
+        startNegotiation();
+      }, delay);
+    }
+
+    function createPC() {
+      if (pc) { try { pc.close(); } catch{}; pc = null; }
+      remoteDescriptionSet = false;
+      lastAnswerSdp = null;
+      candidateQueue.length = 0;
+
+      pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+
+      pc.addTransceiver('video', { direction: 'recvonly' });
+      pc.addTransceiver('audio', { direction: 'recvonly' });
+
+      // Pose DC (receiver initiates)
+      const ch = pc.createDataChannel('pose');
+      ch.onopen = () => {};
+      ch.onclose = () => {};
+      ch.onerror = (e) => { console.warn('[DC][receiver] pose DC error', e); };
+      ch.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'pose-mode') {
+            poseEnabled = !!msg.enabled;
+            poseWhere   = msg.where || 'sender';
+            setOverlayVisible(poseEnabled && poseWhere === 'sender');
+            if (!(poseEnabled && poseWhere === 'sender')) {
+              poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+            }
+          } else if (msg.type === 'pose') {
+            if (poseEnabled && poseWhere === 'sender') drawPoseLandmarks(msg.landmarks);
+          }
+        } catch {}
+      };
+      poseDC = ch;
+
+      pc.onicecandidate = (ev) => { if (ev.candidate) send({ type:'candidate', candidate: ev.candidate }); };
+      pc.ontrack = (ev) => {
+        if (remoteVideo.srcObject !== ev.streams[0]) {
+          remoteVideo.srcObject = ev.streams[0];
+          tryStartMuted();
+        }
+        beginViewportSettle();
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        const state = pc.iceConnectionState;
+        if (state === 'connected') showStatus('Connected'); else showStatus('ICE: ' + state);
+
+        if (state === 'disconnected') {
+          if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
+          setTimeout(() => {
+            if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= RESTART_ON_ICE_TIMEOUT_MS) {
+              startNegotiation(true);
+            }
+          }, RESTART_ON_ICE_TIMEOUT_MS + 50);
+        } else if (state === 'failed') {
+          startNegotiation(true);
+        } else {
+          iceDisconnectedSince = null;
+        }
+      };
+    }
+
+    async function sendCurrentOffer() {
+      if (pc?.localDescription?.type === 'offer') send(pc.localDescription);
+    }
+    function startOfferResendLoop() {
+      stopOfferResendLoop();
+      offerResendTimer = setInterval(() => {
+        if (!remoteDescriptionSet) sendCurrentOffer();
+        else stopOfferResendLoop();
+      }, 2000);
+    }
+    function stopOfferResendLoop() {
+      if (offerResendTimer) clearInterval(offerResendTimer);
+      offerResendTimer = null;
+    }
+
+    async function startNegotiation(forceNewPc = false) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        try { await connectWS(); } catch(e) { scheduleWSReconnect(); return; }
+      }
+      if (!pc || forceNewPc) createPC();
+
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await sendCurrentOffer();
+        startOfferResendLoop();
+        showStatus('Offer sent, waiting for answer…');
+      } catch (e) {
+        showStatus('Negotiation error');
+      }
+    }
+
+    async function onSignal(evt) {
+      let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+
+      if (msg.type === 'answer') {
+        if (pc.signalingState !== 'have-local-offer') return;
+        if (lastAnswerSdp === msg.sdp) return;
+        lastAnswerSdp = msg.sdp;
+
+        showStatus('Got answer, applying…');
+        await pc.setRemoteDescription(new RTCSessionDescription(msg));
+        remoteDescriptionSet = true;
+        stopOfferResendLoop();
+
+        for (const c of candidateQueue) {
+          try { await pc.addIceCandidate(c); } catch {}
+        }
+        candidateQueue.length = 0;
+
+      } else if (msg.type === 'candidate' && msg.candidate) {
+        const cand = new RTCIceCandidate(msg.candidate);
+        if (remoteDescriptionSet) {
+          try { await pc.addIceCandidate(cand); } catch {}
+        } else {
+          candidateQueue.push(cand);
+        }
+
+      } else if (msg.type === 'peer-joined' || msg.type === 'need-offer') {
+        await sendCurrentOffer();
+      } else if (msg.type === 'bye') {
+        remoteDescriptionSet = false;
+        startOfferResendLoop();
+      }
+    }
+
+    window.addEventListener('beforeunload', () => {
+      try { stopOfferResendLoop(); } catch {}
+      try { ws && ws.close(); } catch {}
+      try { pc && pc.close(); } catch {}
+      if (wsKeepalive) clearInterval(wsKeepalive);
+      if (hideStatusTimer) clearTimeout(hideStatusTimer);
+      clearTimeout(sidebarTimer);
+      clearTimeout(hamburgerFadeTimer);
+    });
+
+    // Go!
+    startNegotiation();
+
+    // tiny alias/typo guard
+    function beginViewportSetle(){ beginViewportSettle(); }
+  </script>
+</body>
+</html>
