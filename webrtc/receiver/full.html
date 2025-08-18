@@ -3,9 +3,10 @@
 <head>
   <meta charset="utf-8">
   <title>Baby Monitor – Receiver</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
   <style>
-    :root { color-scheme: dark; }
+    :root { color-scheme: dark; --ui-pad: 12px; }
+
     html, body {
       margin: 0; height: 100%;
       background: #000; color: #fff;
@@ -13,12 +14,11 @@
       overflow: hidden;
     }
 
-    /* Fullscreen wrapper so video+canvas scale together */
+    /* Stage holds BOTH the video and the canvas and is what we fullscreen */
     #stage {
       position: fixed; inset: 0;
-      width: 100vw; height: 100vh;   /* fallback */
-      width: 100dvw; height: 100dvh; /* dynamic viewport */
-      width: 100svw; height: 100svh; /* small viewport (iOS URL bar safe) */
+      width: 100vw; height: 100vh;
+      width: 100dvw; height: 100dvh;        /* iOS dynamic viewport */
       z-index: 1; background: #000;
     }
     #stage > video {
@@ -57,15 +57,260 @@
       text-align: center; white-space: pre-line; max-width: 90vw;
     }
     .overlay.hidden { display: none; }
+
+    /* ---------- Left Sidebar (auto-hide) ---------- */
+    #sidebar {
+      position: fixed; top: 0; bottom: 0; left: 0;
+
+      /* Fit to content width, but never exceed 80vw; ensure a small minimum */
+      width: max-content;
+      width: fit-content;
+      max-width: 80vw;
+      min-width: 150px;
+
+      background: rgba(0,0,0,0.92);
+      border-right: 1px solid rgba(255,255,255,0.1);
+      backdrop-filter: blur(2px);
+      box-shadow: 6px 0 24px rgba(0,0,0,0.5);
+      transform: translateX(-100%);
+      transition: transform .25s ease;
+      z-index: 20;
+      display: flex; flex-direction: column;
+      cursor: default;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: auto;
+    }
+    #sidebar.visible { transform: translateX(0); }
+
+    #sidebar .menu {
+      padding: 8px;
+      overflow-y: auto; -webkit-overflow-scrolling: touch;
+
+      /* Hide scrollbar across browsers (still scrolls) */
+      scrollbar-width: none;              /* Firefox */
+      -ms-overflow-style: none;           /* IE/Edge legacy */
+    }
+    #sidebar .menu::-webkit-scrollbar {   /* WebKit */
+      width: 0; height: 0;
+    }
+
+    #sidebar .nav-item {
+      all: unset;
+      display: flex; align-items: center; gap: 10px;
+      width: 100%;
+      padding: 12px 14px; margin: 2px 0;
+      border-radius: 10px; cursor: pointer; user-select: none;
+      color: #eee; font-weight: 600; font-size: 15px;
+      white-space: nowrap; /* keep one line so width hugs the text */
+    }
+    #sidebar .nav-item:hover { background: rgba(255,255,255,0.08); }
+    #sidebar .nav-item.active { background: rgba(255,255,255,0.14); }
+
+    .nav-icon {
+      width: 18px; height: 18px; flex: 0 0 18px;
+      stroke: currentColor; fill: none; opacity: 0.9;
+    }
+
+    /* Keep other UI behind sidebar when shown */
+    #sidebar.visible ~ #controls { z-index: 4; }
+
+    /* ---------- Tiny Hamburger Button (hides when drawer open) ---------- */
+    #hamburger {
+      position: fixed;
+      /* Baseline positions that always work */
+      top: 12px; left: 12px;
+      /* Safe-area enhanced positions (ignored if not supported) */
+      top: calc(12px + env(safe-area-inset-top));
+      left: calc(12px + env(safe-area-inset-left));
+
+      width: 38px; height: 38px; padding: 8px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 10px; border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(0,0,0,0.7);
+      color: #fff;                 /* for SVG currentColor */
+      cursor: pointer; z-index: 30; user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-appearance: none; appearance: none;
+      transition: opacity .25s ease, background .2s ease;
+      box-shadow: 0 2px 10px rgba(0,0,0,.35);
+    }
+    #hamburger svg { width: 100%; height: 100%; display: block; }
+    #hamburger svg path { stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; fill: none; }
+    #hamburger[aria-expanded="true"] { background: rgba(255,255,255,0.1); }
+    #hamburger.faded { opacity: 0; pointer-events: none; }
+    #hamburger.hidden { display: none; }
+
+    /* HARD KILL any legacy draggers/splitters if they exist anywhere */
+    #hotzone, #drag-handle, .drag-handle, .dragger, .splitter, .resizer,
+    [data-draggable], [data-resizer] {
+      display: none !important;
+      pointer-events: none !important;
+      touch-action: none !important;
+      user-select: none !important;
+      -webkit-user-select: none !important;
+      cursor: default !important;
+    }
+
+    /* ---------- Invite modal + toast ---------- */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: none; z-index: 40;
+      align-items: center; justify-content: center;
+    }
+    .modal-backdrop.visible { display: flex; }
+    .modal-card {
+      background: rgba(20,20,20,0.95);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 16px; padding: 16px;
+      width: min(92vw, 420px);
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+      color: #eee;
+    }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .modal-title { font-weight: 700; font-size: 16px; }
+    .modal-close {
+      all: unset; cursor: pointer; padding: 6px; border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    .qr-wrap {
+      display: flex; gap: 14px; align-items: center; justify-content: center;
+      margin: 8px 0 14px;
+    }
+    .qr-wrap img { width: 220px; height: 220px; border-radius: 10px; background: #fff; }
+    .share-row {
+      display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center;
+    }
+    .share-url {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.18);
+      color: #fff; padding: 10px 12px; border-radius: 10px; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; font-size: 13px;
+    }
+    .small-btn {
+      all: unset; cursor: pointer;
+      padding: 8px 10px; border-radius: 10px; font-weight: 700; font-size: 13px;
+      border: 1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.06);
+    }
+    .toast {
+      position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.18);
+      color: #fff; padding: 10px 14px; border-radius: 12px;
+      font-size: 14px; z-index: 50; display: none;
+    }
+    .toast.visible { display: block; }
   </style>
 </head>
 <body>
+  <!-- Inline SVG icon set (no external deps) -->
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+    <defs>
+      <!-- Camera -->
+      <symbol id="i-camera" viewBox="0 0 24 24" stroke-width="2">
+        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3l2-3h8l2 3h3a2 2 0 0 1 2 2z"></path>
+        <circle cx="12" cy="13" r="4"></circle>
+      </symbol>
+      <!-- Audio -->
+      <symbol id="i-audio" viewBox="0 0 24 24" stroke-width="2">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+      </symbol>
+      <!-- Pose -->
+      <symbol id="i-pose" viewBox="0 0 24 24" stroke-width="2">
+        <circle cx="12" cy="5.5" r="2"></circle>
+        <path d="M12 7.5v5.5"></path>
+        <path d="M9 10l3 3 3-3"></path>
+        <path d="M8 21l4-7 4 7"></path>
+      </symbol>
+      <!-- Face (simple stylized) -->
+      <symbol id="i-face" viewBox="0 0 24 24" stroke-width="2">
+        <circle cx="12" cy="12" r="8.5"></circle>
+        <path d="M9.25 10.5h.01M14.75 10.5h.01"></path>
+        <path d="M9.5 14c1 .8 4 .8 5 0"></path>
+      </symbol>
+      <!-- Settings -->
+      <symbol id="i-settings" viewBox="0 0 24 24" stroke-width="2">
+        <line x1="4" y1="21" x2="4" y2="14"></line>
+        <line x1="4" y1="10" x2="4" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="12"></line>
+        <line x1="12" y1="8" x2="12" y2="3"></line>
+        <line x1="20" y1="21" x2="20" y2="16"></line>
+        <line x1="20" y1="12" x2="20" y2="3"></line>
+        <circle cx="4" cy="12" r="2"></circle>
+        <circle cx="12" cy="10" r="2"></circle>
+        <circle cx="20" cy="14" r="2"></circle>
+      </symbol>
+      <!-- Help -->
+      <symbol id="i-help" viewBox="0 0 24 24" stroke-width="2">
+        <circle cx="12" cy="12" r="10"></circle>
+        <path d="M9.1 9a3 3 0 1 1 5.8 1c0 2-3 2-3 4"></path>
+        <circle cx="12" cy="17" r="1"></circle>
+      </symbol>
+      <!-- Invite -->
+      <symbol id="i-invite" viewBox="0 0 24 24" stroke-width="2">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+        <circle cx="12" cy="7" r="4"></circle>
+        <line x1="20" y1="8" x2="20" y2="14"></line>
+        <line x1="17" y1="11" x2="23" y2="11"></line>
+      </symbol>
+      <!-- Contact -->
+      <symbol id="i-contact" viewBox="0 0 24 24" stroke-width="2">
+        <rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect>
+        <path d="M22 6 12 13 2 6"></path>
+      </symbol>
+    </defs>
+  </svg>
+
+  <!-- Tiny hamburger (SVG so it renders reliably on iPhone) -->
+  <button id="hamburger" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 6.5H20M4 12H20M4 17.5H20"></path>
+    </svg>
+  </button>
+
+  <!-- Sidebar -->
+  <nav id="sidebar" aria-label="Main">
+    <div class="menu">
+      <button class="nav-item" data-item="camera" aria-label="Camera">
+        <svg class="nav-icon"><use href="#i-camera"/></svg><span class="nav-label">Camera</span>
+      </button>
+      <button class="nav-item" data-item="audio" id="menuAudio" aria-label="Audio">
+        <svg class="nav-icon"><use href="#i-audio"/></svg><span class="nav-label">Audio</span>
+      </button>
+      <button class="nav-item" data-item="pose" aria-label="Pose">
+        <svg class="nav-icon"><use href="#i-pose"/></svg><span class="nav-label">Pose</span>
+      </button>
+      <button class="nav-item" data-item="face" aria-label="Face">
+        <svg class="nav-icon"><use href="#i-face"/></svg><span class="nav-label">Face</span>
+      </button>
+      <button class="nav-item" data-item="settings" aria-label="Settings">
+        <svg class="nav-icon"><use href="#i-settings"/></svg><span class="nav-label">Settings</span>
+      </button>
+      <button class="nav-item" data-item="help" aria-label="Help">
+        <svg class="nav-icon"><use href="#i-help"/></svg><span class="nav-label">Help</span>
+      </button>
+      <button class="nav-item" data-item="invite" aria-label="Invite a friend">
+        <svg class="nav-icon"><use href="#i-invite"/></svg><span class="nav-label">Invite a friend</span>
+      </button>
+      <button class="nav-item" data-item="contact" aria-label="Contact us">
+        <svg class="nav-icon"><use href="#i-contact"/></svg><span class="nav-label">Contact us</span>
+      </button>
+    </div>
+  </nav>
+
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
     <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
   </div>
 
+  <!-- fullscreen wrapper for video + canvas -->
   <div id="stage">
     <video id="remote" autoplay playsinline></video>
     <canvas id="poseCanvas"></canvas>
@@ -75,28 +320,38 @@
     <div id="status" class="status">Idle</div>
   </div>
 
-  <script type="module">
-    import { DrawingUtils, PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+  <!-- Invite modal -->
+  <div id="inviteModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="inviteTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div id="inviteTitle" class="modal-title">Invite a friend</div>
+        <button id="inviteClose" class="modal-close" aria-label="Close">✕</button>
+      </div>
+      <div class="qr-wrap">
+        <img id="inviteQR" alt="QR code to open this room"/>
+      </div>
+      <div class="share-row">
+        <div id="inviteUrl" class="share-url" title=""></div>
+        <button id="inviteCopy" class="small-btn" type="button">Copy</button>
+        <button id="inviteShare" class="small-btn" type="button">Share</button>
+      </div>
+    </div>
+  </div>
 
-    /* ---------- Constants ---------- */
+  <!-- Toast -->
+  <div id="toast" class="toast" role="status" aria-live="polite">Copied!</div>
+
+  <script type="module">
+    import { DrawingUtils, PoseLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
-
     const WS_KEEPALIVE_MS = 25000;
     const WS_RECONNECT_MIN_MS = 1000;
     const WS_RECONNECT_MAX_MS = 10000;
+    const RESTART_ON_ICE_TIMEOUT_MS = 5000;
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
-    // Mediapipe assets (same version as import)
-    const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
-    const WASM_DIR  = TASKS_URL + "/wasm";
-    const POSE_MODEL_URL =
-      "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
-
-    // Video readyState helpers
-    const HAVE_CURRENT_DATA = 2;
-
-    /* ---------- DOM ---------- */
     const stage       = document.getElementById('stage');
     const remoteVideo = document.getElementById('remote');
     const poseCanvas  = document.getElementById('poseCanvas');
@@ -108,28 +363,133 @@
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
 
-    /* ---------- State ---------- */
-    let ws = null, wsKeepalive = null, wsRetryMs = WS_RECONNECT_MIN_MS;
-    let pc = null;
-    let remoteDescriptionSet = false;
-    let lastAnswerSdp = null;
-    const candidateQueue = [];
-    let offerResendTimer = null;
+    // Sidebar + hamburger
+    const sidebar   = document.getElementById('sidebar');
+    const hamburger = document.getElementById('hamburger');
+    const menuAudio = document.getElementById('menuAudio');
+    const navItems  = Array.from(sidebar.querySelectorAll('.nav-item'));
+
+    // Invite modal + toast
+    const inviteModal = document.getElementById('inviteModal');
+    const inviteQR    = document.getElementById('inviteQR');
+    const inviteUrlEl = document.getElementById('inviteUrl');
+    const inviteClose = document.getElementById('inviteClose');
+    const inviteCopy  = document.getElementById('inviteCopy');
+    const inviteShare = document.getElementById('inviteShare');
+    const toast       = document.getElementById('toast');
+
+    // Detect touch (iPhone/iPad etc.)
+    const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+
+    // Auto-hide drawer (no dragger)
+    const SIDEBAR_AUTOHIDE_MS = 10000;
+    let sidebarTimer = null;
+    function hideSidebar() {
+      sidebar.classList.remove('visible');
+      hamburger.classList.remove('hidden');         // show button when drawer closes
+      hamburger.setAttribute('aria-expanded', 'false');
+      clearTimeout(sidebarTimer); sidebarTimer = null;
+      resetHamburgerFade();
+    }
+    function showSidebar() {
+      sidebar.classList.add('visible');
+      hamburger.classList.add('hidden');            // hide button entirely while open
+      hamburger.setAttribute('aria-expanded', 'true');
+      clearTimeout(sidebarTimer);
+      sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
+    }
+    function toggleSidebar() {
+      if (sidebar.classList.contains('visible')) hideSidebar();
+      else showSidebar();
+    }
+
+    // Click/tap outside the sidebar closes it (but ignore clicks on hamburger or modal)
+    function clickOutsideHandler(e) {
+      if (!sidebar.classList.contains('visible')) return;
+      const insideSidebar   = e.target.closest('#sidebar');
+      const insideHamburger = e.target.closest('#hamburger');
+      const insideModal     = e.target.closest('#inviteModal');
+      if (!insideSidebar && !insideHamburger && !insideModal) hideSidebar();
+    }
+    document.addEventListener('pointerdown', clickOutsideHandler, { passive: true });
+    document.addEventListener('click', clickOutsideHandler, { passive: true });
+
+    // Kill any legacy dragger/splitter nodes if they exist
+    (function removeLegacyDraggers(){
+      const sel = '#hotzone, #drag-handle, .drag-handle, .dragger, .splitter, .resizer, [data-draggable], [data-resizer]';
+      document.querySelectorAll(sel).forEach(el => el.remove());
+    })();
+
+    // Hamburger auto-fade (disabled on touch so it's always visible there)
+    const HAMBURGER_FADE_MS = 4000;
+    let hamburgerFadeTimer = null;
+    function showHamburger() {
+      hamburger.classList.remove('faded');
+      hamburger.setAttribute('aria-hidden', 'false');
+    }
+    function hideHamburgerBtn() {
+      hamburger.classList.add('faded');
+      hamburger.setAttribute('aria-hidden', 'true');
+    }
+    function resetHamburgerFade() {
+      if (hamburger.classList.contains('hidden')) return; // don't touch while drawer open
+      showHamburger();
+      clearTimeout(hamburgerFadeTimer);
+      if (isTouch) return; // keep visible on iPhone/iPad
+      if (document.fullscreenElement) {
+        hamburgerFadeTimer = setTimeout(() => {
+          if (!sidebar.classList.contains('visible') && !hamburger.classList.contains('hidden')) {
+            hideHamburgerBtn();
+          }
+        }, HAMBURGER_FADE_MS);
+      } else {
+        showHamburger(); // keep visible when not in fullscreen
+      }
+    }
+
+    // Discoverability:
+    // - On touch devices, start CLOSED so the hamburger is immediately visible.
+    // - On non-touch (desktop), open once then auto-hide.
+    if (isTouch) {
+      hideSidebar();
+      showHamburger();
+    } else {
+      showSidebar();
+    }
+
+    // Toggle via hamburger
+    hamburger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSidebar();
+      resetHamburgerFade();
+    });
+
+    // Keep drawer open while interacting
+    ['mousemove','pointermove','wheel','touchstart','click','keydown'].forEach(ev =>
+      sidebar.addEventListener(ev, () => {
+        clearTimeout(sidebarTimer);
+        sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
+      }, { passive: true })
+    );
+
+    // Global activity revives hamburger (mainly in fullscreen)
+    ['mousemove','pointermove','touchstart','keydown','click'].forEach(ev =>
+      window.addEventListener(ev, () => resetHamburgerFade(), { passive: true })
+    );
+
+    // Close drawer with Escape (and close invite modal if open)
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (inviteModal.classList.contains('visible')) closeInvite();
+        else hideSidebar();
+      }
+    });
+
+    // ---------- Status ----------
     let hideStatusTimer = null;
-    let iceDisconnectedSince = null;
-
-    // Pose state
-    let poseDC = null;
-    let poseEnabled = false;
-    let poseWhere   = 'sender'; // 'sender' | 'receiver'
-    let poseTask = null;
-    let poseLoopRunning = false;
-
-    /* ---------- Status overlay ---------- */
     function showStatus(msg) {
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
-      console.log('[STATUS]', msg);
       if (msg === 'Connected') {
         if (hideStatusTimer) clearTimeout(hideStatusTimer);
         hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
@@ -139,7 +499,91 @@
       }
     }
 
-    /* ---------- Audio UI ---------- */
+    // ---------- Menu interactions ----------
+    function setActive(itemName) {
+      navItems.forEach(btn => btn.classList.toggle('active', btn.dataset.item === itemName));
+    }
+
+    sidebar.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.nav-item');
+      if (!btn) return;
+      const item = btn.dataset.item;
+      setActive(item);
+
+      if (item === 'audio') {
+        const wantUnmute = remoteVideo.muted;
+        remoteVideo.muted = !wantUnmute;
+        try { remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
+        updateAudioButtons();
+      } else if (item === 'invite') {
+        openInvite();
+      } else if (item === 'contact') {
+        const subj = encodeURIComponent('Baby Monitor Support');
+        const body = encodeURIComponent(`Hello,\n\nRoom: ${room}\n\n(Describe your issue here)`);
+        window.open(`mailto:?subject=${subj}&body=${body}`, '_blank');
+      } else {
+        console.log('[SIDEBAR] Selected:', item);
+      }
+
+      clearTimeout(sidebarTimer);
+      sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
+    });
+
+    // ---------- Invite modal ----------
+    function openInvite() {
+      const shareUrl = location.href;
+      const qrEndpoint = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&format=svg&data=';
+      inviteQR.src = qrEndpoint + encodeURIComponent(shareUrl);
+      inviteQR.alt = 'QR code for ' + shareUrl;
+      inviteUrlEl.textContent = shareUrl;
+      inviteUrlEl.title = shareUrl;
+
+      inviteModal.classList.add('visible');
+    }
+    function closeInvite() {
+      inviteModal.classList.remove('visible');
+    }
+
+    inviteModal.addEventListener('click', (e) => {
+      if (e.target === inviteModal) closeInvite();
+    });
+    inviteClose.addEventListener('click', closeInvite);
+
+    inviteCopy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(inviteUrlEl.textContent);
+        showToast('Link copied to clipboard');
+      } catch {
+        showToast('Copy failed — select text to copy');
+      }
+    });
+
+    inviteShare.addEventListener('click', async () => {
+      const url = inviteUrlEl.textContent;
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: 'Join my Baby Monitor', url });
+        } catch {}
+      } else {
+        try {
+          await navigator.clipboard.writeText(url);
+          showToast('Link copied (no native share)');
+        } catch {
+          showToast('Sharing not supported');
+        }
+      }
+    });
+
+    // ---------- Toast ----------
+    let toastTimer;
+    function showToast(msg, ms = 1600) {
+      toast.textContent = msg;
+      toast.classList.add('visible');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('visible'), ms);
+    }
+
+    // ---------- Audio UI ----------
     function updateAudioButtons() {
       if (remoteVideo.muted) {
         enableAudioBtn.style.display = 'block';
@@ -148,21 +592,20 @@
         enableAudioBtn.style.display = 'none';
         disableAudioBtn.style.display = 'block';
       }
+      // Menu label stays "Audio"
     }
     enableAudioBtn.style.display = 'block';
-
     async function tryStartMuted() {
       try {
         remoteVideo.muted = true;
         remoteVideo.volume = 1.0;
         await remoteVideo.play();
-      } catch (e) { console.warn('autoplay (muted) blocked:', e); }
+      } catch (e) { /* autoplay might be blocked */ }
       updateAudioButtons();
     }
     enableAudioBtn.addEventListener('click', async (e) => {
       e?.stopPropagation?.(); e?.preventDefault?.();
-      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); }
-      catch (err) { console.warn('unmute play blocked:', err); }
+      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
       updateAudioButtons();
     });
     disableAudioBtn.addEventListener('click', (e) => {
@@ -171,7 +614,7 @@
       updateAudioButtons();
     });
 
-    /* ---------- Fullscreen ---------- */
+    // ---------- Fullscreen ----------
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -182,27 +625,25 @@
           await document.exitFullscreen();
           fsBtn.textContent = 'Fullscreen';
         }
-      } catch (err) { console.warn('fullscreen error', err); }
+      } catch {}
       beginViewportSettle();
+      resetHamburgerFade();
     });
+
     document.addEventListener('fullscreenchange', () => {
       fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
       beginViewportSetle();
+      if (sidebar.classList.contains('visible')) {
+        clearTimeout(sidebarTimer);
+        sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
+      }
+      resetHamburgerFade();
     });
 
-    remoteVideo.addEventListener('loadedmetadata', () => {
-      console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
-      beginViewportSettle();
-    });
-    remoteVideo.addEventListener('playing', () => {
-      console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
-      updateAudioButtons();
-      beginViewportSettle();
-    });
-    // Handle rotation / track size changes from sender
-    remoteVideo.addEventListener('resize', beginViewportSettle);
+    remoteVideo.addEventListener('loadedmetadata', () => beginViewportSettle());
+    remoteVideo.addEventListener('playing', () => { updateAudioButtons(); beginViewportSettle(); });
 
-    /* ---------- Canvas alignment ---------- */
+    // ---------- Canvas alignment ----------
     function containRect(containerW, containerH, contentW, contentH) {
       const scale = Math.min(containerW / (contentW||1), containerH / (contentH||1));
       const w = Math.round(contentW * scale);
@@ -221,6 +662,7 @@
       const vidH = remoteVideo.videoHeight || 1;
 
       const fit = containRect(containerW, containerH, vidW, vidH);
+
       const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
       const topCSS  = Math.round((videoBox.top  - stageBox.top)  + fit.top);
 
@@ -240,7 +682,7 @@
     }
 
     let settleRAF = 0, settleUntil = 0;
-    function beginViewportSettle(durationMs = 1200) {
+    function beginViewportSettle(durationMs = 1000) {
       settleUntil = performance.now() + durationMs;
       if (settleRAF) return;
       const tick = () => {
@@ -254,29 +696,45 @@
       };
       tick();
     }
-    const vpAlign = () => beginViewportSettle();
+
     ['resize','orientationchange','scroll'].forEach(ev =>
-      window.addEventListener(ev, vpAlign, { passive: true })
+      window.addEventListener(ev, () => beginViewportSettle(), { passive: true })
     );
     if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', vpAlign, { passive: true });
-      window.visualViewport.addEventListener('scroll',  vpAlign, { passive: true });
+      ['resize','scroll'].forEach(ev =>
+        window.visualViewport.addEventListener(ev, () => beginViewportSettle(), { passive: true })
+      );
     }
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) beginViewportSettle();
     });
 
-    /* ---------- Overlay helpers ---------- */
+    // ---------- WebSocket / WebRTC ----------
+    let ws = null, wsKeepalive = null, wsRetryMs = WS_RECONNECT_MIN_MS;
+    let pc = null;
+    let remoteDescriptionSet = false;
+    let lastAnswerSdp = null;
+    const candidateQueue = [];
+    let offerResendTimer = null;
+    let iceDisconnectedSince = null;
+
+    // Pose DC + draw state
+    let poseDC = null;
+    let poseEnabled = false;
+    let poseWhere   = 'sender';
+
     function setOverlayVisible(v) {
       poseCanvas.style.display = v ? 'block' : 'none';
       if (v) beginViewportSettle();
       else poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
-
     function drawPoseLandmarks(landmarks) {
+      if (!poseEnabled || poseWhere !== 'sender') return;
       if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
+
       poseCtx.save();
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+
       const utils = new DrawingUtils(poseCtx);
       for (const lm of landmarks) {
         utils.drawLandmarks(lm, {
@@ -287,101 +745,8 @@
       poseCtx.restore();
     }
 
-    /* ---------- MediaPipe on RECEIVER ---------- */
-    async function ensurePoseTask() {
-      if (poseTask) return poseTask;
-      const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
-      poseTask = await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: POSE_MODEL_URL, delegate: "GPU" },
-        runningMode: "VIDEO",
-        numPoses: 1
-      });
-      return poseTask;
-    }
+    const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
-    function videoHasFrame(v) {
-      return v &&
-        v.readyState >= HAVE_CURRENT_DATA &&
-        v.videoWidth  > 0 &&
-        v.videoHeight > 0;
-    }
-
-    function waitForVideoFrame(video) {
-      if (videoHasFrame(video)) return Promise.resolve();
-      return new Promise((resolve) => {
-        const check = () => { if (videoHasFrame(video)) { cleanup(); resolve(); } };
-        const cleanup = () => {
-          video.removeEventListener('loadedmetadata', check);
-          video.removeEventListener('playing', check);
-          video.removeEventListener('resize', check);
-        };
-        video.addEventListener('loadedmetadata', check);
-        video.addEventListener('playing', check);
-        video.addEventListener('resize',  check);
-      });
-    }
-
-    async function startReceiverPoseLoop() {
-      if (poseLoopRunning) return;
-      await ensurePoseTask();
-      await waitForVideoFrame(remoteVideo);
-
-      poseLoopRunning = true;
-      console.log('[POSE][receiver] inference START (receiver)');
-
-      const useRVFC = 'requestVideoFrameCallback' in remoteVideo;
-
-      const onFrame = () => {
-        if (!poseLoopRunning || !poseEnabled || poseWhere !== 'receiver') {
-          console.log('[POSE][receiver] inference STOP (receiver)');
-          return;
-        }
-
-        if (!videoHasFrame(remoteVideo)) {
-          poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
-          scheduleNext();
-          return;
-        }
-
-        try {
-          const ts = performance.now();
-          const result = poseTask.detectForVideo(remoteVideo, ts);
-          if (result?.landmarks?.length) {
-            drawPoseLandmarks(result.landmarks);
-            if (poseDC?.readyState === 'open') {
-              poseDC.send(JSON.stringify({ type:'pose', landmarks: result.landmarks, ts }));
-            }
-          } else {
-            poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-          }
-        } catch (err) {
-          console.warn('[POSE][receiver] detect error (retrying next frame)', err);
-        } finally {
-          scheduleNext();
-        }
-      };
-
-      const scheduleNext = () => {
-        if (useRVFC) remoteVideo.requestVideoFrameCallback(onFrame);
-        else requestAnimationFrame(onFrame);
-      };
-
-      scheduleNext();
-    }
-
-    function stopReceiverPoseLoop() {
-      poseLoopRunning = false;
-      poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-    }
-
-    function applyPoseMode() {
-      setOverlayVisible(poseEnabled);
-      if (!poseEnabled) { stopReceiverPoseLoop(); return; }
-      if (poseWhere === 'receiver') startReceiverPoseLoop();
-      else stopReceiverPoseLoop(); // sender mode: draw only what we receive
-    }
-
-    /* ---------- WebSocket / WebRTC ---------- */
     async function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
@@ -416,17 +781,13 @@
         };
       });
     }
-
     function scheduleWSReconnect() {
       const delay = Math.min(wsRetryMs, WS_RECONNECT_MAX_MS);
-      console.log('[WS] reconnect in', delay, 'ms');
       setTimeout(() => {
         wsRetryMs = Math.min(wsRetryMs * 2, WS_RECONNECT_MAX_MS);
         startNegotiation();
       }, delay);
     }
-
-    const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
     function createPC() {
       if (pc) { try { pc.close(); } catch{}; pc = null; }
@@ -439,10 +800,10 @@
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
-      // Pose DC (receiver initiates; bidirectional)
+      // Pose DC (receiver initiates)
       const ch = pc.createDataChannel('pose');
-      ch.onopen = () => { console.log('[DC][receiver] pose DC open'); };
-      ch.onclose = () => { console.log('[DC][receiver] pose DC close'); };
+      ch.onopen = () => {};
+      ch.onclose = () => {};
       ch.onerror = (e) => { console.warn('[DC][receiver] pose DC error', e); };
       ch.onmessage = (ev) => {
         try {
@@ -450,8 +811,10 @@
           if (msg.type === 'pose-mode') {
             poseEnabled = !!msg.enabled;
             poseWhere   = msg.where || 'sender';
-            console.log('[POSE][receiver] mode:', { poseEnabled, poseWhere });
-            applyPoseMode();
+            setOverlayVisible(poseEnabled && poseWhere === 'sender');
+            if (!(poseEnabled && poseWhere === 'sender')) {
+              poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+            }
           } else if (msg.type === 'pose') {
             if (poseEnabled && poseWhere === 'sender') drawPoseLandmarks(msg.landmarks);
           }
@@ -465,43 +828,31 @@
           remoteVideo.srcObject = ev.streams[0];
           tryStartMuted();
         }
-        console.log('[TRACK][receiver] ontrack:', ev.track.kind);
         beginViewportSettle();
       };
 
-      // Less jumpy on ICE disconnected; immediate on failed
       pc.oniceconnectionstatechange = () => {
         const state = pc.iceConnectionState;
-        console.log('[ICE]', state);
+        if (state === 'connected') showStatus('Connected'); else showStatus('ICE: ' + state);
 
-        if (state === 'connected' || state === 'completed') {
-          showStatus('Connected');
-          iceDisconnectedSince = null;
-        } else if (state === 'failed') {
-          console.log('[ICE] failed - restarting negotiation');
-          startNegotiation(true);
-        } else if (state === 'disconnected') {
+        if (state === 'disconnected') {
           if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
           setTimeout(() => {
-            if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= 15000) {
-              console.log('[ICE] disconnected >15s - restarting negotiation');
+            if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= RESTART_ON_ICE_TIMEOUT_MS) {
               startNegotiation(true);
             }
-          }, 15100);
-          showStatus('ICE: disconnected');
+          }, RESTART_ON_ICE_TIMEOUT_MS + 50);
+        } else if (state === 'failed') {
+          startNegotiation(true);
         } else {
-          showStatus('ICE: ' + state);
+          iceDisconnectedSince = null;
         }
       };
     }
 
     async function sendCurrentOffer() {
-      if (pc?.localDescription?.type === 'offer') {
-        console.log('[WS OUT] offer (send/resend)');
-        send(pc.localDescription);
-      }
+      if (pc?.localDescription?.type === 'offer') send(pc.localDescription);
     }
-
     function startOfferResendLoop() {
       stopOfferResendLoop();
       offerResendTimer = setInterval(() => {
@@ -527,22 +878,16 @@
         startOfferResendLoop();
         showStatus('Offer sent, waiting for answer…');
       } catch (e) {
-        console.error('negotiation error', e);
         showStatus('Negotiation error');
       }
     }
 
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
-      console.log('[WS IN]', msg.type);
 
       if (msg.type === 'answer') {
-        if (pc.signalingState !== 'have-local-offer') {
-          console.log('[SKIP] answer in state', pc.signalingState);
-          if (pc.signalingState === 'stable') stopOfferResendLoop(); // stop storm
-          return;
-        }
-        if (lastAnswerSdp === msg.sdp) { console.log('[DUP] identical answer ignored'); return; }
+        if (pc.signalingState !== 'have-local-offer') return;
+        if (lastAnswerSdp === msg.sdp) return;
         lastAnswerSdp = msg.sdp;
 
         showStatus('Got answer, applying…');
@@ -551,14 +896,14 @@
         stopOfferResendLoop();
 
         for (const c of candidateQueue) {
-          try { await pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
+          try { await pc.addIceCandidate(c); } catch {}
         }
         candidateQueue.length = 0;
 
       } else if (msg.type === 'candidate' && msg.candidate) {
         const cand = new RTCIceCandidate(msg.candidate);
         if (remoteDescriptionSet) {
-          try { await pc.addIceCandidate(cand); } catch (e) { console.warn('ICE add failed', e); }
+          try { await pc.addIceCandidate(cand); } catch {}
         } else {
           candidateQueue.push(cand);
         }
@@ -566,9 +911,8 @@
       } else if (msg.type === 'peer-joined' || msg.type === 'need-offer') {
         await sendCurrentOffer();
       } else if (msg.type === 'bye') {
-        console.log('[INFO] sender bye -> pause offers until peer rejoins');
         remoteDescriptionSet = false;
-        stopOfferResendLoop();
+        startOfferResendLoop();
       }
     }
 
@@ -578,13 +922,14 @@
       try { pc && pc.close(); } catch {}
       if (wsKeepalive) clearInterval(wsKeepalive);
       if (hideStatusTimer) clearTimeout(hideStatusTimer);
-      stopReceiverPoseLoop();
+      clearTimeout(sidebarTimer);
+      clearTimeout(hamburgerFadeTimer);
     });
 
     // Go!
     startNegotiation();
 
-    // tiny typo guard used in logs
+    // tiny alias/typo guard
     function beginViewportSetle(){ beginViewportSettle(); }
   </script>
 </body>
