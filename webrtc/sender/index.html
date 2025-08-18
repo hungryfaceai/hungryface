@@ -56,9 +56,7 @@
         </select>
       </div>
 
-      <div class="row">
-        <input id="room" type="text" placeholder="Room (e.g., Baby)" value="Baby" autocomplete="off">
-      </div>
+      <div class="row"><input id="room" type="text" placeholder="Room (e.g., Baby)" value="Baby" autocomplete="off"></div>
 
       <div class="row">
         <input id="previewMins" type="number" min="0" step="1" value="1" aria-label="Preview minutes">
@@ -69,10 +67,7 @@
         <legend>AI features</legend>
         <div class="ai-row">
           <label class="switch"><input id="poseOn" type="checkbox"><span>Pose</span></label>
-          <select id="poseWhere">
-            <option value="sender" selected>On sender</option>
-            <option value="receiver">On receiver</option>
-          </select>
+          <select id="poseWhere"><option value="sender" selected>On sender</option><option value="receiver">On receiver</option></select>
         </div>
         <div class="ai-row"><label class="switch"><input type="checkbox" disabled><span>Audio</span></label><select disabled><option>On sender</option><option>On receiver</option></select></div>
         <div class="ai-row"><label class="switch"><input type="checkbox" disabled><span>Face</span></label><select disabled><option>On sender</option><option>On receiver</option></select></div>
@@ -221,6 +216,7 @@
     }
     const send = (obj)=>{ try { ws?.readyState===WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
+    // NOTE: we DO NOT add tracks here anymore — we bind them after SRD(offer)
     function createPC(){
       pc = new RTCPeerConnection({ iceServers:[{urls:'stun:stun.l.google.com:19302'}], bundlePolicy:'max-bundle', sdpSemantics:'unified-plan' });
       pc.ondatachannel = (ev)=>{
@@ -235,7 +231,30 @@
       };
       pc.onicecandidate = (e)=>{ if (e.candidate) send({type:'candidate', candidate:e.candidate}); };
       pc.oniceconnectionstatechange = ()=> setStatus('ICE: ' + pc.iceConnectionState);
-      localStream.getTracks().forEach(track => { console.log('[TRACK][sender] addTrack', track.kind); pc.addTrack(track, localStream); });
+    }
+
+    async function bindTracksToOfferedTransceivers(){
+      if (!pc || !localStream) return;
+      const vTrack = localStream.getVideoTracks()[0] || null;
+      const aTrack = localStream.getAudioTracks()[0] || null;
+
+      // Match by kind against the offered (recvonly) transceivers
+      const vXcvr = pc.getTransceivers().find(t => t.receiver?.track?.kind === 'video');
+      const aXcvr = pc.getTransceivers().find(t => t.receiver?.track?.kind === 'audio');
+
+      if (vXcvr && vTrack){
+        vXcvr.direction = 'sendonly';
+        await vXcvr.sender.replaceTrack(vTrack);
+      } else if (vTrack) {
+        pc.addTransceiver(vTrack, { direction: 'sendonly' });
+      }
+
+      if (aXcvr && aTrack){
+        aXcvr.direction = 'sendonly';
+        await aXcvr.sender.replaceTrack(aTrack);
+      } else if (aTrack) {
+        pc.addTransceiver(aTrack, { direction: 'sendonly' });
+      }
     }
 
     async function onSignal(evt){
@@ -247,9 +266,16 @@
         if (pc.signalingState === 'have-local-offer'){ try { await pc.setLocalDescription({type:'rollback'}); } catch {} }
         if (lastOfferSdp === msg.sdp){ console.log('[DUP] identical offer ignored'); return; }
         lastOfferSdp = msg.sdp;
+
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
         remoteDescriptionSet = true;
+
+        // ✅ Bind local tracks to the offered m-sections (correct order)
+        await bindTracksToOfferedTransceivers();
+
+        // handle queued ICE
         while (candidateQueue.length){ const c = candidateQueue.shift(); try { await pc.addIceCandidate(c); } catch (err) { console.warn('late ICE add failed', err); } }
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         send(answer);
@@ -378,7 +404,7 @@
       console.log('[POSE][sender] tasks-vision loaded');
     }
 
-    async function createPoseTask(delegate = senderDelegate){
+    async function createPoseTask(delegate){
       const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
       return await PoseLandmarker.createFromOptions(vision, {
         baseOptions: {
@@ -387,9 +413,7 @@
         },
         runningMode: "VIDEO",
         numPoses: 1,
-        // Be explicit to avoid any mask-related internal drawing paths.
-        outputSegmentationMasks: false,
-        // Conservative thresholds to reduce jitter:
+        outputSegmentationMasks: false, // ← not needed; cheaper & avoids mask paths
         minPoseDetectionConfidence: 0.5,
         minPosePresenceConfidence: 0.5,
         minTrackingConfidence: 0.5
@@ -398,7 +422,7 @@
 
     async function ensurePoseTask(){
       await ensureTasksLoaded();
-      if (!poseTask) poseTask = await createPoseTask();
+      if (!poseTask) poseTask = await createPoseTask(senderDelegate);
       return poseTask;
     }
 
@@ -448,7 +472,6 @@
           if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') return;
           if (!canProcessNow()) { localVideo.requestVideoFrameCallback(onFrame); return; }
 
-          // Use media clock timestamp (s -> ms), keep strictly increasing
           const candidate = Math.floor((metadata?.mediaTime ?? localVideo.currentTime) * 1000);
           const ts = Math.max(lastTs + 1, candidate);
           lastTs = ts;
@@ -467,7 +490,7 @@
             consecutiveDetectErrors++;
             if (consecutiveDetectErrors >= 3){
               errorCooldownUntil = performance.now() + 500;
-              await softResetTask(true); // fallback to CPU
+              await softResetTask(true); // fallback to CPU if GPU is flaky
             }
           }
           localVideo.requestVideoFrameCallback(onFrame);
@@ -506,7 +529,6 @@
     function stopSenderPoseLoop(){ poseLoopRunning = false; ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height); }
 
     function onPoseMessageFromReceiver(ev){
-      // reserved for future “receiver runs inference” → echo back drawing to sender’s preview
       try{
         const msg = JSON.parse(ev.data);
         if (msg.type === 'pose' && document.body.classList.contains('previewing')){
