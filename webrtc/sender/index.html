@@ -159,6 +159,7 @@
     const statusEl  = document.getElementById('status');
     const ui        = document.getElementById('ui');
     const tap       = document.getElementById('tap');
+    const stage     = document.getElementById('stage'); // NEW: align canvas within stage
 
     const poseOn    = document.getElementById('poseOn');
     const poseWhere = document.getElementById('poseWhere');
@@ -194,21 +195,40 @@
       return { x, y, width:w, height:h, left:x, top:y };
     }
 
+    // REPLACED: align canvas to the contained video area inside #stage
     function resizeCanvasToVideo() {
       const showVideo = document.body.classList.contains('previewing') && videoOn.checked;
       localVideo.style.display = showVideo ? 'block' : 'none';
 
-      let rect = localVideo.getBoundingClientRect();
-      if (!rect.width || !rect.height) rect = calcViewportContainRect();
+      // Compute the letterboxed "contain" rectangle of the video content inside #stage
+      const stageBox = stage.getBoundingClientRect();
+      const containerW = Math.round(stageBox.width);
+      const containerH = Math.round(stageBox.height);
+      const vidW = localVideo.videoWidth  || 1;
+      const vidH = localVideo.videoHeight || 1;
 
-      poseCanvas.style.left   = rect.left + 'px';
-      poseCanvas.style.top    = rect.top  + 'px';
-      poseCanvas.style.width  = rect.width  + 'px';
-      poseCanvas.style.height = rect.height + 'px';
+      const scale = Math.min(containerW / vidW, containerH / vidH);
+      const fitW = Math.round(vidW * scale);
+      const fitH = Math.round(vidH * scale);
+      const fitLeft = Math.floor((containerW - fitW) / 2);
+      const fitTop  = Math.floor((containerH - fitH) / 2);
 
+      // Position the canvas *inside stage* (absolute, relative to stage’s top-left)
+      poseCanvas.style.left   = fitLeft + 'px';
+      poseCanvas.style.top    = fitTop  + 'px';
+      poseCanvas.style.width  = fitW + 'px';
+      poseCanvas.style.height = fitH + 'px';
+
+      // Match backing store to CSS size (HiDPI safe)
       const dpr = window.devicePixelRatio || 1;
-      poseCanvas.width  = Math.max(1, Math.round(rect.width  * dpr));
-      poseCanvas.height = Math.max(1, Math.round(rect.height * dpr));
+      const needW = Math.max(1, Math.round(fitW * dpr));
+      const needH = Math.max(1, Math.round(fitH * dpr));
+      if (poseCanvas.width !== needW || poseCanvas.height !== needH) {
+        poseCanvas.width  = needW;
+        poseCanvas.height = needH;
+      }
+
+      // Only show overlay while previewing and Pose is ON
       poseCanvas.style.display =
         (poseOn.checked && videoOn.checked && document.body.classList.contains('previewing'))
           ? 'block' : 'none';
