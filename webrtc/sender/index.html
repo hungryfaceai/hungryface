@@ -12,15 +12,11 @@
       touch-action: manipulation;
     }
 
-    /* Use small-viewport units so iOS URL bar doesn't shift layout */
-    #stage {
-      position: fixed; inset: 0; z-index: 1;
-      width: 100svw; height: 100svh;  /* key fix for iOS Safari */
-    }
+    #stage { position: fixed; inset: 0; z-index: 1; }
 
     /* Letterboxed preview (no crop) */
     #stage > video#local {
-      position: absolute; inset: 0; width: 100%; height: 100%;
+      position: absolute; inset: 0; width: 100vw; height: 100vh;
       object-fit: contain; background: #000; display: none; pointer-events: none;
     }
 
@@ -163,7 +159,7 @@
     const statusEl  = document.getElementById('status');
     const ui        = document.getElementById('ui');
     const tap       = document.getElementById('tap');
-    const stage     = document.getElementById('stage');
+    const stage     = document.getElementById('stage'); // NEW: align canvas within stage
 
     const poseOn    = document.getElementById('poseOn');
     const poseWhere = document.getElementById('poseWhere');
@@ -190,11 +186,21 @@
       document.body.classList.toggle('mirror', isFront());
     }
 
-    /* ----- Canvas alignment (letterbox-aware inside #stage) ----- */
+    function calcViewportContainRect() {
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const vidW = localVideo.videoWidth || 1, vidH = localVideo.videoHeight || 1;
+      const scale = Math.min(vw / vidW, vh / vidH);
+      const w = vidW * scale, h = vidH * scale;
+      const x = (vw - w) / 2, y = (vh - h) / 2;
+      return { x, y, width:w, height:h, left:x, top:y };
+    }
+
+    // REPLACED: align canvas to the contained video area inside #stage
     function resizeCanvasToVideo() {
       const showVideo = document.body.classList.contains('previewing') && videoOn.checked;
       localVideo.style.display = showVideo ? 'block' : 'none';
 
+      // Compute the letterboxed "contain" rectangle of the video content inside #stage
       const stageBox = stage.getBoundingClientRect();
       const containerW = Math.round(stageBox.width);
       const containerH = Math.round(stageBox.height);
@@ -207,11 +213,13 @@
       const fitLeft = Math.floor((containerW - fitW) / 2);
       const fitTop  = Math.floor((containerH - fitH) / 2);
 
+      // Position the canvas *inside stage* (absolute, relative to stage’s top-left)
       poseCanvas.style.left   = fitLeft + 'px';
       poseCanvas.style.top    = fitTop  + 'px';
       poseCanvas.style.width  = fitW + 'px';
       poseCanvas.style.height = fitH + 'px';
 
+      // Match backing store to CSS size (HiDPI safe)
       const dpr = window.devicePixelRatio || 1;
       const needW = Math.max(1, Math.round(fitW * dpr));
       const needH = Math.max(1, Math.round(fitH * dpr));
@@ -220,6 +228,7 @@
         poseCanvas.height = needH;
       }
 
+      // Only show overlay while previewing and Pose is ON
       poseCanvas.style.display =
         (poseOn.checked && videoOn.checked && document.body.classList.contains('previewing'))
           ? 'block' : 'none';
@@ -232,14 +241,17 @@
       resizeCanvasToVideo();
     });
 
-    // Keep canvas aligned as iOS toolbars show/hide or on rotate/scroll
-    const vpAlign = () => { if (document.body.classList.contains('previewing')) resizeCanvasToVideo(); };
     ['resize','orientationchange','scroll'].forEach(ev =>
-      window.addEventListener(ev, vpAlign, { passive: true })
+      window.addEventListener(ev, () => {
+        if (document.body.classList.contains('previewing')) resizeCanvasToVideo();
+      })
     );
     if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', vpAlign, { passive: true });
-      window.visualViewport.addEventListener('scroll',  vpAlign, { passive: true });
+      ['resize','scroll'].forEach(ev =>
+        window.visualViewport.addEventListener(ev, () => {
+          if (document.body.classList.contains('previewing')) resizeCanvasToVideo();
+        })
+      );
     }
 
     async function getMedia() {
@@ -322,9 +334,10 @@
         if (ev.channel?.label === 'pose') {
           const ch = ev.channel;
           console.log('[DC][sender] ondatachannel: pose');
-          ch.onopen = () => { console.log('[POSE][sender] DC open (sender side)'); poseDCs.add(ch); };
+          ch.onopen = () => { console.log('[POSE][sender] DC open (sender side)'); poseDCs.add(ch); announcePoseMode(); };
           ch.onclose = () => { console.log('[POSE][sender] DC close (sender side)'); poseDCs.delete(ch); };
           ch.onerror = (e) => { console.log('[POSE][sender] DC error', e); };
+          ch.onmessage = onPoseMessageFromReceiver;
         }
       };
 
@@ -460,6 +473,7 @@
 
         applyVideoToggle();
         applyAudioToggle();
+        applyPoseUI();
 
       } catch (err) {
         console.error(err);
@@ -510,6 +524,98 @@
 
     window.addEventListener('beforeunload', stopStreaming);
     startBtn.addEventListener('click', startOrStop);
+
+    function announcePoseMode() {
+      const enabled = !!poseOn.checked;
+      const where   = poseWhere.value;
+      for (const ch of poseDCs) {
+        if (ch.readyState === 'open') ch.send(JSON.stringify({ type:'pose-mode', enabled, where }));
+      }
+      console.log(`[POSE][sender] announce inference-mode: ${where} (enabled: ${enabled} )`);
+    }
+    async function ensureTasksLoaded() {
+      if (PoseLandmarker) return;
+      ({ PoseLandmarker, FilesetResolver, DrawingUtils } = await import(TASKS_URL));
+      console.log('[POSE][sender] DrawingUtils loaded');
+    }
+    async function ensurePoseTask() {
+      await ensureTasksLoaded();
+      if (poseTask) return poseTask;
+      const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
+      poseTask = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+          delegate: "GPU"
+        },
+        runningMode: "VIDEO",
+        numPoses: 1
+      });
+      return poseTask;
+    }
+    function sendPoseToReceivers(landmarks) {
+      const payload = JSON.stringify({ type:'pose', landmarks, ts: performance.now() });
+      for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
+    }
+    function drawPoseOnSender(landmarks) {
+      if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
+      const dutils = new DrawingUtils(ctx);
+      ctx.save();
+      ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+      for (const lm of landmarks) {
+        dutils.drawLandmarks(lm, {
+          radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
+        });
+        dutils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+      }
+      ctx.restore();
+    }
+    async function startSenderPoseLoop() {
+      if (!started || !poseOn.checked || poseWhere.value !== 'sender') return;
+      const task = await ensurePoseTask();
+      poseLoopRunning = true;
+      console.log('[POSE][sender] inference START (sender)');
+      const loop = async () => {
+        if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') { console.log('[POSE][sender] inference STOP (sender)'); return; }
+        const ts = performance.now();
+        const result = task.detectForVideo(localVideo, ts);
+        ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+        if (result?.landmarks?.length) {
+          // ⬇️ Keep sending after preview; only draw locally during preview
+          if (document.body.classList.contains('previewing')) {
+            drawPoseOnSender(result.landmarks);
+          }
+          sendPoseToReceivers(result.landmarks);
+        }
+        requestAnimationFrame(loop);
+      };
+      loop();
+    }
+    function stopSenderPoseLoop() {
+      poseLoopRunning = false;
+      ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+    }
+    function onPoseMessageFromReceiver(ev) {
+      // reserved for future “receiver runs inference” → echo back drawing to sender’s preview
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'pose' && document.body.classList.contains('previewing')) {
+          drawPoseOnSender(msg.landmarks);
+        }
+      } catch {}
+    }
+    function applyPoseUI() {
+      announcePoseMode();
+      resizeCanvasToVideo();
+      if (!poseOn.checked) { stopSenderPoseLoop(); return; }
+      if (started && poseWhere.value === 'sender') startSenderPoseLoop();
+      else stopSenderPoseLoop();
+    }
+    poseOn.addEventListener('change', () => { console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`); applyPoseUI(); });
+    poseWhere.addEventListener('change', () => { console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`); applyPoseUI(); });
+
+    const qsRoom = new URLSearchParams(location.search).get('room');
+    if (qsRoom) roomInput.value = qsRoom;
   </script>
 </body>
 </html>
