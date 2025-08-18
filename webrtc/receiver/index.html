@@ -12,10 +12,11 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       overflow: hidden;
     }
+
+    /* Key: use small-viewport units to avoid iOS URL bar drift */
     #stage {
       position: fixed; inset: 0;
-      width: 100vw; height: 100vh;
-      width: 100dvw; height: 100dvh;
+      width: 100svw; height: 100svh;  /* key fix */
       z-index: 1; background: #000;
     }
     #stage > video {
@@ -27,6 +28,7 @@
       position: absolute;
       z-index: 2; pointer-events: none; background: transparent; display: none;
     }
+
     .btn {
       padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
       background: transparent; color: #fff; font-size: 16px; font-weight: 600;
@@ -34,11 +36,13 @@
       text-shadow: 0 1px 2px rgba(0,0,0,0.6);
     }
     .btn:active { transform: scale(0.99); }
+
     #controls {
       position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
       display: flex; align-items: center; gap: 12px; z-index: 6;
     }
     #enableAudioBtn, #disableAudioBtn { display: none; }
+
     .overlay {
       position: fixed; inset: 0; display: flex;
       align-items: center; justify-content: center;
@@ -106,18 +110,14 @@
     let hideStatusTimer = null;
     let iceDisconnectedSince = null;
 
-    // Pose + orientation state
+    // Pose state
     let poseDC = null;
     let poseEnabled = false;
-    let poseWhere   = 'sender'; // or 'receiver'
+    let poseWhere   = 'sender'; // 'sender' | 'receiver'
     let poseTask = null;
     let poseLoopRunning = false;
 
-    // Latest sender meta (for orientation fix)
-    let senderOrient = 0;  // 0/90/180/270
-    let senderSrcW = 0;
-    let senderSrcH = 0;
-
+    /* ---------- Status overlay ---------- */
     function showStatus(msg) {
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
@@ -131,6 +131,7 @@
       }
     }
 
+    /* ---------- Audio UI ---------- */
     function updateAudioButtons() {
       if (remoteVideo.muted) {
         enableAudioBtn.style.display = 'block';
@@ -141,6 +142,7 @@
       }
     }
     enableAudioBtn.style.display = 'block';
+
     async function tryStartMuted() {
       try {
         remoteVideo.muted = true;
@@ -161,6 +163,7 @@
       updateAudioButtons();
     });
 
+    /* ---------- Fullscreen ---------- */
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -189,7 +192,7 @@
       beginViewportSettle();
     });
 
-    // ---- Canvas alignment (letterbox inside #stage) ----
+    /* ---------- Canvas alignment ---------- */
     function containRect(containerW, containerH, contentW, contentH) {
       const scale = Math.min(containerW / (contentW||1), containerH / (contentH||1));
       const w = Math.round(contentW * scale);
@@ -198,24 +201,15 @@
       const y = Math.floor((containerH - h) / 2);
       return { left:x, top:y, width:w, height:h };
     }
-
     function alignCanvasToVideo() {
       const stageBox = stage.getBoundingClientRect();
       const videoBox = remoteVideo.getBoundingClientRect();
-
-      // Choose the content orientation that best matches the display box aspect
       const containerW = Math.round(videoBox.width);
       const containerH = Math.round(videoBox.height);
       const vidW = remoteVideo.videoWidth  || 1;
       const vidH = remoteVideo.videoHeight || 1;
-      const arBox = containerW / (containerH || 1);
-      const arVid = vidW / (vidH || 1);
-      const arSwap= vidH / (vidW || 1);
-      const useSwap = Math.abs(arSwap - arBox) < Math.abs(arVid - arBox);
-      const contentW = useSwap ? vidH : vidW;
-      const contentH = useSwap ? vidW : vidH;
 
-      const fit = containRect(containerW, containerH, contentW, contentH);
+      const fit = containRect(containerW, containerH, vidW, vidH);
       const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
       const topCSS  = Math.round((videoBox.top  - stageBox.top)  + fit.top);
 
@@ -233,9 +227,8 @@
       }
       poseCtx.setTransform(1,0,0,1,0,0);
     }
-
     let settleRAF = 0, settleUntil = 0;
-    function beginViewportSettle(durationMs = 1000) {
+    function beginViewportSettle(durationMs = 1200) {
       settleUntil = performance.now() + durationMs;
       if (settleRAF) return;
       const tick = () => {
@@ -249,25 +242,24 @@
       };
       tick();
     }
+    const vpAlign = () => beginViewportSettle();
     ['resize','orientationchange','scroll'].forEach(ev =>
-      window.addEventListener(ev, () => beginViewportSettle(), { passive: true })
+      window.addEventListener(ev, vpAlign, { passive: true })
     );
     if (window.visualViewport) {
-      ['resize','scroll'].forEach(ev =>
-        window.visualViewport.addEventListener(ev, () => beginViewportSettle(), { passive: true })
-      );
+      window.visualViewport.addEventListener('resize', vpAlign, { passive: true });
+      window.visualViewport.addEventListener('scroll',  vpAlign, { passive: true });
     }
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) beginViewportSettle();
     });
 
-    // ---- Overlay helpers ----
+    /* ---------- Overlay helpers ---------- */
     function setOverlayVisible(v) {
       poseCanvas.style.display = v ? 'block' : 'none';
       if (v) beginViewportSettle();
       else poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
-
     function drawPoseLandmarks(landmarks) {
       if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
       poseCtx.save();
@@ -282,27 +274,7 @@
       poseCtx.restore();
     }
 
-    // ---- Orientation-aware transform for SENDER-provided landmarks ----
-    function getDisplayOrientationDeg() {
-      const r = remoteVideo.getBoundingClientRect();
-      return (r.width >= r.height) ? 90 : 0; // landscape≈90, portrait≈0
-    }
-    function rotatePointNorm({x,y,z}, deg) {
-      // rotate around center of unit square
-      // 0: (x,y), 90: (1-y, x), 180: (1-x, 1-y), 270: (y, 1-x)
-      let nx=x, ny=y;
-      const d = ((deg % 360) + 360) % 360;
-      if (d === 90)  { nx = 1 - y; ny = x; }
-      else if (d === 180){ nx = 1 - x; ny = 1 - y; }
-      else if (d === 270){ nx = y; ny = 1 - x; }
-      return { x:nx, y:ny, z };
-    }
-    function rotateLandmarks(lms, deg) {
-      if (!deg) return lms;
-      return lms.map(group => group.map(pt => rotatePointNorm(pt, deg)));
-    }
-
-    // ---- MediaPipe on RECEIVER ----
+    /* ---------- MediaPipe on RECEIVER (ROI-guarded) ---------- */
     async function ensurePoseTask() {
       if (poseTask) return poseTask;
       const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
@@ -313,7 +285,6 @@
       });
       return poseTask;
     }
-
     function videoHasFrame(v) {
       return v &&
         v.readyState >= HAVE_CURRENT_DATA &&
@@ -334,7 +305,6 @@
         video.addEventListener('resize',  check);
       });
     }
-
     async function startReceiverPoseLoop() {
       if (poseLoopRunning) return;
       await ensurePoseTask();
@@ -360,6 +330,7 @@
           const result = poseTask.detectForVideo(remoteVideo, ts);
           if (result?.landmarks?.length) {
             drawPoseLandmarks(result.landmarks);
+            // Optional echo so sender preview can draw if desired:
             if (poseDC?.readyState === 'open') {
               poseDC.send(JSON.stringify({ type:'pose', landmarks: result.landmarks, ts }));
             }
@@ -372,30 +343,24 @@
           scheduleNext();
         }
       };
-
       const scheduleNext = () => {
         if (useRVFC) remoteVideo.requestVideoFrameCallback(onFrame);
         else requestAnimationFrame(onFrame);
       };
-
       scheduleNext();
     }
     function stopReceiverPoseLoop() {
       poseLoopRunning = false;
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
-
     function applyPoseMode() {
       setOverlayVisible(poseEnabled);
       if (!poseEnabled) { stopReceiverPoseLoop(); return; }
-      if (poseWhere === 'receiver') {
-        startReceiverPoseLoop();
-      } else {
-        stopReceiverPoseLoop(); // draw only what comes over DC
-      }
+      if (poseWhere === 'receiver') startReceiverPoseLoop();
+      else stopReceiverPoseLoop(); // sender mode: draw only what we receive
     }
 
-    // ---- WebSocket / WebRTC ----
+    /* ---------- WebSocket / WebRTC ---------- */
     async function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
@@ -462,24 +427,12 @@
           if (msg.type === 'pose-mode') {
             poseEnabled = !!msg.enabled;
             poseWhere   = msg.where || 'sender';
-            // capture latest sender meta for orientation fix
-            senderOrient = (msg.orient|0) % 360;
-            senderSrcW = msg.srcW|0; senderSrcH = msg.srcH|0;
-            console.log('[POSE][receiver] mode:', { poseEnabled, poseWhere, senderOrient, senderSrcW, senderSrcH });
+            console.log('[POSE][receiver] mode:', { poseEnabled, poseWhere });
             applyPoseMode();
           } else if (msg.type === 'pose') {
-            if (poseEnabled && poseWhere === 'sender') {
-              // rotate landmarks from sender space -> receiver display space
-              const displayDeg = getDisplayOrientationDeg();  // 0 or 90 (approx)
-              const srcDeg = (msg.orient|0) % 360;            // 0/90/180/270
-              const rot = ((displayDeg - srcDeg) + 360) % 360;
-              const lms = rotateLandmarks(msg.landmarks, rot);
-              drawPoseLandmarks(lms);
-            }
+            if (poseEnabled && poseWhere === 'sender') drawPoseLandmarks(msg.landmarks);
           }
-        } catch (e) {
-          console.warn('[DC msg parse error]', e);
-        }
+        } catch {}
       };
       poseDC = ch;
 
@@ -493,7 +446,7 @@
         beginViewportSettle();
       };
 
-      // Less jumpy ICE handling
+      // Less jumpy on ICE disconnected; immediate on failed
       pc.oniceconnectionstatechange = () => {
         const state = pc.iceConnectionState;
         console.log('[ICE]', state);
@@ -542,7 +495,6 @@
         try { await connectWS(); } catch(e) { scheduleWSReconnect(); return; }
       }
       if (!pc || forceNewPc) createPC();
-
       try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
@@ -607,6 +559,7 @@
     // Go!
     startNegotiation();
 
+    // tiny typo guard used in logs
     function beginViewportSetle(){ beginViewportSettle(); }
   </script>
 </body>
