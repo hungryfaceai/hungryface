@@ -17,7 +17,8 @@
     #stage {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;   /* fallback */
-      width: 100dvw; height: 100dvh; /* iOS dynamic viewport */
+      width: 100dvw; height: 100dvh; /* dynamic viewport */
+      width: 100svw; height: 100svh; /* small viewport (iOS URL bar safe) */
       z-index: 1; background: #000;
     }
     #stage > video {
@@ -198,6 +199,8 @@
       updateAudioButtons();
       beginViewportSettle();
     });
+    // Handle rotation / track size changes from sender
+    remoteVideo.addEventListener('resize', beginViewportSettle);
 
     /* ---------- Canvas alignment ---------- */
     function containRect(containerW, containerH, contentW, contentH) {
@@ -237,7 +240,7 @@
     }
 
     let settleRAF = 0, settleUntil = 0;
-    function beginViewportSettle(durationMs = 1000) {
+    function beginViewportSettle(durationMs = 1200) {
       settleUntil = performance.now() + durationMs;
       if (settleRAF) return;
       const tick = () => {
@@ -251,13 +254,13 @@
       };
       tick();
     }
+    const vpAlign = () => beginViewportSettle();
     ['resize','orientationchange','scroll'].forEach(ev =>
-      window.addEventListener(ev, () => beginViewportSettle(), { passive: true })
+      window.addEventListener(ev, vpAlign, { passive: true })
     );
     if (window.visualViewport) {
-      ['resize','scroll'].forEach(ev =>
-        window.visualViewport.addEventListener(ev, () => beginViewportSettle(), { passive: true })
-      );
+      window.visualViewport.addEventListener('resize', vpAlign, { passive: true });
+      window.visualViewport.addEventListener('scroll',  vpAlign, { passive: true });
     }
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) beginViewportSettle();
@@ -335,7 +338,6 @@
         }
 
         if (!videoHasFrame(remoteVideo)) {
-          // transient hiccup during renegotiation; clear and retry next frame
           poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
           scheduleNext();
           return;
@@ -346,7 +348,6 @@
           const result = poseTask.detectForVideo(remoteVideo, ts);
           if (result?.landmarks?.length) {
             drawPoseLandmarks(result.landmarks);
-            // Optional: echo to sender so it can draw during preview when "On receiver"
             if (poseDC?.readyState === 'open') {
               poseDC.send(JSON.stringify({ type:'pose', landmarks: result.landmarks, ts }));
             }
@@ -354,7 +355,6 @@
             poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
           }
         } catch (err) {
-          // Swallow transient ROI errors; keep loop alive
           console.warn('[POSE][receiver] detect error (retrying next frame)', err);
         } finally {
           scheduleNext();
@@ -375,16 +375,10 @@
     }
 
     function applyPoseMode() {
-      // Show the overlay area whenever Pose is enabled (sender-drawn or local-drawn)
       setOverlayVisible(poseEnabled);
       if (!poseEnabled) { stopReceiverPoseLoop(); return; }
-
-      if (poseWhere === 'receiver') {
-        startReceiverPoseLoop();
-      } else {
-        // sender mode: only draw what comes over DC
-        stopReceiverPoseLoop();
-      }
+      if (poseWhere === 'receiver') startReceiverPoseLoop();
+      else stopReceiverPoseLoop(); // sender mode: draw only what we receive
     }
 
     /* ---------- WebSocket / WebRTC ---------- */
@@ -475,7 +469,7 @@
         beginViewportSettle();
       };
 
-      // --- Be less jumpy on ICE disconnected (restart only if persists ≥15s; restart immediately on failed)
+      // Less jumpy on ICE disconnected; immediate on failed
       pc.oniceconnectionstatechange = () => {
         const state = pc.iceConnectionState;
         console.log('[ICE]', state);
@@ -545,8 +539,7 @@
       if (msg.type === 'answer') {
         if (pc.signalingState !== 'have-local-offer') {
           console.log('[SKIP] answer in state', pc.signalingState);
-          // Stop re-sending if we already stabilized
-          if (pc.signalingState === 'stable') stopOfferResendLoop();
+          if (pc.signalingState === 'stable') stopOfferResendLoop(); // stop storm
           return;
         }
         if (lastAnswerSdp === msg.sdp) { console.log('[DUP] identical answer ignored'); return; }
@@ -573,7 +566,6 @@
       } else if (msg.type === 'peer-joined' || msg.type === 'need-offer') {
         await sendCurrentOffer();
       } else if (msg.type === 'bye') {
-        // Don’t spam offers while the sender is gone
         console.log('[INFO] sender bye -> pause offers until peer rejoins');
         remoteDescriptionSet = false;
         stopOfferResendLoop();
