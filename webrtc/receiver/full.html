@@ -125,6 +125,59 @@
       -webkit-user-select: none !important;
       cursor: default !important;
     }
+
+    /* ---------- Invite modal + toast ---------- */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: none; z-index: 40;
+      align-items: center; justify-content: center;
+    }
+    .modal-backdrop.visible { display: flex; }
+    .modal-card {
+      background: rgba(20,20,20,0.95);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 16px; padding: 16px;
+      width: min(92vw, 420px);
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+      color: #eee;
+    }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .modal-title { font-weight: 700; font-size: 16px; }
+    .modal-close {
+      all: unset; cursor: pointer; padding: 6px; border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    .qr-wrap {
+      display: flex; gap: 14px; align-items: center; justify-content: center;
+      margin: 8px 0 14px;
+    }
+    .qr-wrap img { width: 220px; height: 220px; border-radius: 10px; background: #fff; }
+    .share-row {
+      display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center;
+    }
+    .share-url {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.18);
+      color: #fff; padding: 10px 12px; border-radius: 10px; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; font-size: 13px;
+    }
+    .small-btn {
+      all: unset; cursor: pointer;
+      padding: 8px 10px; border-radius: 10px; font-weight: 700; font-size: 13px;
+      border: 1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.06);
+    }
+    .toast {
+      position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.18);
+      color: #fff; padding: 10px 14px; border-radius: 12px;
+      font-size: 14px; z-index: 50; display: none;
+    }
+    .toast.visible { display: block; }
   </style>
 </head>
 <body>
@@ -240,6 +293,27 @@
     <div id="status" class="status">Idle</div>
   </div>
 
+  <!-- Invite modal -->
+  <div id="inviteModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="inviteTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div id="inviteTitle" class="modal-title">Invite a friend</div>
+        <button id="inviteClose" class="modal-close" aria-label="Close">✕</button>
+      </div>
+      <div class="qr-wrap">
+        <img id="inviteQR" alt="QR code to open this room"/>
+      </div>
+      <div class="share-row">
+        <div id="inviteUrl" class="share-url" title=""></div>
+        <button id="inviteCopy" class="small-btn" type="button">Copy</button>
+        <button id="inviteShare" class="small-btn" type="button">Share</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" role="status" aria-live="polite">Copied!</div>
+
   <script type="module">
     import { DrawingUtils, PoseLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
 
@@ -262,11 +336,20 @@
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
 
-    // ---------- Sidebar + hamburger ----------
+    // Sidebar + hamburger
     const sidebar   = document.getElementById('sidebar');
     const hamburger = document.getElementById('hamburger');
     const menuAudio = document.getElementById('menuAudio');
     const navItems  = Array.from(sidebar.querySelectorAll('.nav-item'));
+
+    // Invite modal + toast
+    const inviteModal = document.getElementById('inviteModal');
+    const inviteQR    = document.getElementById('inviteQR');
+    const inviteUrlEl = document.getElementById('inviteUrl');
+    const inviteClose = document.getElementById('inviteClose');
+    const inviteCopy  = document.getElementById('inviteCopy');
+    const inviteShare = document.getElementById('inviteShare');
+    const toast       = document.getElementById('toast');
 
     // Auto-hide drawer (no dragger)
     const SIDEBAR_AUTOHIDE_MS = 10000;
@@ -290,7 +373,7 @@
       else showSidebar();
     }
 
-    // Kill any legacy dragger/splitter nodes if they exist (defense-in-depth)
+    // Kill any legacy dragger/splitter nodes if they exist
     (function removeLegacyDraggers(){
       const sel = '#hotzone, #drag-handle, .drag-handle, .dragger, .splitter, .resizer, [data-draggable], [data-resizer]';
       document.querySelectorAll(sel).forEach(el => el.remove());
@@ -347,7 +430,10 @@
 
     // Close drawer with Escape
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') hideSidebar();
+      if (e.key === 'Escape') {
+        if (inviteModal.classList.contains('visible')) closeInvite();
+        else hideSidebar();
+      }
     });
 
     // ---------- Status ----------
@@ -381,15 +467,7 @@
         try { remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
         updateAudioButtons(); // also sync the menu label
       } else if (item === 'invite') {
-        const shareUrl = location.href;
-        try {
-          await navigator.clipboard?.writeText?.(shareUrl);
-          showStatus('Invite link copied to clipboard');
-          setTimeout(() => overlay.classList.add('hidden'), 1800);
-        } catch {
-          showStatus(shareUrl); // show the URL if clipboard fails
-          setTimeout(() => overlay.classList.add('hidden'), 3000);
-        }
+        openInvite();
       } else if (item === 'contact') {
         const subj = encodeURIComponent('Baby Monitor Support');
         const body = encodeURIComponent(`Hello,\n\nRoom: ${room}\n\n(Describe your issue here)`);
@@ -402,6 +480,62 @@
       clearTimeout(sidebarTimer);
       sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
     });
+
+    // ---------- Invite modal ----------
+    function openInvite() {
+      const shareUrl = location.href;
+      const qrEndpoint = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&format=svg&data=';
+      inviteQR.src = qrEndpoint + encodeURIComponent(shareUrl);
+      inviteQR.alt = 'QR code for ' + shareUrl;
+      inviteUrlEl.textContent = shareUrl;
+      inviteUrlEl.title = shareUrl;
+
+      inviteModal.classList.add('visible');
+    }
+    function closeInvite() {
+      inviteModal.classList.remove('visible');
+      // Pause any possible network re-fetches by blanking src (optional):
+      // inviteQR.src = '';
+    }
+
+    inviteModal.addEventListener('click', (e) => {
+      if (e.target === inviteModal) closeInvite(); // click outside card
+    });
+    inviteClose.addEventListener('click', closeInvite);
+
+    inviteCopy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(inviteUrlEl.textContent);
+        showToast('Link copied to clipboard');
+      } catch {
+        showToast('Copy failed — select text to copy');
+      }
+    });
+
+    inviteShare.addEventListener('click', async () => {
+      const url = inviteUrlEl.textContent;
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: 'Join my Baby Monitor', url });
+        } catch { /* user canceled or unsupported field */ }
+      } else {
+        try {
+          await navigator.clipboard.writeText(url);
+          showToast('Link copied (no native share)');
+        } catch {
+          showToast('Sharing not supported');
+        }
+      }
+    });
+
+    // ---------- Toast ----------
+    let toastTimer;
+    function showToast(msg, ms = 1600) {
+      toast.textContent = msg;
+      toast.classList.add('visible');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('visible'), ms);
+    }
 
     // ---------- Audio UI ----------
     function updateMenuAudio() {
@@ -463,6 +597,9 @@
       }
       resetHamburgerFade();
     });
+
+    remoteVideo.addEventListener('loadedmetadata', () => beginViewportSettle());
+    remoteVideo.addEventListener('playing', () => { updateAudioButtons(); beginViewportSettle(); });
 
     // ---------- Canvas alignment ----------
     function containRect(containerW, containerH, contentW, contentH) {
