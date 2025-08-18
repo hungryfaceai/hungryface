@@ -4,12 +4,11 @@
   <meta charset="utf-8">
   <title>Baby Monitor – Receiver</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <!-- prevent favicon 404 noise -->
   <link rel="icon" href="data:,">
   <style>
     :root { color-scheme: dark; }
     html, body { margin:0; height:100%; background:#000; color:#fff; font-family:-apple-system, system-ui, Segoe UI, Roboto, sans-serif; overflow:hidden; }
-    #stage { position:fixed; inset:0; width:100vw; height:100vh; width:100dvw; height:100dvh; background:#000; }
+    #stage { position:fixed; inset:0; width:100dvw; height:100dvh; background:#000; }
     #stage>video { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#000; }
     #stage>canvas { position:absolute; z-index:2; pointer-events:none; background:transparent; display:none; }
     .btn{padding:12px 14px; border-radius:12px; border:1px solid rgba(255,255,255,.6); background:transparent; color:#fff; font-size:16px; font-weight:600; cursor:pointer}
@@ -28,7 +27,6 @@
   </div>
 
   <div id="stage">
-    <!-- keep default muted so autoplay always works; button will unmute -->
     <video id="remote" autoplay playsinline muted></video>
     <canvas id="poseCanvas"></canvas>
   </div>
@@ -38,17 +36,14 @@
   </div>
 
   <script type="module">
-    // ▶️ MediaPipe Tasks Vision (latest stable)
     import { DrawingUtils, PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
 
-    /* -------------------- tiny env helpers -------------------- */
     const ua = navigator.userAgent;
     const IS_IOS = /iP(hone|ad|od)/.test(ua);
     const IS_SAFARI = /^((?!chrome|android).)*safari/i.test(ua);
-    const USE_CPU_DELEGATE = IS_IOS || IS_SAFARI; // GPU is flaky with remote <video> on WebKit
+    const USE_CPU_DELEGATE = IS_IOS || IS_SAFARI;
     const HAS_RVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
 
-    /* -------------------- DOM -------------------- */
     const stage = document.getElementById('stage');
     const remoteVideo = document.getElementById('remote');
     const poseCanvas  = document.getElementById('poseCanvas');
@@ -59,19 +54,17 @@
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
 
-    /* -------------------- signaling/webrtc -------------------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
     const WS_KEEPALIVE_MS = 25000, WS_RECONNECT_MIN_MS = 1000, WS_RECONNECT_MAX_MS = 10000;
     const RESTART_ON_ICE_TIMEOUT_MS = 5000, STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
-    // WASM base
     const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
     const WASM_DIR  = TASKS_URL + "/wasm";
 
     let ws=null, wsKeepalive=null, wsRetryMs=WS_RECONNECT_MIN_MS;
     let pc=null, remoteDescriptionSet=false, lastAnswerSdp=null;
-    let applyingAnswer = false; // prevent concurrent answer application
+    let applyingAnswer = false;
     const candidateQueue=[];
     let offerResendTimer=null, iceDisconnectedSince=null, hideStatusTimer=null;
 
@@ -79,7 +72,6 @@
     let poseEnabled=false;
     let poseWhere='sender';
 
-    /* -------------------- status & audio UI -------------------- */
     function showStatus(msg){
       statusEl.textContent = msg;
       if (msg==='Connected'){
@@ -97,7 +89,7 @@
     }
     async function tryStartMuted(){
       try{
-        remoteVideo.muted = true;      // ensure autoplay allowed
+        remoteVideo.muted = true;
         remoteVideo.playsInline = true;
         const p = remoteVideo.play();
         if (p && typeof p.then === 'function') await p;
@@ -108,7 +100,6 @@
     enableAudioBtn.onclick = async (e)=>{ e.preventDefault(); try{ remoteVideo.muted=false; await remoteVideo.play(); }catch{} updateAudioButtons(); };
     disableAudioBtn.onclick = (e)=>{ e.preventDefault(); remoteVideo.muted=true; updateAudioButtons(); };
 
-    /* -------------------- fullscreen + alignment -------------------- */
     fsBtn.onclick = async (e)=>{
       e.stopPropagation();
       try{
@@ -161,7 +152,6 @@
       if (v) beginViewportSettle(); else poseCtx.clearRect(0,0,poseCanvas.width, poseCanvas.height);
     }
 
-    /* -------------------- draw (sender-produced landmarks only) -------------------- */
     function drawPoseLandmarks(landmarks){
       if (!poseEnabled || poseWhere!=='sender') return;
       if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
@@ -175,9 +165,8 @@
       poseCtx.restore();
     }
 
-    /* -------------------- receiver-side inference -------------------- */
     let receiverPoseTask=null, receiverLoopOn=false, lastVideoTime=-1, consecutiveErrors=0, errorCooldownUntil=0;
-    let lastTs = 0; // ensure strictly increasing timestamps for detectForVideo()
+    let lastTs = 0;
 
     async function ensureReceiverPoseTask(){
       if (receiverPoseTask) return receiverPoseTask;
@@ -207,7 +196,7 @@
 
     function maybeStartReceiverLoop(){
       if (!poseEnabled || poseWhere!=='receiver') return;
-      if (!remoteVideo.videoWidth || !remoteVideo.videoHeight) return; // wait for meta
+      if (!remoteVideo.videoWidth || !remoteVideo.videoHeight) return;
       if (receiverLoopOn) return;
       startReceiverPoseLoop();
     }
@@ -217,7 +206,7 @@
       receiverPoseTask = null;
       await ensureReceiverPoseTask();
       consecutiveErrors = 0;
-      lastTs = 0; // reset timestamp guard on soft reset
+      lastTs = 0;
     }
 
     async function startReceiverPoseLoop(){
@@ -234,12 +223,9 @@
           if (!receiverLoopOn || !poseEnabled || poseWhere!=='receiver') return;
           if (!poseDC || poseDC.readyState!=='open'){ remoteVideo.requestVideoFrameCallback(onFrame); return; }
           if (!canProcessNow()){ remoteVideo.requestVideoFrameCallback(onFrame); return; }
-
-          // Use mediaTime (s) -> ms; enforce strictly increasing
           const candidate = Math.floor((metadata?.mediaTime ?? remoteVideo.currentTime) * 1000);
           const ts = Math.max(lastTs + 1, candidate);
           lastTs = ts;
-
           try{
             const result = receiverPoseTask.detectForVideo(remoteVideo, ts);
             consecutiveErrors = 0;
@@ -249,7 +235,7 @@
           }catch(e){
             console.warn('[POSE][receiver] detect error', e?.message||e);
             consecutiveErrors++;
-            if (consecutiveErrors >= 3){ // brief cool-down and task refresh
+            if (consecutiveErrors >= 3){
               errorCooldownUntil = performance.now() + 500;
               await softResetTask();
             }
@@ -258,12 +244,10 @@
         };
         remoteVideo.requestVideoFrameCallback(onFrame);
       } else {
-        // Fallback: RAF + currentTime gate
         const loop = async ()=>{
           if (!receiverLoopOn || !poseEnabled || poseWhere!=='receiver') return;
           if (!poseDC || poseDC.readyState!=='open'){ requestAnimationFrame(loop); return; }
           if (!canProcessNow()){ requestAnimationFrame(loop); return; }
-
           const t = remoteVideo.currentTime;
           if (t !== lastVideoTime){
             lastVideoTime = t;
@@ -271,7 +255,6 @@
               const candidate = Math.floor(performance.now());
               const ts = Math.max(lastTs + 1, candidate);
               lastTs = ts;
-
               const result = receiverPoseTask.detectForVideo(remoteVideo, ts);
               consecutiveErrors = 0;
               if (result?.landmarks?.length){
@@ -294,7 +277,6 @@
 
     function stopReceiverPoseLoop(){ receiverLoopOn=false; }
 
-    /* -------------------- signaling / rtc wiring -------------------- */
     function setOverlayModeFromMsg(enabled, where){
       poseEnabled = !!enabled; poseWhere = where || 'sender';
       setOverlayVisible(poseEnabled && poseWhere==='sender');
@@ -351,7 +333,6 @@
       pc.ontrack = (ev)=>{
         if (remoteVideo.srcObject !== ev.streams[0]){
           remoteVideo.srcObject = ev.streams[0];
-          // Robustly start playback on every browser
           remoteVideo.muted = true;
           remoteVideo.playsInline = true;
           try { const p = remoteVideo.play(); if (p && typeof p.then === 'function') p.catch(()=>{}); } catch {}
@@ -361,6 +342,9 @@
       };
       pc.oniceconnectionstatechange = ()=>{
         const s = pc.iceConnectionState; console.log('[ICE]', s);
+        if (s === 'connected' || s === 'completed') {
+          stopOfferResendLoop();                 // <— hard stop any resends once ICE is good
+        }
         showStatus(s==='connected'?'Connected':'ICE: '+s);
         if (s==='disconnected'){
           if (!iceDisconnectedSince) iceDisconnectedSince=Date.now();
@@ -369,8 +353,24 @@
       };
     }
 
-    async function sendCurrentOffer(){ if (pc?.localDescription?.type==='offer'){ console.log('[WS OUT] offer (send/resend)'); sendWS(pc.localDescription); } }
-    function startOfferResendLoop(){ stopOfferResendLoop(); offerResendTimer=setInterval(()=>{ if (!remoteDescriptionSet) sendCurrentOffer(); else stopOfferResendLoop(); }, 2000); }
+    async function sendCurrentOffer(){
+      if (pc?.localDescription?.type==='offer'){
+        console.log('[WS OUT] offer (send/resend)');
+        sendWS(pc.localDescription);
+      }
+    }
+    function startOfferResendLoop(){
+      stopOfferResendLoop();
+      offerResendTimer=setInterval(()=>{
+        // if already connected/stable, bail
+        if ((pc?.iceConnectionState==='connected' || pc?.iceConnectionState==='completed') && pc?.signalingState==='stable') {
+          stopOfferResendLoop();
+          return;
+        }
+        if (!remoteDescriptionSet) sendCurrentOffer();
+        else stopOfferResendLoop();
+      }, 2000);
+    }
     function stopOfferResendLoop(){ if (offerResendTimer) clearInterval(offerResendTimer); offerResendTimer=null; }
 
     async function startNegotiation(forceNew=false){
@@ -385,15 +385,19 @@
       }catch(e){ console.error('negotiation error', e); showStatus('Negotiation error'); }
     }
 
+    function shouldSendOfferNow(){
+      // Only send an offer if we’re not already in a good, stable state
+      const goodIce = pc && (pc.iceConnectionState==='connected' || pc.iceConnectionState==='completed');
+      return !(goodIce && pc.signalingState==='stable' && remoteDescriptionSet);
+    }
+
     async function onSignal(evt){
       let msg; try{ msg=JSON.parse(evt.data);}catch{ return; }
 
       if (msg.type==='answer'){
-        // Deduplicate exact SDP
         if (lastAnswerSdp === msg.sdp) return;
 
-        // If we're already stable, we must have successfully applied an answer.
-        // Stop re-offering to avoid tearing the stream down.
+        // If already stable, we must have applied an answer; stop any resends.
         if (pc.signalingState === 'stable'){
           lastAnswerSdp = msg.sdp;
           remoteDescriptionSet = true;
@@ -401,8 +405,9 @@
           return;
         }
 
-        // Only apply one answer at a time
         if (applyingAnswer) return;
+
+        if (pc.signalingState !== 'have-local-offer') return;
 
         applyingAnswer = true;
         try {
@@ -412,7 +417,6 @@
           remoteDescriptionSet = true;
           stopOfferResendLoop();
 
-          // Flush any queued ICE
           for (const c of candidateQueue){ try{ await pc.addIceCandidate(c);}catch{} }
           candidateQueue.length=0;
         } catch (e) {
@@ -426,7 +430,8 @@
         if (remoteDescriptionSet){ try{ await pc.addIceCandidate(cand);}catch{} } else { candidateQueue.push(cand); }
 
       } else if (msg.type==='peer-joined' || msg.type==='need-offer'){
-        await sendCurrentOffer();
+        // NEW: ignore stray “need-offer” when already connected & stable
+        if (shouldSendOfferNow()) await sendCurrentOffer();
 
       } else if (msg.type==='bye'){
         remoteDescriptionSet=false; stopReceiverPoseLoop(); startOfferResendLoop();
@@ -444,10 +449,8 @@
       try{ receiverPoseTask?.close(); }catch{}
     });
 
-    /* -------------------- media events to kick alignment/inference -------------------- */
     remoteVideo.addEventListener('loadedmetadata', ()=>{
       console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
-      // ensure playback in case autoplay was delayed
       try { const p = remoteVideo.play(); if (p && typeof p.then === 'function') p.catch(()=>{}); } catch {}
       beginViewportSettle(); maybeStartReceiverLoop();
     });
@@ -460,7 +463,6 @@
       updateAudioButtons(); beginViewportSettle(); maybeStartReceiverLoop();
     });
 
-    /* -------------------- start -------------------- */
     startNegotiation();
   </script>
 </body>
