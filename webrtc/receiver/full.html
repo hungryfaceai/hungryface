@@ -3,9 +3,15 @@
 <head>
   <meta charset="utf-8">
   <title>Baby Monitor – Receiver</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
   <style>
-    :root { color-scheme: dark; --ui-pad:12px; }
+    :root {
+      color-scheme: dark;
+      --ui-pad: 12px;
+      /* Safe area padding for iPhone notch / home indicator */
+      --safe-top: max(env(safe-area-inset-top, 0px), 12px);
+      --safe-left: max(env(safe-area-inset-left, 0px), 12px);
+    }
 
     html, body {
       margin: 0; height: 100%;
@@ -61,7 +67,13 @@
     /* ---------- Left Sidebar (auto-hide; NO DRAGGER) ---------- */
     #sidebar {
       position: fixed; top: 0; bottom: 0; left: 0;
-      width: min(240px, 80vw);              /* fixed width; no resizer/drag */
+
+      /* Fit to content width, but never exceed 80vw; ensure a small minimum */
+      width: max-content;
+      width: fit-content;
+      max-width: 80vw;
+      min-width: 150px;
+
       background: rgba(0,0,0,0.92);
       border-right: 1px solid rgba(255,255,255,0.1);
       backdrop-filter: blur(2px);
@@ -96,6 +108,7 @@
       padding: 12px 14px; margin: 2px 0;
       border-radius: 10px; cursor: pointer; user-select: none;
       color: #eee; font-weight: 600; font-size: 15px;
+      white-space: nowrap; /* keep a single line so width hugs text */
     }
     #sidebar .nav-item:hover { background: rgba(255,255,255,0.08); }
     #sidebar .nav-item.active { background: rgba(255,255,255,0.14); }
@@ -108,9 +121,9 @@
     /* Keep other UI behind sidebar when shown */
     #sidebar.visible ~ #controls { z-index: 4; }
 
-    /* ---------- Tiny Hamburger Button (hides when drawer open; fades in FS) ---------- */
+    /* ---------- Tiny Hamburger Button (hides when drawer open) ---------- */
     #hamburger {
-      position: fixed; top: var(--ui-pad); left: var(--ui-pad);
+      position: fixed; top: var(--safe-top); left: var(--safe-left);
       width: 38px; height: 38px; padding: 8px;
       display: flex; flex-direction: column; justify-content: center; gap: 5px;
       border-radius: 10px; border: 1px solid rgba(255,255,255,0.2);
@@ -212,11 +225,8 @@
       </symbol>
       <!-- Face (simple stylized) -->
       <symbol id="i-face" viewBox="0 0 24 24" stroke-width="2">
-        <!-- Minimal head outline -->
         <circle cx="12" cy="12" r="8.5"></circle>
-        <!-- Dot eyes -->
         <path d="M9.25 10.5h.01M14.75 10.5h.01"></path>
-        <!-- Soft short smile -->
         <path d="M9.5 14c1 .8 4 .8 5 0"></path>
       </symbol>
       <!-- Settings (sliders) -->
@@ -263,8 +273,9 @@
       <button class="nav-item" data-item="camera" aria-label="Camera">
         <svg class="nav-icon"><use href="#i-camera"/></svg><span class="nav-label">Camera</span>
       </button>
+      <!-- 1) Renamed label to "Audio" (no status suffix) -->
       <button class="nav-item" data-item="audio" id="menuAudio" aria-label="Audio">
-        <svg class="nav-icon"><use href="#i-audio"/></svg><span class="nav-label">Audio: Muted</span>
+        <svg class="nav-icon"><use href="#i-audio"/></svg><span class="nav-label">Audio</span>
       </button>
       <button class="nav-item" data-item="pose" aria-label="Pose">
         <svg class="nav-icon"><use href="#i-pose"/></svg><span class="nav-label">Pose</span>
@@ -361,6 +372,9 @@
     const inviteShare = document.getElementById('inviteShare');
     const toast       = document.getElementById('toast');
 
+    // Detect touch (iPhone/iPad etc.)
+    const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+
     // Auto-hide drawer (no dragger)
     const SIDEBAR_AUTOHIDE_MS = 10000;
     let sidebarTimer = null;
@@ -389,7 +403,7 @@
       document.querySelectorAll(sel).forEach(el => el.remove());
     })();
 
-    // Hamburger auto-fade in fullscreen (only when visible)
+    // Hamburger auto-fade (disabled on touch so it's always visible there)
     const HAMBURGER_FADE_MS = 4000;
     let hamburgerFadeTimer = null;
     function showHamburger() {
@@ -404,6 +418,7 @@
       if (hamburger.classList.contains('hidden')) return; // don't touch while drawer open
       showHamburger();
       clearTimeout(hamburgerFadeTimer);
+      if (isTouch) return; // keep visible on iPhone/iPad
       if (document.fullscreenElement) {
         hamburgerFadeTimer = setTimeout(() => {
           if (!sidebar.classList.contains('visible') && !hamburger.classList.contains('hidden')) {
@@ -415,14 +430,21 @@
       }
     }
 
-    // Discoverability: open once on load, then auto-hide -> hamburger returns
-    showSidebar();
+    // Discoverability:
+    // - On touch devices, start CLOSED so the hamburger is immediately visible.
+    // - On non-touch (desktop), open once then auto-hide.
+    if (isTouch) {
+      hideSidebar();
+      showHamburger();
+    } else {
+      showSidebar();
+    }
 
     // Toggle via hamburger
     hamburger.addEventListener('click', (e) => {
       e.stopPropagation();
       toggleSidebar();
-      resetHamburgerFade(); // if we just closed, start fade timer
+      resetHamburgerFade(); // if we just closed, start/refresh fade timer (desktop only)
     });
 
     // Keep drawer open while interacting
@@ -438,7 +460,7 @@
       window.addEventListener(ev, () => resetHamburgerFade(), { passive: true })
     );
 
-    // Close drawer with Escape
+    // Close drawer with Escape (and close invite modal if open)
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         if (inviteModal.classList.contains('visible')) closeInvite();
@@ -475,7 +497,7 @@
         const wantUnmute = remoteVideo.muted;
         remoteVideo.muted = !wantUnmute;
         try { remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
-        updateAudioButtons(); // also sync the menu label
+        updateAudioButtons();
       } else if (item === 'invite') {
         openInvite();
       } else if (item === 'contact') {
@@ -486,7 +508,6 @@
         console.log('[SIDEBAR] Selected:', item);
       }
 
-      // keep drawer alive while interacting
       clearTimeout(sidebarTimer);
       sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
     });
@@ -507,7 +528,7 @@
     }
 
     inviteModal.addEventListener('click', (e) => {
-      if (e.target === inviteModal) closeInvite(); // click outside card
+      if (e.target === inviteModal) closeInvite();
     });
     inviteClose.addEventListener('click', closeInvite);
 
@@ -525,7 +546,7 @@
       if (navigator.share) {
         try {
           await navigator.share({ title: 'Join my Baby Monitor', url });
-        } catch { /* user canceled or unsupported field */ }
+        } catch {}
       } else {
         try {
           await navigator.clipboard.writeText(url);
@@ -546,10 +567,6 @@
     }
 
     // ---------- Audio UI ----------
-    function updateMenuAudio() {
-      const label = menuAudio.querySelector('.nav-label');
-      if (label) label.textContent = remoteVideo.muted ? 'Audio: Muted' : 'Audio: On';
-    }
     function updateAudioButtons() {
       if (remoteVideo.muted) {
         enableAudioBtn.style.display = 'block';
@@ -558,7 +575,7 @@
         enableAudioBtn.style.display = 'none';
         disableAudioBtn.style.display = 'block';
       }
-      updateMenuAudio();
+      // Note: menu item label stays "Audio" (no status suffix)
     }
     enableAudioBtn.style.display = 'block';
     async function tryStartMuted() {
