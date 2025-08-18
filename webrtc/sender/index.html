@@ -56,7 +56,9 @@
         </select>
       </div>
 
-      <div class="row"><input id="room" type="text" placeholder="Room (e.g., Baby)" value="Baby" autocomplete="off"></div>
+      <div class="row">
+        <input id="room" type="text" placeholder="Room (e.g., Baby)" value="Baby" autocomplete="off">
+      </div>
 
       <div class="row">
         <input id="previewMins" type="number" min="0" step="1" value="1" aria-label="Preview minutes">
@@ -67,7 +69,10 @@
         <legend>AI features</legend>
         <div class="ai-row">
           <label class="switch"><input id="poseOn" type="checkbox"><span>Pose</span></label>
-          <select id="poseWhere"><option value="sender" selected>On sender</option><option value="receiver">On receiver</option></select>
+          <select id="poseWhere">
+            <option value="sender" selected>On sender</option>
+            <option value="receiver">On receiver</option>
+          </select>
         </div>
         <div class="ai-row"><label class="switch"><input type="checkbox" disabled><span>Audio</span></label><select disabled><option>On sender</option><option>On receiver</option></select></div>
         <div class="ai-row"><label class="switch"><input type="checkbox" disabled><span>Face</span></label><select disabled><option>On sender</option><option>On receiver</option></select></div>
@@ -97,6 +102,11 @@
     const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
     const WASM_DIR  = TASKS_URL + "/wasm";
 
+    // NEW: WebSocket keepalive + reconnect backoff
+    const WS_KEEPALIVE_MS = 25000;
+    const WS_RECONNECT_MIN_MS = 1000;
+    const WS_RECONNECT_MAX_MS = 10000;
+
     /* ---------- DOM ---------- */
     const roomInput = document.getElementById('room');
     const videoOn   = document.getElementById('videoOn');
@@ -120,6 +130,8 @@
     let needOfferTimer=null, lastOfferSdp=null;
     let previewTimer=null, previewTicker=null, previewEnd=0;
     const poseDCs = new Set();
+
+    let wsKeepalive=null, wsRetryMs=WS_RECONNECT_MIN_MS;
 
     let PoseLandmarker, FilesetResolver, DrawingUtils;
     let poseTask=null, poseLoopRunning=false;
@@ -208,15 +220,62 @@
         ws = sock;
         let opened=false;
         const t = setTimeout(()=>{ if(!opened){ try{sock.close();}catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); }}, 15000);
-        sock.onopen = ()=>{ opened=true; clearTimeout(t); setStatus('Signaling: connected'); send({type:'join', room}); send({type:'need-offer'}); needOfferTimer=setInterval(()=>{ if(!remoteDescriptionSet){ console.log('[WS OUT] need-offer (retry)'); send({type:'need-offer'}); } else { clearInterval(needOfferTimer); needOfferTimer=null; }}, NEED_OFFER_INTERVAL_MS); resolve(); };
+        sock.onopen = ()=>{
+          opened=true; clearTimeout(t);
+          setStatus('Signaling: connected');
+          wsRetryMs = WS_RECONNECT_MIN_MS;
+
+          send({type:'join', room});
+          send({type:'need-offer'});
+          needOfferTimer=setInterval(()=>{
+            if(!remoteDescriptionSet){
+              console.log('[WS OUT] need-offer (retry)');
+              send({type:'need-offer'});
+            } else {
+              clearInterval(needOfferTimer);
+              needOfferTimer=null;
+            }
+          }, NEED_OFFER_INTERVAL_MS);
+
+          if (wsKeepalive) clearInterval(wsKeepalive);
+          wsKeepalive = setInterval(()=>{
+            if (ws?.readyState===WebSocket.OPEN) send({type:'keepalive', ts:Date.now()});
+          }, WS_KEEPALIVE_MS);
+
+          resolve();
+        };
         sock.onmessage = onSignal;
         sock.onerror = (e)=>console.warn('[WS error]', e);
-        sock.onclose  = (e)=>{ console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); };
+        sock.onclose  = (e)=>{
+          console.warn('[WS closed]', e.code, e.reason);
+          setStatus('Signaling: closed');
+          if (wsKeepalive){ clearInterval(wsKeepalive); wsKeepalive=null; }
+          if (started) scheduleWSReconnect();
+        };
       });
+    }
+    function scheduleWSReconnect(){
+      const delay = Math.min(wsRetryMs, WS_RECONNECT_MAX_MS);
+      setTimeout(async ()=>{
+        wsRetryMs = Math.min(wsRetryMs*2, WS_RECONNECT_MAX_MS);
+        try{
+          await connectWS(currentRoom());
+          if (!remoteDescriptionSet){
+            send({type:'need-offer'});
+            if (!needOfferTimer){
+              needOfferTimer = setInterval(()=>{
+                if(!remoteDescriptionSet) send({type:'need-offer'});
+                else { clearInterval(needOfferTimer); needOfferTimer=null; }
+              }, NEED_OFFER_INTERVAL_MS);
+            }
+          }
+        } catch {
+          scheduleWSReconnect();
+        }
+      }, delay);
     }
     const send = (obj)=>{ try { ws?.readyState===WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
-    // NOTE: we DO NOT add tracks here anymore — we bind them after SRD(offer)
     function createPC(){
       pc = new RTCPeerConnection({ iceServers:[{urls:'stun:stun.l.google.com:19302'}], bundlePolicy:'max-bundle', sdpSemantics:'unified-plan' });
       pc.ondatachannel = (ev)=>{
@@ -231,30 +290,7 @@
       };
       pc.onicecandidate = (e)=>{ if (e.candidate) send({type:'candidate', candidate:e.candidate}); };
       pc.oniceconnectionstatechange = ()=> setStatus('ICE: ' + pc.iceConnectionState);
-    }
-
-    async function bindTracksToOfferedTransceivers(){
-      if (!pc || !localStream) return;
-      const vTrack = localStream.getVideoTracks()[0] || null;
-      const aTrack = localStream.getAudioTracks()[0] || null;
-
-      // Match by kind against the offered (recvonly) transceivers
-      const vXcvr = pc.getTransceivers().find(t => t.receiver?.track?.kind === 'video');
-      const aXcvr = pc.getTransceivers().find(t => t.receiver?.track?.kind === 'audio');
-
-      if (vXcvr && vTrack){
-        vXcvr.direction = 'sendonly';
-        await vXcvr.sender.replaceTrack(vTrack);
-      } else if (vTrack) {
-        pc.addTransceiver(vTrack, { direction: 'sendonly' });
-      }
-
-      if (aXcvr && aTrack){
-        aXcvr.direction = 'sendonly';
-        await aXcvr.sender.replaceTrack(aTrack);
-      } else if (aTrack) {
-        pc.addTransceiver(aTrack, { direction: 'sendonly' });
-      }
+      localStream.getTracks().forEach(track => { console.log('[TRACK][sender] addTrack', track.kind); pc.addTrack(track, localStream); });
     }
 
     async function onSignal(evt){
@@ -266,16 +302,9 @@
         if (pc.signalingState === 'have-local-offer'){ try { await pc.setLocalDescription({type:'rollback'}); } catch {} }
         if (lastOfferSdp === msg.sdp){ console.log('[DUP] identical offer ignored'); return; }
         lastOfferSdp = msg.sdp;
-
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
         remoteDescriptionSet = true;
-
-        // ✅ Bind local tracks to the offered m-sections (correct order)
-        await bindTracksToOfferedTransceivers();
-
-        // handle queued ICE
         while (candidateQueue.length){ const c = candidateQueue.shift(); try { await pc.addIceCandidate(c); } catch (err) { console.warn('late ICE add failed', err); } }
-
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         send(answer);
@@ -366,7 +395,9 @@
       if (previewTicker) clearInterval(previewTicker);
       if (hideUITimer) clearTimeout(hideUITimer);
       if (needOfferTimer) clearInterval(needOfferTimer);
-      previewTimer=previewTicker=hideUITimer=needOfferTimer=null;
+      if (wsKeepalive) clearInterval(wsKeepalive);
+      previewTimer=previewTicker=hideUITimer=needOfferTimer=wsKeepalive=null;
+      wsRetryMs = WS_RECONNECT_MIN_MS;
 
       try { poseLoopRunning = false; } catch {}
       try { await poseTask?.close(); } catch {}
@@ -404,7 +435,7 @@
       console.log('[POSE][sender] tasks-vision loaded');
     }
 
-    async function createPoseTask(delegate){
+    async function createPoseTask(delegate = senderDelegate){
       const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
       return await PoseLandmarker.createFromOptions(vision, {
         baseOptions: {
@@ -413,7 +444,9 @@
         },
         runningMode: "VIDEO",
         numPoses: 1,
-        outputSegmentationMasks: true, // ← not needed; cheaper & avoids mask paths
+        // Don't waste work on masks we don't draw on sender
+        outputSegmentationMasks: false,
+        // Conservative thresholds to reduce jitter:
         minPoseDetectionConfidence: 0.5,
         minPosePresenceConfidence: 0.5,
         minTrackingConfidence: 0.5
@@ -422,7 +455,7 @@
 
     async function ensurePoseTask(){
       await ensureTasksLoaded();
-      if (!poseTask) poseTask = await createPoseTask(senderDelegate);
+      if (!poseTask) poseTask = await createPoseTask();
       return poseTask;
     }
 
@@ -472,6 +505,7 @@
           if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') return;
           if (!canProcessNow()) { localVideo.requestVideoFrameCallback(onFrame); return; }
 
+          // Use media clock timestamp (s -> ms), keep strictly increasing
           const candidate = Math.floor((metadata?.mediaTime ?? localVideo.currentTime) * 1000);
           const ts = Math.max(lastTs + 1, candidate);
           lastTs = ts;
@@ -490,7 +524,7 @@
             consecutiveDetectErrors++;
             if (consecutiveDetectErrors >= 3){
               errorCooldownUntil = performance.now() + 500;
-              await softResetTask(true); // fallback to CPU if GPU is flaky
+              await softResetTask(true); // fallback to CPU
             }
           }
           localVideo.requestVideoFrameCallback(onFrame);
@@ -529,6 +563,7 @@
     function stopSenderPoseLoop(){ poseLoopRunning = false; ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height); }
 
     function onPoseMessageFromReceiver(ev){
+      // reserved for future “receiver runs inference” → echo back drawing to sender’s preview
       try{
         const msg = JSON.parse(ev.data);
         if (msg.type === 'pose' && document.body.classList.contains('previewing')){
