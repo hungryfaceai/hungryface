@@ -64,7 +64,7 @@
 
     let ws=null, wsKeepalive=null, wsRetryMs=WS_RECONNECT_MIN_MS;
     let pc=null, remoteDescriptionSet=false, lastAnswerSdp=null;
-    let applyingAnswer = false;
+    let applyingAnswer = false; // prevent concurrent answer application
     const candidateQueue=[];
     let offerResendTimer=null, iceDisconnectedSince=null, hideStatusTimer=null;
 
@@ -223,9 +223,11 @@
           if (!receiverLoopOn || !poseEnabled || poseWhere!=='receiver') return;
           if (!poseDC || poseDC.readyState!=='open'){ remoteVideo.requestVideoFrameCallback(onFrame); return; }
           if (!canProcessNow()){ remoteVideo.requestVideoFrameCallback(onFrame); return; }
+
           const candidate = Math.floor((metadata?.mediaTime ?? remoteVideo.currentTime) * 1000);
           const ts = Math.max(lastTs + 1, candidate);
           lastTs = ts;
+
           try{
             const result = receiverPoseTask.detectForVideo(remoteVideo, ts);
             consecutiveErrors = 0;
@@ -248,6 +250,7 @@
           if (!receiverLoopOn || !poseEnabled || poseWhere!=='receiver') return;
           if (!poseDC || poseDC.readyState!=='open'){ requestAnimationFrame(loop); return; }
           if (!canProcessNow()){ requestAnimationFrame(loop); return; }
+
           const t = remoteVideo.currentTime;
           if (t !== lastVideoTime){
             lastVideoTime = t;
@@ -255,6 +258,7 @@
               const candidate = Math.floor(performance.now());
               const ts = Math.max(lastTs + 1, candidate);
               lastTs = ts;
+
               const result = receiverPoseTask.detectForVideo(remoteVideo, ts);
               consecutiveErrors = 0;
               if (result?.landmarks?.length){
@@ -343,7 +347,7 @@
       pc.oniceconnectionstatechange = ()=>{
         const s = pc.iceConnectionState; console.log('[ICE]', s);
         if (s === 'connected' || s === 'completed') {
-          stopOfferResendLoop();                 // <— hard stop any resends once ICE is good
+          stopOfferResendLoop(); // hard stop resends once ICE is good
         }
         showStatus(s==='connected'?'Connected':'ICE: '+s);
         if (s==='disconnected'){
@@ -362,7 +366,7 @@
     function startOfferResendLoop(){
       stopOfferResendLoop();
       offerResendTimer=setInterval(()=>{
-        // if already connected/stable, bail
+        // Already good? stop.
         if ((pc?.iceConnectionState==='connected' || pc?.iceConnectionState==='completed') && pc?.signalingState==='stable') {
           stopOfferResendLoop();
           return;
@@ -386,7 +390,6 @@
     }
 
     function shouldSendOfferNow(){
-      // Only send an offer if we’re not already in a good, stable state
       const goodIce = pc && (pc.iceConnectionState==='connected' || pc.iceConnectionState==='completed');
       return !(goodIce && pc.signalingState==='stable' && remoteDescriptionSet);
     }
@@ -397,7 +400,6 @@
       if (msg.type==='answer'){
         if (lastAnswerSdp === msg.sdp) return;
 
-        // If already stable, we must have applied an answer; stop any resends.
         if (pc.signalingState === 'stable'){
           lastAnswerSdp = msg.sdp;
           remoteDescriptionSet = true;
@@ -406,7 +408,6 @@
         }
 
         if (applyingAnswer) return;
-
         if (pc.signalingState !== 'have-local-offer') return;
 
         applyingAnswer = true;
@@ -430,7 +431,6 @@
         if (remoteDescriptionSet){ try{ await pc.addIceCandidate(cand);}catch{} } else { candidateQueue.push(cand); }
 
       } else if (msg.type==='peer-joined' || msg.type==='need-offer'){
-        // NEW: ignore stray “need-offer” when already connected & stable
         if (shouldSendOfferNow()) await sendCurrentOffer();
 
       } else if (msg.type==='bye'){
