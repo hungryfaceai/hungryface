@@ -392,11 +392,17 @@
         // Deduplicate exact SDP
         if (lastAnswerSdp === msg.sdp) return;
 
+        // If we're already stable, we must have successfully applied an answer.
+        // Stop re-offering to avoid tearing the stream down.
+        if (pc.signalingState === 'stable'){
+          lastAnswerSdp = msg.sdp;
+          remoteDescriptionSet = true;
+          stopOfferResendLoop();
+          return;
+        }
+
         // Only apply one answer at a time
         if (applyingAnswer) return;
-
-        // Must still be in have-local-offer to accept an answer
-        if (pc.signalingState !== 'have-local-offer') return;
 
         applyingAnswer = true;
         try {
