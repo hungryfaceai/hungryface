@@ -4,6 +4,8 @@
   <meta charset="utf-8" />
   <title>Baby Monitor – Sender</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <!-- prevent favicon 404 noise -->
+  <link rel="icon" href="data:,">
   <style>
     :root { color-scheme: dark; }
     html, body { margin:0; height:100%; background:#000; color:#ccc; font-family:-apple-system, system-ui, Segoe UI, Roboto, sans-serif; touch-action: manipulation; }
@@ -90,7 +92,7 @@
     const ua = navigator.userAgent;
     const IS_IOS = /iP(hone|ad|od)/.test(ua);
     const IS_SAFARI = /^((?!chrome|android).)*safari/i.test(ua);
-    const USE_CPU_DELEGATE = IS_IOS || IS_SAFARI; // GPU is flaky on WebKit
+    const USE_CPU_DELEGATE = IS_IOS || IS_SAFARI;
     const HAS_RVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
 
     /* ---------- constants ---------- */
@@ -98,11 +100,10 @@
     const UI_AUTOHIDE_MS = 10000;
     const NEED_OFFER_INTERVAL_MS = 3000;
 
-    // MediaPipe Tasks Vision (latest stable)
     const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
     const WASM_DIR  = TASKS_URL + "/wasm";
 
-    // NEW: WebSocket keepalive + reconnect backoff
+    // keepalive/backoff (as in your last version)
     const WS_KEEPALIVE_MS = 25000;
     const WS_RECONNECT_MIN_MS = 1000;
     const WS_RECONNECT_MAX_MS = 10000;
@@ -137,10 +138,10 @@
     let poseTask=null, poseLoopRunning=false;
     let senderDelegate = USE_CPU_DELEGATE ? "CPU" : "GPU";
     let consecutiveDetectErrors = 0, errorCooldownUntil = 0;
-    let lastTs = 0; // strictly increasing timestamps for detectForVideo()
+    let lastTs = 0;
     const ctx = poseCanvas.getContext('2d', { alpha:true });
 
-    /* ---------- UI helpers ---------- */
+    /* ---------- ui helpers ---------- */
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
     const currentRoom = () => (roomInput.value || 'Baby').trim();
     const isFront = () => (cameraSel.value === 'user');
@@ -297,17 +298,21 @@
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
       console.log('[WS IN]', msg.type);
       if (msg.type === 'offer'){
-        setStatus('Got offer, creating answer…');
-        if (!pc) createPC();
-        if (pc.signalingState === 'have-local-offer'){ try { await pc.setLocalDescription({type:'rollback'}); } catch {} }
-        if (lastOfferSdp === msg.sdp){ console.log('[DUP] identical offer ignored'); return; }
-        lastOfferSdp = msg.sdp;
-        await pc.setRemoteDescription(new RTCSessionDescription(msg));
-        remoteDescriptionSet = true;
-        while (candidateQueue.length){ const c = candidateQueue.shift(); try { await pc.addIceCandidate(c); } catch (err) { console.warn('late ICE add failed', err); } }
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        send(answer);
+        try {
+          setStatus('Got offer, creating answer…');
+          if (!pc) createPC();
+          if (pc.signalingState === 'have-local-offer'){ try { await pc.setLocalDescription({type:'rollback'}); } catch {} }
+          if (lastOfferSdp === msg.sdp){ console.log('[DUP] identical offer ignored'); return; }
+          lastOfferSdp = msg.sdp;
+          await pc.setRemoteDescription(new RTCSessionDescription(msg));
+          remoteDescriptionSet = true;
+          while (candidateQueue.length){ const c = candidateQueue.shift(); try { await pc.addIceCandidate(c); } catch (err) { console.warn('late ICE add failed', err); } }
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          send(answer);
+        } catch (e) {
+          console.warn('[OFFER] handling error', e);
+        }
       } else if (msg.type === 'candidate' && msg.candidate){
         const cand = new RTCIceCandidate(msg.candidate);
         if (remoteDescriptionSet && pc){ try { await pc.addIceCandidate(cand); } catch (err) { console.warn('ICE add failed', err); } }
@@ -422,7 +427,7 @@
     window.addEventListener('beforeunload', stopStreaming);
     startBtn.addEventListener('click', startOrStop);
 
-    /* ---------- pose (MediaPipe Tasks Vision) ---------- */
+    /* ---------- pose ---------- */
     function announcePoseMode(){
       const enabled = !!poseOn.checked;
       const where   = poseWhere.value;
@@ -444,9 +449,7 @@
         },
         runningMode: "VIDEO",
         numPoses: 1,
-        // Don't waste work on masks we don't draw on sender
         outputSegmentationMasks: false,
-        // Conservative thresholds to reduce jitter:
         minPoseDetectionConfidence: 0.5,
         minPosePresenceConfidence: 0.5,
         minTrackingConfidence: 0.5
@@ -505,7 +508,6 @@
           if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') return;
           if (!canProcessNow()) { localVideo.requestVideoFrameCallback(onFrame); return; }
 
-          // Use media clock timestamp (s -> ms), keep strictly increasing
           const candidate = Math.floor((metadata?.mediaTime ?? localVideo.currentTime) * 1000);
           const ts = Math.max(lastTs + 1, candidate);
           lastTs = ts;
@@ -524,7 +526,7 @@
             consecutiveDetectErrors++;
             if (consecutiveDetectErrors >= 3){
               errorCooldownUntil = performance.now() + 500;
-              await softResetTask(true); // fallback to CPU
+              await softResetTask(true);
             }
           }
           localVideo.requestVideoFrameCallback(onFrame);
@@ -563,7 +565,6 @@
     function stopSenderPoseLoop(){ poseLoopRunning = false; ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height); }
 
     function onPoseMessageFromReceiver(ev){
-      // reserved for future “receiver runs inference” → echo back drawing to sender’s preview
       try{
         const msg = JSON.parse(ev.data);
         if (msg.type === 'pose' && document.body.classList.contains('previewing')){
@@ -580,7 +581,7 @@
       else stopSenderPoseLoop();
     }
     poseOn.addEventListener('change', ()=>{ console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`); applyPoseUI(); });
-    poseWhere.addEventListener('change', ()=>{ console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`); applyPoseUI(); });
+    poseWhere.addEventListener('change', ()=>{ console.log(`[POSE][sender] UI → enabled: ${poseWhere.value}`); applyPoseUI(); });
 
     /* ---------- init ---------- */
     const qsRoom = new URLSearchParams(location.search).get('room');
