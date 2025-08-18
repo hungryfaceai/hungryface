@@ -159,7 +159,7 @@
     const statusEl  = document.getElementById('status');
     const ui        = document.getElementById('ui');
     const tap       = document.getElementById('tap');
-    const stage     = document.getElementById('stage'); // NEW: align canvas within stage
+    const stage     = document.getElementById('stage'); // align canvas within stage
 
     const poseOn    = document.getElementById('poseOn');
     const poseWhere = document.getElementById('poseWhere');
@@ -186,21 +186,27 @@
       document.body.classList.toggle('mirror', isFront());
     }
 
-    function calcViewportContainRect() {
-      const vw = window.innerWidth, vh = window.innerHeight;
-      const vidW = localVideo.videoWidth || 1, vidH = localVideo.videoHeight || 1;
-      const scale = Math.min(vw / vidW, vh / vidH);
-      const w = vidW * scale, h = vidH * scale;
-      const x = (vw - w) / 2, y = (vh - h) / 2;
-      return { x, y, width:w, height:h, left:x, top:y };
+    // -------- Orientation helpers (sent to receiver) --------
+    function getOrientationAngle() {
+      if (screen.orientation && Number.isFinite(screen.orientation.angle)) {
+        return (screen.orientation.angle + 360) % 360;
+      }
+      const o = (typeof window.orientation === 'number') ? window.orientation : 0;
+      return ((o % 360) + 360) % 360; // 0/90/180/270 typical on iOS
+    }
+    function currentPoseMeta() {
+      return {
+        orient: getOrientationAngle(),
+        srcW: localVideo.videoWidth  || 0,
+        srcH: localVideo.videoHeight || 0,
+      };
     }
 
-    // REPLACED: align canvas to the contained video area inside #stage
+    // -------- Canvas resize (letterbox aware within #stage) --------
     function resizeCanvasToVideo() {
       const showVideo = document.body.classList.contains('previewing') && videoOn.checked;
       localVideo.style.display = showVideo ? 'block' : 'none';
 
-      // Compute the letterboxed "contain" rectangle of the video content inside #stage
       const stageBox = stage.getBoundingClientRect();
       const containerW = Math.round(stageBox.width);
       const containerH = Math.round(stageBox.height);
@@ -213,13 +219,11 @@
       const fitLeft = Math.floor((containerW - fitW) / 2);
       const fitTop  = Math.floor((containerH - fitH) / 2);
 
-      // Position the canvas *inside stage* (absolute, relative to stage’s top-left)
       poseCanvas.style.left   = fitLeft + 'px';
       poseCanvas.style.top    = fitTop  + 'px';
       poseCanvas.style.width  = fitW + 'px';
       poseCanvas.style.height = fitH + 'px';
 
-      // Match backing store to CSS size (HiDPI safe)
       const dpr = window.devicePixelRatio || 1;
       const needW = Math.max(1, Math.round(fitW * dpr));
       const needH = Math.max(1, Math.round(fitH * dpr));
@@ -228,7 +232,6 @@
         poseCanvas.height = needH;
       }
 
-      // Only show overlay while previewing and Pose is ON
       poseCanvas.style.display =
         (poseOn.checked && videoOn.checked && document.body.classList.contains('previewing'))
           ? 'block' : 'none';
@@ -239,11 +242,14 @@
     localVideo.addEventListener('loadedmetadata', () => {
       console.log('[MEDIA] local video meta', localVideo.videoWidth, 'x', localVideo.videoHeight);
       resizeCanvasToVideo();
+      announcePoseMode(); // include fresh srcW/srcH after meta is known
     });
 
     ['resize','orientationchange','scroll'].forEach(ev =>
       window.addEventListener(ev, () => {
         if (document.body.classList.contains('previewing')) resizeCanvasToVideo();
+        // Also re-announce orientation changes while streaming
+        if (started && poseOn.checked) announcePoseMode();
       })
     );
     if (window.visualViewport) {
@@ -282,6 +288,7 @@
       if (vt) vt.enabled = videoOn.checked;
       resizeCanvasToVideo();
       setStatus(videoOn.checked ? 'Video ON' : 'Video OFF');
+      announcePoseMode();
     }
     function applyAudioToggle() {
       if (!localStream) return;
@@ -291,7 +298,7 @@
     }
     videoOn.addEventListener('change', applyVideoToggle);
     audioOn.addEventListener('change', applyAudioToggle);
-    cameraSel.addEventListener('change', () => { updateMirrorClass(); resizeCanvasToVideo(); });
+    cameraSel.addEventListener('change', () => { updateMirrorClass(); resizeCanvasToVideo(); announcePoseMode(); });
 
     function connectWS(room) {
       return new Promise((resolve, reject) => {
@@ -525,13 +532,15 @@
     window.addEventListener('beforeunload', stopStreaming);
     startBtn.addEventListener('click', startOrStop);
 
+    // ---------- Pose ----------
     function announcePoseMode() {
       const enabled = !!poseOn.checked;
       const where   = poseWhere.value;
+      const meta    = currentPoseMeta();
       for (const ch of poseDCs) {
-        if (ch.readyState === 'open') ch.send(JSON.stringify({ type:'pose-mode', enabled, where }));
+        if (ch.readyState === 'open') ch.send(JSON.stringify({ type:'pose-mode', enabled, where, ...meta }));
       }
-      console.log(`[POSE][sender] announce inference-mode: ${where} (enabled: ${enabled} )`);
+      console.log(`[POSE][sender] announce inference-mode: ${where} (enabled: ${enabled})`, meta);
     }
     async function ensureTasksLoaded() {
       if (PoseLandmarker) return;
@@ -554,7 +563,8 @@
       return poseTask;
     }
     function sendPoseToReceivers(landmarks) {
-      const payload = JSON.stringify({ type:'pose', landmarks, ts: performance.now() });
+      const meta = currentPoseMeta();
+      const payload = JSON.stringify({ type:'pose', landmarks, ts: performance.now(), ...meta });
       for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
     }
     function drawPoseOnSender(landmarks) {
@@ -581,7 +591,6 @@
         const result = task.detectForVideo(localVideo, ts);
         ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
         if (result?.landmarks?.length) {
-          // ⬇️ Keep sending after preview; only draw locally during preview
           if (document.body.classList.contains('previewing')) {
             drawPoseOnSender(result.landmarks);
           }
@@ -596,7 +605,6 @@
       ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
     function onPoseMessageFromReceiver(ev) {
-      // reserved for future “receiver runs inference” → echo back drawing to sender’s preview
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'pose' && document.body.classList.contains('previewing')) {
