@@ -5,8 +5,7 @@
   <title>Baby Monitor – Receiver</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
   <style>
-    :root { color-scheme: dark; --ui-pad: 12px; }
-
+    :root { color-scheme: dark; }
     html, body {
       margin: 0; height: 100%;
       background: #000; color: #fff;
@@ -14,11 +13,12 @@
       overflow: hidden;
     }
 
-    /* Stage holds BOTH the video and the canvas and is what we fullscreen */
+    /* Fullscreen wrapper so video+canvas scale together */
     #stage {
       position: fixed; inset: 0;
-      width: 100vw; height: 100vh;
-      width: 100dvw; height: 100dvh;        /* iOS dynamic viewport */
+      width: 100vw; height: 100vh;   /* fallback */
+      width: 100dvw; height: 100dvh; /* dynamic viewport */
+      width: 100svw; height: 100svh; /* small viewport (iOS URL bar safe) */
       z-index: 1; background: #000;
     }
     #stage > video {
@@ -58,70 +58,13 @@
     }
     .overlay.hidden { display: none; }
 
-    /* ---------- Left Sidebar (auto-hide) ---------- */
-    #sidebar {
-      position: fixed; top: 0; bottom: 0; left: 0;
+    /* ========== SIDEBAR UI (added) ========== */
 
-      /* Fit to content width, but never exceed 80vw; ensure a small minimum */
-      width: max-content;
-      width: fit-content;
-      max-width: 80vw;
-      min-width: 150px;
-
-      background: rgba(0,0,0,0.92);
-      border-right: 1px solid rgba(255,255,255,0.1);
-      backdrop-filter: blur(2px);
-      box-shadow: 6px 0 24px rgba(0,0,0,0.5);
-      transform: translateX(-100%);
-      transition: transform .25s ease;
-      z-index: 20;
-      display: flex; flex-direction: column;
-      cursor: default;
-      user-select: none;
-      -webkit-user-select: none;
-      touch-action: auto;
-    }
-    #sidebar.visible { transform: translateX(0); }
-
-    #sidebar .menu {
-      padding: 8px;
-      overflow-y: auto; -webkit-overflow-scrolling: touch;
-
-      /* Hide scrollbar across browsers (still scrolls) */
-      scrollbar-width: none;              /* Firefox */
-      -ms-overflow-style: none;           /* IE/Edge legacy */
-    }
-    #sidebar .menu::-webkit-scrollbar {   /* WebKit */
-      width: 0; height: 0;
-    }
-
-    #sidebar .nav-item {
-      all: unset;
-      display: flex; align-items: center; gap: 10px;
-      width: 100%;
-      padding: 12px 14px; margin: 2px 0;
-      border-radius: 10px; cursor: pointer; user-select: none;
-      color: #eee; font-weight: 600; font-size: 15px;
-      white-space: nowrap; /* keep one line so width hugs the text */
-    }
-    #sidebar .nav-item:hover { background: rgba(255,255,255,0.08); }
-    #sidebar .nav-item.active { background: rgba(255,255,255,0.14); }
-
-    .nav-icon {
-      width: 18px; height: 18px; flex: 0 0 18px;
-      stroke: currentColor; fill: none; opacity: 0.9;
-    }
-
-    /* Keep other UI behind sidebar when shown */
-    #sidebar.visible ~ #controls { z-index: 4; }
-
-    /* ---------- Tiny Hamburger Button (hides when drawer open) ---------- */
+    /* Tiny Hamburger Button (SVG inside; hides while drawer open) */
     #hamburger {
       position: fixed;
-      top: 12px; left: 12px;
       top: calc(12px + env(safe-area-inset-top));
       left: calc(12px + env(safe-area-inset-left));
-
       width: 38px; height: 38px; padding: 8px;
       display: flex; align-items: center; justify-content: center;
       border-radius: 10px; border: 1px solid rgba(255,255,255,0.25);
@@ -139,23 +82,48 @@
     #hamburger.faded { opacity: 0; pointer-events: none; }
     #hamburger.hidden { display: none; }
 
-    /* HARD KILL any legacy draggers/splitters if they exist anywhere */
-    #hotzone, #drag-handle, .drag-handle, .dragger, .splitter, .resizer,
-    [data-draggable], [data-resizer] {
-      display: none !important;
-      pointer-events: none !important;
-      touch-action: none !important;
-      user-select: none !important;
-      -webkit-user-select: none !important;
-      cursor: default !important;
+    /* Left Sidebar */
+    #sidebar {
+      position: fixed; top: 0; bottom: 0; left: 0;
+      width: fit-content; max-width: 80vw; min-width: 150px;
+      background: rgba(0,0,0,0.92);
+      border-right: 1px solid rgba(255,255,255,0.1);
+      backdrop-filter: blur(2px);
+      box-shadow: 6px 0 24px rgba(0,0,0,0.5);
+      transform: translateX(-100%);
+      transition: transform .25s ease;
+      z-index: 20;
+      display: flex; flex-direction: column;
+      user-select: none;
     }
+    #sidebar.visible { transform: translateX(0); }
 
-    /* ---------- Invite modal + toast ---------- */
+    #sidebar .menu {
+      padding: 8px;
+      overflow-y: auto; -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;           /* Firefox hide scrollbar */
+      -ms-overflow-style: none;        /* IE 10+ */
+    }
+    #sidebar .menu::-webkit-scrollbar { width:0; height:0; }
+
+    #sidebar .nav-item {
+      all: unset;
+      display: flex; align-items: center; gap: 10px;
+      width: 100%;
+      padding: 12px 14px; margin: 2px 0;
+      border-radius: 10px; cursor: pointer;
+      color: #eee; font-weight: 600; font-size: 15px;
+      white-space: nowrap;             /* so width hugs text */
+    }
+    #sidebar .nav-item:hover { background: rgba(255,255,255,0.08); }
+    #sidebar .nav-item.active { background: rgba(255,255,255,0.14); }
+
+    .nav-icon { width: 18px; height: 18px; flex: 0 0 18px; stroke: currentColor; fill: none; opacity: .9; }
+
+    /* Invite modal + toast */
     .modal-backdrop {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,0.5);
-      display: none; z-index: 40;
-      align-items: center; justify-content: center;
+      position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+      display: none; z-index: 40; align-items: center; justify-content: center;
     }
     .modal-backdrop.visible { display: flex; }
     .modal-card {
@@ -166,27 +134,16 @@
       box-shadow: 0 10px 40px rgba(0,0,0,0.5);
       color: #eee;
     }
-    .modal-header {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 10px;
-    }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
     .modal-title { font-weight: 700; font-size: 16px; }
-    .modal-close {
-      all: unset; cursor: pointer; padding: 6px; border-radius: 8px;
-      border: 1px solid rgba(255,255,255,0.2);
-    }
-    .qr-wrap {
-      display: flex; gap: 14px; align-items: center; justify-content: center;
-      margin: 8px 0 14px;
-    }
+    .modal-close { all: unset; cursor: pointer; padding: 6px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); }
+    .qr-wrap { display: flex; gap: 14px; align-items: center; justify-content: center; margin: 8px 0 14px; }
     .qr-wrap img { width: 220px; height: 220px; border-radius: 10px; background: #fff; }
     .share-row {
       display: grid;
-      /* FIX: prevent URL input from overlapping buttons */
-      grid-template-columns: minmax(0,1fr) auto auto;
+      grid-template-columns: minmax(0,1fr) auto auto; /* prevents overlap with buttons */
       gap: 8px; align-items: center;
     }
-    /* URL input: scrollable + caret + no overlap */
     .share-url {
       width: 100%;
       background: rgba(255,255,255,0.06);
@@ -196,9 +153,7 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
       white-space: nowrap; overflow-x: auto; overflow-y: hidden;
       text-overflow: clip; direction: ltr;
-      box-sizing: border-box;
-      min-width: 0;               /* <-- crucial for CSS grid */
-      max-width: 100%;
+      box-sizing: border-box; min-width: 0; max-width: 100%;
     }
     .small-btn {
       all: unset; cursor: pointer;
@@ -216,15 +171,15 @@
   </style>
 </head>
 <body>
-  <!-- Inline SVG icon set (no external deps) -->
+  <!-- Inline SVG icon set (for menu + hamburger) -->
   <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
     <defs>
-      <!-- Video (camcorder) -->
+      <!-- Video -->
       <symbol id="i-video" viewBox="0 0 24 24" stroke-width="2">
         <rect x="2" y="6" width="14" height="12" rx="2" ry="2"></rect>
         <polygon points="18 8 22 10 22 14 18 16 18 8"></polygon>
       </symbol>
-      <!-- Camera (photo) -->
+      <!-- Camera -->
       <symbol id="i-camera" viewBox="0 0 24 24" stroke-width="2">
         <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3l2-3h8l2 3h3a2 2 0 0 1 2 2z"></path>
         <circle cx="12" cy="13" r="4"></circle>
@@ -242,7 +197,7 @@
         <path d="M9 10l3 3 3-3"></path>
         <path d="M8 21l4-7 4 7"></path>
       </symbol>
-      <!-- Face -->
+      <!-- Face (simple stylized) -->
       <symbol id="i-face" viewBox="0 0 24 24" stroke-width="2">
         <circle cx="12" cy="12" r="8.5"></circle>
         <path d="M9.25 10.5h.01M14.75 10.5h.01"></path>
@@ -281,7 +236,7 @@
     </defs>
   </svg>
 
-  <!-- Tiny hamburger (SVG so it renders reliably on iPhone) -->
+  <!-- Hamburger -->
   <button id="hamburger" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false">
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path d="M4 6.5H20M4 12H20M4 17.5H20"></path>
@@ -291,15 +246,10 @@
   <!-- Sidebar -->
   <nav id="sidebar" aria-label="Main">
     <div class="menu">
-      <!-- Renamed Camera -> Video (uses video icon) -->
       <button class="nav-item" data-item="video" aria-label="Video">
         <svg class="nav-icon"><use href="#i-video"/></svg><span class="nav-label">Video</span>
       </button>
-      <!-- New Camera item (sender) just below Video -->
-      <button class="nav-item" data-item="camera" aria-label="Camera">
-        <svg class="nav-icon"><use href="#i-camera"/></svg><span class="nav-label">Camera</span>
-      </button>
-
+      <!-- Camera item removed as requested -->
       <button class="nav-item" data-item="audio" id="menuAudio" aria-label="Audio">
         <svg class="nav-icon"><use href="#i-audio"/></svg><span class="nav-label">Audio</span>
       </button>
@@ -324,13 +274,29 @@
     </div>
   </nav>
 
+  <!-- Invite modal -->
+  <div id="inviteModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="inviteTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div id="inviteTitle" class="modal-title">Invite a friend</div>
+        <button id="inviteClose" class="modal-close" aria-label="Close">✕</button>
+      </div>
+      <div class="qr-wrap"><img id="inviteQR" alt="QR code to open this room"/></div>
+      <div class="share-row">
+        <input id="inviteUrl" class="share-url" type="text" inputmode="url" readonly />
+        <button id="inviteCopy" class="small-btn" type="button">Copy</button>
+        <button id="inviteShare" class="small-btn" type="button">Share</button>
+      </div>
+    </div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite">Copied!</div>
+
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
     <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
   </div>
 
-  <!-- fullscreen wrapper for video + canvas -->
   <div id="stage">
     <video id="remote" autoplay playsinline></video>
     <canvas id="poseCanvas"></canvas>
@@ -340,39 +306,28 @@
     <div id="status" class="status">Idle</div>
   </div>
 
-  <!-- Invite modal -->
-  <div id="inviteModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="inviteTitle">
-    <div class="modal-card">
-      <div class="modal-header">
-        <div id="inviteTitle" class="modal-title">Invite a friend</div>
-        <button id="inviteClose" class="modal-close" aria-label="Close">✕</button>
-      </div>
-      <div class="qr-wrap">
-        <img id="inviteQR" alt="QR code to open this room"/>
-      </div>
-      <div class="share-row">
-        <!-- readonly input so user can move caret & scroll -->
-        <input id="inviteUrl" class="share-url" type="text" inputmode="url" readonly />
-        <button id="inviteCopy" class="small-btn" type="button">Copy</button>
-        <button id="inviteShare" class="small-btn" type="button">Share</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Toast -->
-  <div id="toast" class="toast" role="status" aria-live="polite">Copied!</div>
-
   <script type="module">
-    import { DrawingUtils, PoseLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+    import { DrawingUtils, PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
 
+    /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
+
     const WS_KEEPALIVE_MS = 25000;
     const WS_RECONNECT_MIN_MS = 1000;
     const WS_RECONNECT_MAX_MS = 10000;
-    const RESTART_ON_ICE_TIMEOUT_MS = 5000;
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
+    // Mediapipe assets (same version as import)
+    const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+    const WASM_DIR  = TASKS_URL + "/wasm";
+    const POSE_MODEL_URL =
+      "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+
+    // Video readyState helpers
+    const HAVE_CURRENT_DATA = 2;
+
+    /* ---------- DOM ---------- */
     const stage       = document.getElementById('stage');
     const remoteVideo = document.getElementById('remote');
     const poseCanvas  = document.getElementById('poseCanvas');
@@ -384,126 +339,28 @@
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
 
-    // Sidebar + hamburger
-    const sidebar   = document.getElementById('sidebar');
-    const hamburger = document.getElementById('hamburger');
-    const menuAudio = document.getElementById('menuAudio');
-    const navItems  = Array.from(sidebar.querySelectorAll('.nav-item'));
-
-    // Invite modal + toast
-    const inviteModal = document.getElementById('inviteModal');
-    const inviteQR    = document.getElementById('inviteQR');
-    const inviteUrlEl = document.getElementById('inviteUrl');
-    const inviteClose = document.getElementById('inviteClose');
-    const inviteCopy  = document.getElementById('inviteCopy');
-    const inviteShare = document.getElementById('inviteShare');
-    const toast       = document.getElementById('toast');
-
-    // Detect touch (iPhone/iPad etc.)
-    const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
-
-    // Auto-hide drawer (no dragger)
-    const SIDEBAR_AUTOHIDE_MS = 10000;
-    let sidebarTimer = null;
-    function hideSidebar() {
-      sidebar.classList.remove('visible');
-      hamburger.classList.remove('hidden');         // show button when drawer closes
-      hamburger.setAttribute('aria-expanded', 'false');
-      clearTimeout(sidebarTimer); sidebarTimer = null;
-      resetHamburgerFade();
-    }
-    function showSidebar() {
-      sidebar.classList.add('visible');
-      hamburger.classList.add('hidden');            // hide button entirely while open
-      hamburger.setAttribute('aria-expanded', 'true');
-      clearTimeout(sidebarTimer);
-      sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
-    }
-    function toggleSidebar() {
-      if (sidebar.classList.contains('visible')) hideSidebar();
-      else showSidebar();
-    }
-
-    // Click/tap outside the sidebar closes it (ignore clicks on hamburger or modal)
-    function clickOutsideHandler(e) {
-      if (!sidebar.classList.contains('visible')) return;
-      const insideSidebar   = e.target.closest('#sidebar');
-      const insideHamburger = e.target.closest('#hamburger');
-      const insideModal     = e.target.closest('#inviteModal');
-      if (!insideSidebar && !insideHamburger && !insideModal) hideSidebar();
-    }
-    document.addEventListener('pointerdown', clickOutsideHandler, { passive: true });
-    document.addEventListener('click', clickOutsideHandler, { passive: true });
-
-    // Kill any legacy dragger/splitter nodes if they exist
-    (function removeLegacyDraggers(){
-      const sel = '#hotzone, #drag-handle, .drag-handle, .dragger, .splitter, .resizer, [data-draggable], [data-resizer]';
-      document.querySelectorAll(sel).forEach(el => el.remove());
-    })();
-
-    // Hamburger auto-fade (disabled on touch so it's always visible there)
-    const HAMBURGER_FADE_MS = 4000;
-    let hamburgerFadeTimer = null;
-    function showHamburger() {
-      hamburger.classList.remove('faded');
-      hamburger.setAttribute('aria-hidden', 'false');
-    }
-    function hideHamburgerBtn() {
-      hamburger.classList.add('faded');
-      hamburger.setAttribute('aria-hidden', 'true');
-    }
-    function resetHamburgerFade() {
-      if (hamburger.classList.contains('hidden')) return; // don't touch while drawer open
-      showHamburger();
-      clearTimeout(hamburgerFadeTimer);
-      if (isTouch) return; // keep visible on iPhone/iPad
-      if (document.fullscreenElement) {
-        hamburgerFadeTimer = setTimeout(() => {
-          if (!sidebar.classList.contains('visible') && !hamburger.classList.contains('hidden')) {
-            hideHamburgerBtn();
-          }
-        }, HAMBURGER_FADE_MS);
-      } else {
-        showHamburger(); // keep visible when not in fullscreen
-      }
-    }
-
-    // Discoverability
-    if (isTouch) { hideSidebar(); showHamburger(); } else { showSidebar(); }
-
-    // Toggle via hamburger
-    hamburger.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleSidebar();
-      resetHamburgerFade();
-    });
-
-    // Keep drawer open while interacting
-    ['mousemove','pointermove','wheel','touchstart','click','keydown'].forEach(ev =>
-      sidebar.addEventListener(ev, () => {
-        clearTimeout(sidebarTimer);
-        sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
-      }, { passive: true })
-    );
-
-    // Global activity revives hamburger (mainly in fullscreen)
-    ['mousemove','pointermove','touchstart','keydown','click'].forEach(ev =>
-      window.addEventListener(ev, () => resetHamburgerFade(), { passive: true })
-    );
-
-    // Close drawer with Escape (and close invite modal if open)
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        if (inviteModal.classList.contains('visible')) closeInvite();
-        else hideSidebar();
-      }
-    });
-
-    // ---------- Status ----------
+    /* ---------- State ---------- */
+    let ws = null, wsKeepalive = null, wsRetryMs = WS_RECONNECT_MIN_MS;
+    let pc = null;
+    let remoteDescriptionSet = false;
+    let lastAnswerSdp = null;
+    const candidateQueue = [];
+    let offerResendTimer = null;
     let hideStatusTimer = null;
+    let iceDisconnectedSince = null;
+
+    // Pose state
+    let poseDC = null;
+    let poseEnabled = false;
+    let poseWhere   = 'sender'; // 'sender' | 'receiver'
+    let poseTask = null;
+    let poseLoopRunning = false;
+
+    /* ---------- Status overlay ---------- */
     function showStatus(msg) {
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
+      console.log('[STATUS]', msg);
       if (msg === 'Connected') {
         if (hideStatusTimer) clearTimeout(hideStatusTimer);
         hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
@@ -513,113 +370,7 @@
       }
     }
 
-    // ---------- Menu interactions ----------
-    function setActive(itemName) {
-      navItems.forEach(btn => btn.classList.toggle('active', btn.dataset.item === itemName));
-    }
-
-    sidebar.addEventListener('click', async (e) => {
-      const btn = e.target.closest('.nav-item');
-      if (!btn) return;
-      const item = btn.dataset.item;
-      setActive(item);
-
-      if (item === 'video') {
-        // Redirect to receiver with fixed room=Baby
-        window.location.href = "https://hungryfaceai.github.io/hungryface/webrtc/receiver/?room=Baby";
-        return;
-      } else if (item === 'camera') {
-        // Redirect to sender page
-        window.location.href = "https://hungryfaceai.github.io/hungryface/webrtc/sender";
-        return;
-      } else if (item === 'audio') {
-        const wantUnmute = remoteVideo.muted;
-        remoteVideo.muted = !wantUnmute;
-        try { remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
-        updateAudioButtons();
-      } else if (item === 'invite') {
-        openInvite();
-      } else if (item === 'contact') {
-        const subj = encodeURIComponent('Baby Monitor Support');
-        const body = encodeURIComponent(`Hello,\n\nRoom: ${room}\n\n(Describe your issue here)`);
-        window.open(`mailto:?subject=${subj}&body=${body}`, '_blank');
-      } else {
-        console.log('[SIDEBAR] Selected:', item);
-      }
-
-      clearTimeout(sidebarTimer);
-      sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
-    });
-
-    // ---------- Invite modal ----------
-    function openInvite() {
-      // Canonical share URL: /webrtc/receiver (+ ?room=...)
-      const base = new URL('https://hungryfaceai.github.io/hungryface/webrtc/receiver');
-      if (room) base.searchParams.set('room', room);
-      const shareUrl = base.toString();
-
-      const qrEndpoint = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&format=svg&data=';
-      inviteQR.src = qrEndpoint + encodeURIComponent(shareUrl);
-      inviteQR.alt = 'QR code for ' + shareUrl;
-
-      inviteUrlEl.value = shareUrl;
-      inviteUrlEl.title = shareUrl;
-
-      // Put caret at the end and scroll to the right so the end is visible
-      requestAnimationFrame(() => {
-        inviteUrlEl.focus({ preventScroll: true });
-        const len = inviteUrlEl.value.length;
-        try { inviteUrlEl.setSelectionRange(len, len); } catch {}
-        inviteUrlEl.scrollLeft = inviteUrlEl.scrollWidth;
-      });
-
-      inviteModal.classList.add('visible');
-    }
-    function closeInvite() {
-      inviteModal.classList.remove('visible');
-    }
-
-    inviteModal.addEventListener('click', (e) => {
-      if (e.target === inviteModal) closeInvite();
-    });
-    inviteClose.addEventListener('click', closeInvite);
-
-    inviteCopy.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(inviteUrlEl.value);
-        showToast('Link copied to clipboard');
-      } catch {
-        inviteUrlEl.focus();
-        inviteUrlEl.select?.();
-        showToast('Copy failed — select text to copy');
-      }
-    });
-
-    inviteShare.addEventListener('click', async () => {
-      const url = inviteUrlEl.value;
-      if (navigator.share) {
-        try { await navigator.share({ title: 'Join my Baby Monitor', url }); }
-        catch {}
-      } else {
-        try {
-          await navigator.clipboard.writeText(url);
-          showToast('Link copied (no native share)');
-        } catch {
-          showToast('Sharing not supported');
-        }
-      }
-    });
-
-    // ---------- Toast ----------
-    let toastTimer;
-    function showToast(msg, ms = 1600) {
-      toast.textContent = msg;
-      toast.classList.add('visible');
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => toast.classList.remove('visible'), ms);
-    }
-
-    // ---------- Audio UI ----------
+    /* ---------- Audio UI ---------- */
     function updateAudioButtons() {
       if (remoteVideo.muted) {
         enableAudioBtn.style.display = 'block';
@@ -628,20 +379,21 @@
         enableAudioBtn.style.display = 'none';
         disableAudioBtn.style.display = 'block';
       }
-      // Menu label stays "Audio"
     }
     enableAudioBtn.style.display = 'block';
+
     async function tryStartMuted() {
       try {
         remoteVideo.muted = true;
         remoteVideo.volume = 1.0;
         await remoteVideo.play();
-      } catch (e) { /* autoplay might be blocked */ }
+      } catch (e) { console.warn('autoplay (muted) blocked:', e); }
       updateAudioButtons();
     }
     enableAudioBtn.addEventListener('click', async (e) => {
       e?.stopPropagation?.(); e?.preventDefault?.();
-      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
+      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); }
+      catch (err) { console.warn('unmute play blocked:', err); }
       updateAudioButtons();
     });
     disableAudioBtn.addEventListener('click', (e) => {
@@ -650,7 +402,7 @@
       updateAudioButtons();
     });
 
-    // ---------- Fullscreen ----------
+    /* ---------- Fullscreen ---------- */
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -661,32 +413,35 @@
           await document.exitFullscreen();
           fsBtn.textContent = 'Fullscreen';
         }
-      } catch {}
+      } catch (err) { console.warn('fullscreen error', err); }
       beginViewportSettle();
-      resetHamburgerFade();
+      // Sidebar fade reset is wired below.
     });
-
     document.addEventListener('fullscreenchange', () => {
       fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
       beginViewportSetle();
-      if (sidebar.classList.contains('visible')) {
-        clearTimeout(sidebarTimer);
-        sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
-      }
-      resetHamburgerFade();
+      resetHamburgerFade?.();
     });
 
-    remoteVideo.addEventListener('loadedmetadata', () => beginViewportSettle());
-    remoteVideo.addEventListener('playing', () => { updateAudioButtons(); beginViewportSettle(); });
+    remoteVideo.addEventListener('loadedmetadata', () => {
+      console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
+      beginViewportSettle();
+    });
+    remoteVideo.addEventListener('playing', () => {
+      console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
+      updateAudioButtons();
+      beginViewportSettle();
+    });
+    // Handle rotation / track size changes from sender
+    remoteVideo.addEventListener('resize', beginViewportSettle);
 
-    // ---------- Canvas alignment ----------
+    /* ---------- Canvas alignment ---------- */
     function containRect(containerW, containerH, contentW, contentH) {
       const scale = Math.min(containerW / (contentW||1), containerH / (contentH||1));
       const w = Math.round(contentW * scale);
       const h = Math.round(contentH * scale);
-      const x = Math.floor((containerW - w) / 2);
-      const y = Math.floor((containerH - h) / 2);
-      return { left:x, top:y, width:w, height:h };
+      const x = Math.floor((containerH - h) / 2); // (unused var kept for clarity)
+      return { left: Math.floor((containerW - w) / 2), top: Math.floor((containerH - h) / 2), width: w, height: h };
     }
 
     function alignCanvasToVideo() {
@@ -698,7 +453,6 @@
       const vidH = remoteVideo.videoHeight || 1;
 
       const fit = containRect(containerW, containerH, vidW, vidH);
-
       const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
       const topCSS  = Math.round((videoBox.top  - stageBox.top)  + fit.top);
 
@@ -718,7 +472,7 @@
     }
 
     let settleRAF = 0, settleUntil = 0;
-    function beginViewportSettle(durationMs = 1000) {
+    function beginViewportSettle(durationMs = 1200) {
       settleUntil = performance.now() + durationMs;
       if (settleRAF) return;
       const tick = () => {
@@ -732,45 +486,29 @@
       };
       tick();
     }
-
+    const vpAlign = () => beginViewportSettle();
     ['resize','orientationchange','scroll'].forEach(ev =>
-      window.addEventListener(ev, () => beginViewportSettle(), { passive: true })
+      window.addEventListener(ev, vpAlign, { passive: true })
     );
     if (window.visualViewport) {
-      ['resize','scroll'].forEach(ev =>
-        window.visualViewport.addEventListener(ev, () => beginViewportSettle(), { passive: true })
-      );
+      window.visualViewport.addEventListener('resize', vpAlign, { passive: true });
+      window.visualViewport.addEventListener('scroll',  vpAlign, { passive: true });
     }
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) beginViewportSettle();
     });
 
-    // ---------- WebSocket / WebRTC ----------
-    let ws = null, wsKeepalive = null, wsRetryMs = WS_RECONNECT_MIN_MS;
-    let pc = null;
-    let remoteDescriptionSet = false;
-    let lastAnswerSdp = null;
-    const candidateQueue = [];
-    let offerResendTimer = null;
-    let iceDisconnectedSince = null;
-
-    // Pose DC + draw state
-    let poseDC = null;
-    let poseEnabled = false;
-    let poseWhere   = 'sender';
-
+    /* ---------- Overlay helpers ---------- */
     function setOverlayVisible(v) {
       poseCanvas.style.display = v ? 'block' : 'none';
       if (v) beginViewportSettle();
       else poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
-    function drawPoseLandmarks(landmarks) {
-      if (!poseEnabled || poseWhere !== 'sender') return;
-      if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
 
+    function drawPoseLandmarks(landmarks) {
+      if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
       poseCtx.save();
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-
       const utils = new DrawingUtils(poseCtx);
       for (const lm of landmarks) {
         utils.drawLandmarks(lm, {
@@ -781,8 +519,101 @@
       poseCtx.restore();
     }
 
-    const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
+    /* ---------- MediaPipe on RECEIVER ---------- */
+    async function ensurePoseTask() {
+      if (poseTask) return poseTask;
+      const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
+      poseTask = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: POSE_MODEL_URL, delegate: "GPU" },
+        runningMode: "VIDEO",
+        numPoses: 1
+      });
+      return poseTask;
+    }
 
+    function videoHasFrame(v) {
+      return v &&
+        v.readyState >= HAVE_CURRENT_DATA &&
+        v.videoWidth  > 0 &&
+        v.videoHeight > 0;
+    }
+
+    function waitForVideoFrame(video) {
+      if (videoHasFrame(video)) return Promise.resolve();
+      return new Promise((resolve) => {
+        const check = () => { if (videoHasFrame(video)) { cleanup(); resolve(); } };
+        const cleanup = () => {
+          video.removeEventListener('loadedmetadata', check);
+          video.removeEventListener('playing', check);
+          video.removeEventListener('resize', check);
+        };
+        video.addEventListener('loadedmetadata', check);
+        video.addEventListener('playing', check);
+        video.addEventListener('resize',  check);
+      });
+    }
+
+    async function startReceiverPoseLoop() {
+      if (poseLoopRunning) return;
+      await ensurePoseTask();
+      await waitForVideoFrame(remoteVideo);
+
+      poseLoopRunning = true;
+      console.log('[POSE][receiver] inference START (receiver)');
+
+      const useRVFC = 'requestVideoFrameCallback' in remoteVideo;
+
+      const onFrame = () => {
+        if (!poseLoopRunning || !poseEnabled || poseWhere !== 'receiver') {
+          console.log('[POSE][receiver] inference STOP (receiver)');
+          return;
+        }
+
+        if (!videoHasFrame(remoteVideo)) {
+          poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+          scheduleNext();
+          return;
+        }
+
+        try {
+          const ts = performance.now();
+          const result = poseTask.detectForVideo(remoteVideo, ts);
+          if (result?.landmarks?.length) {
+            drawPoseLandmarks(result.landmarks);
+            if (poseDC?.readyState === 'open') {
+              poseDC.send(JSON.stringify({ type:'pose', landmarks: result.landmarks, ts }));
+            }
+          } else {
+            poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+          }
+        } catch (err) {
+          console.warn('[POSE][receiver] detect error (retrying next frame)', err);
+        } finally {
+          scheduleNext();
+        }
+      };
+
+      const scheduleNext = () => {
+        if (useRVFC) remoteVideo.requestVideoFrameCallback(onFrame);
+        else requestAnimationFrame(onFrame);
+      };
+
+      scheduleNext();
+    }
+
+    function stopReceiverPoseLoop() {
+      poseLoopRunning = false;
+      poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+    }
+
+    function applyPoseMode() {
+      setOverlayVisible(poseEnabled);
+      if (!poseEnabled) { stopReceiverPoseLoop(); return; }
+      if (poseWhere === 'receiver') startReceiverPoseLoop();
+      else stopReceiverPoseLoop(); // sender mode: draw only what we receive
+    }
+
+    /* ---------- WebSocket / WebRTC ---------- */
     async function connectWS() {
       return new Promise((resolve, reject) => {
         const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
@@ -817,13 +648,17 @@
         };
       });
     }
+
     function scheduleWSReconnect() {
       const delay = Math.min(wsRetryMs, WS_RECONNECT_MAX_MS);
+      console.log('[WS] reconnect in', delay, 'ms');
       setTimeout(() => {
         wsRetryMs = Math.min(wsRetryMs * 2, WS_RECONNECT_MAX_MS);
         startNegotiation();
       }, delay);
     }
+
+    const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
     function createPC() {
       if (pc) { try { pc.close(); } catch{}; pc = null; }
@@ -836,10 +671,10 @@
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
-      // Pose DC (receiver initiates)
+      // Pose DC (receiver initiates; bidirectional)
       const ch = pc.createDataChannel('pose');
-      ch.onopen = () => {};
-      ch.onclose = () => {};
+      ch.onopen = () => { console.log('[DC][receiver] pose DC open'); };
+      ch.onclose = () => { console.log('[DC][receiver] pose DC close'); };
       ch.onerror = (e) => { console.warn('[DC][receiver] pose DC error', e); };
       ch.onmessage = (ev) => {
         try {
@@ -847,10 +682,8 @@
           if (msg.type === 'pose-mode') {
             poseEnabled = !!msg.enabled;
             poseWhere   = msg.where || 'sender';
-            setOverlayVisible(poseEnabled && poseWhere === 'sender');
-            if (!(poseEnabled && poseWhere === 'sender')) {
-              poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-            }
+            console.log('[POSE][receiver] mode:', { poseEnabled, poseWhere });
+            applyPoseMode();
           } else if (msg.type === 'pose') {
             if (poseEnabled && poseWhere === 'sender') drawPoseLandmarks(msg.landmarks);
           }
@@ -864,31 +697,43 @@
           remoteVideo.srcObject = ev.streams[0];
           tryStartMuted();
         }
+        console.log('[TRACK][receiver] ontrack:', ev.track.kind);
         beginViewportSettle();
       };
 
+      // Less jumpy on ICE disconnected; immediate on failed
       pc.oniceconnectionstatechange = () => {
         const state = pc.iceConnectionState;
-        if (state === 'connected') showStatus('Connected'); else showStatus('ICE: ' + state);
+        console.log('[ICE]', state);
 
-        if (state === 'disconnected') {
+        if (state === 'connected' || state === 'completed') {
+          showStatus('Connected');
+          iceDisconnectedSince = null;
+        } else if (state === 'failed') {
+          console.log('[ICE] failed - restarting negotiation');
+          startNegotiation(true);
+        } else if (state === 'disconnected') {
           if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
           setTimeout(() => {
-            if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= RESTART_ON_ICE_TIMEOUT_MS) {
+            if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= 15000) {
+              console.log('[ICE] disconnected >15s - restarting negotiation');
               startNegotiation(true);
             }
-          }, RESTART_ON_ICE_TIMEOUT_MS + 50);
-        } else if (state === 'failed') {
-          startNegotiation(true);
+          }, 15100);
+          showStatus('ICE: disconnected');
         } else {
-          iceDisconnectedSince = null;
+          showStatus('ICE: ' + state);
         }
       };
     }
 
     async function sendCurrentOffer() {
-      if (pc?.localDescription?.type === 'offer') send(pc.localDescription);
+      if (pc?.localDescription?.type === 'offer') {
+        console.log('[WS OUT] offer (send/resend)');
+        send(pc.localDescription);
+      }
     }
+
     function startOfferResendLoop() {
       stopOfferResendLoop();
       offerResendTimer = setInterval(() => {
@@ -914,16 +759,22 @@
         startOfferResendLoop();
         showStatus('Offer sent, waiting for answer…');
       } catch (e) {
+        console.error('negotiation error', e);
         showStatus('Negotiation error');
       }
     }
 
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+      console.log('[WS IN]', msg.type);
 
       if (msg.type === 'answer') {
-        if (pc.signalingState !== 'have-local-offer') return;
-        if (lastAnswerSdp === msg.sdp) return;
+        if (pc.signalingState !== 'have-local-offer') {
+          console.log('[SKIP] answer in state', pc.signalingState);
+          if (pc.signalingState === 'stable') stopOfferResendLoop(); // stop storm
+          return;
+        }
+        if (lastAnswerSdp === msg.sdp) { console.log('[DUP] identical answer ignored'); return; }
         lastAnswerSdp = msg.sdp;
 
         showStatus('Got answer, applying…');
@@ -932,14 +783,14 @@
         stopOfferResendLoop();
 
         for (const c of candidateQueue) {
-          try { await pc.addIceCandidate(c); } catch {}
+          try { await pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
         }
         candidateQueue.length = 0;
 
       } else if (msg.type === 'candidate' && msg.candidate) {
         const cand = new RTCIceCandidate(msg.candidate);
         if (remoteDescriptionSet) {
-          try { await pc.addIceCandidate(cand); } catch {}
+          try { await pc.addIceCandidate(cand); } catch (e) { console.warn('ICE add failed', e); }
         } else {
           candidateQueue.push(cand);
         }
@@ -947,17 +798,209 @@
       } else if (msg.type === 'peer-joined' || msg.type === 'need-offer') {
         await sendCurrentOffer();
       } else if (msg.type === 'bye') {
+        console.log('[INFO] sender bye -> pause offers until peer rejoins');
         remoteDescriptionSet = false;
-        startOfferResendLoop();
+        stopOfferResendLoop();
       }
     }
 
+    // ========== SIDEBAR LOGIC (unchanged except requested redirects + removed camera) ==========
+    const sidebar   = document.getElementById('sidebar');
+    const hamburger = document.getElementById('hamburger');
+    const navItems  = Array.from(sidebar.querySelectorAll('.nav-item'));
+    const inviteModal = document.getElementById('inviteModal');
+    const inviteQR    = document.getElementById('inviteQR');
+    const inviteUrlEl = document.getElementById('inviteUrl');
+    const inviteClose = document.getElementById('inviteClose');
+    const inviteCopy  = document.getElementById('inviteCopy');
+    const inviteShare = document.getElementById('inviteShare');
+    const toast       = document.getElementById('toast');
+
+    const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+
+    const SIDEBAR_AUTOHIDE_MS = 10000;
+    let sidebarTimer = null;
+
+    function hideSidebar() {
+      sidebar.classList.remove('visible');
+      hamburger.classList.remove('hidden');
+      hamburger.setAttribute('aria-expanded', 'false');
+      clearTimeout(sidebarTimer); sidebarTimer = null;
+      resetHamburgerFade();
+    }
+    function showSidebar() {
+      sidebar.classList.add('visible');
+      hamburger.classList.add('hidden');
+      hamburger.setAttribute('aria-expanded', 'true');
+      clearTimeout(sidebarTimer);
+      sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
+    }
+    function toggleSidebar() {
+      if (sidebar.classList.contains('visible')) hideSidebar();
+      else showSidebar();
+    }
+
+    if (isTouch) { hideSidebar(); } else { showSidebar(); }
+
+    hamburger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSidebar();
+      resetHamburgerFade();
+    });
+
+    ['mousemove','pointermove','wheel','touchstart','click','keydown'].forEach(ev =>
+      sidebar.addEventListener(ev, () => {
+        clearTimeout(sidebarTimer);
+        sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
+      }, { passive: true })
+    );
+
+    function clickOutsideHandler(e) {
+      if (!sidebar.classList.contains('visible')) return;
+      const insideSidebar = e.target.closest('#sidebar');
+      const insideHamb    = e.target.closest('#hamburger');
+      const insideModal   = e.target.closest('#inviteModal');
+      if (!insideSidebar && !insideHamb && !insideModal) hideSidebar();
+    }
+    document.addEventListener('pointerdown', clickOutsideHandler, { passive: true });
+    document.addEventListener('click', clickOutsideHandler, { passive: true });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (inviteModal.classList.contains('visible')) closeInvite();
+        else hideSidebar();
+      }
+    });
+
+    const HAMBURGER_FADE_MS = 4000;
+    let hamburgerFadeTimer = null;
+    function showHamburgerBtn() {
+      hamburger.classList.remove('faded');
+      hamburger.setAttribute('aria-hidden', 'false');
+    }
+    function hideHamburgerBtn() {
+      hamburger.classList.add('faded');
+      hamburger.setAttribute('aria-hidden', 'true');
+    }
+    function resetHamburgerFade() {
+      if (hamburger.classList.contains('hidden')) return;
+      showHamburgerBtn();
+      clearTimeout(hamburgerFadeTimer);
+      if (isTouch) return;
+      if (document.fullscreenElement) {
+        hamburgerFadeTimer = setTimeout(() => {
+          if (!sidebar.classList.contains('visible') && !hamburger.classList.contains('hidden')) {
+            hideHamburgerBtn();
+          }
+        }, HAMBURGER_FADE_MS);
+      }
+    }
+    ['mousemove','pointermove','touchstart','keydown','click'].forEach(ev =>
+      window.addEventListener(ev, () => resetHamburgerFade(), { passive: true })
+    );
+    window.resetHamburgerFade = resetHamburgerFade;
+
+    function setActive(itemName) {
+      navItems.forEach(btn => btn.classList.toggle('active', btn.dataset.item === itemName));
+    }
+
+    sidebar.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.nav-item');
+      if (!btn) return;
+      const item = btn.dataset.item;
+      setActive(item);
+
+      if (item === 'video') {
+        window.location.href = "https://hungryfaceai.github.io/hungryface/webrtc/receiver/video/index.html";
+        return;
+      } else if (item === 'audio') {
+        window.location.href = "https://hungryfaceai.github.io/hungryface/webrtc/receiver/audio/index.html";
+        return;
+      } else if (item === 'pose') {
+        window.location.href = "https://hungryfaceai.github.io/hungryface/webrtc/receiver/pose/index.html";
+        return;
+      } else if (item === 'face') {
+        window.location.href = "https://hungryfaceai.github.io/hungryface/webrtc/receiver/face/index.html";
+        return;
+      } else if (item === 'invite') {
+        openInvite();
+      } else if (item === 'contact') {
+        const subj = encodeURIComponent('Baby Monitor Support');
+        const body = encodeURIComponent(`Hello,\n\nRoom: ${room}\n\n(Describe your issue here)`);
+        window.open(`mailto:?subject=${subj}&body=${body}`, '_blank');
+      } else {
+        console.log('[SIDEBAR] Selected:', item);
+      }
+
+      clearTimeout(sidebarTimer);
+      sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
+    });
+
+    function openInvite() {
+      const base = new URL('https://hungryfaceai.github.io/hungryface/webrtc/receiver');
+      if (room) base.searchParams.set('room', room);
+      const shareUrl = base.toString();
+
+      const qrEndpoint = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&format=svg&data=';
+      inviteQR.src = qrEndpoint + encodeURIComponent(shareUrl);
+      inviteQR.alt = 'QR code for ' + shareUrl;
+
+      inviteUrlEl.value = shareUrl;
+      inviteUrlEl.title = shareUrl;
+
+      requestAnimationFrame(() => {
+        inviteUrlEl.focus({ preventScroll: true });
+        const len = inviteUrlEl.value.length;
+        try { inviteUrlEl.setSelectionRange(len, len); } catch {}
+        inviteUrlEl.scrollLeft = inviteUrlEl.scrollWidth;
+      });
+
+      inviteModal.classList.add('visible');
+    }
+    function closeInvite() {
+      inviteModal.classList.remove('visible');
+    }
+
+    inviteModal.addEventListener('click', (e) => {
+      if (e.target === inviteModal) closeInvite();
+    });
+    inviteClose.addEventListener('click', closeInvite);
+
+    inviteCopy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(inviteUrlEl.value);
+        showToast('Link copied to clipboard');
+      } catch {
+        inviteUrlEl.focus();
+        inviteUrlEl.select?.();
+        showToast('Copy failed — select text to copy');
+      }
+    });
+
+    inviteShare.addEventListener('click', async () => {
+      const url = inviteUrlEl.value;
+      if (navigator.share) {
+        try { await navigator.share({ title: 'Join my Baby Monitor', url }); } catch {}
+      } else {
+        try {
+          await navigator.clipboard.writeText(url);
+          showToast('Link copied (no native share)');
+        } catch {
+          showToast('Sharing not supported');
+        }
+      }
+    });
+
+    let toastTimer;
+    function showToast(msg, ms = 1600) {
+      toast.textContent = msg;
+      toast.classList.add('visible');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('visible'), ms);
+    }
+
+    /* ---------- WebRTC helpers continue ---------- */
     window.addEventListener('beforeunload', () => {
-      try { stopOfferResendLoop(); } catch {}
-      try { ws && ws.close(); } catch {}
-      try { pc && pc.close(); } catch {}
-      if (wsKeepalive) clearInterval(wsKeepalive);
-      if (hideStatusTimer) clearTimeout(hideStatusTimer);
       clearTimeout(sidebarTimer);
       clearTimeout(hamburgerFadeTimer);
     });
@@ -965,7 +1008,7 @@
     // Go!
     startNegotiation();
 
-    // tiny alias/typo guard
+    // tiny typo guard used in logs
     function beginViewportSetle(){ beginViewportSettle(); }
   </script>
 </body>
