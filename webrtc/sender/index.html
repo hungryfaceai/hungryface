@@ -170,6 +170,61 @@
     const poseOn    = document.getElementById('poseOn');
     const poseWhere = document.getElementById('poseWhere');
 
+    /* -----------------------
+       PERSISTENCE (localStorage) — no behavior changes
+       ----------------------- */
+    (function () {
+      const PREFIX = 'bm_sender_';
+
+      // Map of controls to persist
+      const entries = [
+        ['videoOn',    'checkbox', document.getElementById('videoOn')],
+        ['audioOn',    'checkbox', document.getElementById('audioOn')],
+        ['cameraSel',  'select',   document.getElementById('cameraSel')],
+        ['room',       'text',     document.getElementById('room')],
+        ['previewMins','number',   document.getElementById('previewMins')],
+        ['poseOn',     'checkbox', document.getElementById('poseOn')],
+        ['poseWhere',  'select',   document.getElementById('poseWhere')],
+      ];
+
+      // Also persist the (currently disabled) Audio/Face AI controls and their dropdowns.
+      // We don't add IDs or change markup; we select by structure:
+      const aiRows = document.querySelectorAll('fieldset.ai .ai-row');
+      const audioRow = aiRows[1], faceRow = aiRows[2];
+      const audioChk = audioRow?.querySelector('input[type="checkbox"]');
+      const audioSel = audioRow?.querySelector('select');
+      const faceChk  = faceRow?.querySelector('input[type="checkbox"]');
+      const faceSel  = faceRow?.querySelector('select');
+      if (audioChk) entries.push(['audioAiOn',   'checkbox', audioChk]);
+      if (audioSel) entries.push(['audioAiWhere','select',   audioSel]);
+      if (faceChk)  entries.push(['faceOn',      'checkbox', faceChk]);
+      if (faceSel)  entries.push(['faceWhere',   'select',   faceSel]);
+
+      function loadOne(key, type, el) {
+        if (!el) return;
+        const v = localStorage.getItem(PREFIX + key);
+        if (v == null) return; // leave current default if nothing saved
+        if (type === 'checkbox') el.checked = (v === '1' || v === 'true');
+        else el.value = v;
+      }
+
+      function saveOne(key, type, el) {
+        if (!el) return;
+        const v = (type === 'checkbox') ? (el.checked ? '1' : '0') : el.value;
+        try { localStorage.setItem(PREFIX + key, v); } catch {}
+      }
+
+      // Apply saved values (does NOT dispatch events, so no behavior changes)
+      entries.forEach(([k, t, el]) => loadOne(k, t, el));
+
+      // Save on change
+      entries.forEach(([k, t, el]) => el && el.addEventListener('change', () => saveOne(k, t, el)));
+
+      // If a ?room= is present, persist that value too (existing code still sets the input)
+      const qsRoomVal = new URLSearchParams(location.search).get('room');
+      if (qsRoomVal) { try { localStorage.setItem(PREFIX + 'room', qsRoomVal); } catch {} }
+    })();
+
     let ws = null, pc = null, localStream = null;
     let started = false, hideUITimer = null;
 
