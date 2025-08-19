@@ -1,1 +1,1017 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Baby Monitor – Receiver</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
+  <style>
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; height: 100%;
+      background: #000; color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+      overflow: hidden;
+    }
 
+    /* Fullscreen wrapper so video+canvas scale together */
+    #stage {
+      position: fixed; inset: 0;
+      width: 100vw; height: 100vh;   /* fallback */
+      width: 100dvw; height: 100dvh; /* dynamic viewport */
+      width: 100svw; height: 100svh; /* small viewport (iOS URL bar safe) */
+      z-index: 1; background: #000;
+    }
+    #stage > video {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: contain; background: #000;
+    }
+    #stage > canvas {
+      position: absolute;
+      z-index: 2; pointer-events: none; background: transparent; display: none;
+    }
+
+    .btn {
+      padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
+      background: transparent; color: #fff; font-size: 16px; font-weight: 600;
+      cursor: pointer; box-shadow: none;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+    .btn:active { transform: scale(0.99); }
+
+    #controls {
+      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 12px; z-index: 6;
+    }
+    #enableAudioBtn, #disableAudioBtn { display: none; }
+
+    .overlay {
+      position: fixed; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      pointer-events: none; z-index: 5;
+    }
+    .status {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
+      text-align: center; white-space: pre-line; max-width: 90vw;
+    }
+    .overlay.hidden { display: none; }
+
+    /* ===== Sidebar UI (added) ===== */
+
+    /* Tiny Hamburger Button */
+    #hamburger {
+      position: fixed;
+      top: calc(12px + env(safe-area-inset-top));
+      left: calc(12px + env(safe-area-inset-left));
+      width: 38px; height: 38px; padding: 8px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 10px; border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(0,0,0,0.7);
+      color: #fff;
+      cursor: pointer; z-index: 30; user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-appearance: none; appearance: none;
+      transition: opacity .25s ease, background .2s ease;
+      box-shadow: 0 2px 10px rgba(0,0,0,.35);
+    }
+    #hamburger svg { width: 100%; height: 100%; display: block; }
+    #hamburger svg path { stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; fill: none; }
+    #hamburger[aria-expanded="true"] { background: rgba(255,255,255,0.1); }
+    #hamburger.faded { opacity: 0; pointer-events: none; }
+    #hamburger.hidden { display: none; }
+
+    /* Sidebar Drawer */
+    #sidebar {
+      position: fixed; top: 0; bottom: 0; left: 0;
+      width: fit-content; max-width: 80vw; min-width: 150px;
+      background: rgba(0,0,0,0.92);
+      border-right: 1px solid rgba(255,255,255,0.1);
+      backdrop-filter: blur(2px);
+      box-shadow: 6px 0 24px rgba(0,0,0,0.5);
+      transform: translateX(-100%);
+      transition: transform .25s ease;
+      z-index: 20;
+      display: flex; flex-direction: column;
+      user-select: none;
+    }
+    #sidebar.visible { transform: translateX(0); }
+
+    #sidebar .menu {
+      padding: 8px;
+      overflow-y: auto; -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;           /* Firefox hide scrollbar */
+      -ms-overflow-style: none;        /* IE 10+ */
+    }
+    #sidebar .menu::-webkit-scrollbar { width:0; height:0; }
+
+    #sidebar .nav-item {
+      all: unset;
+      display: flex; align-items: center; gap: 10px;
+      width: 100%;
+      padding: 12px 14px; margin: 2px 0;
+      border-radius: 10px; cursor: pointer;
+      color: #eee; font-weight: 600; font-size: 15px;
+      white-space: nowrap;             /* so width hugs text */
+    }
+    #sidebar .nav-item:hover { background: rgba(255,255,255,0.08); }
+    #sidebar .nav-item.active { background: rgba(255,255,255,0.14); }
+
+    .nav-icon { width: 18px; height: 18px; flex: 0 0 18px; stroke: currentColor; fill: none; opacity: .9; }
+
+    /* Invite modal + toast */
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+      display: none; z-index: 40; align-items: center; justify-content: center;
+    }
+    .modal-backdrop.visible { display: flex; }
+    .modal-card {
+      background: rgba(20,20,20,0.95);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 16px; padding: 16px;
+      width: min(92vw, 420px);
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+      color: #eee;
+    }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .modal-title { font-weight: 700; font-size: 16px; }
+    .modal-close { all: unset; cursor: pointer; padding: 6px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); }
+    .qr-wrap { display: flex; gap: 14px; align-items: center; justify-content: center; margin: 8px 0 14px; }
+    .qr-wrap img { width: 220px; height: 220px; border-radius: 10px; background: #fff; }
+    .share-row {
+      display: grid;
+      grid-template-columns: minmax(0,1fr) auto auto; /* prevent overlap with buttons */
+      gap: 8px; align-items: center;
+    }
+    .share-url {
+      width: 100%;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.18);
+      color: #fff; padding: 10px 12px; border-radius: 10px;
+      font-size: 13px; line-height: 1.2;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      white-space: nowrap; overflow-x: auto; overflow-y: hidden;
+      text-overflow: clip; direction: ltr;
+      box-sizing: border-box; min-width: 0; max-width: 100%;
+    }
+    .small-btn {
+      all: unset; cursor: pointer;
+      padding: 8px 10px; border-radius: 10px; font-weight: 700; font-size: 13px;
+      border: 1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.06);
+    }
+    .toast {
+      position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.18);
+      color: #fff; padding: 10px 14px; border-radius: 12px;
+      font-size: 14px; z-index: 50; display: none;
+    }
+    .toast.visible { display: block; }
+  </style>
+</head>
+<body>
+  <!-- Inline SVG icon set (for menu + hamburger) -->
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+    <defs>
+      <!-- Video -->
+      <symbol id="i-video" viewBox="0 0 24 24" stroke-width="2">
+        <rect x="2" y="6" width="14" height="12" rx="2" ry="2"></rect>
+        <polygon points="18 8 22 10 22 14 18 16 18 8"></polygon>
+      </symbol>
+      <!-- Audio -->
+      <symbol id="i-audio" viewBox="0 0 24 24" stroke-width="2">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+      </symbol>
+      <!-- Pose -->
+      <symbol id="i-pose" viewBox="0 0 24 24" stroke-width="2">
+        <circle cx="12" cy="5.5" r="2"></circle>
+        <path d="M12 7.5v5.5"></path>
+        <path d="M9 10l3 3 3-3"></path>
+        <path d="M8 21l4-7 4 7"></path>
+      </symbol>
+      <!-- Face (simple stylized) -->
+      <symbol id="i-face" viewBox="0 0 24 24" stroke-width="2">
+        <circle cx="12" cy="12" r="8.5"></circle>
+        <path d="M9.25 10.5h.01M14.75 10.5h.01"></path>
+        <path d="M9.5 14c1 .8 4 .8 5 0"></path>
+      </symbol>
+      <!-- Settings -->
+      <symbol id="i-settings" viewBox="0 0 24 24" stroke-width="2">
+        <line x1="4" y1="21" x2="4" y2="14"></line>
+        <line x1="4" y1="10" x2="4" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="12"></line>
+        <line x1="12" y1="8" x2="12" y2="3"></line>
+        <line x1="20" y1="21" x2="20" y2="16"></line>
+        <line x1="20" y1="12" x2="20" y2="3"></line>
+        <circle cx="4" cy="12" r="2"></circle>
+        <circle cx="12" cy="10" r="2"></circle>
+        <circle cx="20" cy="14" r="2"></circle>
+      </symbol>
+      <!-- Help -->
+      <symbol id="i-help" viewBox="0 0 24 24" stroke-width="2">
+        <circle cx="12" cy="12" r="10"></circle>
+        <path d="M9.1 9a3 3 0 1 1 5.8 1c0 2-3 2-3 4"></path>
+        <circle cx="12" cy="17" r="1"></circle>
+      </symbol>
+      <!-- Invite -->
+      <symbol id="i-invite" viewBox="0 0 24 24" stroke-width="2">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+        <circle cx="12" cy="7" r="4"></circle>
+        <line x1="20" y1="8" x2="20" y2="14"></line>
+        <line x1="17" y1="11" x2="23" y2="11"></line>
+      </symbol>
+      <!-- Contact -->
+      <symbol id="i-contact" viewBox="0 0 24 24" stroke-width="2">
+        <rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect>
+        <path d="M22 6 12 13 2 6"></path>
+      </symbol>
+    </defs>
+  </svg>
+
+  <!-- Hamburger -->
+  <button id="hamburger" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 6.5H20M4 12H20M4 17.5H20"></path>
+    </svg>
+  </button>
+
+  <!-- Sidebar -->
+  <nav id="sidebar" aria-label="Main">
+    <div class="menu">
+      <button class="nav-item" data-item="video" aria-label="Video">
+        <svg class="nav-icon"><use href="#i-video"/></svg><span class="nav-label">Video</span>
+      </button>
+      <button class="nav-item" data-item="audio" aria-label="Audio">
+        <svg class="nav-icon"><use href="#i-audio"/></svg><span class="nav-label">Audio</span>
+      </button>
+      <button class="nav-item" data-item="pose" aria-label="Pose">
+        <svg class="nav-icon"><use href="#i-pose"/></svg><span class="nav-label">Pose</span>
+      </button>
+      <button class="nav-item" data-item="face" aria-label="Face">
+        <svg class="nav-icon"><use href="#i-face"/></svg><span class="nav-label">Face</span>
+      </button>
+      <button class="nav-item" data-item="settings" aria-label="Settings">
+        <svg class="nav-icon"><use href="#i-settings"/></svg><span class="nav-label">Settings</span>
+      </button>
+      <button class="nav-item" data-item="help" aria-label="Help">
+        <svg class="nav-icon"><use href="#i-help"/></svg><span class="nav-label">Help</span>
+      </button>
+      <button class="nav-item" data-item="invite" aria-label="Invite a friend">
+        <svg class="nav-icon"><use href="#i-invite"/></svg><span class="nav-label">Invite a friend</span>
+      </button>
+      <button class="nav-item" data-item="contact" aria-label="Contact us">
+        <svg class="nav-icon"><use href="#i-contact"/></svg><span class="nav-label">Contact us</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Invite modal -->
+  <div id="inviteModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="inviteTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div id="inviteTitle" class="modal-title">Invite a friend</div>
+        <button id="inviteClose" class="modal-close" aria-label="Close">✕</button>
+      </div>
+      <div class="qr-wrap"><img id="inviteQR" alt="QR code to open this room"/></div>
+      <div class="share-row">
+        <input id="inviteUrl" class="share-url" type="text" inputmode="url" readonly />
+        <button id="inviteCopy" class="small-btn" type="button">Copy</button>
+        <button id="inviteShare" class="small-btn" type="button">Share</button>
+      </div>
+    </div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite">Copied!</div>
+
+  <div id="controls">
+    <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
+    <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
+    <button id="fsBtn" class="btn" type="button">Fullscreen</button>
+  </div>
+
+  <div id="stage">
+    <video id="remote" autoplay playsinline></video>
+    <canvas id="poseCanvas"></canvas>
+  </div>
+
+  <div id="overlay" class="overlay">
+    <div id="status" class="status">Idle</div>
+  </div>
+
+  <script type="module">
+    import { DrawingUtils, PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+
+    /* ---------- Constants ---------- */
+    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const room = new URLSearchParams(location.search).get("room") || "Baby";
+
+    const WS_KEEPALIVE_MS = 25000;
+    const WS_RECONNECT_MIN_MS = 1000;
+    const WS_RECONNECT_MAX_MS = 10000;
+    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
+
+    // Mediapipe assets (same version as import)
+    const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+    const WASM_DIR  = TASKS_URL + "/wasm";
+    const POSE_MODEL_URL =
+      "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+
+    // Video readyState helpers
+    const HAVE_CURRENT_DATA = 2;
+
+    /* ---------- DOM ---------- */
+    const stage       = document.getElementById('stage');
+    const remoteVideo = document.getElementById('remote');
+    const poseCanvas  = document.getElementById('poseCanvas');
+    const poseCtx     = poseCanvas.getContext('2d', { alpha: true });
+
+    const fsBtn = document.getElementById('fsBtn');
+    const enableAudioBtn = document.getElementById('enableAudioBtn');
+    const disableAudioBtn = document.getElementById('disableAudioBtn');
+    const overlay = document.getElementById('overlay');
+    const statusEl = document.getElementById('status');
+
+    /* ---------- State ---------- */
+    let ws = null, wsKeepalive = null, wsRetryMs = WS_RECONNECT_MIN_MS;
+    let pc = null;
+    let remoteDescriptionSet = false;
+    let lastAnswerSdp = null;
+    const candidateQueue = [];
+    let offerResendTimer = null;
+    let hideStatusTimer = null;
+    let iceDisconnectedSince = null;
+
+    // Pose state
+    let poseDC = null;
+    let poseEnabled = false;
+    let poseWhere   = 'sender'; // 'sender' | 'receiver'
+    let poseTask = null;
+    let poseLoopRunning = false;
+
+    /* ---------- Status overlay ---------- */
+    function showStatus(msg) {
+      statusEl.textContent = msg;
+      overlay.classList.remove('hidden');
+      console.log('[STATUS]', msg);
+      if (msg === 'Connected') {
+        if (hideStatusTimer) clearTimeout(hideStatusTimer);
+        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
+      } else {
+        if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
+        overlay.classList.remove('hidden');
+      }
+    }
+
+    /* ---------- Audio UI ---------- */
+    function updateAudioButtons() {
+      if (remoteVideo.muted) {
+        enableAudioBtn.style.display = 'block';
+        disableAudioBtn.style.display = 'none';
+      } else {
+        enableAudioBtn.style.display = 'none';
+        disableAudioBtn.style.display = 'block';
+      }
+    }
+    enableAudioBtn.style.display = 'block';
+
+    async function tryStartMuted() {
+      try {
+        remoteVideo.muted = true;
+        remoteVideo.volume = 1.0;
+        await remoteVideo.play();
+      } catch (e) { console.warn('autoplay (muted) blocked:', e); }
+      updateAudioButtons();
+    }
+    enableAudioBtn.addEventListener('click', async (e) => {
+      e?.stopPropagation?.(); e?.preventDefault?.();
+      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); }
+      catch (err) { console.warn('unmute play blocked:', err); }
+      updateAudioButtons();
+    });
+    disableAudioBtn.addEventListener('click', (e) => {
+      e?.stopPropagation?.(); e?.preventDefault?.();
+      remoteVideo.muted = true;
+      updateAudioButtons();
+    });
+
+    /* ---------- Fullscreen ---------- */
+    fsBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        if (!document.fullscreenElement) {
+          await (stage.requestFullscreen?.call(stage) || document.documentElement.requestFullscreen());
+          fsBtn.textContent = 'Exit fullscreen';
+        } else {
+          await document.exitFullscreen();
+          fsBtn.textContent = 'Fullscreen';
+        }
+      } catch (err) { console.warn('fullscreen error', err); }
+      beginViewportSettle();
+    });
+    document.addEventListener('fullscreenchange', () => {
+      fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+      beginViewportSetle();
+    });
+
+    remoteVideo.addEventListener('loadedmetadata', () => {
+      console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
+      beginViewportSettle();
+    });
+    remoteVideo.addEventListener('playing', () => {
+      console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
+      updateAudioButtons();
+      beginViewportSettle();
+    });
+    // Handle rotation / track size changes from sender
+    remoteVideo.addEventListener('resize', beginViewportSettle);
+
+    /* ---------- Canvas alignment ---------- */
+    function containRect(containerW, containerH, contentW, contentH) {
+      const scale = Math.min(containerW / (contentW||1), containerH / (contentH||1));
+      const w = Math.round(contentW * scale);
+      const h = Math.round(contentH * scale);
+      const x = Math.floor((containerW - w) / 2);
+      const y = Math.floor((containerH - h) / 2);
+      return { left:x, top:y, width:w, height:h };
+    }
+
+    function alignCanvasToVideo() {
+      const stageBox = stage.getBoundingClientRect();
+      const videoBox = remoteVideo.getBoundingClientRect();
+      const containerW = Math.round(videoBox.width);
+      const containerH = Math.round(videoBox.height);
+      const vidW = remoteVideo.videoWidth  || 1;
+      const vidH = remoteVideo.videoHeight || 1;
+
+      const fit = containRect(containerW, containerH, vidW, vidH);
+      const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
+      const topCSS  = Math.round((videoBox.top  - stageBox.top)  + fit.top);
+
+      poseCanvas.style.left   = leftCSS + 'px';
+      poseCanvas.style.top    = topCSS  + 'px';
+      poseCanvas.style.width  = fit.width  + 'px';
+      poseCanvas.style.height = fit.height + 'px';
+
+      const dpr = window.devicePixelRatio || 1;
+      const needW = Math.max(1, Math.round(fit.width  * dpr));
+      const needH = Math.max(1, Math.round(fit.height * dpr));
+      if (poseCanvas.width !== needW || poseCanvas.height !== needH) {
+        poseCanvas.width  = needW;
+        poseCanvas.height = needH;
+      }
+      poseCtx.setTransform(1,0,0,1,0,0);
+    }
+
+    let settleRAF = 0, settleUntil = 0;
+    function beginViewportSettle(durationMs = 1200) {
+      settleUntil = performance.now() + durationMs;
+      if (settleRAF) return;
+      const tick = () => {
+        alignCanvasToVideo();
+        if (performance.now() < settleUntil) {
+          settleRAF = requestAnimationFrame(tick);
+        } else {
+          cancelAnimationFrame(settleRAF); settleRAF = 0;
+          alignCanvasToVideo();
+        }
+      };
+      tick();
+    }
+    const vpAlign = () => beginViewportSettle();
+    ['resize','orientationchange','scroll'].forEach(ev =>
+      window.addEventListener(ev, vpAlign, { passive: true })
+    );
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', vpAlign, { passive: true });
+      window.visualViewport.addEventListener('scroll',  vpAlign, { passive: true });
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) beginViewportSettle();
+    });
+
+    /* ---------- Overlay helpers ---------- */
+    function setOverlayVisible(v) {
+      poseCanvas.style.display = v ? 'block' : 'none';
+      if (v) beginViewportSettle();
+      else poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+    }
+
+    function drawPoseLandmarks(landmarks) {
+      if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
+      poseCtx.save();
+      poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+      const utils = new DrawingUtils(poseCtx);
+      for (const lm of landmarks) {
+        utils.drawLandmarks(lm, {
+          radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
+        });
+        utils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+      }
+      poseCtx.restore();
+    }
+
+    /* ---------- MediaPipe on RECEIVER ---------- */
+    async function ensurePoseTask() {
+      if (poseTask) return poseTask;
+      const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
+      poseTask = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: POSE_MODEL_URL, delegate: "GPU" },
+        runningMode: "VIDEO",
+        numPoses: 1
+      });
+      return poseTask;
+    }
+
+    function videoHasFrame(v) {
+      return v &&
+        v.readyState >= HAVE_CURRENT_DATA &&
+        v.videoWidth  > 0 &&
+        v.videoHeight > 0;
+    }
+
+    function waitForVideoFrame(video) {
+      if (videoHasFrame(video)) return Promise.resolve();
+      return new Promise((resolve) => {
+        const check = () => { if (videoHasFrame(video)) { cleanup(); resolve(); } };
+        const cleanup = () => {
+          video.removeEventListener('loadedmetadata', check);
+          video.removeEventListener('playing', check);
+          video.removeEventListener('resize', check);
+        };
+        video.addEventListener('loadedmetadata', check);
+        video.addEventListener('playing', check);
+        video.addEventListener('resize',  check);
+      });
+    }
+
+    async function startReceiverPoseLoop() {
+      if (poseLoopRunning) return;
+      await ensurePoseTask();
+      await waitForVideoFrame(remoteVideo);
+
+      poseLoopRunning = true;
+      console.log('[POSE][receiver] inference START (receiver)');
+
+      const useRVFC = 'requestVideoFrameCallback' in remoteVideo;
+
+      const onFrame = () => {
+        if (!poseLoopRunning || !poseEnabled || poseWhere !== 'receiver') {
+          console.log('[POSE][receiver] inference STOP (receiver)');
+          return;
+        }
+
+        if (!videoHasFrame(remoteVideo)) {
+          poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+          scheduleNext();
+          return;
+        }
+
+        try {
+          const ts = performance.now();
+          const result = poseTask.detectForVideo(remoteVideo, ts);
+          if (result?.landmarks?.length) {
+            drawPoseLandmarks(result.landmarks);
+            if (poseDC?.readyState === 'open') {
+              poseDC.send(JSON.stringify({ type:'pose', landmarks: result.landmarks, ts }));
+            }
+          } else {
+            poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+          }
+        } catch (err) {
+          console.warn('[POSE][receiver] detect error (retrying next frame)', err);
+        } finally {
+          scheduleNext();
+        }
+      };
+
+      const scheduleNext = () => {
+        if (useRVFC) remoteVideo.requestVideoFrameCallback(onFrame);
+        else requestAnimationFrame(onFrame);
+      };
+
+      scheduleNext();
+    }
+
+    function stopReceiverPoseLoop() {
+      poseLoopRunning = false;
+      poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+    }
+
+    function applyPoseMode() {
+      setOverlayVisible(poseEnabled);
+      if (!poseEnabled) { stopReceiverPoseLoop(); return; }
+      if (poseWhere === 'receiver') startReceiverPoseLoop();
+      else stopReceiverPoseLoop(); // sender mode: draw only what we receive
+    }
+
+    /* ---------- WebSocket / WebRTC ---------- */
+    async function connectWS() {
+      return new Promise((resolve, reject) => {
+        const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
+        showStatus('Connecting to signaling…');
+        const sock = new WebSocket(url);
+        ws = sock;
+
+        let opened = false;
+        const openTimeout = setTimeout(() => {
+          if (!opened) { try { sock.close(); } catch{}; reject(new Error('WS timeout')); }
+        }, 15000);
+
+        sock.onopen = () => {
+          opened = true; clearTimeout(openTimeout);
+          showStatus('Signaling: connected');
+          wsRetryMs = WS_RECONNECT_MIN_MS;
+          send({ type: 'join', room });
+
+          if (wsKeepalive) clearInterval(wsKeepalive);
+          wsKeepalive = setInterval(() => {
+            if (ws?.readyState === WebSocket.OPEN) send({ type:'keepalive', ts: Date.now() });
+          }, WS_KEEPALIVE_MS);
+
+          resolve();
+        };
+        sock.onmessage = onSignal;
+        sock.onerror = (e) => { console.warn('[WS error]', e); };
+        sock.onclose  = () => {
+          showStatus('Signaling: closed');
+          if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
+          scheduleWSReconnect();
+        };
+      });
+    }
+
+    function scheduleWSReconnect() {
+      const delay = Math.min(wsRetryMs, WS_RECONNECT_MAX_MS);
+      console.log('[WS] reconnect in', delay, 'ms');
+      setTimeout(() => {
+        wsRetryMs = Math.min(wsRetryMs * 2, WS_RECONNECT_MAX_MS);
+        startNegotiation();
+      }, delay);
+    }
+
+    const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
+
+    function createPC() {
+      if (pc) { try { pc.close(); } catch{}; pc = null; }
+      remoteDescriptionSet = false;
+      lastAnswerSdp = null;
+      candidateQueue.length = 0;
+
+      pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+
+      pc.addTransceiver('video', { direction: 'recvonly' });
+      pc.addTransceiver('audio', { direction: 'recvonly' });
+
+      // Pose DC (receiver initiates; bidirectional)
+      const ch = pc.createDataChannel('pose');
+      ch.onopen = () => { console.log('[DC][receiver] pose DC open'); };
+      ch.onclose = () => { console.log('[DC][receiver] pose DC close'); };
+      ch.onerror = (e) => { console.warn('[DC][receiver] pose DC error', e); };
+      ch.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'pose-mode') {
+            poseEnabled = !!msg.enabled;
+            poseWhere   = msg.where || 'sender';
+            console.log('[POSE][receiver] mode:', { poseEnabled, poseWhere });
+            applyPoseMode();
+          } else if (msg.type === 'pose') {
+            if (poseEnabled && poseWhere === 'sender') drawPoseLandmarks(msg.landmarks);
+          }
+        } catch {}
+      };
+      poseDC = ch;
+
+      pc.onicecandidate = (ev) => { if (ev.candidate) send({ type:'candidate', candidate: ev.candidate }); };
+      pc.ontrack = (ev) => {
+        if (remoteVideo.srcObject !== ev.streams[0]) {
+          remoteVideo.srcObject = ev.streams[0];
+          tryStartMuted();
+        }
+        console.log('[TRACK][receiver] ontrack:', ev.track.kind);
+        beginViewportSettle();
+      };
+
+      // Less jumpy on ICE disconnected; immediate on failed
+      pc.oniceconnectionstatechange = () => {
+        const state = pc.iceConnectionState;
+        console.log('[ICE]', state);
+
+        if (state === 'connected' || state === 'completed') {
+          showStatus('Connected');
+          iceDisconnectedSince = null;
+        } else if (state === 'failed') {
+          console.log('[ICE] failed - restarting negotiation');
+          startNegotiation(true);
+        } else if (state === 'disconnected') {
+          if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
+          setTimeout(() => {
+            if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= 15000) {
+              console.log('[ICE] disconnected >15s - restarting negotiation');
+              startNegotiation(true);
+            }
+          }, 15100);
+          showStatus('ICE: disconnected');
+        } else {
+          showStatus('ICE: ' + state);
+        }
+      };
+    }
+
+    async function sendCurrentOffer() {
+      if (pc?.localDescription?.type === 'offer') {
+        console.log('[WS OUT] offer (send/resend)');
+        send(pc.localDescription);
+      }
+    }
+
+    function startOfferResendLoop() {
+      stopOfferResendLoop();
+      offerResendTimer = setInterval(() => {
+        if (!remoteDescriptionSet) sendCurrentOffer();
+        else stopOfferResendLoop();
+      }, 2000);
+    }
+    function stopOfferResendLoop() {
+      if (offerResendTimer) clearInterval(offerResendTimer);
+      offerResendTimer = null;
+    }
+
+    async function startNegotiation(forceNewPc = false) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        try { await connectWS(); } catch(e) { scheduleWSReconnect(); return; }
+      }
+      if (!pc || forceNewPc) createPC();
+
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await sendCurrentOffer();
+        startOfferResendLoop();
+        showStatus('Offer sent, waiting for answer…');
+      } catch (e) {
+        console.error('negotiation error', e);
+        showStatus('Negotiation error');
+      }
+    }
+
+    async function onSignal(evt) {
+      let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+      console.log('[WS IN]', msg.type);
+
+      if (msg.type === 'answer') {
+        if (pc.signalingState !== 'have-local-offer') {
+          console.log('[SKIP] answer in state', pc.signalingState);
+          if (pc.signalingState === 'stable') stopOfferResendLoop(); // stop storm
+          return;
+        }
+        if (lastAnswerSdp === msg.sdp) { console.log('[DUP] identical answer ignored'); return; }
+        lastAnswerSdp = msg.sdp;
+
+        showStatus('Got answer, applying…');
+        await pc.setRemoteDescription(new RTCSessionDescription(msg));
+        remoteDescriptionSet = true;
+        stopOfferResendLoop();
+
+        for (const c of candidateQueue) {
+          try { await pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
+        }
+        candidateQueue.length = 0;
+
+      } else if (msg.type === 'candidate' && msg.candidate) {
+        const cand = new RTCIceCandidate(msg.candidate);
+        if (remoteDescriptionSet) {
+          try { await pc.addIceCandidate(cand); } catch (e) { console.warn('ICE add failed', e); }
+        } else {
+          candidateQueue.push(cand);
+        }
+
+      } else if (msg.type === 'peer-joined' || msg.type === 'need-offer') {
+        await sendCurrentOffer();
+      } else if (msg.type === 'bye') {
+        console.log('[INFO] sender bye -> pause offers until peer rejoins');
+        remoteDescriptionSet = false;
+        stopOfferResendLoop();
+      }
+    }
+
+    window.addEventListener('beforeunload', () => {
+      try { stopOfferResendLoop(); } catch {}
+      try { ws && ws.close(); } catch {}
+      try { pc && pc.close(); } catch {}
+      if (wsKeepalive) clearInterval(wsKeepalive);
+      if (hideStatusTimer) clearTimeout(hideStatusTimer);
+      stopReceiverPoseLoop();
+    });
+
+    // ===== Sidebar logic (added) =====
+    const sbSidebar   = document.getElementById('sidebar');
+    const sbHamburger = document.getElementById('hamburger');
+    const sbNavItems  = Array.from(sbSidebar.querySelectorAll('.nav-item'));
+    const sbInviteModal = document.getElementById('inviteModal');
+    const sbInviteQR    = document.getElementById('inviteQR');
+    const sbInviteUrlEl = document.getElementById('inviteUrl');
+    const sbInviteClose = document.getElementById('inviteClose');
+    const sbInviteCopy  = document.getElementById('inviteCopy');
+    const sbInviteShare = document.getElementById('inviteShare');
+    const sbToast       = document.getElementById('toast');
+
+    const sbIsTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+
+    const SIDEBAR_AUTOHIDE_MS = 10000;
+    let sbSidebarTimer = null;
+
+    function sbHideSidebar() {
+      sbSidebar.classList.remove('visible');
+      sbHamburger.classList.remove('hidden');
+      sbHamburger.setAttribute('aria-expanded', 'false');
+      clearTimeout(sbSidebarTimer); sbSidebarTimer = null;
+      sbResetHamburgerFade();
+    }
+    function sbShowSidebar() {
+      sbSidebar.classList.add('visible');
+      sbHamburger.classList.add('hidden');     // hide while open
+      sbHamburger.setAttribute('aria-expanded', 'true');
+      clearTimeout(sbSidebarTimer);
+      sbSidebarTimer = setTimeout(sbHideSidebar, SIDEBAR_AUTOHIDE_MS);
+    }
+    function sbToggleSidebar() {
+      if (sbSidebar.classList.contains('visible')) sbHideSidebar();
+      else sbShowSidebar();
+    }
+
+    if (sbIsTouch) { sbHideSidebar(); } else { sbShowSidebar(); }
+
+    sbHamburger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sbToggleSidebar();
+      sbResetHamburgerFade();
+    });
+
+    ['mousemove','pointermove','wheel','touchstart','click','keydown'].forEach(ev =>
+      sbSidebar.addEventListener(ev, () => {
+        clearTimeout(sbSidebarTimer);
+        sbSidebarTimer = setTimeout(sbHideSidebar, SIDEBAR_AUTOHIDE_MS);
+      }, { passive: true })
+    );
+
+    function sbClickOutsideHandler(e) {
+      if (!sbSidebar.classList.contains('visible')) return;
+      const insideSidebar = e.target.closest('#sidebar');
+      const insideHamb    = e.target.closest('#hamburger');
+      const insideModal   = e.target.closest('#inviteModal');
+      if (!insideSidebar && !insideHamb && !insideModal) sbHideSidebar();
+    }
+    document.addEventListener('pointerdown', sbClickOutsideHandler, { passive: true });
+    document.addEventListener('click', sbClickOutsideHandler, { passive: true });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (sbInviteModal.classList.contains('visible')) sbCloseInvite();
+        else sbHideSidebar();
+      }
+    });
+
+    const HAMBURGER_FADE_MS = 4000;
+    let sbHamburgerFadeTimer = null;
+    function sbShowHamburgerBtn() {
+      sbHamburger.classList.remove('faded');
+      sbHamburger.setAttribute('aria-hidden', 'false');
+    }
+    function sbHideHamburgerBtn() {
+      sbHamburger.classList.add('faded');
+      sbHamburger.setAttribute('aria-hidden', 'true');
+    }
+    function sbResetHamburgerFade() {
+      if (sbHamburger.classList.contains('hidden')) return;
+      sbShowHamburgerBtn();
+      clearTimeout(sbHamburgerFadeTimer);
+      if (sbIsTouch) return;
+      if (document.fullscreenElement) {
+        sbHamburgerFadeTimer = setTimeout(() => {
+          if (!sbSidebar.classList.contains('visible') && !sbHamburger.classList.contains('hidden')) {
+            sbHideHamburgerBtn();
+          }
+        }, HAMBURGER_FADE_MS);
+      }
+    }
+    ['mousemove','pointermove','touchstart','keydown','click'].forEach(ev =>
+      window.addEventListener(ev, () => sbResetHamburgerFade(), { passive: true })
+    );
+
+    function sbSetActive(name) {
+      sbNavItems.forEach(btn => btn.classList.toggle('active', btn.dataset.item === name));
+    }
+
+    sbSidebar.addEventListener('click', (e) => {
+      const btn = e.target.closest('.nav-item');
+      if (!btn) return;
+      const item = btn.dataset.item;
+      sbSetActive(item);
+
+      if (item === 'video') {
+        window.location.href = "https://hungryfaceai.github.io/hungryface/webrtc/receiver/video/index.html";
+        return;
+      } else if (item === 'audio') {
+        window.location.href = "https://hungryfaceai.github.io/hungryface/webrtc/receiver/audio/index.html";
+        return;
+      } else if (item === 'pose') {
+        window.location.href = "https://hungryfaceai.github.io/hungryface/webrtc/receiver/pose/index.html";
+        return;
+      } else if (item === 'face') {
+        window.location.href = "https://hungryfaceai.github.io/hungryface/webrtc/receiver/face/index.html";
+        return;
+      } else if (item === 'invite') {
+        sbOpenInvite();
+      } else if (item === 'contact') {
+        const subj = encodeURIComponent('Baby Monitor Support');
+        const body = encodeURIComponent(`Hello,\n\nRoom: ${room}\n\n(Describe your issue here)`);
+        window.open(`mailto:?subject=${subj}&body=${body}`, '_blank');
+      } else {
+        // settings/help placeholders
+        console.log('[SIDEBAR] Selected:', item);
+      }
+
+      clearTimeout(sbSidebarTimer);
+      sbSidebarTimer = setTimeout(sbHideSidebar, SIDEBAR_AUTOHIDE_MS);
+    });
+
+    // Invite modal
+    function sbOpenInvite() {
+      const base = new URL('https://hungryfaceai.github.io/hungryface/webrtc/receiver');
+      if (room) base.searchParams.set('room', room);
+      const shareUrl = base.toString();
+
+      const qrEndpoint = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&format=svg&data=';
+      sbInviteQR.src = qrEndpoint + encodeURIComponent(shareUrl);
+      sbInviteQR.alt = 'QR code for ' + shareUrl;
+
+      sbInviteUrlEl.value = shareUrl;
+      sbInviteUrlEl.title = shareUrl;
+
+      requestAnimationFrame(() => {
+        sbInviteUrlEl.focus({ preventScroll: true });
+        const len = sbInviteUrlEl.value.length;
+        try { sbInviteUrlEl.setSelectionRange(len, len); } catch {}
+        sbInviteUrlEl.scrollLeft = sbInviteUrlEl.scrollWidth;
+      });
+
+      sbInviteModal.classList.add('visible');
+    }
+    function sbCloseInvite() {
+      sbInviteModal.classList.remove('visible');
+    }
+
+    sbInviteModal.addEventListener('click', (e) => {
+      if (e.target === sbInviteModal) sbCloseInvite();
+    });
+    sbInviteClose.addEventListener('click', sbCloseInvite);
+
+    sbInviteCopy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(sbInviteUrlEl.value);
+        sbShowToast('Link copied to clipboard');
+      } catch {
+        sbInviteUrlEl.focus();
+        sbInviteUrlEl.select?.();
+        sbShowToast('Copy failed — select text to copy');
+      }
+    });
+
+    sbInviteShare.addEventListener('click', async () => {
+      const url = sbInviteUrlEl.value;
+      if (navigator.share) {
+        try { await navigator.share({ title: 'Join my Baby Monitor', url }); } catch {}
+      } else {
+        try {
+          await navigator.clipboard.writeText(url);
+          sbShowToast('Link copied (no native share)');
+        } catch {
+          sbShowToast('Sharing not supported');
+        }
+      }
+    });
+
+    let sbToastTimer;
+    function sbShowToast(msg, ms = 1600) {
+      sbToast.textContent = msg;
+      sbToast.classList.add('visible');
+      clearTimeout(sbToastTimer);
+      sbToastTimer = setTimeout(() => sbToast.classList.remove('visible'), ms);
+    }
+
+    window.addEventListener('beforeunload', () => {
+      clearTimeout(sbSidebarTimer);
+      clearTimeout(sbHamburgerFadeTimer);
+    });
+
+    // Go!
+    startNegotiation();
+
+    // tiny typo guard used in logs
+    function beginViewportSetle(){ beginViewportSettle(); }
+  </script>
+</body>
+</html>
