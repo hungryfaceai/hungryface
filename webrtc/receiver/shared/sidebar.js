@@ -146,6 +146,7 @@
       const urlInput = document.getElementById('invite-url');
       const btnCopy  = document.getElementById('invite-copy');
       const btnOpen  = document.getElementById('invite-open');
+      const btnShare = document.getElementById('invite-share');
       const btnClose = modal.querySelector('.invite-close');
 
       // Allow per-page override via:
@@ -218,6 +219,38 @@
           }
         });
       }
+      
+      if (btnShare) {
+      const canWebShare = typeof navigator !== 'undefined' && 'share' in navigator;
+      // Hide the Share button if unsupported (most desktops)
+      if (!canWebShare) btnShare.style.display = 'none';
+    
+      btnShare.addEventListener('click', async () => {
+        const url = (urlInput && urlInput.value) || INVITE_URL;
+        try {
+          // Extra guard for some iOS versions
+          if (navigator.canShare && !navigator.canShare({ url })) {
+            throw new Error('URL sharing not supported');
+          }
+          await navigator.share({
+            title: 'HungryFace',
+            text: 'Join me on HungryFace:',
+            url
+          });
+        } catch (err) {
+          // Ignore user-cancel; for other errors, fall back to copying the link
+          if (err && err.name === 'AbortError') return;
+          try {
+            await navigator.clipboard.writeText(url);
+            toast('Link copied');
+          } catch {
+            urlInput?.select?.();
+            toast('Share failed — link selected to copy');
+          }
+        }
+      });
+    }
+          
     })();
   }
 })();
