@@ -1,1 +1,130 @@
-.
+:root { --ui-pad: 12px; }
+
+/* ---------- Left Sidebar (auto-hide) ---------- */
+#sidebar {
+  position: fixed; top: 0; bottom: 0; left: 0;
+
+  /* Fit to content width, but never exceed 80vw; ensure a small minimum */
+  width: max-content;
+  width: fit-content;
+  max-width: 80vw;
+  min-width: 150px;
+
+  background: rgba(0,0,0,0.92);
+  border-right: 1px solid rgba(255,255,255,0.1);
+  backdrop-filter: blur(2px);
+  box-shadow: 6px 0 24px rgba(0,0,0,0.5);
+  transform: translateX(-100%);
+  transition: transform .25s ease;
+  z-index: 20;
+  display: flex; flex-direction: column;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: auto;
+}
+#sidebar.visible { transform: translateX(0); }
+
+#sidebar .menu {
+  padding: 8px;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+
+  /* Hide scrollbar across browsers (still scrolls) */
+  scrollbar-width: none;              /* Firefox */
+  -ms-overflow-style: none;           /* IE/Edge legacy */
+}
+#sidebar .menu::-webkit-scrollbar {   /* WebKit */
+  width: 0; height: 0;
+}
+
+#sidebar .nav-item {
+  all: unset;
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 12px 14px; margin: 2px 0;
+  border-radius: 10px; cursor: pointer; user-select: none;
+  color: #eee; font-weight: 600; font-size: 15px;
+  white-space: nowrap; /* keep one line so width hugs the text */
+}
+#sidebar .nav-item:hover { background: rgba(255,255,255,0.08); }
+#sidebar .nav-item.active { background: rgba(255,255,255,0.14); }
+
+.nav-icon {
+  width: 18px; height: 18px; flex: 0 0 18px;
+  stroke: currentColor; fill: none; opacity: 0.9;
+}
+
+/* ---------- Tiny Hamburger Button (hides when drawer open) ---------- */
+#hamburger {
+  position: fixed;
+  top: 12px; left: 12px;
+  top: calc(12px + env(safe-area-inset-top));
+  left: calc(12px + env(safe-area-inset-left));
+
+  width: 38px; height: 38px; padding: 8px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 10px; border: 1px solid rgba(255,255,255,0.25);
+  background: rgba(0,0,0,0.7);
+  color: #fff;
+  cursor: pointer; z-index: 30; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-appearance: none; appearance: none;
+  transition: opacity .25s ease, background .2s ease;
+  box-shadow: 0 2px 10px rgba(0,0,0,.35);
+}
+#hamburger svg { width: 100%; height: 100%; display: block; }
+#hamburger svg path { stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; fill: none; }
+#hamburger[aria-expanded="true"] { background: rgba(255,255,255,0.1); }
+#hamburger.faded { opacity: 0; pointer-events: none; }
+#hamburger.hidden { display: none; }
+
+/* ---------- Invite modal ---------- */
+.invite-modal {
+  position: fixed; inset: 0; display: none;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.6); z-index: 9998;
+}
+.invite-modal.visible { display: flex; }
+.invite-sheet {
+  width: min(92vw, 420px);
+  background: #111; color: #fff; border: 1px solid #262626;
+  border-radius: 14px; padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+  position: relative;
+  box-sizing: border-box;
+}
+.invite-close {
+  position: absolute; top: 8px; right: 10px;
+  background: transparent; border: 0; color: #aaa;
+  font-size: 28px; line-height: 1; cursor: pointer;
+}
+.invite-qr-wrap { display: grid; place-items: center; margin: 10px 0 14px; }
+.invite-qr-wrap img { width: 220px; height: 220px; }
+
+/* Centered, contained link box */
+.invite-url {
+  display: grid; gap: 6px; margin: 0 auto 12px;
+  width: 100%; max-width: 360px;
+}
+.invite-url-label { font-size: 12px; color: #bbb; text-align: center; }
+#invite-url {
+  width: 100%; padding: 10px 12px; border-radius: 10px;
+  background: #0a0a0a; color: #ddd; border: 1px solid #232323;
+  box-sizing: border-box; min-width: 0; text-align: center;
+}
+
+.invite-actions { display: flex; gap: 10px; justify-content: flex-end; }
+#invite-copy, #invite-open {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 10px 14px; border-radius: 10px; text-decoration: none;
+  background: #1f1f1f; color: #fff; border: 1px solid #2b2b2b; cursor: pointer;
+}
+#invite-copy:hover, #invite-open:hover { filter: brightness(1.1); }
+
+.invite-toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+  background: #1a1a1a; color: #fff; border: 1px solid #2a2a2a;
+  padding: 8px 12px; border-radius: 10px; opacity: 0; transition: opacity .2s ease;
+  z-index: 10000; pointer-events: none;
+}
+.invite-toast.show { opacity: 1; }
