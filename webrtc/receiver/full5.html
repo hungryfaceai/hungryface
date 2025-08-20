@@ -91,6 +91,56 @@
     #hamburger[aria-expanded="true"] { background: rgba(255,255,255,0.1); }
     #hamburger.faded { opacity: 0; pointer-events: none; }
     #hamburger.hidden { display: none; }
+
+    /* ---------- Invite QR modal ---------- */
+    #qrModal {
+      position: fixed; inset: 0;
+      display: none; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(2px);
+      z-index: 40;
+    }
+    #qrModal.visible { display: flex; }
+    .qr-card {
+      position: relative;
+      width: min(92vw, 420px);
+      background: #0b0b0b;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 16px;
+      padding: 16px;
+      text-align: center;
+      color: #eee;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    .qr-title { margin: 0 0 8px 0; font-size: 18px; font-weight: 700; }
+    .qr-sub { margin: 0 0 12px 0; font-size: 14px; opacity: 0.8; }
+    #qrContainer {
+      display: inline-block; background: #fff; padding: 10px; border-radius: 12px;
+      margin: 8px auto 12px auto;
+    }
+    .qr-actions {
+      display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+    }
+    .qr-actions button, .qr-actions a {
+      all: unset;
+      padding: 10px 12px; border-radius: 10px; cursor: pointer;
+      background: #1e1e1e; color: #fff; border: 1px solid rgba(255,255,255,0.18);
+      font-weight: 600; font-size: 14px;
+    }
+    .qr-actions a { text-decoration: none; }
+    .qr-close {
+      position: absolute; top: 8px; right: 8px;
+      width: 34px; height: 34px; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(255,255,255,0.06);
+      display: inline-flex; align-items: center; justify-content: center;
+      cursor: pointer;
+    }
+    .qr-close svg { width: 18px; height: 18px; stroke: #fff; fill: none; stroke-width: 2; }
+    .qr-foot {
+      margin-top: 10px; font-size: 12px; opacity: 0.7;
+      word-break: break-all;
+    }
   </style>
 </head>
 <body>
@@ -160,27 +210,34 @@
   <!-- Sidebar -->
   <nav id="sidebar" aria-label="Main">
     <div class="menu">
-      <button class="nav-item" data-item="video" aria-label="Video">
+      <!-- Home icon first; anchor navigates to Home. Icons referenced from same folder -->
+      <a class="nav-item" href="/hungryface/home" data-item="home" aria-label="Home">
+        <svg class="nav-icon" aria-hidden="true" focusable="false">
+          <use href="icons.svg#icon-cradle-ai" xlink:href="icons.svg#icon-cradle-ai"></use>
+        </svg>
+        <span class="nav-label">Home</span>
+      </a>
+
+      <a class="nav-item" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/video/" data-item="video" aria-label="Video">
         <svg class="nav-icon"><use href="#i-video"/></svg><span class="nav-label">Video</span>
-      </button>
-      <button class="nav-item" data-item="camera" aria-label="Camera">
-        <svg class="nav-icon"><use href="#i-camera"/></svg><span class="nav-label">Camera</span>
-      </button>
-      <button class="nav-item" data-item="audio" aria-label="Audio">
+      </a>
+      <!-- Removed: Camera -->
+      <a class="nav-item" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/audio/" data-item="audio" aria-label="Audio">
         <svg class="nav-icon"><use href="#i-audio"/></svg><span class="nav-label">Audio</span>
-      </button>
-      <button class="nav-item" data-item="pose" aria-label="Pose">
+      </a>
+      <a class="nav-item" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/pose/" data-item="pose" aria-label="Pose">
         <svg class="nav-icon"><use href="#i-pose"/></svg><span class="nav-label">Pose</span>
-      </button>
-      <button class="nav-item" data-item="face" aria-label="Face">
+      </a>
+      <a class="nav-item" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/face/" data-item="face" aria-label="Face">
         <svg class="nav-icon"><use href="#i-face"/></svg><span class="nav-label">Face</span>
-      </button>
-      <button class="nav-item" data-item="settings" aria-label="Settings">
+      </a>
+      <a class="nav-item" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/settings/" data-item="settings" aria-label="Settings">
         <svg class="nav-icon"><use href="#i-settings"/></svg><span class="nav-label">Settings</span>
-      </button>
-      <button class="nav-item" data-item="help" aria-label="Help">
+      </a>
+      <a class="nav-item" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/help/" data-item="help" aria-label="Help">
         <svg class="nav-icon"><use href="#i-help"/></svg><span class="nav-label">Help</span>
-      </button>
+      </a>
+      <!-- Invite opens QR modal -->
       <button class="nav-item" data-item="invite" aria-label="Invite a friend">
         <svg class="nav-icon"><use href="#i-invite"/></svg><span class="nav-label">Invite a friend</span>
       </button>
@@ -189,6 +246,31 @@
       </button>
     </div>
   </nav>
+
+  <!-- Invite QR Modal -->
+  <div id="qrModal" role="dialog" aria-modal="true" aria-labelledby="qrTitle">
+    <div class="qr-card">
+      <button class="qr-close" id="qrClose" aria-label="Close invite dialog">
+        <svg viewBox="0 0 24 24"><path d="M6 6L18 18M18 6L6 18"/></svg>
+      </button>
+      <h3 class="qr-title" id="qrTitle">Invite a friend</h3>
+      <p class="qr-sub">Scan the QR with your phone’s camera to open the link.</p>
+      <div id="qrContainer" aria-label="QR code"></div>
+      <div class="qr-actions">
+        <button id="copyInvite">Copy link</button>
+        <a id="openInvite" target="_blank" rel="noopener">Open</a>
+        <button id="shareInvite" style="display:none;">Share…</button>
+      </div>
+      <div class="qr-foot" id="inviteUrlText"></div>
+    </div>
+  </div>
+
+  <script>
+    // ---------------- QRCode.js (MIT) - embedded minimal generator ----------------
+    /*! qrcode.js v1.0.0 (MIT) | https://github.com/davidshimjs/qrcodejs */
+    /* Minified for brevity */
+    !function(o){function p(a){this.mode=s.MODE_8BIT_BYTE,this.data=a}function q(a,c){this.typeNumber=a,this.errorCorrectLevel=c,this.modules=null,this.moduleCount=0,this.dataCache=null,this.dataList=[]}function r(a,c){if(void 0==a.length)throw new Error(a.length+"/"+c);for(var b=0;b<a.length&&0==a[b];)b++;this.num=a.length-b;for(var d=Array(this.num),e=0;e<this.num;e++)d[e]=a[e+b];this.den=c}function t(a,c){this.totalCount=a,this.dataCount=c}var s={};p.prototype={getLength:function(){return this.data.length},write:function(a){for(var c=0;c<this.data.length;c++){var b=this.data.charCodeAt(c);a.put(b,8)}}};q.prototype={addData:function(a){this.dataList.push(new p(a)),this.dataCache=null},isDark:function(a,c){if(0>a||this.moduleCount<=a||0>c||this.moduleCount<=c)throw new Error(a+","+c);return this.modules[a][c]},getModuleCount:function(){return this.moduleCount},make:function(){if(this.typeNumber<1){for(var a=1;a<40;a++){for(var c=t.getRSBlocks(a,this.errorCorrectLevel),b=new u,d=0,e=0;e<c.length;e++)d+=c[e].dataCount;for(e=0;e<this.dataList.length;e++)b.put(4,4),b.put(this.dataList[e].getLength(),8),this.dataList[e].write(b);for(e=0;e<c.length;e++)if(b.getLengthInBits()<=8*d){this.typeNumber=a;break}if(this.typeNumber!=a)continue;break}}this.makeImpl(!1,this.getBestMaskPattern())},makeImpl:function(a,c){this.moduleCount=4*this.typeNumber+17,this.modules=new Array(this.moduleCount);for(var b=0;b<this.moduleCount;b++){this.modules[b]=new Array(this.moduleCount);for(var d=0;d<this.moduleCount;d++)this.modules[b][d]=null}this.setupPositionProbePattern(0,0),this.setupPositionProbePattern(this.moduleCount-7,0),this.setupPositionProbePattern(0,this.moduleCount-7),this.setupPositionAdjustPattern(),this.setupTimingPattern(),this.setupTypeInfo(a,c),this.typeNumber>=7&&this.setupTypeNumber(a);var e=t.getRSBlocks(this.typeNumber,this.errorCorrectLevel),f=new u;for(b=0;b<this.dataList.length;b++)f.put(4,4),f.put(this.dataList[b].getLength(),8),this.dataList[b].write(f);var g=0;for(b=0;b<e.length;b++)g+=e[b].dataCount;f.getLengthInBits()>8*g&&console.error("qrcode: data overflow");for(f=f.makeBytes(),b=0;b<e.length;b++){var h=e[b].dataCount,k=e[b].totalCount-h;for(a=Array(h),d=0;d<a.length;d++)a[d]=255&f[d];f=f.slice(h);var l=v.getErrorCorrectPolynomial(k),m=new r(a,l.getAt(0));for(d=1;d<k;d++)m=m.multiplyMod(new r([0],l.getAt(d)));var n=m.getResult(k);for(d=0;d<k;d++)a.push(n[d]);this.dataCache?this.dataCache=this.dataCache.concat(a):this.dataCache=a}this.mapData(this.dataCache,c)},setupPositionProbePattern:function(a,c){for(var b=-1;7>=b;b++)if(!(-1>=a+b||this.moduleCount<=a+b))for(var d=-1;7>=d;d++)-1>=c+d||this.moduleCount<=c+d||(this.modules[a+b][c+d]=0<=b&&b<=6&&(0==d||6==d)||0<=d&&d<=6&&(0==b||6==b)||2<=b&&b<=4&&2<=d&&d<=4)},getBestMaskPattern:function(){for(var a=0,c=0,b=0;8>b;b++){this.makeImpl(!0,b);var d=w.getLostPoint(this);(0==b||a>d)&&(a=d,c=b)}return c},createMovieClip:function(a,c,b){a=a.createEmptyMovieClip(c,b),this.make(),for(c=0;c<this.modules.length;c++)for(var d=1*c,b=0;b<this.modules[c].length;b++){var e=1*b;this.modules[c][b]&&(a.beginFill(0,100),a.moveTo(e,d),a.lineTo(e+1,d),a.lineTo(e+1,d+1),a.lineTo(e,d+1),a.endFill())}return a},setupTimingPattern:function(){for(var a=8;a<this.moduleCount-8;a++)null==this.modules[a][6]&&(this.modules[a][6]=0==a%2),null==this.modules[6][a]&&(this.modules[6][a]=0==a%2)},setupPositionAdjustPattern:function(){for(var a=v.getPatternPosition(this.typeNumber),c=0;c<a.length;c++)for(var b=0;b<a.length;b++){var d=a[c],e=a[b];if(null==this.modules[d][e])for(var f=-2;f<=2;f++)for(var g=-2;g<=2;g++)this.modules[d+f][e+g]=-2==f||2==f||-2==g||2==g||0==f&&0==g}},setupTypeNumber:function(a){for(var c=v.getBCHTypeNumber(this.typeNumber),b=0;b<18;b++){var d=!a&&1==(c>>b&1);this.modules[Math.floor(b/3)][b%3+this.moduleCount-8-3]=d}for(b=0;b<18;b++)d=!a&&1==(c>>b&1),this.modules[b%3+this.moduleCount-8-3][Math.floor(b/3)]=d},setupTypeInfo:function(a,c){for(var b=v.getBCHTypeInfo(c<<3|0),d=0;d<15;d++){var e=!a&&1==(b>>d&1);6>d?this.modules[d][8]=e:8>d?this.modules[d+1][8]=e:this.modules[this.moduleCount-15+d][8]=e}for(d=0;d<15;d++)e=!a&&1==(b>>d&1),8>d?this.modules[8][this.moduleCount-d-1]=e:9>d?this.modules[8][15-d-1]=e:this.modules[8][15-d-1]=e;this.modules[this.moduleCount-8][8]=!a},mapData:function(a,c){for(var b=-1,d=this.moduleCount-1,e=7,f=0,g=this.moduleCount-1;0<g;g-=2){6==g&&g--;for(;;){for(var h=0;2>h;h++)if(null==this.modules[d][g-h]){var k=!1;f<a.length&&(k=1==(a[f]>>>e&1));var l=v.getMask(c,d,g-h);this.modules[d][g-h]=l?!k:k;e--; -1==e&&(f++,e=7)}d+=b;if(0>d||this.moduleCount<=d){d-=b;b=-b;break}}}},u=function(){this.buffer=[],this.length=0};u.prototype={getBuffer:function(){return this.buffer},getLengthInBits:function(){return this.length},put:function(a,c){for(var b=0;b<c;b++)this.putBit(a>>c-b-1&1)},putBit:function(a){var c=Math.floor(this.length/8);this.buffer.length<=c&&this.buffer.push(0),a&&(this.buffer[c]|=128>>>this.length%8),this.length++},makeBytes:function(){return this.buffer}};r.prototype={getAt:function(a){return this.den[a]},getResult:function(a){for(var c=new Array(a),b=0;b<a;b++)c[b]=this.mod(0,a-1-b);return c},multiplyMod:function(a){for(var c=new Array(this.den.length+a.den.length-1),b=0;b<c.length;b++)c[b]=0;for(b=0;b<this.den.length;b++)for(var d=0;d<a.den.length;d++)c[b+d]^=v.gexp(v.glog(this.den[b])+v.glog(a.den[d]));return new r(c,this.den)},mod:function(a,c){for(var b=this.den.slice(),d=b.length-(this.den.length-this.num),e=0;e<a;e++)b.push(0);for(;b.length>c+1;){for(e=0;0==b[e];)e++;if(e>=b.length)break;var f=b[e];for(var g=0;g<this.den.length;g++)b[e+g]^=v.gexp(v.glog(f)+v.glog(this.den[g]))}return b}},v={glog:function(a){if(1>a)throw new Error("glog("+a+")");return v.LOG_TABLE[a]},gexp:function(a){for(;0>a;)a+=255;for(;256<=a;)a-=255;return v.EXP_TABLE[a]},EXP_TABLE:new Array(256),LOG_TABLE:new Array(256),getBCHTypeInfo:function(a){for(var c=a<<10;0<=v.getBCHDigit(c)-v.getBCHDigit(1335);)c^=1335<<v.getBCHDigit(c)-v.getBCHDigit(1335);return a<<10|c},getBCHTypeNumber:function(a){for(var c=a<<12;0<=v.getBCHDigit(c)-v.getBCHDigit(7973);)c^=7973<<v.getBCHDigit(c)-v.getBCHDigit(7973);return a<<12|c},getBCHDigit:function(a){for(var c=0;0!=a;)c++,a>>>=1;return c},getPatternPosition:function(a){return[[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50],[6,30,54],[6,32,58],[6,34,62],[6,26,46,66],[6,26,48,70],[6,26,50,74],[6,30,54,78],[6,30,56,82],[6,30,58,86],[6,34,62,90],[6,28,50,72,94]][a-1]||[]},getRSBlocks:function(a,c){var b=t.getRSBlocks(a,c);if(void 0==b)throw new Error("bad rs block @ typeNumber:"+a+"/errorCorrectLevel:"+c);return b},polyMultiply:function(a,c){for(var b=Array(a.length+c.length-1),d=0;d<b.length;d++)b[d]=0;for(d=0;d<a.length;d++)for(var e=0;e<c.length;e++)b[d+e]^=v.gexp(v.glog(a[d])+v.glog(c[e]));return b},polyMod:function(a,c){for(var b=a.slice(),d=b.length-(c.length-1),e=0;e<d;e++){for(var f=0;0==b[f];)f++;if(f>=b.length)break;for(var g=v.gexp(v.glog(b[f])),h=0;h<c.length;h++)b[f+h]^=v.gexp((v.glog(c[h])+g)%255)}return b}};for(var x=0;256>x;x++)v.EXP_TABLE[x]=x<8?1<<x:v.EXP_TABLE[x-1]^v.EXP_TABLE[x-4]^v.EXP_TABLE[x-5]^v.EXP_TABLE[x-8],v.LOG_TABLE[v.EXP_TABLE[x]]=x;var w={getLostPoint:function(a){for(var c=a.getModuleCount(),b=0,d=0;d<c;d++)for(var e=0;e<c;e++){for(var f=0,g=a.isDark(d,e),h=-1;1>=h;h++)if(!(0>d+h||c<=d+h))for(var k=-1;1>=k;k++)0>e+k||c<=e+k||0==h&&0==k||g==a.isDark(d+h,e+k)&&f++;4<f&&(b+=3+f-5)}for(d=0;d<c-1;d++)for(e=0;e<c-1;e++){var l=0;a.isDark(d,e)&&l++;a.isDark(d+1,e)&&l++;a.isDark(d,e+1)&&l++;a.isDark(d+1,e+1)&&l++;0==l||4==l&&(b+=3)}for(d=0;d<c;d++)for(e=0;e<c-6;e++)a.isDark(d,e)&&!a.isDark(d,e+1)&&a.isDark(d,e+2)&&a.isDark(d,e+3)&&a.isDark(d,e+4)&&!a.isDark(d,e+5)&&a.isDark(d,e+6)&&(b+=40);for(e=0;e<c;e++)for(d=0;d<c-6;d++)a.isDark(d,e)&&!a.isDark(d+1,e)&&a.isDark(d+2,e)&&a.isDark(d+3,e)&&a.isDark(d+4,e)&&!a.isDark(d+5,e)&&a.isDark(d+6,e)&&(b+=40);for(d=0;d<c;d++)for(e=0;e<c;e++)a.isDark(d,e)&&b++;return b+10*Math.abs(50-100*b/(c*c))}};t.RS_BLOCK_TABLE=[[1,26,19],[1,26,16],[1,26,13],[1,26,9],[1,44,34],[1,44,28],[1,44,22],[1,44,16],[1,70,55],[1,70,44],[2,35,17],[2,35,13],[1,100,80],[2,50,32],[2,50,24],[4,25,9],[1,134,108],[2,67,43],[2,33,15,2,34,16],[2,33,11,2,34,12],[2,86,68],[4,43,27],[4,43,19],[4,43,15],[2,98,78],[4,49,31],[2,32,14,4,33,15],[4,39,13,1,40,14],[2,121,97],[2,60,38,2,61,39],[4,40,18,2,41,19],[4,40,14,2,41,15]];t.getRSBlocks=function(a,c){var b=[];if(1>a||40<a)throw new Error("typeNumber:"+a);for(var d=t.RS_BLOCK_TABLE[4*(a-1)+c],e=0;e<d.length/3;e++)for(var f=0,g=d[3*e+0],h=d[3*e+1],k=d[3*e+2];f<g;f++)b.push(new t(h,k));return b};var y={L:1,M:0,Q:3,H:2};window.QRCode=function(a,c){this._el="string"==typeof a?document.getElementById(a):a,this._htOption=c,this._oQRCode=null,this._oDrawing=null,this._htOption.width&&(this._htOption.height=this._htOption.width),this.makeCode(c.text)},QRCode.prototype.makeCode=function(a){this._oQRCode=new q(-1,y.M),this._oQRCode.addData(a),this._oQRCode.make(),this._el.innerHTML="";for(var c=this._oQRCode.getModuleCount(),b=Math.floor(Math.min(this._htOption.width||256,this._htOption.height||256)/c),d=b*c,e=document.createElement("canvas"),f=e.getContext("2d");e.width=e.height=d,f.clearRect(0,0,d,d),f.fillStyle="#000",f.fillRect(0,0,d,d),f.fillStyle="#fff",f.fillRect(0,0,d,d),f.fillStyle="#000",f.beginPath(),h=0;h<c;h++)for(var g=0;g<c;g++)this._oQRCode.isDark(h,g)&&f.fillRect(b*h,b*g,b,b);this._el.appendChild(e)},QRCode.CorrectLevel={L:1,M:0,Q:3,H:2};
+  </script>
 
   <script>
     // Sidebar + hamburger
@@ -307,7 +389,70 @@
       clearTimeout(sidebarTimer);
       clearTimeout(hamburgerFadeTimer);
     });
+
+    // ---------------- Invite QR logic ----------------
+    const INVITE_URL = 'https://hungryfaceai.github.io/hungryface/home/';
+
+    const qrModal = document.getElementById('qrModal');
+    const qrClose = document.getElementById('qrClose');
+    const qrContainer = document.getElementById('qrContainer');
+    const copyInvite = document.getElementById('copyInvite');
+    const openInvite = document.getElementById('openInvite');
+    const shareInvite = document.getElementById('shareInvite');
+    const inviteUrlText = document.getElementById('inviteUrlText');
+
+    // Fill static parts
+    openInvite.href = INVITE_URL;
+    inviteUrlText.textContent = INVITE_URL;
+
+    const inviteBtn = sidebar.querySelector('.nav-item[data-item="invite"]');
+    inviteBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      showInviteQR();
+    });
+
+    function showInviteQR() {
+      // Clear any previous QR
+      qrContainer.innerHTML = '';
+      // Generate QR (canvas)
+      new QRCode(qrContainer, { text: INVITE_URL, width: 240, height: 240 });
+      qrModal.classList.add('visible');
+
+      // Share API availability
+      if (navigator.share) {
+        shareInvite.style.display = '';
+      } else {
+        shareInvite.style.display = 'none';
+      }
+    }
+    function hideInviteQR() {
+      qrModal.classList.remove('visible');
+    }
+
+    qrClose.addEventListener('click', hideInviteQR);
+    qrModal.addEventListener('click', (e) => {
+      if (e.target === qrModal) hideInviteQR(); // click on backdrop
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && qrModal.classList.contains('visible')) hideInviteQR();
+    });
+
+    copyInvite.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(INVITE_URL);
+        copyInvite.textContent = 'Copied!';
+        setTimeout(() => (copyInvite.textContent = 'Copy link'), 1200);
+      } catch {
+        copyInvite.textContent = 'Copy failed';
+        setTimeout(() => (copyInvite.textContent = 'Copy link'), 1200);
+      }
+    });
+
+    shareInvite.addEventListener('click', async () => {
+      try {
+        await navigator.share({ title: 'Naptio', text: 'Join me on Naptio', url: INVITE_URL });
+      } catch { /* user cancelled */ }
+    });
   </script>
 </body>
 </html>
-
