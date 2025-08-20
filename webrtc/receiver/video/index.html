@@ -17,7 +17,7 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       overflow: hidden;
     }
-    /* Fullscreen wrapper so video+canvas scale together */
+    /* Fullscreen wrapper so video scales */
     #stage {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;   /* fallback */
@@ -29,10 +29,6 @@
       position: absolute; inset: 0;
       width: 100%; height: 100%;
       object-fit: contain; background: #000;
-    }
-    #stage > canvas {
-      position: absolute;
-      z-index: 2; pointer-events: none; background: transparent; display: none;
     }
 
     .btn {
@@ -97,7 +93,6 @@
 
   <div id="stage">
     <video id="remote" autoplay playsinline></video>
-    <canvas id="poseCanvas"></canvas>
   </div>
 
   <div id="overlay" class="overlay">
@@ -105,8 +100,6 @@
   </div>
 
   <script type="module">
-    import { DrawingUtils, PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
-
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
@@ -116,20 +109,9 @@
     const WS_RECONNECT_MAX_MS = 10000;
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
-    // Mediapipe assets (same version as import)
-    const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
-    const WASM_DIR = TASKS_URL + "/wasm";
-    const POSE_MODEL_URL =
-      "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
-
-    // Video readyState helpers
-    const HAVE_CURRENT_DATA = 2;
-
     /* ---------- DOM ---------- */
     const stage = document.getElementById('stage');
     const remoteVideo = document.getElementById('remote');
-    const poseCanvas = document.getElementById('poseCanvas');
-    const poseCtx = poseCanvas.getContext('2d', { alpha: true });
 
     const fsBtn = document.getElementById('fsBtn');
     const enableAudioBtn = document.getElementById('enableAudioBtn');
@@ -146,13 +128,6 @@
     let offerResendTimer = null;
     let hideStatusTimer = null;
     let iceDisconnectedSince = null;
-
-    // Pose state
-    let poseDC = null;
-    let poseEnabled = false;
-    let poseWhere = 'sender'; // 'sender' | 'receiver'
-    let poseTask = null;
-    let poseLoopRunning = false;
 
     /* ---------- Status overlay ---------- */
     function showStatus(msg) {
@@ -231,58 +206,8 @@
     // Handle rotation / track size changes from sender
     remoteVideo.addEventListener('resize', beginViewportSettle);
 
-    /* ---------- Canvas alignment ---------- */
-    function containRect(containerW, containerH, contentW, contentH) {
-      const scale = Math.min(containerW / (contentW||1), containerH / (contentH||1));
-      const w = Math.round(contentW * scale);
-      const h = Math.round(contentH * scale);
-      const x = Math.floor((containerW - w) / 2);
-      const y = Math.floor((containerH - h) / 2);
-      return { left:x, top:y, width:w, height:h };
-    }
-
-    function alignCanvasToVideo() {
-      const stageBox = stage.getBoundingClientRect();
-      const videoBox = remoteVideo.getBoundingClientRect();
-      const containerW = Math.round(videoBox.width);
-      const containerH = Math.round(videoBox.height);
-      const vidW = remoteVideo.videoWidth || 1;
-      const vidH = remoteVideo.videoHeight || 1;
-
-      const fit = containRect(containerW, containerH, vidW, vidH);
-      const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
-      const topCSS = Math.round((videoBox.top - stageBox.top) + fit.top);
-
-      poseCanvas.style.left = leftCSS + 'px';
-      poseCanvas.style.top = topCSS + 'px';
-      poseCanvas.style.width = fit.width + 'px';
-      poseCanvas.style.height = fit.height + 'px';
-
-      const dpr = window.devicePixelRatio || 1;
-      const needW = Math.max(1, Math.round(fit.width * dpr));
-      const needH = Math.max(1, Math.round(fit.height * dpr));
-      if (poseCanvas.width !== needW || poseCanvas.height !== needH) {
-        poseCanvas.width = needW;
-        poseCanvas.height = needH;
-      }
-      poseCtx.setTransform(1,0,0,1,0,0);
-    }
-
-    let settleRAF = 0, settleUntil = 0;
-    function beginViewportSettle(durationMs = 1200) {
-      settleUntil = performance.now() + durationMs;
-      if (settleRAF) return;
-      const tick = () => {
-        alignCanvasToVideo();
-        if (performance.now() < settleUntil) {
-          settleRAF = requestAnimationFrame(tick);
-        } else {
-          cancelAnimationFrame(settleRAF); settleRAF = 0;
-          alignCanvasToVideo();
-        }
-      };
-      tick();
-    }
+    // No-op stubs kept to preserve previous event wiring
+    function beginViewportSettle() { /* no-op: no overlay to align anymore */ }
     const vpAlign = () => beginViewportSettle();
     ['resize','orientationchange','scroll'].forEach(ev =>
       window.addEventListener(ev, vpAlign, { passive: true })
@@ -294,121 +219,6 @@
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) beginViewportSettle();
     });
-
-    /* ---------- Overlay helpers ---------- */
-    function setOverlayVisible(v) {
-      poseCanvas.style.display = v ? 'block' : 'none';
-      if (v) beginViewportSettle();
-      else poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-    }
-
-    function drawPoseLandmarks(landmarks) {
-      if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
-      poseCtx.save();
-      poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-      const utils = new DrawingUtils(poseCtx);
-      for (const lm of landmarks) {
-        utils.drawLandmarks(lm, {
-          radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
-        });
-        utils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
-      }
-      poseCtx.restore();
-    }
-
-    /* ---------- MediaPipe on RECEIVER ---------- */
-    async function ensurePoseTask() {
-      if (poseTask) return poseTask;
-      const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
-      poseTask = await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: POSE_MODEL_URL, delegate: "GPU" },
-        runningMode: "VIDEO",
-        numPoses: 1
-      });
-      return poseTask;
-    }
-
-    function videoHasFrame(v) {
-      return v &&
-        v.readyState >= HAVE_CURRENT_DATA &&
-        v.videoWidth  > 0 &&
-        v.videoHeight > 0;
-    }
-
-    function waitForVideoFrame(video) {
-      if (videoHasFrame(video)) return Promise.resolve();
-      return new Promise((resolve) => {
-        const check = () => { if (videoHasFrame(video)) { cleanup(); resolve(); } };
-        const cleanup = () => {
-          video.removeEventListener('loadedmetadata', check);
-          video.removeEventListener('playing', check);
-          video.removeEventListener('resize', check);
-        };
-        video.addEventListener('loadedmetadata', check);
-        video.addEventListener('playing', check);
-        video.addEventListener('resize', check);
-      });
-    }
-
-    async function startReceiverPoseLoop() {
-      if (poseLoopRunning) return;
-      await ensurePoseTask();
-      await waitForVideoFrame(remoteVideo);
-
-      poseLoopRunning = true;
-      console.log('[POSE][receiver] inference START (receiver)');
-
-      const useRVFC = 'requestVideoFrameCallback' in remoteVideo;
-
-      const onFrame = () => {
-        if (!poseLoopRunning || !poseEnabled || poseWhere !== 'receiver') {
-          console.log('[POSE][receiver] inference STOP (receiver)');
-          return;
-        }
-
-        if (!videoHasFrame(remoteVideo)) {
-          poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
-          scheduleNext();
-          return;
-        }
-
-        try {
-          const ts = performance.now();
-          const result = poseTask.detectForVideo(remoteVideo, ts);
-          if (result?.landmarks?.length) {
-            drawPoseLandmarks(result.landmarks);
-            if (poseDC?.readyState === 'open') {
-              poseDC.send(JSON.stringify({ type:'pose', landmarks: result.landmarks, ts }));
-            }
-          } else {
-            poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-          }
-        } catch (err) {
-          console.warn('[POSE][receiver] detect error (retrying next frame)', err);
-        } finally {
-          scheduleNext();
-        }
-      };
-
-      const scheduleNext = () => {
-        if (useRVFC) remoteVideo.requestVideoFrameCallback(onFrame);
-        else requestAnimationFrame(onFrame);
-      };
-
-      scheduleNext();
-    }
-
-    function stopReceiverPoseLoop() {
-      poseLoopRunning = false;
-      poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-    }
-
-    function applyPoseMode() {
-      setOverlayVisible(poseEnabled);
-      if (!poseEnabled) { stopReceiverPoseLoop(); return; }
-      if (poseWhere === 'receiver') startReceiverPoseLoop();
-      else stopReceiverPoseLoop(); // sender mode: draw only what we receive
-    }
 
     /* ---------- WebSocket / WebRTC ---------- */
     async function connectWS() {
@@ -468,26 +278,6 @@
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
-      // Pose DC (receiver initiates; bidirectional)
-      const ch = pc.createDataChannel('pose');
-      ch.onopen = () => { console.log('[DC][receiver] pose DC open'); };
-      ch.onclose = () => { console.log('[DC][receiver] pose DC close'); };
-      ch.onerror = (e) => { console.warn('[DC][receiver] pose DC error', e); };
-      ch.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data);
-          if (msg.type === 'pose-mode') {
-            poseEnabled = !!msg.enabled;
-            poseWhere   = msg.where || 'sender';
-            console.log('[POSE][receiver] mode:', { poseEnabled, poseWhere });
-            applyPoseMode();
-          } else if (msg.type === 'pose') {
-            if (poseEnabled && poseWhere === 'sender') drawPoseLandmarks(msg.landmarks);
-          }
-        } catch {}
-      };
-      poseDC = ch;
-
       pc.onicecandidate = (ev) => { if (ev.candidate) send({ type:'candidate', candidate: ev.candidate }); };
       pc.ontrack = (ev) => {
         if (remoteVideo.srcObject !== ev.streams[0]) {
@@ -496,6 +286,12 @@
         }
         console.log('[TRACK][receiver] ontrack:', ev.track.kind);
         beginViewportSettle();
+      };
+
+      // If the sender opens any data channel, ignore it.
+      pc.ondatachannel = (e) => {
+        console.log('[DC][receiver] ignoring datachannel:', e.channel?.label);
+        try { e.channel.close(); } catch {}
       };
 
       // Less jumpy on ICE disconnected; immediate on failed
@@ -607,7 +403,6 @@
       try { pc && pc.close(); } catch {}
       if (wsKeepalive) clearInterval(wsKeepalive);
       if (hideStatusTimer) clearTimeout(hideStatusTimer);
-      stopReceiverPoseLoop();
     });
 
     // Go!
