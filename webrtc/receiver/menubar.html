@@ -91,6 +91,63 @@
     #hamburger[aria-expanded="true"] { background: rgba(255,255,255,0.1); }
     #hamburger.faded { opacity: 0; pointer-events: none; }
     #hamburger.hidden { display: none; }
+
+    /* ---------- Invite Modal ---------- */
+    #inviteModal {
+      position: fixed; inset: 0;
+      display: none;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.6);
+      z-index: 100;                 /* above sidebar + hamburger */
+      padding: 20px;
+    }
+    #inviteModal[open] { display: flex; }
+
+    .modal-dialog {
+      background: rgba(20,20,20,0.98);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 14px;
+      box-shadow: 0 10px 50px rgba(0,0,0,0.6);
+      max-width: 92vw; width: 360px; 
+      padding: 18px;
+    }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .modal-title {
+      font-size: 16px; font-weight: 700; color: #fff;
+    }
+    .modal-close {
+      all: unset; cursor: pointer;
+      padding: 6px 10px; border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.06);
+      line-height: 1; font-weight: 700;
+    }
+    .modal-body { text-align: center; }
+    .qr-box {
+      display: inline-block;
+      padding: 10px;
+      border-radius: 10px;
+      background: #fff;    /* white background so QR has contrast */
+      margin: 8px 0 14px;
+    }
+    .invite-link {
+      font-size: 12px; color: #aaa; user-select: all; word-break: break-all;
+    }
+    .modal-actions {
+      display: flex; gap: 10px; justify-content: center; margin-top: 12px;
+    }
+    .btn {
+      all: unset;
+      padding: 10px 14px; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.08);
+      color: #fff; font-weight: 600; cursor: pointer;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary { background: rgba(0,122,255,0.9); border-color: rgba(0,122,255,0.8); }
   </style>
 </head>
 <body>
@@ -134,7 +191,7 @@
       </symbol>
       <symbol id="i-help" viewBox="0 0 24 24" stroke-width="2">
         <circle cx="12" cy="12" r="10"></circle>
-        <path d="M9.1 9a3 3 0 1 1 5.8 1c0  2-3 2-3 4"></path>
+        <path d="M9.1 9a3 3 0 1 1 5.8 1c0 2-3 2-3 4"></path>
         <circle cx="12" cy="17" r="1"></circle>
       </symbol>
       <symbol id="i-invite" viewBox="0 0 24 24" stroke-width="2">
@@ -195,6 +252,26 @@
       </button>
     </div>
   </nav>
+
+  <!-- Invite Modal -->
+  <div id="inviteModal" role="dialog" aria-modal="true" aria-labelledby="inviteTitle">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title" id="inviteTitle">Invite a friend</div>
+        <button class="modal-close" id="inviteClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="qr-box">
+          <img id="qrImg" width="220" height="220" alt="QR code for invite link">
+        </div>
+        <div class="invite-link" id="inviteLinkText"></div>
+        <div class="modal-actions">
+          <button class="btn" id="copyInvite">Copy link</button>
+          <button class="btn primary" id="openInvite">Open</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script>
     // Sidebar + hamburger
@@ -298,16 +375,63 @@
       navItems.forEach(btn => btn.classList.toggle('active', btn.dataset.item === itemName));
     }
 
-    // URL routes for specified items
+    // URL routes for specified items (invite handled separately via modal)
     const ROUTES = {
       video: 'https://hungryfaceai.github.io/hungryface/webrtc/receiver/video/index.html',
       audio: 'https://hungryfaceai.github.io/hungryface/webrtc/receiver/audio/index.html',
       pose: 'https://hungryfaceai.github.io/hungryface/webrtc/receiver/pose/index.html',
       face: 'https://hungryfaceai.github.io/hungryface/webrtc/receiver/face/index.html',
       settings: 'https://hungryfaceai.github.io/hungryface/webrtc/receiver/settings/index.html',
-      help: 'https://hungryfaceai.github.io/hungryface/webrtc/receiver/help/index.html',
-      invite: 'https://hungryfaceai.github.io/hungryface/webrtc/receiver/invite/index.html'
+      help: 'https://hungryfaceai.github.io/hungryface/webrtc/receiver/help/index.html'
+      // invite intentionally NOT here
     };
+
+    const INVITE_URL = 'https://hungryfaceai.github.io/hungryface/home/';
+
+    // Invite modal elements
+    const inviteModal = document.getElementById('inviteModal');
+    const inviteClose = document.getElementById('inviteClose');
+    const qrImg = document.getElementById('qrImg');
+    const inviteLinkText = document.getElementById('inviteLinkText');
+    const copyInvite = document.getElementById('copyInvite');
+    const openInvite = document.getElementById('openInvite');
+
+    function showInviteModal() {
+      // Use Google Chart API for a simple QR image (no extra JS deps)
+      const qrURL = 'https://chart.googleapis.com/chart?cht=qr&chs=220x220&choe=UTF-8&chl=' + encodeURIComponent(INVITE_URL);
+      qrImg.src = qrURL;
+      qrImg.alt = 'QR code for ' + INVITE_URL;
+      inviteLinkText.textContent = INVITE_URL;
+      inviteModal.setAttribute('open', '');
+    }
+    function hideInviteModal() {
+      inviteModal.removeAttribute('open');
+    }
+
+    inviteClose.addEventListener('click', hideInviteModal);
+    inviteModal.addEventListener('click', (e) => {
+      // close when clicking outside the dialog
+      if (e.target === inviteModal) hideInviteModal();
+    });
+    window.addEventListener('keydown', (e) => {
+      if (inviteModal.hasAttribute('open') && e.key === 'Escape') hideInviteModal();
+    });
+
+    copyInvite.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(INVITE_URL);
+        const prev = copyInvite.textContent;
+        copyInvite.textContent = 'Copied';
+        setTimeout(() => (copyInvite.textContent = prev), 1200);
+      } catch {
+        // Fallback: open a prompt to let user copy manually
+        window.prompt('Copy this link:', INVITE_URL);
+      }
+    });
+
+    openInvite.addEventListener('click', () => {
+      window.open(INVITE_URL, '_blank', 'noopener,noreferrer');
+    });
 
     sidebar.addEventListener('click', (e) => {
       const btn = e.target.closest('.nav-item');
@@ -316,7 +440,14 @@
       setActive(item);
       console.log('[SIDEBAR] Selected:', item);
 
-      // Navigate for specified items
+      if (item === 'invite') {
+        // Open invite modal instead of navigating
+        showInviteModal();
+        hideSidebar();
+        return;
+      }
+
+      // Navigate for the defined routes
       const url = ROUTES[item];
       if (url) {
         window.location.href = url;
