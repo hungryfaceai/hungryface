@@ -22,32 +22,75 @@
       width: max-content;
       width: fit-content;
       max-width: 80vw;
-      min-width: 220px;
+      min-width: 150px;
 
-      padding: 16px 10px 18px;
-      border-right: 1px solid #1a1a1a;
-      background: #0b0b0b;
-      z-index: 9000;
-      overflow: auto;
-      -webkit-overflow-scrolling: touch;
+      background: rgba(0,0,0,0.92);
+      border-right: 1px solid rgba(255,255,255,0.1);
+      backdrop-filter: blur(2px);
+      box-shadow: 6px 0 24px rgba(0,0,0,0.5);
+      transform: translateX(-100%);
+      transition: transform .25s ease;
+      z-index: 20;
+      display: flex; flex-direction: column;
+      cursor: default;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: auto;
+    }
+    #sidebar.visible { transform: translateX(0); }
+
+    #sidebar .menu {
+      padding: 8px;
+      overflow-y: auto; -webkit-overflow-scrolling: touch;
+
+      /* Hide scrollbar across browsers (still scrolls) */
+      scrollbar-width: none;              /* Firefox */
+      -ms-overflow-style: none;           /* IE/Edge legacy */
+    }
+    #sidebar .menu::-webkit-scrollbar {   /* WebKit */
+      width: 0; height: 0;
     }
 
-    .menu {
-      list-style: none; margin: 0; padding: 0;
-      display: grid; gap: 8px;
+    #sidebar .nav-item {
+      all: unset;
+      display: flex; align-items: center; gap: 10px;
+      width: 100%;
+      padding: 12px 14px; margin: 2px 0;
+      border-radius: 10px; cursor: pointer; user-select: none;
+      color: #eee; font-weight: 600; font-size: 15px;
+      white-space: nowrap; /* keep one line so width hugs the text */
     }
-    .menu a, .menu button {
-      display: block; width: 100%;
-      text-align: left;
-      color: #ddd; text-decoration: none;
-      background: #141414; border: 1px solid #1f1f1f;
-      padding: 10px 12px; border-radius: 10px;
-      cursor: pointer; font-size: 15px;
+    #sidebar .nav-item:hover { background: rgba(255,255,255,0.08); }
+    #sidebar .nav-item.active { background: rgba(255,255,255,0.14); }
+
+    .nav-icon {
+      width: 18px; height: 18px; flex: 0 0 18px;
+      stroke: currentColor; fill: none; opacity: 0.9;
     }
-    .menu a:hover, .menu button:hover { filter: brightness(1.06); }
-    .menu h3 {
-      margin: 12px 6px 6px; font-size: 12px; color: #aaa; font-weight: 600; letter-spacing: .02em;
+
+    /* ---------- Tiny Hamburger Button (hides when drawer open) ---------- */
+    #hamburger {
+      position: fixed;
+      top: 12px; left: 12px;
+      top: calc(12px + env(safe-area-inset-top));
+      left: calc(12px + env(safe-area-inset-left));
+
+      width: 38px; height: 38px; padding: 8px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 10px; border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(0,0,0,0.7);
+      color: #fff;
+      cursor: pointer; z-index: 30; user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-appearance: none; appearance: none;
+      transition: opacity .25s ease, background .2s ease;
+      box-shadow: 0 2px 10px rgba(0,0,0,.35);
     }
+    #hamburger svg { width: 100%; height: 100%; display: block; }
+    #hamburger svg path { stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; fill: none; }
+    #hamburger[aria-expanded="true"] { background: rgba(255,255,255,0.1); }
+    #hamburger.faded { opacity: 0; pointer-events: none; }
+    #hamburger.hidden { display: none; }
 
     /* ---------- Invite modal (added) ---------- */
     .invite-modal {
@@ -70,14 +113,12 @@
     }
     .invite-qr-wrap { display: grid; place-items: center; margin: 10px 0 14px; }
     .invite-qr-wrap img { width: 220px; height: 220px; }
-
     .invite-url { display: grid; gap: 6px; margin-bottom: 12px; }
     .invite-url-label { font-size: 12px; color: #bbb; }
     #invite-url {
       width: 100%; padding: 10px 12px; border-radius: 10px;
       background: #0a0a0a; color: #ddd; border: 1px solid #232323;
     }
-
     .invite-actions { display: flex; gap: 10px; justify-content: flex-end; }
     #invite-copy, #invite-open {
       display: inline-flex; align-items: center; justify-content: center;
@@ -85,7 +126,6 @@
       background: #1f1f1f; color: #fff; border: 1px solid #2b2b2b; cursor: pointer;
     }
     #invite-copy:hover, #invite-open:hover { filter: brightness(1.1); }
-
     .invite-toast {
       position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
       background: #1a1a1a; color: #fff; border: 1px solid #2a2a2a;
@@ -93,43 +133,110 @@
       z-index: 10000; pointer-events: none;
     }
     .invite-toast.show { opacity: 1; }
-
-    /* ---------- Page filler (keeps layout stable) ---------- */
-    main { margin-left: 260px; padding: var(--ui-pad); }
-    @media (max-width: 640px) {
-      main { margin-left: 240px; }
-    }
   </style>
 </head>
 <body>
+  <!-- Inline SVG icon set (no external deps) -->
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+    <defs>
+      <symbol id="i-video" viewBox="0 0 24 24" stroke-width="2">
+        <rect x="2" y="6" width="14" height="12" rx="2" ry="2"></rect>
+        <polygon points="18 8 22 10 22 14 18 16 18 8"></polygon>
+      </symbol>
+      <symbol id="i-camera" viewBox="0 0 24 24" stroke-width="2">
+        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3l2-3h8l2 3h3a2 2 0 0 1 2 2z"></path>
+        <circle cx="12" cy="13" r="4"></circle>
+      </symbol>
+      <symbol id="i-audio" viewBox="0 0 24 24" stroke-width="2">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+      </symbol>
+      <symbol id="i-pose" viewBox="0 0 24 24" stroke-width="2">
+        <circle cx="12" cy="5.5" r="2"></circle>
+        <path d="M12 7.5v5.5"></path>
+        <path d="M9 10l3 3 3-3"></path>
+        <path d="M8 21l4-7 4 7"></path>
+      </symbol>
+      <symbol id="i-face" viewBox="0 0 24 24" stroke-width="2">
+        <circle cx="12" cy="12" r="8.5"></circle>
+        <path d="M9.25 10.5h.01M14.75 10.5h.01"></path>
+        <path d="M9.5 14c1 .8 4 .8 5 0"></path>
+      </symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24" stroke-width="2">
+        <line x1="4" y1="21" x2="4" y2="14"></line>
+        <line x1="4" y1="10" x2="4" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="12"></line>
+        <line x1="12" y1="8" x2="12" y2="3"></line>
+        <line x1="20" y1="21" x2="20" y2="16"></line>
+        <line x1="20" y1="12" x2="20" y2="3"></line>
+        <circle cx="4" cy="12" r="2"></circle>
+        <circle cx="12" cy="10" r="2"></circle>
+        <circle cx="20" cy="14" r="2"></circle>
+      </symbol>
+      <symbol id="i-help" viewBox="0 0 24 24" stroke-width="2">
+        <circle cx="12" cy="12" r="10"></circle>
+        <path d="M9.1 9a3 3 0 1 1 5.8 1c0 2-3 2-3 4"></path>
+        <circle cx="12" cy="17" r="1"></circle>
+      </symbol>
+      <symbol id="i-invite" viewBox="0 0 24 24" stroke-width="2">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+        <circle cx="12" cy="7" r="4"></circle>
+        <line x1="20" y1="8" x2="20" y2="14"></line>
+        <line x1="17" y1="11" x2="23" y2="11"></line>
+      </symbol>
+      <symbol id="i-contact" viewBox="0 0 24 24" stroke-width="2">
+        <rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect>
+        <path d="M22 6 12 13 2 6"></path>
+      </symbol>
+    </defs>
+  </svg>
 
-  <!-- Sidebar menu -->
-  <aside id="sidebar" aria-label="Main menu">
-    <ul class="menu">
-      <h3>Views</h3>
-      <li><a href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/video/index.html">Video</a></li>
-      <li><a href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/audio/index.html">Audio</a></li>
-      <li><a href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/pose/index.html">Pose</a></li>
-      <li><a href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/face/index.html">Face</a></li>
+  <!-- Tiny hamburger (SVG so it renders reliably on iPhone) -->
+  <button id="hamburger" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 6.5H20M4 12H20M4 17.5H20"></path>
+    </svg>
+  </button>
 
-      <h3>App</h3>
-      <li><a href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/settings/index.html">Settings</a></li>
-      <li><a href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/help/index.html">Help</a></li>
+  <!-- Sidebar -->
+  <nav id="sidebar" aria-label="Main">
+    <div class="menu">
+      <!-- Home icon first; anchor navigates to Home. Icons referenced from same folder -->
+      <a class="nav-item" href="/hungryface/home" data-item="home" aria-label="Home">
+        <svg class="nav-icon" aria-hidden="true" focusable="false">
+          <use href="/hungryface/assets/icons.svg#icon-cradle-ai" xlink:href="/hungryface/assets/icons.svg#icon-cradle-ai"></use>
+        </svg>
+        <span class="nav-label">Home</span>
+      </a>
 
-      <!-- Invite menu item with fixed id -->
-      <h3>Share</h3>
-      <li>
-        <a id="menu-invite" href="#" role="button" aria-haspopup="dialog" aria-controls="invite-modal">
-          Invite a friend
-        </a>
-      </li>
-    </ul>
-  </aside>
-
-  <main>
-    <!-- Placeholder content area; unchanged app content would sit here -->
-    <p style="opacity:.6">Open a view from the sidebar.</p>
-  </main>
+      <a class="nav-item" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/video/index.html" data-item="video" aria-label="Video">
+        <svg class="nav-icon"><use href="#i-video"/></svg><span class="nav-label">Video</span>
+      </a>
+      <!-- Removed: Camera -->
+      <a class="nav-item" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/audio/index.html" data-item="audio" aria-label="Audio">
+        <svg class="nav-icon"><use href="#i-audio"/></svg><span class="nav-label">Audio</span>
+      </a>
+      <a class="nav-item" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/pose/index.html" data-item="pose" aria-label="Pose">
+        <svg class="nav-icon"><use href="#i-pose"/></svg><span class="nav-label">Pose</span>
+      </a>
+      <a class="nav-item" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/face/index.html" data-item="face" aria-label="Face">
+        <svg class="nav-icon"><use href="#i-face"/></svg><span class="nav-label">Face</span>
+      </a>
+      <a class="nav-item" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/settings/index.html" data-item="settings" aria-label="Settings">
+        <svg class="nav-icon"><use href="#i-settings"/></svg><span class="nav-label">Settings</span>
+      </a>
+      <a class="nav-item" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/help/index.html" data-item="help" aria-label="Help">
+        <svg class="nav-icon"><use href="#i-help"/></svg><span class="nav-label">Help</span>
+      </a>
+      <button id="menu-invite" class="nav-item" data-item="invite" aria-label="Invite a friend">
+        <svg class="nav-icon"><use href="#i-invite"/></svg><span class="nav-label">Invite a friend</span>
+      </button>
+      <button class="nav-item" data-item="contact" aria-label="Contact us">
+        <svg class="nav-icon"><use href="#i-contact"/></svg><span class="nav-label">Contact us</span>
+      </button>
+    </div>
+  </nav>
 
   <!-- Invite a friend — modal (added) -->
   <div id="invite-modal" class="invite-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="invite-title">
@@ -153,22 +260,138 @@
     </div>
   </div>
 
-  <!-- JS: Invite flow (added) -->
+  <script>
+    // Sidebar + hamburger
+    const sidebar   = document.getElementById('sidebar');
+    const hamburger = document.getElementById('hamburger');
+    const navItems  = Array.from(sidebar.querySelectorAll('.nav-item'));
+
+    // Detect touch (iPhone/iPad etc.)
+    const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+
+    // Auto-hide drawer (no dragger)
+    const SIDEBAR_AUTOHIDE_MS = 10000;
+    let sidebarTimer = null;
+
+    function hideSidebar() {
+      sidebar.classList.remove('visible');
+      hamburger.classList.remove('hidden');         // show button when drawer closes
+      hamburger.setAttribute('aria-expanded', 'false');
+      clearTimeout(sidebarTimer); sidebarTimer = null;
+      resetHamburgerFade();
+    }
+    function showSidebar() {
+      sidebar.classList.add('visible');
+      hamburger.classList.add('hidden');            // hide button entirely while open
+      hamburger.setAttribute('aria-expanded', 'true');
+      clearTimeout(sidebarTimer);
+      sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
+    }
+    function toggleSidebar() {
+      if (sidebar.classList.contains('visible')) hideSidebar();
+      else showSidebar();
+    }
+
+    // Click/tap outside the sidebar closes it (ignore clicks on hamburger)
+    function clickOutsideHandler(e) {
+      if (!sidebar.classList.contains('visible')) return;
+      const insideSidebar   = e.target.closest('#sidebar');
+      const insideHamburger = e.target.closest('#hamburger');
+      if (!insideSidebar && !insideHamburger) hideSidebar();
+    }
+    document.addEventListener('pointerdown', clickOutsideHandler, { passive: true });
+    document.addEventListener('click', clickOutsideHandler, { passive: true });
+
+    // Hamburger auto-fade (disabled on touch so it's always visible there)
+    const HAMBURGER_FADE_MS = 4000;
+    let hamburgerFadeTimer = null;
+    function showHamburger() {
+      hamburger.classList.remove('faded');
+      hamburger.setAttribute('aria-hidden', 'false');
+    }
+    function hideHamburgerBtn() {
+      hamburger.classList.add('faded');
+      hamburger.setAttribute('aria-hidden', 'true');
+    }
+    function resetHamburgerFade() {
+      if (hamburger.classList.contains('hidden')) return; // don't touch while drawer open
+      showHamburger();
+      clearTimeout(hamburgerFadeTimer);
+      if (isTouch) return; // keep visible on iPhone/iPad
+      if (document.fullscreenElement) {
+        hamburgerFadeTimer = setTimeout(() => {
+          if (!sidebar.classList.contains('visible') && !hamburger.classList.contains('hidden')) {
+            hideHamburgerBtn();
+          }
+        }, HAMBURGER_FADE_MS);
+      } else {
+        showHamburger(); // keep visible when not in fullscreen
+      }
+    }
+
+    // Discoverability
+    if (isTouch) { hideSidebar(); showHamburger(); } else { showSidebar(); }
+
+    // Toggle via hamburger
+    hamburger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSidebar();
+      resetHamburgerFade();
+    });
+
+    // Keep drawer open while interacting
+    ['mousemove','pointermove','wheel','touchstart','click','keydown'].forEach(ev =>
+      sidebar.addEventListener(ev, () => {
+        clearTimeout(sidebarTimer);
+        sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
+      }, { passive: true })
+    );
+
+    // Global activity revives hamburger (mainly in fullscreen)
+    ['mousemove','pointermove','touchstart','keydown','click'].forEach(ev =>
+      window.addEventListener(ev, () => resetHamburgerFade(), { passive: true })
+    );
+
+    // Close drawer with Escape
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hideSidebar();
+    });
+
+    // ---------- Menu interactions (sidebar-only) ----------
+    function setActive(itemName) {
+      navItems.forEach(btn => btn.classList.toggle('active', btn.dataset.item === itemName));
+    }
+
+    sidebar.addEventListener('click', (e) => {
+      const btn = e.target.closest('.nav-item');
+      if (!btn) return;
+      const item = btn.dataset.item;
+      setActive(item);
+      console.log('[SIDEBAR] Selected:', item);
+      clearTimeout(sidebarTimer);
+      sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
+    });
+
+    // Cleanup timers on unload
+    window.addEventListener('beforeunload', () => {
+      clearTimeout(sidebarTimer);
+      clearTimeout(hamburgerFadeTimer);
+    });
+  </script>
+
+  <!-- QR Invite logic (added) -->
   <script>
     (() => {
-      // Fixed invite target (no room parameter)
       const INVITE_URL = 'https://hungryfaceai.github.io/hungryface/home/';
       const QR_ENDPOINT = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&format=svg&data=';
 
-      const $ = (s, r = document) => r.querySelector(s);
-
-      const modal   = $('#invite-modal');
-      const qrImg   = $('#invite-qr');
-      const urlIn   = $('#invite-url');
-      const btnCopy = $('#invite-copy');
-      const btnOpen = $('#invite-open');
-      const btnX    = $('.invite-close');
-      const trigger = $('#menu-invite');
+      const trigger  = document.getElementById('menu-invite');
+      const modal    = document.getElementById('invite-modal');
+      const qrImg    = document.getElementById('invite-qr');
+      const urlInput = document.getElementById('invite-url');
+      const btnCopy  = document.getElementById('invite-copy');
+      const btnOpen  = document.getElementById('invite-open');
+      const btnClose = document.querySelector('.invite-close');
 
       function toast(msg) {
         const el = document.createElement('div');
@@ -182,43 +405,48 @@
         }, 1400);
       }
 
-      function showInvite() {
+      function openInvite() {
         const url = INVITE_URL;
         qrImg.src = QR_ENDPOINT + encodeURIComponent(url);
         qrImg.alt = 'QR code for ' + url;
-        urlIn.value = url;
+        urlInput.value = url;
         btnOpen.href = url;
 
         modal.classList.add('visible');
         modal.setAttribute('aria-hidden', 'false');
 
         setTimeout(() => {
-          urlIn.focus({ preventScroll: true });
-          try { urlIn.setSelectionRange(urlIn.value.length, urlIn.value.length); } catch {}
-          urlIn.scrollLeft = urlIn.scrollWidth;
+          try { urlInput.focus({ preventScroll: true }); urlInput.setSelectionRange(url.length, url.length); } catch {}
+          urlInput.scrollLeft = urlInput.scrollWidth;
         }, 0);
 
         document.addEventListener('keydown', onEsc, { once: true });
       }
 
-      function hideInvite() {
+      function closeInvite() {
         modal.classList.remove('visible');
         modal.setAttribute('aria-hidden', 'true');
       }
 
-      function onEsc(e) { if (e.key === 'Escape') hideInvite(); }
+      function onEsc(e) { if (e.key === 'Escape') closeInvite(); }
 
-      // Wire up events
-      trigger?.addEventListener('click', (e) => { e.preventDefault(); showInvite(); });
-      modal.addEventListener('click', (e) => { if (e.target === modal) hideInvite(); });
-      btnX.addEventListener('click', hideInvite);
+      if (trigger) {
+        trigger.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openInvite();
+        });
+      }
+
+      modal.addEventListener('click', (e) => { if (e.target === modal) closeInvite(); });
+      btnClose.addEventListener('click', closeInvite);
 
       btnCopy.addEventListener('click', async () => {
         try {
-          await navigator.clipboard.writeText(urlIn.value);
+          await navigator.clipboard.writeText(urlInput.value);
           toast('Link copied');
         } catch {
-          urlIn.select?.();
+          urlInput.select?.();
           toast('Copy failed — select and copy');
         }
       });
