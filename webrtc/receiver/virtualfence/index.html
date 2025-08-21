@@ -29,10 +29,23 @@
       position: absolute; inset: 0;
       width: 100%; height: 100%;
       object-fit: contain; background: #000;
+      z-index: 0;               /* ensure proper stacking below overlays */
+      pointer-events: none;     /* never steals taps */
     }
     #stage > canvas {
       position: absolute;
-      z-index: 2; pointer-events: none; background: transparent; display: none;
+      z-index: 2; background: transparent; display: none;
+      /* 👇 canvas needs to capture taps for polygon drawing/dragging */
+      pointer-events: auto;
+      touch-action: none;
+    }
+    /* Translucent red veil shown when any landmark is outside zone */
+    #zoneAlert {
+      position: absolute; inset: 0;
+      background: rgba(255, 0, 0, 0.18);
+      z-index: 1;           /* above video, below canvas drawings/handles */
+      pointer-events: none;
+      display: none;
     }
 
     .btn {
@@ -46,6 +59,7 @@
     #controls {
       position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
       display: flex; align-items: center; gap: 12px; z-index: 6;
+      flex-wrap: wrap;
     }
     #enableAudioBtn, #disableAudioBtn { display: none; }
 
@@ -93,10 +107,15 @@
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
     <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
+    <!-- 👇 New zone controls (same styling) -->
+    <button id="drawZoneBtn" class="btn" type="button">Draw zone</button>
+    <button id="clearZoneBtn" class="btn" type="button">Clear</button>
   </div>
 
   <div id="stage">
     <video id="remote" autoplay playsinline></video>
+    <!-- Red veil for out-of-zone -->
+    <div id="zoneAlert"></div>
     <canvas id="poseCanvas"></canvas>
   </div>
 
@@ -130,10 +149,13 @@
     const remoteVideo = document.getElementById('remote');
     const poseCanvas = document.getElementById('poseCanvas');
     const poseCtx = poseCanvas.getContext('2d', { alpha: true });
+    const zoneAlert = document.getElementById('zoneAlert');
 
     const fsBtn = document.getElementById('fsBtn');
     const enableAudioBtn = document.getElementById('enableAudioBtn');
     const disableAudioBtn = document.getElementById('disableAudioBtn');
+    const drawZoneBtn = document.getElementById('drawZoneBtn');
+    const clearZoneBtn = document.getElementById('clearZoneBtn');
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
 
@@ -153,6 +175,23 @@
     let poseWhere = 'sender'; // 'sender' | 'receiver'
     let poseTask = null;
     let poseLoopRunning = false;
+
+    // ---------- Polygon / Zone state ----------
+    let polygonPoints = [];            // [{x,y}] in canvas pixels
+    let polygonClosed = true;
+    let drawingMode = false;
+    let polygonInitialized = false;
+    let lastCanvasW = 0, lastCanvasH = 0;
+
+    // interaction
+    let activePointerId = null;
+    let isDragging = false;
+    let draggingPointIndex = -1;
+    let hoveredPointIndex = -1;
+    let lastTapTime = 0;
+    let lastTapPos = null;
+
+    const HANDLE_RADIUS_CSS = 10; // in CSS px; scaled to canvas px
 
     /* ---------- Status overlay ---------- */
     function showStatus(msg) {
@@ -261,10 +300,26 @@
       const dpr = window.devicePixelRatio || 1;
       const needW = Math.max(1, Math.round(fit.width * dpr));
       const needH = Math.max(1, Math.round(fit.height * dpr));
+
       if (poseCanvas.width !== needW || poseCanvas.height !== needH) {
+        // scale / initialize polygon to new canvas size
+        const prevW = poseCanvas.width || needW;
+        const prevH = poseCanvas.height || needH;
         poseCanvas.width = needW;
         poseCanvas.height = needH;
+
+        if (!polygonInitialized) {
+          setDefaultPolygon();
+          polygonInitialized = true;
+        } else {
+          const sx = needW / Math.max(1, prevW);
+          const sy = needH / Math.max(1, prevH);
+          for (const p of polygonPoints) { p.x *= sx; p.y *= sy; }
+        }
+        // redraw polygon anytime the canvas resizes
+        renderPolygonOnly();
       }
+
       poseCtx.setTransform(1,0,0,1,0,0);
     }
 
@@ -297,62 +352,130 @@
 
     /* ---------- Overlay helpers ---------- */
     function setOverlayVisible(v) {
-      poseCanvas.style.display = v ? 'block' : 'none';
-      if (v) beginViewportSettle();
+      // Keep canvas visible while drawing or when a closed polygon exists
+      const want = v || drawingMode || (polygonClosed && polygonPoints.length >= 3);
+      poseCanvas.style.display = want ? 'block' : 'none';
+      if (want) beginViewportSettle();
       else poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
 
-    function drawPoseLandmarks(landmarks) {
-      if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
-      poseCtx.save();
-      poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-      const utils = new DrawingUtils(poseCtx);
-      for (const lm of landmarks) {
-        utils.drawLandmarks(lm, {
-          radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
-        });
-        utils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
-      }
-      poseCtx.restore();
-    }
-
-    /* ---------- NEW: central canvas clear helper ---------- */
     function clearOverlayDrawing() {
       try {
         poseCtx.setTransform(1,0,0,1,0,0);
         poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+        // Also hide alert when stream stops
+        zoneAlert.style.display = 'none';
       } catch {}
     }
 
-														   
-							
-									  
-						   
-									
-																															 
-	 
-								 
-								  
-									
-											 
-												  
-			  
-	 
-								 
-																							
-	 
+    /* ---------- Polygon helpers ---------- */
+    function setDefaultPolygon() {
+      polygonPoints = [
+        { x: 0, y: 0 },
+        { x: poseCanvas.width, y: 0 },
+        { x: poseCanvas.width, y: poseCanvas.height },
+        { x: 0, y: poseCanvas.height }
+      ];
+      polygonClosed = true;
+      drawingMode = false;
+      setOverlayVisible(true);
+    }
 
-    /* ---------- NEW: attach track/stream end handlers ---------- */
-    function attachStreamEndHandlers(stream) {
-      if (!stream) return;
-      // Clear if any video track ends/mutes or is removed
-      stream.getVideoTracks().forEach((t) => {
-        t.addEventListener('ended',  clearOverlayDrawing);
-        t.addEventListener('mute',   clearOverlayDrawing);
-      });
-      stream.addEventListener('removetrack', (e) => {
-        if (e.track?.kind === 'video') clearOverlayDrawing();
-      });
+    function getCanvasCoordsFromClientXY(clientX, clientY) {
+      const rect = poseCanvas.getBoundingClientRect();
+      const xVis = clientX - rect.left;
+      const yVis = clientY - rect.top;
+      const sx = poseCanvas.width / Math.max(1, rect.width);
+      const sy = poseCanvas.height / Math.max(1, rect.height);
+      return { x: xVis * sx, y: yVis * sy };
+    }
+
+    function getHitRadiusCanvasPx() {
+      const rect = poseCanvas.getBoundingClientRect();
+      const sx = poseCanvas.width / Math.max(1, rect.width);
+      const dpr = window.devicePixelRatio || 1;
+      return HANDLE_RADIUS_CSS * Math.max(1, sx / dpr) * dpr;
+    }
+
+    function findHandleIndexAt(pos) {
+      const r2 = getHitRadiusCanvasPx() ** 2;
+      let best = -1, bestDist = Infinity;
+      for (let i = 0; i < polygonPoints.length; i++) {
+        const dx = polygonPoints[i].x - pos.x;
+        const dy = polygonPoints[i].y - pos.y;
+        const d2 = dx*dx + dy*dy;
+        if (d2 <= r2 && d2 < bestDist) { best = i; bestDist = d2; }
+      }
+      return best;
+    }
+
+    function clampToCanvas(pt) {
+      return {
+        x: Math.max(0, Math.min(poseCanvas.width, pt.x)),
+        y: Math.max(0, Math.min(poseCanvas.height, pt.y))
+      };
+    }
+
+    function drawPolygonOverlay(ctx) {
+      if (!polygonPoints.length) return;
+      ctx.save();
+      // draw landmarks already on canvas; just overlay the zone outline/handles
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#00BCD4";
+      ctx.fillStyle = "rgba(0, 188, 212, 0.10)";
+      ctx.beginPath();
+      ctx.moveTo(polygonPoints[0].x, polygonPoints[0].y);
+      for (let i = 1; i < polygonPoints.length; i++) ctx.lineTo(polygonPoints[i].x, polygonPoints[i].y);
+      if (polygonClosed) ctx.closePath();
+      ctx.stroke();
+      if (polygonClosed) ctx.fill();
+
+      // handles
+      for (let i = 0; i < polygonPoints.length; i++) {
+        const p = polygonPoints[i];
+        ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = "#00BCD4"; ctx.fill();
+      }
+      // hover/drag highlight
+      const idx = isDragging ? draggingPointIndex : hoveredPointIndex;
+      if (idx >= 0) {
+        const p = polygonPoints[idx];
+        ctx.beginPath(); ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+        ctx.strokeStyle = "#FF9800"; ctx.lineWidth = 2; ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function renderPolygonOnly() {
+      // For interactions when no pose frame is being drawn
+      poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+      drawPolygonOverlay(poseCtx);
+    }
+
+    function pointInPolygon(pt, poly) {
+      let inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const xi = poly[i].x, yi = poly[i].y;
+        const xj = poly[j].x, yj = poly[j].y;
+        const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+          (pt.x < ((xj - xi) * (pt.y - yi)) / ((yj - yi) || 1e-9) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    function anyLandmarkOutside(landmarks) {
+      if (!polygonClosed || polygonPoints.length < 3) return false;
+      // landmarks are normalized [0..1]; convert to canvas px
+      const w = poseCanvas.width, h = poseCanvas.height;
+      for (const lm of landmarks) {
+        for (const p of lm) {
+          const x = p.x * w;
+          const y = p.y * h;
+          if (!pointInPolygon({ x, y }, polygonPoints)) return true;
+        }
+      }
+      return false;
     }
 
     /* ---------- MediaPipe on RECEIVER ---------- */
@@ -389,6 +512,30 @@
       });
     }
 
+    function drawPoseLandmarks(landmarks) {
+      if (!poseCanvas.width || !poseCanvas.height) return;
+
+      // Clear then draw landmarks
+      poseCtx.save();
+      poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+
+      const utils = new DrawingUtils(poseCtx);
+      for (const lm of landmarks || []) {
+        utils.drawLandmarks(lm, {
+          radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
+        });
+        utils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+      }
+
+      // Overlay the polygon UI on top
+      drawPolygonOverlay(poseCtx);
+      poseCtx.restore();
+
+      // Toggle the red veil if any landmark point lies outside
+      const out = (landmarks && landmarks.length) ? anyLandmarkOutside(landmarks) : false;
+      zoneAlert.style.display = out ? 'block' : 'none';
+    }
+
     async function startReceiverPoseLoop() {
       if (poseLoopRunning) return;
       await ensurePoseTask();
@@ -407,6 +554,7 @@
 
         if (!videoHasFrame(remoteVideo)) {
           poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+          zoneAlert.style.display = 'none';
           scheduleNext();
           return;
         }
@@ -416,11 +564,10 @@
           const result = poseTask.detectForVideo(remoteVideo, ts);
           if (result?.landmarks?.length) {
             drawPoseLandmarks(result.landmarks);
-            if (poseDC?.readyState === 'open') {
-              poseDC.send(JSON.stringify({ type:'pose', landmarks: result.landmarks, ts }));
-            }
           } else {
             poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+            drawPolygonOverlay(poseCtx);
+            zoneAlert.style.display = 'none';
           }
         } catch (err) {
           console.warn('[POSE][receiver] detect error (retrying next frame)', err);
@@ -440,6 +587,7 @@
     function stopReceiverPoseLoop() {
       poseLoopRunning = false;
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+      zoneAlert.style.display = 'none';
     }
 
     function applyPoseMode() {
@@ -522,7 +670,9 @@
             console.log('[POSE][receiver] mode:', { poseEnabled, poseWhere });
             applyPoseMode();
           } else if (msg.type === 'pose') {
-            if (poseEnabled && poseWhere === 'sender') drawPoseLandmarks(msg.landmarks);
+            if (poseEnabled && poseWhere === 'sender') {
+              drawPoseLandmarks(msg.landmarks);
+            }
           }
         } catch {}
       };
@@ -533,27 +683,11 @@
         if (remoteVideo.srcObject !== ev.streams[0]) {
           remoteVideo.srcObject = ev.streams[0];
           tryStartMuted();
-
-															
-										   
-																	
-																	
-		   
-
-          attachStreamEndHandlers(ev.streams[0]);   // NEW: clear when track stops/mutes
-																				
+          attachStreamEndHandlers(ev.streams[0]);   // clear when track stops/mutes
         }
         console.log('[TRACK][receiver] ontrack:', ev.track.kind);
         beginViewportSettle();
       };
-
-												
-										  
-									  
-																		  
-								
-		 
-		
 
       // Less jumpy on ICE disconnected; immediate on failed
       pc.oniceconnectionstatechange = () => {
@@ -564,11 +698,11 @@
           showStatus('Connected');
           iceDisconnectedSince = null;
         } else if (state === 'failed') {
-          clearOverlayDrawing();                 // NEW: clear on failure
+          clearOverlayDrawing();                 // clear on failure
           console.log('[ICE] failed - restarting negotiation');
           startNegotiation(true);
         } else if (state === 'disconnected') {
-          clearOverlayDrawing();                 // NEW: clear on disconnect
+          clearOverlayDrawing();                 // clear on disconnect
           if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
           setTimeout(() => {
             if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= 15000) {
@@ -578,7 +712,7 @@
           }, 15100);
           showStatus('ICE: disconnected');
         } else if (state === 'closed') {
-          clearOverlayDrawing();                 // NEW: clear on closed
+          clearOverlayDrawing();                 // clear on closed
           showStatus('ICE: closed');
         } else {
           showStatus('ICE: ' + state);
@@ -660,7 +794,7 @@
         console.log('[INFO] sender bye -> pause offers until peer rejoins');
         remoteDescriptionSet = false;
         stopOfferResendLoop();
-        clearOverlayDrawing();                 // NEW: clear on explicit bye
+        clearOverlayDrawing();                 // clear on explicit bye
       }
     }
 
@@ -669,13 +803,24 @@
       remoteVideo.addEventListener(ev, clearOverlayDrawing, { passive: true });
     });
 
+    /* ---------- Track/stream end handlers ---------- */
+    function attachStreamEndHandlers(stream) {
+      if (!stream) return;
+      stream.getVideoTracks().forEach((t) => {
+        t.addEventListener('ended',  clearOverlayDrawing);
+        t.addEventListener('mute',   clearOverlayDrawing);
+      });
+      stream.addEventListener('removetrack', (e) => {
+        if (e.track?.kind === 'video') clearOverlayDrawing();
+      });
+    }
+
     window.addEventListener('beforeunload', () => {
       try { stopOfferResendLoop(); } catch {}
       try { ws && ws.close(); } catch {}
       try { pc && pc.close(); } catch {}
       if (wsKeepalive) clearInterval(wsKeepalive);
       if (hideStatusTimer) clearTimeout(hideStatusTimer);
-											 
       stopReceiverPoseLoop();
     });
 
@@ -684,6 +829,112 @@
 
     // tiny typo guard used in logs
     function beginViewportSetle(){ beginViewportSettle(); }
+
+    /* ---------- Polygon interactions ---------- */
+    function resetInteractionState() {
+      try {
+        if (activePointerId != null) {
+          poseCanvas.releasePointerCapture?.(activePointerId);
+        }
+      } catch {}
+      activePointerId = null;
+      isDragging = false;
+      draggingPointIndex = -1;
+      hoveredPointIndex = -1;
+      lastTapPos = null;
+      lastTapTime = 0;
+    }
+
+    function onPointerDown(e) {
+      e.preventDefault();
+      const pos = getCanvasCoordsFromClientXY(e.clientX, e.clientY);
+      activePointerId = e.pointerId;
+      poseCanvas.setPointerCapture?.(e.pointerId);
+
+      if (drawingMode) {
+        // double-tap to close
+        const now = Date.now();
+        if (lastTapPos && (now - lastTapTime) < 350) {
+          const dx = pos.x - lastTapPos.x;
+          const dy = pos.y - lastTapPos.y;
+          if (dx*dx + dy*dy < (getHitRadiusCanvasPx() ** 2)) {
+            if (polygonPoints.length >= 3) {
+              polygonClosed = true;
+              drawingMode = false;
+              drawZoneBtn.textContent = 'Draw zone';
+              renderPolygonOnly();
+              return;
+            }
+          }
+        }
+        polygonPoints.push(clampToCanvas(pos));
+        lastTapTime = now;
+        lastTapPos = pos;
+        renderPolygonOnly();
+      } else {
+        const idx = findHandleIndexAt(pos);
+        if (idx !== -1) { isDragging = true; draggingPointIndex = idx; }
+      }
+    }
+
+    function onPointerMove(e) {
+      if (activePointerId !== e.pointerId) return;
+      const pos = getCanvasCoordsFromClientXY(e.clientX, e.clientY);
+
+      if (isDragging && draggingPointIndex !== -1) {
+        e.preventDefault();
+        polygonPoints[draggingPointIndex] = clampToCanvas(pos);
+        renderPolygonOnly();
+      } else if (!drawingMode) {
+        hoveredPointIndex = findHandleIndexAt(pos);
+        renderPolygonOnly();
+      }
+    }
+
+    function onPointerUpOrCancel(e) {
+      if (activePointerId !== e.pointerId) return;
+      isDragging = false; draggingPointIndex = -1;
+      activePointerId = null;
+      poseCanvas.releasePointerCapture?.(e.pointerId);
+      // no-op render; recent move already drew
+    }
+
+    poseCanvas.addEventListener("pointerdown", onPointerDown, { passive: false });
+    poseCanvas.addEventListener("pointermove", onPointerMove, { passive: false });
+    poseCanvas.addEventListener("pointerup", onPointerUpOrCancel, { passive: false });
+    poseCanvas.addEventListener("pointercancel", onPointerUpOrCancel, { passive: false });
+    poseCanvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+    // Buttons
+    drawZoneBtn.addEventListener('click', () => {
+      if (!drawingMode) {
+        polygonPoints = [];
+        polygonClosed = false;
+        drawingMode = true;
+        hoveredPointIndex = -1; draggingPointIndex = -1; isDragging = false;
+        zoneAlert.style.display = 'none';
+        drawZoneBtn.textContent = 'Finish drawing';
+        setOverlayVisible(true);
+        renderPolygonOnly();
+      } else {
+        drawingMode = false;
+        if (polygonPoints.length >= 3) polygonClosed = true;
+        drawZoneBtn.textContent = 'Draw zone';
+        renderPolygonOnly();
+      }
+    });
+
+    clearZoneBtn.addEventListener('click', () => {
+      resetInteractionState();
+      setDefaultPolygon();
+      zoneAlert.style.display = 'none';
+      drawZoneBtn.textContent = 'Draw zone';
+      renderPolygonOnly();
+    });
+
+    // Make sure canvas is visible for interactions from the start
+    setDefaultPolygon();
+    setOverlayVisible(true);
   </script>
 </body>
 </html>
