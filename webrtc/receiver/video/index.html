@@ -275,6 +275,23 @@
 
       pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
 
+      //added
+      // Pose DC (receiver-initiated) — keep SDP consistent with the other pages
+      const ch = pc.createDataChannel('pose');
+      ch.onopen  = () => console.log('[DC][receiver] pose DC open (video-only)');
+      ch.onclose = () => console.log('[DC][receiver] pose DC close (video-only)');
+      ch.onerror = (e) => console.warn('[DC][receiver] pose DC error', e);
+      ch.onmessage = (ev) => {
+        // We don't draw anything on the video-only page; just log and ignore.
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg?.type === 'pose-mode') {
+            console.log('[DC][receiver] pose-mode (ignored on video-only):', msg);
+          }
+        } catch {}
+      };
+      //
+
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
@@ -289,10 +306,17 @@
       };
 
       // If the sender opens any data channel, ignore it.
+      /*
       pc.ondatachannel = (e) => {
         console.log('[DC][receiver] ignoring datachannel:', e.channel?.label);
         try { e.channel.close(); } catch {}
       };
+      */
+       pc.ondatachannel = (e) => {
+        console.log('[DC][receiver] inbound datachannel (leaving open):', e.channel?.label);
+        // Leave it open; some sender logic may rely on it existing.
+      };
+ 
 
       // Less jumpy on ICE disconnected; immediate on failed
       pc.oniceconnectionstatechange = () => {
@@ -395,6 +419,12 @@
         remoteDescriptionSet = false;
         stopOfferResendLoop();
       }
+      //added
+      } else if (msg.type === 'hello' || msg.type === 'roster') {
+        // Helpful nudge: if we have an offer in-flight, re-send it.
+        await sendCurrentOffer();
+      }
+      //
     }
 
     window.addEventListener('beforeunload', () => {
