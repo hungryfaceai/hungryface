@@ -316,6 +316,27 @@
       poseCtx.restore();
     }
 
+    /* ---------- NEW: central canvas clear helper ---------- */
+    function clearOverlayDrawing() {
+      try {
+        poseCtx.setTransform(1,0,0,1,0,0);
+        poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+      } catch {}
+    }
+
+    /* ---------- NEW: attach track/stream end handlers ---------- */
+    function attachStreamEndHandlers(stream) {
+      if (!stream) return;
+      // Clear if any video track ends/mutes or is removed
+      stream.getVideoTracks().forEach((t) => {
+        t.addEventListener('ended',  clearOverlayDrawing);
+        t.addEventListener('mute',   clearOverlayDrawing);
+      });
+      stream.addEventListener('removetrack', (e) => {
+        if (e.track?.kind === 'video') clearOverlayDrawing();
+      });
+    }
+
     /* ---------- MediaPipe on RECEIVER ---------- */
     async function ensurePoseTask() {
       if (poseTask) return poseTask;
@@ -441,6 +462,7 @@
         sock.onclose  = () => {
           showStatus('Signaling: closed');
           if (wsKeepalive) { clearInterval(wsKeepalive); wsKeepalive = null; }
+          clearOverlayDrawing();            // NEW: clear on WS close
           scheduleWSReconnect();
         };
       });
@@ -493,6 +515,7 @@
         if (remoteVideo.srcObject !== ev.streams[0]) {
           remoteVideo.srcObject = ev.streams[0];
           tryStartMuted();
+          attachStreamEndHandlers(ev.streams[0]);   // NEW: clear when track stops/mutes
         }
         console.log('[TRACK][receiver] ontrack:', ev.track.kind);
         beginViewportSettle();
@@ -507,9 +530,11 @@
           showStatus('Connected');
           iceDisconnectedSince = null;
         } else if (state === 'failed') {
+          clearOverlayDrawing();                 // NEW: clear on failure
           console.log('[ICE] failed - restarting negotiation');
           startNegotiation(true);
         } else if (state === 'disconnected') {
+          clearOverlayDrawing();                 // NEW: clear on disconnect
           if (!iceDisconnectedSince) iceDisconnectedSince = Date.now();
           setTimeout(() => {
             if (iceDisconnectedSince && Date.now() - iceDisconnectedSince >= 15000) {
@@ -518,6 +543,9 @@
             }
           }, 15100);
           showStatus('ICE: disconnected');
+        } else if (state === 'closed') {
+          clearOverlayDrawing();                 // NEW: clear on closed
+          showStatus('ICE: closed');
         } else {
           showStatus('ICE: ' + state);
         }
@@ -598,8 +626,14 @@
         console.log('[INFO] sender bye -> pause offers until peer rejoins');
         remoteDescriptionSet = false;
         stopOfferResendLoop();
+        clearOverlayDrawing();                 // NEW: clear on explicit bye
       }
     }
+
+    /* ---------- NEW: clear overlay on video element stop-like states ---------- */
+    ['pause','ended','emptied','stalled','suspend','waiting'].forEach((ev) => {
+      remoteVideo.addEventListener(ev, clearOverlayDrawing, { passive: true });
+    });
 
     window.addEventListener('beforeunload', () => {
       try { stopOfferResendLoop(); } catch {}
