@@ -241,7 +241,7 @@
   <script type="module">
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
-    const NEED_OFFER_INTERVAL_MS = 3000;
+    //const NEED_OFFER_INTERVAL_MS = 3000; //now unused https://chatgpt.com/c/68a874e7-225c-832b-b147-60cfea788ffb
     const TASKS_URL  = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     const WASM_DIR   = TASKS_URL + "/wasm";
 
@@ -532,6 +532,7 @@
       });
     }
     */
+    /* revised below: https://chatgpt.com/c/68a874e7-225c-832b-b147-60cfea788ffb
     function getOrCreatePC(peerId) {
       const existing = peers.get(peerId)?.pc;
       if (existing) return existing;
@@ -581,6 +582,63 @@
       peers.set(peerId, { pc, remoteDescriptionSet: false, candidateQueue: [], lastOfferSdp: null });
       return pc;
     }
+    */
+    function getOrCreatePC(peerId) {
+      let rec = peers.get(peerId);
+      if (rec && rec.pc) return rec.pc;
+    
+      if (!localStream) {
+        console.warn('[SENDER] localStream missing; startOrStop() must run first');
+      }
+    
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+        bundlePolicy: 'max-bundle',
+        sdpSemantics: 'unified-plan'
+      });
+    
+      // Attach local tracks to *this* connection
+      if (localStream) {
+        localStream.getTracks().forEach(track => {
+          console.log('[TRACK][sender] addTrack', track.kind, '→', peerId);
+          pc.addTrack(track, localStream);
+        });
+      }
+    
+      // "pose" DC handling (unchanged)
+      pc.ondatachannel = (ev) => {
+        if (ev.channel?.label === 'pose') {
+          const ch = ev.channel;
+          console.log('[DC][sender] ondatachannel: pose from', peerId);
+          ch.onopen  = () => { console.log('[POSE][sender] DC open', peerId); poseDCs.add(ch); announcePoseMode(); };
+          ch.onclose = () => { console.log('[POSE][sender] DC close', peerId); poseDCs.delete(ch); };
+          ch.onerror = (e) => { console.log('[POSE][sender] DC error', peerId, e); };
+          ch.onmessage = onPoseMessageFromReceiver;
+        }
+      };
+    
+      pc.onicecandidate = (e) => {
+        if (e.candidate && ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'candidate', to: peerId, candidate: e.candidate }));
+        }
+      };
+    
+      pc.onconnectionstatechange = () => {
+        const st = pc.connectionState;
+        console.log('[SENDER][PC]', peerId, st);
+        if (st === 'failed' || st === 'closed') cleanupPeer(peerId, 'pc-state:' + st);
+      };
+    
+      // Preserve any existing queued candidates / flags
+      if (!rec) {
+        rec = { pc, remoteDescriptionSet: false, candidateQueue: [], lastOfferSdp: null };
+      } else {
+        rec.pc = pc; // keep existing candidateQueue/flags
+      }
+      peers.set(peerId, rec);
+      return pc;
+    }
+      
     
     function cleanupPeer(peerId, reason = 'cleanup') {
       const rec = peers.get(peerId);
