@@ -316,12 +316,24 @@
       if (qsRoomVal) { try { localStorage.setItem(PREFIX + 'room', qsRoomVal); } catch {} }
     })();
 
+    /* bm - 22 aug 2025 - 16:43
     let ws = null, pc = null, localStream = null;
     let started = false, hideUITimer = null;
 
     let remoteDescriptionSet = false;
     const candidateQueue = [];
     let needOfferTimer = null, lastOfferSdp = null;
+    */
+    let ws = null, localStream = null;
+    let started = false, hideUITimer = null;
+    
+    // One RTCPeerConnection per receiver
+    // peers: Map<peerId, { pc, remoteDescriptionSet: boolean, candidateQueue: RTCIceCandidate[], lastOfferSdp: string|null }>
+    const peers = new Map();
+    
+    // Optional: if you keep the preview/pose logic as-is
+    let needOfferTimer = null; // (we won't use the interval anymore)
+    //end bm - 22 aug 2025 - 16:43
 
     let previewTimer = null, previewTicker = null, previewEnd = 0;
     const poseDCs = new Set();
@@ -461,6 +473,7 @@
           if (!opened) { try { sock.close(); } catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); }
         }, 15000);
 
+        /* https://chatgpt.com/c/68a874e7-225c-832b-b147-60cfea788ffb
         sock.onopen = () => {
           opened = true; clearTimeout(t);
           setStatus('Signaling: connected');
@@ -472,6 +485,18 @@
           }, NEED_OFFER_INTERVAL_MS);
           resolve();
         };
+        */
+        sock.onopen = () => {
+          opened = true; clearTimeout(t);
+          setStatus('Signaling: connected');
+          send({ type: 'join', room, role: 'sender' });
+        
+          // Optional: one-time nudge so any already-open receivers offer
+          send({ type: 'need-offer' });
+        
+          resolve();
+        };
+        //end bm - 22 aug 2025 - 16:48                         
         sock.onmessage = onSignal;
         sock.onerror = (e) => { console.warn('[WS error]', e); };
         sock.onclose  = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); };
@@ -479,6 +504,7 @@
     }
     const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
+    /*bm 22 aug 2025 - 16:45
     function createPC() {
       pc = new RTCPeerConnection({
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
@@ -505,7 +531,67 @@
         pc.addTrack(track, localStream);
       });
     }
+    */
+    function getOrCreatePC(peerId) {
+      const existing = peers.get(peerId)?.pc;
+      if (existing) return existing;
+    
+      if (!localStream) {
+        console.warn('[SENDER] localStream missing; startOrStop() must run first');
+      }
+    
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+        bundlePolicy: 'max-bundle',
+        sdpSemantics: 'unified-plan'
+      });
+    
+      // Attach local tracks to *this* connection
+      if (localStream) {
+        localStream.getTracks().forEach(track => {
+          console.log('[TRACK][sender] addTrack', track.kind, '→', peerId);
+          pc.addTrack(track, localStream);
+        });
+      }
+    
+      // If a receiver opens the "pose" DC, keep your existing logic
+      pc.ondatachannel = (ev) => {
+        if (ev.channel?.label === 'pose') {
+          const ch = ev.channel;
+          console.log('[DC][sender] ondatachannel: pose from', peerId);
+          ch.onopen  = () => { console.log('[POSE][sender] DC open', peerId); poseDCs.add(ch); announcePoseMode(); };
+          ch.onclose = () => { console.log('[POSE][sender] DC close', peerId); poseDCs.delete(ch); };
+          ch.onerror = (e) => { console.log('[POSE][sender] DC error', peerId, e); };
+          ch.onmessage = onPoseMessageFromReceiver;
+        }
+      };
+    
+      pc.onicecandidate = (e) => {
+        if (e.candidate && ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'candidate', to: peerId, candidate: e.candidate }));
+        }
+      };
+    
+      pc.onconnectionstatechange = () => {
+        const st = pc.connectionState;
+        console.log('[SENDER][PC]', peerId, st);
+        if (st === 'failed' || st === 'closed') cleanupPeer(peerId, 'pc-state:' + st);
+      };
+    
+      peers.set(peerId, { pc, remoteDescriptionSet: false, candidateQueue: [], lastOfferSdp: null });
+      return pc;
+    }
+    
+    function cleanupPeer(peerId, reason = 'cleanup') {
+      const rec = peers.get(peerId);
+      if (!rec) return;
+      try { rec.pc.close(); } catch {}
+      peers.delete(peerId);
+      console.log('[SENDER] cleaned', peerId, reason);
+    }
+    //end bm - 22 aug 2025 - 16:46
 
+    /* bm - 22 aug 2025 - 16:51
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
       console.log('[WS IN]', msg.type);
@@ -538,6 +624,93 @@
         }
       }
     }
+    */
+
+    async function onSignal(evt) {
+      let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+      const t = msg?.type;
+    
+      if (t === 'peer-left' && msg.id) {
+        cleanupPeer(msg.id, 'peer-left');
+        return;
+      }
+    
+      if (t === 'bye' && msg.from) {
+        cleanupPeer(msg.from, 'bye');
+        return;
+      }
+    
+      // When a receiver joins, nudge *that* peer only
+      if (t === 'peer-joined' && msg.id && msg.role === 'receiver') {
+        ws?.readyState === WebSocket.OPEN &&
+          ws.send(JSON.stringify({ type: 'need-offer', to: msg.id }));
+        return;
+      }
+    
+      // Optional: if /rooms has existing receivers when we connect
+      if (t === 'roster' && Array.isArray(msg.peers)) {
+        for (const p of msg.peers) {
+          if (p.role === 'receiver') {
+            ws?.readyState === WebSocket.OPEN &&
+              ws.send(JSON.stringify({ type: 'need-offer', to: p.id }));
+          }
+        }
+        return;
+      }
+    
+      if (t === 'offer' && msg.from) {
+        setStatus('Got offer, creating answer…');
+    
+        const rec = peers.get(msg.from) || {};
+        if (rec.lastOfferSdp === msg.sdp) { console.log('[DUP] identical offer ignored from', msg.from); return; }
+    
+        const pc = getOrCreatePC(msg.from);
+    
+        // If renegotiating while we have a local offer, roll back
+        if (pc.signalingState === 'have-local-offer') {
+          try { await pc.setLocalDescription({ type: 'rollback' }); } catch {}
+        }
+    
+        await pc.setRemoteDescription(new RTCSessionDescription(msg));
+    
+        // flush any queued candidates for this peer
+        const state = peers.get(msg.from);
+        state.remoteDescriptionSet = true;
+        for (const c of state.candidateQueue) {
+          try { await pc.addIceCandidate(c); } catch (err) { console.warn('[SENDER] late ICE add failed', msg.from, err); }
+        }
+        state.candidateQueue.length = 0;
+        state.lastOfferSdp = msg.sdp;
+    
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+    
+        // IMPORTANT: target the receiver
+        const ans = pc.localDescription;
+        ws.send(JSON.stringify({ type: ans.type, sdp: ans.sdp, to: msg.from }));
+        return;
+      }
+    
+      if (t === 'candidate' && msg.from && msg.candidate) {
+        const rec = peers.get(msg.from);
+        if (!rec) { /* might arrive before offer */ 
+          peers.set(msg.from, { pc: null, remoteDescriptionSet: false, candidateQueue: [new RTCIceCandidate(msg.candidate)], lastOfferSdp: null });
+          return;
+        }
+        const pc = rec.pc || getOrCreatePC(msg.from);
+        const cand = new RTCIceCandidate(msg.candidate);
+        if (rec.remoteDescriptionSet) {
+          try { await pc.addIceCandidate(cand); } catch (err) { console.warn('[SENDER] ICE add failed', msg.from, err); }
+        } else {
+          rec.candidateQueue.push(cand);
+        }
+        return;
+      }
+    
+      // Ignore noise
+      if (t === 'hello' || t === 'keepalive') return;
+    }
+        //end bm - 22 aug 2025 - 16:51    
 
     function beginPreviewWindow(minutes) {
       const ms = Math.max(0, Math.round((Number(minutes) || 1) * 60000));
@@ -639,6 +812,7 @@
       }
     }
 
+    /* bm - 22 aug 2025 - 17:06
     async function stopStreaming() {
       try { send({ type: 'bye' }); } catch {}
 
@@ -662,8 +836,8 @@
       localStream = null; pc = null; ws = null;
       started = false;
 
-      remoteDescriptionSet = false;
-      candidateQueue.length = 0;
+      remoteDescriptionSet = false; //not needed anymore https://chatgpt.com/c/68a874e7-225c-832b-b147-60cfea788ffb
+      candidateQueue.length = 0;  //not needed anymore https://chatgpt.com/c/68a874e7-225c-832b-b147-60cfea788ffb
       lastOfferSdp = null;
 
       document.body.classList.remove('previewing','streaming','ui-visible');
@@ -677,7 +851,74 @@
       setStatus('Stopped');
       startBtn.textContent = 'Start streaming';
     }
-
+    */
+    async function stopStreaming() {
+      try { send({ type: 'bye' }); } catch {}
+    
+      // Stop timers
+      if (previewTimer)  clearTimeout(previewTimer);
+      if (previewTicker) clearInterval(previewTicker);
+      if (hideUITimer)   clearTimeout(hideUITimer);
+      if (needOfferTimer) clearInterval(needOfferTimer);
+      previewTimer = previewTicker = hideUITimer = needOfferTimer = null;
+    
+      // Stop pose loop/task
+      try { poseLoopRunning = false; } catch {}
+      try { poseTask && poseTask.close && poseTask.close(); } catch {}
+      poseTask = null;
+    
+      // ---- Close all RTCPeerConnections ----
+      // If using the multi-peer patch: close every per-peer PC
+      try {
+        if (typeof peers !== 'undefined' && peers && typeof peers.forEach === 'function') {
+          for (const [peerId, rec] of peers) {
+            try { rec.pc && rec.pc.getSenders()?.forEach(s => s.track && s.track.stop()); } catch {}
+            try { rec.pc && rec.pc.close(); } catch {}
+          }
+          peers.clear();
+        }
+      } catch {}
+    
+      // Fallback for the original single-PC implementation
+      try {
+        if (typeof pc !== 'undefined' && pc) {
+          try { pc.getSenders()?.forEach(s => s.track && s.track.stop()); } catch {}
+          try { pc.close(); } catch {}
+        }
+      } catch {}
+    
+      // Stop local media + WS
+      try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
+      try { ws && ws.close(); } catch {}
+    
+      // Datachannels / references
+      poseDCs.clear();
+    
+      // Null refs
+      try { localStream = null; } catch {}
+      try { ws = null; } catch {}
+      try { if (typeof pc !== 'undefined') pc = null; } catch {}
+    
+      started = false;
+    
+      // Legacy single-peer flags (harmless if not present)
+      try { remoteDescriptionSet = false; } catch {}
+      try { candidateQueue && (candidateQueue.length = 0); } catch {}
+      try { lastOfferSdp = null; } catch {}
+    
+      // UI reset
+      document.body.classList.remove('previewing','streaming','ui-visible');
+      document.body.classList.add('blackout');
+    
+      ui.style.display = '';
+      localVideo.style.display = 'none';
+      poseCanvas.style.display = 'none';
+      ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+    
+      setStatus('Stopped');
+      startBtn.textContent = 'Start streaming';
+    }
+    //end - bm 22 aug 2025 - 17:07
     window.addEventListener('beforeunload', stopStreaming);
     startBtn.addEventListener('click', startOrStop);
 
