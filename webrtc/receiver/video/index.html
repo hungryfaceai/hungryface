@@ -403,6 +403,7 @@
       // end bm - 22 aug 2025 - 17:41
       if (msg.type === 'roster' && Array.isArray(msg.peers)) {
         const snd = msg.peers.find(p => p.role === 'sender');
+        if (snd) { senderId = s.id; }
         const newId = snd?.id || null;
         if (newId && newId !== targetSenderId) {
           targetSenderId = newId;
@@ -463,7 +464,9 @@
         }
       //} else if (msg.type === 'peer-joined' || msg.type === 'need-offer') {
       //  await sendCurrentOffer();
-      } else if (msg.type === 'peer-joined' && msg.role === 'sender') {
+      //} else if (msg.type === 'peer-joined' && msg.role === 'sender') {
+      } else if (msg.type === 'peer-joined' && msg.role === 'sender' && msg.id) { //replaced the above line with this - bm 22 aug 2025 - 19:29 https://chatgpt.com/c/68a8ae44-518c-832e-bf56-0395ef065b37
+        senderId = msg.id; //added this
         await sendCurrentOffer();
       } else if (msg.type === 'need-offer') {
         await sendCurrentOffer();        
