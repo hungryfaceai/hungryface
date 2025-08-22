@@ -424,6 +424,7 @@
           try { await pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
         }
         candidateQueue.length = 0;*/
+        if (!targetSenderId && msg.from) targetSenderId = msg.from;
         if (msg.from && targetSenderId && msg.from !== targetSenderId) return; // ignore others
         if (pc.signalingState !== 'have-local-offer') { 
           console.log('[SKIP] answer in state', pc.signalingState);
@@ -446,6 +447,7 @@
         } else {
           candidateQueue.push(cand);
         } */
+        if (!targetSenderId && msg.from) targetSenderId = msg.from;
         if (msg.from && targetSenderId && msg.from !== targetSenderId) return; // ignore others
         const cand = new RTCIceCandidate(msg.candidate);
         if (remoteDescriptionSet) {
@@ -453,14 +455,19 @@
         } else {
           candidateQueue.push(cand);
         }
-      } else if (msg.type === 'peer-joined' || msg.type === 'need-offer') {
+      //} else if (msg.type === 'peer-joined' || msg.type === 'need-offer') {
+      //  await sendCurrentOffer();
+      } else if (msg.type === 'peer-joined' && msg.role === 'sender') {
         await sendCurrentOffer();
+      } else if (msg.type === 'need-offer') {
+        await sendCurrentOffer();        
       } else if (msg.type === 'bye') {
         console.log('[INFO] sender bye -> pause offers until peer rejoins');
         remoteDescriptionSet = false;
         stopOfferResendLoop();
       //added
-      } else if (msg.type === 'hello' || msg.type === 'roster') {
+      //} else if (msg.type === 'hello' || msg.type === 'roster') {
+      } else if (msg.type === 'hello') {
         // Helpful nudge: if we have an offer in-flight, re-send it.
         await sendCurrentOffer();
       }
