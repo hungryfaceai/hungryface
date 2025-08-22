@@ -661,7 +661,9 @@
         if (lastOfferSdp === msg.sdp) { console.log('[DUP] identical offer ignored'); return; }
         lastOfferSdp = msg.sdp;
 
-        await pc.setRemoteDescription(new RTCSessionDescription(msg));
+        //await pc.setRemoteDescription(new RTCSessionDescription(msg));
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: msg.type, sdp: msg.sdp })); //bm - 22 aug 2025 - 23:05 - https://chatgpt.com/c/68a8ae44-518c-832e-bf56-0395ef065b37
+        
         remoteDescriptionSet = true;
 
         while (candidateQueue.length) {
@@ -745,7 +747,10 @@
     
         // IMPORTANT: target the receiver
         const ans = pc.localDescription;
-        ws.send(JSON.stringify({ type: ans.type, sdp: ans.sdp, to: msg.from }));
+        //ws.send(JSON.stringify({ type: ans.type, sdp: ans.sdp, to: msg.from }));
+        const payload = { type: ans.type, sdp: ans.sdp, to: msg.from };
+        console.log('[WS OUT] answer →', msg.from);
+        ws.send(JSON.stringify(payload));        
         return;
       }
     
