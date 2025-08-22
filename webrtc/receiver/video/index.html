@@ -356,8 +356,13 @@
 
     async function sendCurrentOffer() {
       if (pc?.localDescription?.type === 'offer') {
-        console.log('[WS OUT] offer (send/resend)');
-        send(pc.localDescription);
+        //console.log('[WS OUT] offer (send/resend)'); 
+        //send(pc.localDescription);
+        //bm - 22 aug 2025 - 19:16 - https://chatgpt.com/c/68a8ae44-518c-832e-bf56-0395ef065b37 - replace the above with:
+        const payload = { type: pc.localDescription.type, sdp: pc.localDescription.sdp };
+        if (senderId) payload.to = senderId;      // ← target the sender when known
+        console.log('[WS OUT] offer (send/resend)', senderId ? `(to ${senderId})` : '(broadcast)');
+        send(payload);        
       }
     }
 
