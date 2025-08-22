@@ -150,8 +150,6 @@
       <span id="fenceBannerTime">--:--</span>.
     </div>
     <div class="fence-banner__actions">
-      <button id="fenceKeepBtn" class="fence-link" type="button">Keep reminding</button>
-      <span aria-hidden="true">·</span>
       <button id="fenceDismissBtn" class="fence-link" type="button">Dismiss</button>
     </div>
   </div>
@@ -198,7 +196,6 @@
     /* ----- Virtual Fence banner DOM ----- */
     const fenceBanner     = document.getElementById('fenceBanner');
     const fenceBannerTime = document.getElementById('fenceBannerTime');
-    const fenceKeepBtn    = document.getElementById('fenceKeepBtn');
     const fenceDismissBtn = document.getElementById('fenceDismissBtn');
 
     /* ---------- State ---------- */
@@ -253,26 +250,16 @@
       fenceBanner.classList.add('hidden');
     }
     function updateFenceBanner(isOutside) {
-      // rising edge -> record first breach moment
-      if (isOutside && !lastOutside) {
-        lastBreachAtMs = Date.now();
-      }
+      if (isOutside && !lastOutside) lastBreachAtMs = Date.now();
       if (isOutside) {
-        if (keepReminding) {
-          showFenceBanner(lastBreachAtMs || Date.now());
-        } else {
-          if (Date.now() >= suppressUntilMs) showFenceBanner(Date.now());
-          else hideFenceBanner();
-        }
+        if (Date.now() >= suppressUntilMs) showFenceBanner(lastBreachAtMs || Date.now());
+        else hideFenceBanner();
       } else {
         hideFenceBanner();
       }
       lastOutside = isOutside;
-    }
-    fenceKeepBtn?.addEventListener('click', () => {
-      keepReminding = true;
-      if (lastOutside) showFenceBanner(lastBreachAtMs || Date.now());
-    });
+    }   
+
     fenceDismissBtn?.addEventListener('click', () => {
       keepReminding   = false;
       suppressUntilMs = Date.now() + DISMISS_SUPPRESS_MS;
