@@ -1,1 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Signaling Rooms – Live Roster</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0b0f;
+      --panel: #15151b;
+      --muted: #8b8ca3;
+      --text: #e9eaf2;
+      --ok: #7dd87d;
+      --warn: #ffb84d;
+      --err: #ff6b6b;
+      --sender: #ff9f43;   /* orange */
+      --receiver: #6ac4ff; /* cyan   */
+      --chip: #242633;
+      --ring: #2b2e44;
+      --focus: #7aa2ff;
+    }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif; }
+    .wrap {
+      max-width: 1100px; margin: 0 auto; padding: 20px;
+      display: grid; grid-template-rows: auto auto 1fr; gap: 16px;
+    }
+    header {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    .title { font-size: 22px; font-weight: 700; letter-spacing: 0.2px; }
+    .legend { margin-left: auto; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+    .pill { display: inline-flex; align-items: center; gap: 8px; background: var(--chip); padding: 6px 10px; border-radius: 999px; font-size: 12px; color: var(--muted); }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+    .dot.sender { background: var(--sender); }
+    .dot.receiver { background: var(--receiver); }
+
+    .toolbar {
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+      background: var(--panel); border: 1px solid var(--ring); border-radius: 12px; padding: 10px;
+    }
+    .toolbar input[type="url"] {
+      flex: 1 1 320px; background: #0f111a; border: 1px solid var(--ring); color: var(--text);
+      padding: 10px 12px; border-radius: 10px; outline: none;
+    }
+    .toolbar input[type="url"]:focus { border-color: var(--focus); }
+    .toolbar button, .toolbar label.btn {
+      background: #1b1d2a; border: 1px solid var(--ring); color: var(--text);
+      padding: 10px 12px; border-radius: 10px; cursor: pointer; font-weight: 600;
+    }
+    .toolbar button:hover, .toolbar label.btn:hover { background: #202338; }
+    .toolbar .spacer { flex: 1; }
+
+    .status {
+      display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted);
+    }
+    .badge { padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: 11px; letter-spacing: .3px; }
+    .badge.ok { background: #0f2a16; color: var(--ok); border: 1px solid #1c4b25; }
+    .badge.warn { background: #2a230f; color: var(--warn); border: 1px solid #4b3c1c; }
+    .badge.err { background: #2a0f12; color: var(--err); border: 1px solid #4b1c23; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 14px;
+      align-content: start;
+    }
+
+    .room {
+      background: var(--panel);
+      border: 1px solid var(--ring);
+      border-radius: 16px;
+      padding: 12px;
+      display: grid; grid-template-rows: auto auto 1fr; gap: 10px;
+      min-height: 160px;
+    }
+
+    .room-head {
+      display: flex; align-items: center; gap: 8px; justify-content: space-between;
+    }
+    .room-title { font-weight: 700; font-size: 16px; letter-spacing: .2px; }
+    .counts { display: inline-flex; gap: 6px; }
+    .count {
+      font-size: 11px; color: var(--muted);
+      border: 1px dashed var(--ring); padding: 4px 8px; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px;
+    }
+
+    .bubbles {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      padding: 4px; border-radius: 10px; background: #11131d;
+      min-height: 60px;
+    }
+    .node {
+      display: inline-flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 999px;
+      background: #171926; border: 1px solid var(--ring); font-size: 12px; user-select: text;
+    }
+    .node .badge-role {
+      width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center;
+      font-size: 11px; font-weight: 800; color: #081018;
+    }
+    .node.sender .badge-role { background: var(--sender); }
+    .node.receiver .badge-role { background: var(--receiver); }
+
+    .room-foot {
+      display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--muted);
+      font-size: 12px;
+    }
+    .warnline { color: var(--warn); display: inline-flex; align-items: center; gap: 6px; }
+
+    details.fallback {
+      background: var(--panel); border: 1px dashed var(--ring); border-radius: 12px; padding: 8px 10px;
+    }
+    details.fallback summary { cursor: pointer; color: var(--muted); }
+    textarea {
+      width: 100%; min-height: 120px; margin-top: 8px; background: #0f111a; color: var(--text);
+      border: 1px solid var(--ring); border-radius: 8px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .footer {
+      text-align: center; color: var(--muted); font-size: 12px; padding: 8px 0 16px;
+    }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #cbd5ff; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="title">Signaling Rooms</div>
+      <div class="legend">
+        <span class="pill"><span class="dot sender"></span> Sender</span>
+        <span class="pill"><span class="dot receiver"></span> Receiver</span>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <input id="endpoint" type="url" value="https://signaling-server-f5gu.onrender.com/rooms" aria-label="Rooms endpoint">
+      <button id="btn-refresh" type="button">Refresh now</button>
+      <label class="btn"><input id="auto" type="checkbox" checked style="accent-color: var(--focus); margin-right:6px;">Auto refresh (3s)</label>
+      <div class="spacer"></div>
+      <div class="status">
+        <span id="status-badge" class="badge warn">IDLE</span>
+        <span id="status-msg">Waiting…</span>
+      </div>
+    </div>
+
+    <details class="fallback">
+      <summary>Paste JSON roster manually (useful if CORS blocks fetch)</summary>
+      <textarea id="paste" placeholder='{"5":[{"id":"...","role":"sender"}]}'></textarea>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button id="btn-apply" type="button">Render pasted JSON</button>
+        <button id="btn-sample" type="button">Load sample</button>
+      </div>
+    </details>
+
+    <div id="grid" class="grid" role="list" aria-label="Rooms"></div>
+
+    <div class="footer">
+      Last updated: <span id="last-updated">—</span> · Endpoint: <span class="mono" id="endpoint-view">—</span>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const endpointInput = document.getElementById('endpoint');
+      const grid          = document.getElementById('grid');
+      const badge         = document.getElementById('status-badge');
+      const statusMsg     = document.getElementById('status-msg');
+      const lastUpdated   = document.getElementById('last-updated');
+      const endpointView  = document.getElementById('endpoint-view');
+      const btnRefresh    = document.getElementById('btn-refresh');
+      const btnApply      = document.getElementById('btn-apply');
+      const btnSample     = document.getElementById('btn-sample');
+      const autoToggle    = document.getElementById('auto');
+      const pasteArea     = document.getElementById('paste');
+
+      let timer = null;
+
+      function setBadge(kind, text) {
+        badge.className = 'badge ' + kind;
+        badge.textContent = text;
+      }
+
+      function fmtTime(d=new Date()) {
+        const pad = n => String(n).padStart(2, '0');
+        return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
+               ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+      }
+
+      function summarizeRoom(list) {
+        let senders=0, receivers=0;
+        for (const m of list) {
+          if ((m.role||'').toLowerCase() === 'sender') senders++;
+          else receivers++;
+        }
+        return { senders, receivers };
+      }
+
+      function shortId(id) {
+        if (!id) return '—';
+        if (id.length <= 14) return id;
+        return id.slice(0, 6) + '…' + id.slice(-6);
+      }
+
+      function render(data) {
+        // data is expected as { "<roomId>": [ {id, role}, ... ], ... }
+        grid.innerHTML = '';
+        const roomIds = Object.keys(data || {}).sort((a,b) => {
+          const na = Number(a), nb = Number(b);
+          if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+          return (''+a).localeCompare(''+b);
+        });
+
+        if (roomIds.length === 0) {
+          grid.innerHTML = `<div class="room" role="listitem"><div class="room-head">
+            <div class="room-title">No rooms</div>
+          </div><div class="bubbles" style="justify-content:center;color:var(--muted)">Roster is empty.</div></div>`;
+          return;
+        }
+
+        for (const roomId of roomIds) {
+          const members = Array.isArray(data[roomId]) ? data[roomId] : [];
+          const { senders, receivers } = summarizeRoom(members);
+
+          const card = document.createElement('div');
+          card.className = 'room';
+          card.setAttribute('role', 'listitem');
+          card.innerHTML = `
+            <div class="room-head">
+              <div class="room-title">Room ${roomId}</div>
+              <div class="counts">
+                <span class="count"><span class="dot sender" style="width:8px;height:8px;border-radius:50%"></span> ${senders} sender${senders!==1?'s':''}</span>
+                <span class="count"><span class="dot receiver" style="width:8px;height:8px;border-radius:50%"></span> ${receivers} receiver${receivers!==1?'s':''}</span>
+              </div>
+            </div>
+            <div class="bubbles"></div>
+            <div class="room-foot">
+              ${senders === 0 ? `<span class="warnline">⚠ No sender in this room</span>` : `<span></span>`}
+              <span>${members.length} participant${members.length!==1?'s':''}</span>
+            </div>
+          `;
+
+          const bubbles = card.querySelector('.bubbles');
+          for (const m of members) {
+            const role = (m.role || '').toLowerCase() === 'sender' ? 'sender' : 'receiver';
+            const node = document.createElement('div');
+            node.className = `node ${role}`;
+            node.innerHTML = `
+              <span class="badge-role" title="${role === 'sender' ? 'Sender' : 'Receiver'}">${role === 'sender' ? 'S' : 'R'}</span>
+              <span class="mono" title="${m.id || ''}">${shortId(m.id)}</span>
+            `;
+            // Click to copy full ID
+            node.addEventListener('click', () => {
+              if (!m.id) return;
+              navigator.clipboard?.writeText(m.id);
+            }, { passive: true });
+            bubbles.appendChild(node);
+          }
+
+          grid.appendChild(card);
+        }
+      }
+
+      async function fetchAndRender() {
+        const url = endpointInput.value.trim();
+        endpointView.textContent = url || '—';
+
+        if (!url) { setBadge('warn', 'NO URL'); statusMsg.textContent = 'Enter an endpoint to fetch.'; return; }
+
+        setBadge('warn', 'FETCHING');
+        statusMsg.textContent = 'Fetching roster…';
+
+        try {
+          const resp = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store' });
+          if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
+          const data = await resp.json();
+          render(data);
+          setBadge('ok', 'LIVE');
+          statusMsg.textContent = 'Updated successfully.';
+          lastUpdated.textContent = fmtTime();
+        } catch (err) {
+          setBadge('err', 'ERROR');
+          statusMsg.textContent = (err && err.message) ? err.message : 'Fetch failed.';
+          // Do not clear the grid – user may have pasted JSON
+          console.error(err);
+        }
+      }
+
+      function startAuto() {
+        clearInterval(timer);
+        if (autoToggle.checked) {
+          timer = setInterval(fetchAndRender, 3000);
+        }
+      }
+
+      // Wire up UI
+      btnRefresh.addEventListener('click', fetchAndRender);
+      endpointInput.addEventListener('change', fetchAndRender);
+      autoToggle.addEventListener('change', () => { startAuto(); fetchAndRender(); });
+
+      btnApply.addEventListener('click', () => {
+        try {
+          const json = JSON.parse(pasteArea.value || '{}');
+          render(json);
+          setBadge('ok', 'LOCAL');
+          statusMsg.textContent = 'Rendered pasted JSON.';
+          lastUpdated.textContent = fmtTime();
+        } catch (e) {
+          setBadge('err', 'BAD JSON');
+          statusMsg.textContent = 'Could not parse pasted JSON.';
+        }
+      });
+
+      btnSample.addEventListener('click', () => {
+        pasteArea.value = JSON.stringify({
+          "5":[
+            {"id":"72be92bf-1ef8-45b8-8a1c-c36a15c51810","role":"sender"},
+            {"id":"65c8b029-e59e-4ea7-b649-f4a1df770bb4","role":"receiver"},
+            {"id":"35bc66fe-0786-42ce-a805-58ad63c62752","role":"receiver"}
+          ],
+          "6":[{"id":"6599ebc7-db0c-4701-bf7a-d80599e8575b","role":"receiver"}]
+        }, null, 2);
+      });
+
+      // Kick off
+      startAuto();
+      fetchAndRender();
+    })();
+  </script>
+</body>
+</html>
 
