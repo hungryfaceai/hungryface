@@ -257,6 +257,8 @@
     //const NEED_OFFER_INTERVAL_MS = 3000; //now unused https://chatgpt.com/c/68a874e7-225c-832b-b147-60cfea788ffb
     const TASKS_URL  = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     const WASM_DIR   = TASKS_URL + "/wasm";
+    const AUDIO_TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0";
+    const AUDIO_WASM_DIR  = AUDIO_TASKS_URL + "/wasm";
 
     const roomInput = document.getElementById('room');
     const videoOn   = document.getElementById('videoOn');
@@ -388,8 +390,8 @@
     let PoseLandmarker, FilesetResolver, DrawingUtils;
     let poseTask = null, poseLoopRunning = false;
 
-    // ==== FACE AI state ====
     let FaceLandmarker, faceTask = null, faceLoopRunning = false;
+    let AudioClassifier, audioTask = null, audioLoopRunning = false;
     
     const ctx = poseCanvas.getContext('2d', { alpha: true });
 
@@ -981,6 +983,10 @@
       try { poseLoopRunning = false; } catch {}
       try { poseTask && poseTask.close && poseTask.close(); } catch {}
       poseTask = null;
+
+      stopSenderAudioLoop();
+      try { audioTask && audioTask.close && audioTask.close(); } catch {}
+      audioTask = null;
     
       // ---- Close all RTCPeerConnections ----
       // If using the multi-peer patch: close every per-peer PC
@@ -1082,6 +1088,23 @@
       });
       return faceTask;
     }
+
+    async function ensureAudioTask() {
+      if (audioTask) return audioTask;
+      if (!AudioClassifier) {
+        ({ AudioClassifier } = await import(AUDIO_TASKS_URL));
+        console.log('[AUDIO][sender] AudioClassifier loaded');
+      }
+      const resolver = await AudioClassifier.FilesetResolver.forAudioTasks(AUDIO_WASM_DIR);
+      audioTask = await AudioClassifier.createFromOptions(resolver, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.task"
+        },
+        runningMode: "AUDIO_CLIPS"
+      });
+      return audioTask;
+    }
     
     function sendPoseToReceivers(landmarks) {
       const payload = JSON.stringify({ type:'pose', landmarks, ts: performance.now() });
@@ -1120,6 +1143,8 @@
       };
       loop();
     }
+
+    
     function stopSenderPoseLoop() {
       poseLoopRunning = false;
       ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
@@ -1143,6 +1168,60 @@
     //poseOn.addEventListener('change', () => { console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`); announceAIModes(); });
     //poseWhere.addEventListener('change', () => { console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`); announceAIModes(); });
 
+    //audio
+    async function startSenderAudioLoop() {
+      if (!started || !audioAiOn?.checked || audioAiWhere?.value !== 'sender') return;
+    
+      const task = await ensureAudioTask();
+      if (!localStream?.getAudioTracks()?.length) {
+        console.warn('[AUDIO][sender] No audio track');
+        return;
+      }
+    
+      const audioCtx = new AudioContext({ sampleRate: 16000 }); // required for yamnet
+      const source   = audioCtx.createMediaStreamSource(localStream);
+      const processor = audioCtx.createScriptProcessor(1024, 1, 1);
+    
+      source.connect(processor);
+      processor.connect(audioCtx.destination);
+    
+      audioLoopRunning = true;
+      console.log('[AUDIO][sender] loop START');
+    
+      processor.onaudioprocess = async (e) => {
+        if (!audioLoopRunning || !started || !audioAiOn.checked || audioAiWhere.value !== 'sender') {
+          console.log('[AUDIO][sender] loop STOP');
+          try { processor.disconnect(); source.disconnect(); audioCtx.close(); } catch {}
+          return;
+        }
+        const inputData = e.inputBuffer.getChannelData(0);
+        const result = await task.classify(inputData);
+        const classifications = result?.classifications?.[0]?.categories ?? [];
+    
+        // broadcast raw categories
+        const payload = JSON.stringify({ type:'audio', categories: classifications, ts: performance.now() });
+        for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
+      };
+    }
+    
+    function stopSenderAudioLoop() {
+      audioLoopRunning = false;
+    }
+    
+    function announceAudioMode() {
+      const enabled = !!audioAiOn?.checked;
+      const where   = audioAiWhere?.value;
+      for (const ch of poseDCs) if (ch.readyState === 'open') {
+        ch.send(JSON.stringify({ type:'audio-mode', enabled, where }));
+      }
+    }
+    
+    function applyAudioUI() {
+      if (started && audioAiOn?.checked && audioAiWhere?.value === 'sender') startSenderAudioLoop();
+      else stopSenderAudioLoop();
+      announceAudioMode();
+    }
+    
     announceAIModes(); // ← harmless early initialization
     const qsRoom = new URLSearchParams(location.search).get('room');
     if (qsRoom) roomInput.value = qsRoom;
