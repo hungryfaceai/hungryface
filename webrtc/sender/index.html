@@ -278,6 +278,30 @@
     const faceOn       = document.getElementById('faceOn');
     const faceWhere    = document.getElementById('faceWhere');    
 
+    function announceAIModes() {
+      // 1) Apply local behavior + per-feature mode messages (pose/audio/face)
+      applyPoseUI();
+      applyAudioUI();
+      applyFaceUI();
+    
+      // 2) Broadcast one consolidated snapshot
+      const payload = {
+        type: 'ai-modes',
+        pose:  { enabled: !!poseOn.checked,        where: poseWhere.value },
+        audio: { enabled: !!audioAiOn?.checked,    where: audioAiWhere?.value },
+        face:  { enabled: !!faceOn?.checked,       where: faceWhere?.value }
+      };
+      for (const ch of poseDCs) if (ch.readyState === 'open') {
+        ch.send(JSON.stringify(payload));
+      }
+    }
+
+    // One compact block for ALL AI controls (pose + audio + face)
+    [poseOn, poseWhere, audioAiOn, audioAiWhere, faceOn, faceWhere]
+      .filter(Boolean)
+      .forEach(el => el.addEventListener('change', announceAIModes));
+
+
     /* -----------------------
        PERSISTENCE (localStorage) — no behavior changes
        ----------------------- */
@@ -292,12 +316,18 @@
         ['room',       'text',     document.getElementById('room')],
         ['previewMins','number',   document.getElementById('previewMins')],
         ['poseOn',     'checkbox', document.getElementById('poseOn')],
-        ['poseWhere',  'select',   document.getElementById('poseWhere')],
-      ];
+        ['poseWhere',    'select',   poseWhere],
+    
+        // NEW: persist Audio + Face AI exactly the same way
+        ['audioAiOn',    'checkbox', audioAiOn],
+        ['audioAiWhere', 'select',   audioAiWhere],
+        ['faceOn',       'checkbox', faceOn],
+        ['faceWhere',    'select',   faceWhere],
+      ].filter(([, , el]) => !!el); // keep only those that exist
 
       // Also persist the (currently disabled) Audio/Face AI controls and their dropdowns.
       // We don't add IDs or change markup; we select by structure:
-      const aiRows = document.querySelectorAll('fieldset.ai .ai-row');
+      /*const aiRows = document.querySelectorAll('fieldset.ai .ai-row');
       const audioRow = aiRows[1], faceRow = aiRows[2];
       const audioChk = audioRow?.querySelector('input[type="checkbox"]');
       const audioSel = audioRow?.querySelector('select');
@@ -306,7 +336,7 @@
       if (audioChk) entries.push(['audioAiOn',   'checkbox', audioChk]);
       if (audioSel) entries.push(['audioAiWhere','select',   audioSel]);
       if (faceChk)  entries.push(['faceOn',      'checkbox', faceChk]);
-      if (faceSel)  entries.push(['faceWhere',   'select',   faceSel]);
+      if (faceSel)  entries.push(['faceWhere',   'select',   faceSel]);*/
 
       function loadOne(key, type, el) {
         if (!el) return;
@@ -357,6 +387,10 @@
 
     let PoseLandmarker, FilesetResolver, DrawingUtils;
     let poseTask = null, poseLoopRunning = false;
+
+    // ==== FACE AI state ====
+    let FaceLandmarker, faceTask = null, faceLoopRunning = false;
+    
     const ctx = poseCanvas.getContext('2d', { alpha: true });
 
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
@@ -627,7 +661,7 @@
         if (ev.channel?.label === 'pose') {
           const ch = ev.channel;
           console.log('[DC][sender] ondatachannel: pose from', peerId);
-          ch.onopen  = () => { console.log('[POSE][sender] DC open', peerId); poseDCs.add(ch); announcePoseMode(); };
+          ch.onopen  = () => { console.log('[POSE][sender] DC open', peerId); poseDCs.add(ch); announceAIModes();};
           ch.onclose = () => { console.log('[POSE][sender] DC close', peerId); poseDCs.delete(ch); };
           ch.onerror = (e) => { console.log('[POSE][sender] DC error', peerId, e); };
           ch.onmessage = onPoseMessageFromReceiver;
@@ -882,7 +916,8 @@
 
         applyVideoToggle();
         applyAudioToggle();
-        applyPoseUI();
+        //applyPoseUI();
+        announceAIModes();
 
       } catch (err) {
         console.error(err);
@@ -1011,10 +1046,11 @@
       console.log(`[POSE][sender] announce inference-mode: ${where} (enabled: ${enabled} )`);
     }
     async function ensureTasksLoaded() {
-      if (PoseLandmarker) return;
-      ({ PoseLandmarker, FilesetResolver, DrawingUtils } = await import(TASKS_URL));
-      console.log('[POSE][sender] DrawingUtils loaded');
+      if (PoseLandmarker && FaceLandmarker && FilesetResolver && DrawingUtils) return;
+      ({ PoseLandmarker, FaceLandmarker, FilesetResolver, DrawingUtils } = await import(TASKS_URL));
+      console.log('[TASKS] Vision tasks loaded');
     }
+
     async function ensurePoseTask() {
       await ensureTasksLoaded();
       if (poseTask) return poseTask;
@@ -1030,6 +1066,23 @@
       });
       return poseTask;
     }
+
+    async function ensureFaceTask() {
+      await ensureTasksLoaded();
+      if (faceTask) return faceTask;
+      const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
+      faceTask = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+          delegate: "GPU"
+        },
+        runningMode: "VIDEO",
+        numFaces: 1
+      });
+      return faceTask;
+    }
+    
     function sendPoseToReceivers(landmarks) {
       const payload = JSON.stringify({ type:'pose', landmarks, ts: performance.now() });
       for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
@@ -1080,15 +1133,17 @@
       } catch {}
     }
     function applyPoseUI() {
+      //announceAIModes();
       announcePoseMode();
       beginViewportSettle();
       if (!poseOn.checked) { stopSenderPoseLoop(); return; }
       if (started && poseWhere.value === 'sender') startSenderPoseLoop();
       else stopSenderPoseLoop();
     }
-    poseOn.addEventListener('change', () => { console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`); applyPoseUI(); });
-    poseWhere.addEventListener('change', () => { console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`); applyPoseUI(); });
+    //poseOn.addEventListener('change', () => { console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`); announceAIModes(); });
+    //poseWhere.addEventListener('change', () => { console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`); announceAIModes(); });
 
+    announceAIModes(); // ← harmless early initialization
     const qsRoom = new URLSearchParams(location.search).get('room');
     if (qsRoom) roomInput.value = qsRoom;
   </script>
