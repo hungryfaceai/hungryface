@@ -395,6 +395,7 @@
     let AudioFilesetResolver; // alias to avoid clashing with vision FilesetResolver
     
     const ctx = poseCanvas.getContext('2d', { alpha: true });
+    let lastClearedTs = -1; // ensures we clear once per animation frame
 
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
     const currentRoom = () => (roomInput.value || 'Baby').trim();
@@ -1155,7 +1156,7 @@
       }
     }
     
-    async function startSenderPoseLoop() {
+    /*async function startSenderPoseLoop() {
       if (!started || !poseOn.checked || poseWhere.value !== 'sender') return;
       const task = await ensurePoseTask();
       poseLoopRunning = true;
@@ -1174,7 +1175,37 @@
         requestAnimationFrame(loop);
       };
       loop();
+    }*/
+    async function startSenderPoseLoop() {
+      if (!started || !poseOn.checked || poseWhere.value !== 'sender') return;
+      const task = await ensurePoseTask();
+      poseLoopRunning = true;
+      console.log('[POSE][sender] inference START (sender)');
+    
+      const loop = (ts) => {
+        if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') {
+          console.log('[POSE][sender] inference STOP (sender)'); return;
+        }
+    
+        // Clear once per frame (whoever gets here first)
+        if (document.body.classList.contains('previewing') && ts !== lastClearedTs) {
+          ctx.setTransform(1,0,0,1,0,0);
+          ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+          lastClearedTs = ts;
+        }
+    
+        const result = task.detectForVideo(localVideo, ts ?? performance.now());
+        if (result?.landmarks?.length) {
+          if (document.body.classList.contains('previewing')) {
+            drawPoseOnSender(result.landmarks);
+          }
+          sendPoseToReceivers(result.landmarks);
+        }
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
     }
+
 
     
     function stopSenderPoseLoop() {
@@ -1282,7 +1313,7 @@
     }
 
     // face
-    async function startSenderFaceLoop() {
+    /*async function startSenderFaceLoop() {
       if (!started || !faceOn?.checked || faceWhere?.value !== 'sender') return;
       const task = await ensureFaceTask();
       faceLoopRunning = true;
@@ -1305,7 +1336,43 @@
         requestAnimationFrame(loop);
       };
       loop();
+    }*/
+
+    async function startSenderFaceLoop() {
+      if (!started || !faceOn?.checked || faceWhere?.value !== 'sender') return;
+      const task = await ensureFaceTask();
+      faceLoopRunning = true;
+      console.log('[FACE][sender] loop START (sender)');
+    
+      const loop = (ts) => {
+        if (!faceLoopRunning || !started || !faceOn.checked || faceWhere.value !== 'sender') {
+          console.log('[FACE][sender] loop STOP (sender)'); return;
+        }
+    
+        // Clear once per frame (may already be cleared by pose loop)
+        if (document.body.classList.contains('previewing') && ts !== lastClearedTs) {
+          ctx.setTransform(1,0,0,1,0,0);
+          ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+          lastClearedTs = ts;
+        }
+    
+        const result = task.detectForVideo(localVideo, ts ?? performance.now());
+    
+        // Draw locally while previewing
+        if (document.body.classList.contains('previewing')) {
+          drawFaceOnSender(result?.faceLandmarks);
+        }
+    
+        // Broadcast to receivers
+        const payload = JSON.stringify({ type:'face', landmarks: result?.faceLandmarks ?? null, ts });
+        for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
+    
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
     }
+
+      
     function stopSenderFaceLoop() { faceLoopRunning = false; }
     function announceFaceMode() {
       const enabled = !!faceOn?.checked;
