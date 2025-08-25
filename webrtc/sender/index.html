@@ -392,6 +392,7 @@
 
     let FaceLandmarker, faceTask = null, faceLoopRunning = false;
     let AudioClassifier, audioTask = null, audioLoopRunning = false;
+    let AudioFilesetResolver; // alias to avoid clashing with vision FilesetResolver
     
     const ctx = poseCanvas.getContext('2d', { alpha: true });
 
@@ -987,6 +988,11 @@
       stopSenderAudioLoop();
       try { audioTask && audioTask.close && audioTask.close(); } catch {}
       audioTask = null;
+
+      // Stop face loop/task
+      try { faceLoopRunning = false; } catch {}
+      try { faceTask && faceTask.close && faceTask.close(); } catch {}
+      faceTask = null;
     
       // ---- Close all RTCPeerConnections ----
       // If using the multi-peer patch: close every per-peer PC
@@ -1091,11 +1097,11 @@
 
     async function ensureAudioTask() {
       if (audioTask) return audioTask;
-      if (!AudioClassifier) {
-        ({ AudioClassifier } = await import(AUDIO_TASKS_URL));
-        console.log('[AUDIO][sender] AudioClassifier loaded');
+      if (!AudioClassifier || !AudioFilesetResolver) {
+        ({ AudioClassifier, FilesetResolver: AudioFilesetResolver } = await import(AUDIO_TASKS_URL));
+        console.log('[AUDIO][sender] AudioClassifier + FilesetResolver loaded');
       }
-      const resolver = await AudioClassifier.FilesetResolver.forAudioTasks(AUDIO_WASM_DIR);
+      const resolver = await AudioFilesetResolver.forAudioTasks(AUDIO_WASM_DIR);
       audioTask = await AudioClassifier.createFromOptions(resolver, {
         baseOptions: {
           modelAssetPath:
@@ -1178,15 +1184,22 @@
         return;
       }
     
-      const audioCtx = new AudioContext({ sampleRate: 16000 }); // required for yamnet
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const source   = audioCtx.createMediaStreamSource(localStream);
       const processor = audioCtx.createScriptProcessor(1024, 1, 1);
     
       source.connect(processor);
       processor.connect(audioCtx.destination);
     
+      const sr = audioCtx.sampleRate;
+      const WINDOW_SEC = 0.975;
+      const CLIP_SAMPLES = Math.round(sr * WINDOW_SEC);
+    
+      const chunks = [];
+      let totalSamples = 0;
+    
       audioLoopRunning = true;
-      console.log('[AUDIO][sender] loop START');
+      console.log('[AUDIO][sender] loop START @', sr, 'Hz');
     
       processor.onaudioprocess = async (e) => {
         if (!audioLoopRunning || !started || !audioAiOn.checked || audioAiWhere.value !== 'sender') {
@@ -1194,13 +1207,33 @@
           try { processor.disconnect(); source.disconnect(); audioCtx.close(); } catch {}
           return;
         }
-        const inputData = e.inputBuffer.getChannelData(0);
-        const result = await task.classify(inputData);
-        const classifications = result?.classifications?.[0]?.categories ?? [];
+        const frame = e.inputBuffer.getChannelData(0).slice(0);
+        chunks.push(frame);
+        totalSamples += frame.length;
     
-        // broadcast raw categories
-        const payload = JSON.stringify({ type:'audio', categories: classifications, ts: performance.now() });
-        for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
+        while (totalSamples >= CLIP_SAMPLES) {
+          const clip = new Float32Array(CLIP_SAMPLES);
+          let write = 0;
+          while (write < CLIP_SAMPLES && chunks.length) {
+            const head = chunks[0];
+            const take = Math.min(head.length, CLIP_SAMPLES - write);
+            clip.set(head.subarray(0, take), write);
+            write += take;
+            if (take < head.length) {
+              chunks[0] = head.subarray(take);
+            } else {
+              chunks.shift();
+            }
+          }
+          totalSamples -= CLIP_SAMPLES;
+    
+          const result = await task.classify({ audioClip: clip, sampleRateHz: sr });
+          const classifications = result?.classifications?.[0]?.categories ?? [];
+    
+          // broadcast raw categories
+          const payload = JSON.stringify({ type:'audio', categories: classifications, ts: performance.now() });
+          for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
+        }
       };
     }
     
@@ -1220,6 +1253,39 @@
       if (started && audioAiOn?.checked && audioAiWhere?.value === 'sender') startSenderAudioLoop();
       else stopSenderAudioLoop();
       announceAudioMode();
+    }
+
+    // face
+    async function startSenderFaceLoop() {
+      if (!started || !faceOn?.checked || faceWhere?.value !== 'sender') return;
+      const task = await ensureFaceTask();
+      faceLoopRunning = true;
+      console.log('[FACE][sender] loop START (sender)');
+      const loop = () => {
+        if (!faceLoopRunning || !started || !faceOn.checked || faceWhere.value !== 'sender') {
+          console.log('[FACE][sender] loop STOP (sender)');
+          return;
+        }
+        const ts = performance.now();
+        const result = task.detectForVideo(localVideo, ts);
+        const payload = JSON.stringify({ type: 'face', landmarks: result?.faceLandmarks ?? null, ts });
+        for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
+        requestAnimationFrame(loop);
+      };
+      loop();
+    }
+    function stopSenderFaceLoop() { faceLoopRunning = false; }
+    function announceFaceMode() {
+      const enabled = !!faceOn?.checked;
+      const where   = faceWhere?.value;
+      for (const ch of poseDCs) if (ch.readyState === 'open') {
+        ch.send(JSON.stringify({ type:'face-mode', enabled, where }));
+      }
+    }
+    function applyFaceUI() {
+      if (started && faceOn?.checked && faceWhere?.value === 'sender') startSenderFaceLoop();
+      else stopSenderFaceLoop();
+      announceFaceMode();
     }
     
     announceAIModes(); // ← harmless early initialization
