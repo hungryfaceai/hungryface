@@ -110,10 +110,56 @@
     document.addEventListener('fullscreenchange', resetHamburgerFade);
 
     // ---------- Menu interactions (highlight only; navigation via anchors) ----------
-    function setActive(itemName) {
+    /*function setActive(itemName) {
       navItems.forEach(btn => btn.classList.toggle('active', btn.dataset.item === itemName));
-    }
+    }*/
 
+    // ---------- Menu interactions (highlight only; navigation via anchors) ----------
+    //https://chatgpt.com/c/68ac564d-b3e4-8328-ae07-598697bbd50c
+    function setActive(itemName) {
+      navItems.forEach(btn => {
+        const isActive = btn.dataset.item === itemName;
+        btn.classList.toggle('active', isActive);
+        if (isActive) btn.setAttribute('aria-current', 'page');
+        else btn.removeAttribute('aria-current');
+      });
+    }
+    
+    // Auto-highlight based on current URL (longest matching path prefix)
+    function norm(p) {
+      return new URL(p, location.href).pathname
+        .replace(/index\.html$/,'')
+        .replace(/\/+$/,'/') || '/';
+    }
+    function setActiveFromUrl() {
+      const here = norm(location.pathname);
+      const anchors = Array.from(sidebar.querySelectorAll('.nav-item[href]'));
+      let best = null, bestLen = -1;
+    
+      for (const a of anchors) {
+        const path = norm(a.getAttribute('href'));
+        if (here.startsWith(path) && path.length > bestLen) {
+          best = a; bestLen = path.length;
+        }
+      }
+      if (best) {
+        navItems.forEach(btn => {
+          const isActive = btn === best;
+          btn.classList.toggle('active', isActive);
+          if (isActive) btn.setAttribute('aria-current', 'page');
+          else btn.removeAttribute('aria-current');
+        });
+        return true;
+      }
+      return false;
+    }
+    
+    // Initialize highlight: URL first, fallback to <body data-menu-active="...">
+    if (!setActiveFromUrl()) {
+      const initialActive = document.body?.dataset?.menuActive;
+      if (initialActive) setActive(initialActive);
+    }
+    
     sidebar.addEventListener('click', (e) => {
       const btn = e.target.closest('.nav-item');
       if (!btn) return;
@@ -125,8 +171,8 @@
     });
 
     // Optional: initialize active item from <body data-menu-active="video">
-    const initialActive = document.body?.dataset?.menuActive;
-    if (initialActive) setActive(initialActive);
+    /*const initialActive = document.body?.dataset?.menuActive;
+    if (initialActive) setActive(initialActive);*/
 
     // Cleanup timers on unload
     window.addEventListener('beforeunload', () => {
