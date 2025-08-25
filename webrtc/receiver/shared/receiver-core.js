@@ -1,5 +1,4 @@
-//https://chatgpt.com/c/68a91295-fee8-832c-b2b3-0a48defff90f
-// receiver-core.js — shared signaling + WebRTC for receivers (targeting a specific sender)
+// receiver-core.js — shared signaling + WebRTC for receivers (targets a specific sender)
 export class ReceiverCore {
   constructor(cfg) {
     this.wsEndpoint = cfg.wsEndpoint;                 // wss://.../ws
@@ -98,7 +97,7 @@ export class ReceiverCore {
     const delay = Math.min(this.wsRetryMs, this.reconnectMaxMs);
     setTimeout(() => {
       this.wsRetryMs = Math.min(this.wsRetryMs * 2, this.reconnectMaxMs);
-      this.start().catch(()=>{}); // re-enter
+      this.start().catch(()=>{});
     }, delay);
   }
 
@@ -126,7 +125,7 @@ export class ReceiverCore {
     pc.addTransceiver('video', { direction: 'recvonly' });
     pc.addTransceiver('audio', { direction: 'recvonly' });
 
-    // Let the page add custom DCs (e.g., 'pose')
+    // Allow page to add custom DCs (e.g., 'pose')
     try { this.onCreatePC(pc); } catch (e) { console.warn('[onCreatePC] error', e); }
 
     // Leave inbound DCs open
@@ -148,7 +147,7 @@ export class ReceiverCore {
         this.iceDisconnectedSince = null;
       } else if (s === 'failed') {
         this.#status('ICE: failed');
-        this.#ensurePC(true); // rebuild pc
+        this.#ensurePC(true);
         this.#negotiate().catch(()=>{});
       } else if (s === 'disconnected') {
         if (!this.iceDisconnectedSince) this.iceDisconnectedSince = Date.now();
@@ -182,7 +181,7 @@ export class ReceiverCore {
   async #sendCurrentOffer() {
     if (this.pc?.localDescription?.type === 'offer') {
       const payload = { type: this.pc.localDescription.type, sdp: this.pc.localDescription.sdp };
-      if (this.senderId) payload.to = this.senderId;              // narrow to known sender
+      if (this.senderId) payload.to = this.senderId;
       this.#send(payload);
     }
   }
