@@ -181,6 +181,29 @@
   </style>
 </head>
 <body>
+
+  <!-- ⬇️ Inject shared sidebar markup and behavior (kept separate from your code) -->
+  <script type="module">
+    (async () => {
+      try {
+        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
+        const html = await res.text();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html.trim();
+        document.body.prepend(...wrap.childNodes);
+
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      } catch (err) {
+        console.error('[Sidebar] failed to load shared assets:', err);
+      }
+    })();
+  </script>  
   <div class="wrap">
     <header>
       <div class="title">Signaling Rooms</div>
