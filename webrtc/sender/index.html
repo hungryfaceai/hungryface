@@ -18,6 +18,7 @@
       width: 100vw; height: 100vh;     /* fallback */
       width: 100dvw; height: 100dvh;   /* dynamic viewport (iOS 16+) */
       width: 100svw; height: 100svh;   /* small viewport (iOS URL bar safe) */
+      background-color: #000; isolation: isolate;
     }
 
     /* Letterboxed preview (no crop) */
@@ -29,7 +30,10 @@
     /* Canvas positioned by JS to cover the visible video box */
     #stage > canvas#poseCanvas {
       position: absolute; /* left/top/width/height set in JS */
-      display: none; background: transparent; pointer-events: none;
+      display: none; background: transparent !important; 
+      /* helps Safari’s compositor behave */
+      mix-blend-mode: normal;
+      pointer-events: none;
     }
 
     /* Visual mirror for preview when using front camera */
@@ -435,6 +439,13 @@
         poseCanvas.height = needH;
       }
 
+      https://chatgpt.com/c/68ac9cc0-ccc8-8330-877e-aea76507f26e
+      // after poseCanvas.width = needW; poseCanvas.height = needH;
+      ctx.save();
+      ctx.globalAlpha = 0;      // draw nothing visible
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, 1, 1); // 1px is enough to prime
+      ctx.restore();
       /*
       poseCanvas.style.display =
         (poseOn.checked && videoOn.checked && document.body.classList.contains('previewing'))
