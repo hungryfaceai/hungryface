@@ -434,9 +434,20 @@
         poseCanvas.height = needH;
       }
 
+      /*
       poseCanvas.style.display =
         (poseOn.checked && videoOn.checked && document.body.classList.contains('previewing'))
-          ? 'block' : 'none';
+          ? 'block' : 'none';*/
+      const wantOverlay =
+        (
+          (poseOn.checked && poseWhere.value === 'sender') ||
+          (faceOn?.checked && faceWhere?.value === 'sender')
+        ) &&
+        videoOn.checked &&
+        document.body.classList.contains('previewing');
+      
+      poseCanvas.style.display = wantOverlay ? 'block' : 'none';
+      
 
       ctx.setTransform(1,0,0,1,0,0);
     }
@@ -1129,6 +1140,21 @@
       }
       ctx.restore();
     }
+
+    function drawFaceOnSender(faces) {
+      if (!faces?.length || !poseCanvas.width || !poseCanvas.height) return;
+      const dutils = new DrawingUtils(ctx);
+      // ⚠️ Do NOT clear here—your pose loop already clears each frame.
+      for (const lm of faces) {
+        dutils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_TESSELATION);
+        dutils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE);
+        dutils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYE);
+        dutils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL);
+        dutils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LIPS);
+        dutils.drawLandmarks(lm);
+      }
+    }
+    
     async function startSenderPoseLoop() {
       if (!started || !poseOn.checked || poseWhere.value !== 'sender') return;
       const task = await ensurePoseTask();
@@ -1268,6 +1294,12 @@
         }
         const ts = performance.now();
         const result = task.detectForVideo(localVideo, ts);
+        
+        // Draw locally while previewing
+        if (document.body.classList.contains('previewing')) {
+          // Don't clear here—pose loop already clears.
+          drawFaceOnSender(result?.faceLandmarks);
+        }
         const payload = JSON.stringify({ type: 'face', landmarks: result?.faceLandmarks ?? null, ts });
         for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
         requestAnimationFrame(loop);
