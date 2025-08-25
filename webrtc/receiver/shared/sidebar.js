@@ -9,9 +9,10 @@
   function init() {
     const sidebar   = document.getElementById('sidebar');
     const hamburger = document.getElementById('hamburger');
-    const inviteModal = document.getElementById('invite-modal');
+    const inviteModal = document.getElementById('invite-modal'); //made optional
     // If any core element is missing, do nothing.
-    if (!sidebar || !hamburger || !inviteModal) return;
+    //if (!sidebar || !hamburger || !inviteModal) return;
+    if (!sidebar || !hamburger) return;
 
     const navItems  = Array.from(sidebar.querySelectorAll('.nav-item'));
     const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
