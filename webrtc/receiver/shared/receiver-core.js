@@ -1,3 +1,4 @@
+
 // receiver-core.js — shared signaling + WebRTC for receivers (targets a specific sender)
 export class ReceiverCore {
   constructor(cfg) {
@@ -19,9 +20,13 @@ export class ReceiverCore {
     this.onCreatePC      = cfg.onCreatePC      || (()=>{});
 
     // Timers / backoff (overridable)
-    this.keepaliveMs     = cfg.keepaliveMs     || 25000;
-    this.reconnectMinMs  = cfg.reconnectMinMs  || 1000;
-    this.reconnectMaxMs  = cfg.reconnectMaxMs  || 10000;
+    this.keepaliveMs          = cfg.keepaliveMs          || 25000;
+    this.reconnectMinMs       = cfg.reconnectMinMs       || 1000;
+    this.reconnectMaxMs       = cfg.reconnectMaxMs       || 10000;
+
+    // NEW: make 15s constants configurable
+    this.wsConnectTimeoutMs   = cfg.wsConnectTimeoutMs   || 10000; // WS open timeout
+    this.iceDisconnectGraceMs = cfg.iceDisconnectGraceMs || 9000; // ICE disconnected grace
 
     // Internals
     this.ws = null;
@@ -68,7 +73,7 @@ export class ReceiverCore {
       let opened = false;
       const t = setTimeout(() => {
         if (!opened) { try { sock.close(); } catch{}; reject(new Error('WS timeout')); }
-      }, 15000);
+      }, this.wsConnectTimeoutMs); // ← was 15000
 
       sock.onopen = () => {
         opened = true; clearTimeout(t);
@@ -151,13 +156,14 @@ export class ReceiverCore {
         this.#negotiate().catch(()=>{});
       } else if (s === 'disconnected') {
         if (!this.iceDisconnectedSince) this.iceDisconnectedSince = Date.now();
+        const grace = this.iceDisconnectGraceMs;
         setTimeout(() => {
-          if (this.iceDisconnectedSince && Date.now() - this.iceDisconnectedSince >= 15000) {
-            this.#status('ICE: disconnected >15s (renegotiating)');
+          if (this.iceDisconnectedSince && Date.now() - this.iceDisconnectedSince >= grace) {
+            this.#status(`ICE: disconnected >${Math.round(grace/1000)}s (renegotiating)`);
             this.#ensurePC(true);
             this.#negotiate().catch(()=>{});
           }
-        }, 15100);
+        }, grace + 100); // ← was 15100 to exceed the ≥ check reliably
         this.#status('ICE: disconnected');
       } else if (s === 'closed') {
         this.#status('ICE: closed');
@@ -277,3 +283,4 @@ export class ReceiverCore {
 
   #status(s) { try { this.onStatus?.(s); } catch {} }
 }
+```
