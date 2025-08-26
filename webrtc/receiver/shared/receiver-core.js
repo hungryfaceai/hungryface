@@ -283,4 +283,4 @@ export class ReceiverCore {
 
   #status(s) { try { this.onStatus?.(s); } catch {} }
 }
-```
+
