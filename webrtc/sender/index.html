@@ -375,7 +375,8 @@
 
     let remoteDescriptionSet = false;
     const candidateQueue = [];
-    let needOfferTimer = null, lastOfferSdp = null;
+    //let needOfferTimer = null; //https://chatgpt.com/c/68ada965-6d7c-832b-9d16-e90772e321b9
+    lastOfferSdp = null;
     */
     let ws = null, localStream = null;
     let started = false, hideUITimer = null;
@@ -709,11 +710,19 @@
     
       // Preserve any existing queued candidates / flags
       if (!rec) {
-        rec = { pc, remoteDescriptionSet: false, candidateQueue: [], lastOfferSdp: null };
+        rec = {
+          pc,
+          remoteDescriptionSet: false,
+          candidateQueue: [],
+          lastOfferSdp: null,
+          processingOffer: false   // ← add this here
+        };
       } else {
         rec.pc = pc; // keep existing candidateQueue/flags
+        if (rec.processingOffer == null) rec.processingOffer = false; // ensure field exists
       }
       peers.set(peerId, rec);
+
       return pc;
     }
       
@@ -796,7 +805,7 @@
         return;
       }
     
-      if (t === 'offer' && msg.from) {
+      /*if (t === 'offer' && msg.from) {
         setStatus('Got offer, creating answer…');
     
         const rec = peers.get(msg.from) || {};
@@ -830,12 +839,80 @@
         console.log('[WS OUT] answer →', msg.from);
         ws.send(JSON.stringify(payload));        
         return;
+      }*/
+
+      // Replace your 'offer' branch inside onSignal with this - https://chatgpt.com/c/68ada965-6d7c-832b-9d16-e90772e321b9
+      if (t === 'offer' && msg.from) {
+        setStatus('Got offer, creating answer…');
+      
+        // Ensure a peer record
+        let rec = peers.get(msg.from);
+        if (!rec) {
+          getOrCreatePC(msg.from);
+          rec = peers.get(msg.from);
+        }
+      
+        // Drop exact duplicates
+        if (rec.lastOfferSdp === msg.sdp) {
+          console.log('[DUP] identical offer ignored from', msg.from);
+          return;
+        }
+      
+        // Don’t overlap answer flows
+        if (rec.processingOffer) {
+          console.log('[SENDER] skipping offer from', msg.from, '(answer in progress)');
+          return;
+        }
+        rec.processingOffer = true;
+      
+        const pc = rec.pc || getOrCreatePC(msg.from);
+      
+        try {
+          if (pc.signalingState === 'have-local-offer') {
+            try { await pc.setLocalDescription({ type: 'rollback' }); } catch {}
+          }
+      
+          await pc.setRemoteDescription(new RTCSessionDescription(msg));
+      
+          // Only answer from the correct state
+          if (pc.signalingState !== 'have-remote-offer') {
+            console.warn('[SENDER] unexpected signalingState before answer:', pc.signalingState);
+            return;
+          }
+      
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+      
+          ws.send(JSON.stringify({ type: answer.type, sdp: answer.sdp, to: msg.from }));
+          console.log('[WS OUT] answer →', msg.from);
+      
+          rec.remoteDescriptionSet = true;
+          rec.lastOfferSdp = msg.sdp;
+      
+          // Flush any queued ICE
+          for (const c of rec.candidateQueue) {
+            try { await pc.addIceCandidate(c); } catch (err) { console.warn('[SENDER] late ICE add failed', msg.from, err); }
+          }
+          rec.candidateQueue.length = 0;
+      
+        } finally {
+          rec.processingOffer = false;
+        }
+        return;
       }
+
     
       if (t === 'candidate' && msg.from && msg.candidate) {
         const rec = peers.get(msg.from);
         if (!rec) { /* might arrive before offer */ 
-          peers.set(msg.from, { pc: null, remoteDescriptionSet: false, candidateQueue: [new RTCIceCandidate(msg.candidate)], lastOfferSdp: null });
+          //peers.set(msg.from, { pc: null, remoteDescriptionSet: false, candidateQueue: [new RTCIceCandidate(msg.candidate)], lastOfferSdp: null });
+          peers.set(msg.from, {
+            pc: null,
+            remoteDescriptionSet: false,
+            candidateQueue: [new RTCIceCandidate(msg.candidate)],
+            lastOfferSdp: null,
+            processingOffer: false     // ← add this here too
+          });
           return;
         }
         const pc = rec.pc || getOrCreatePC(msg.from);
@@ -1001,7 +1078,7 @@
       if (previewTimer)  clearTimeout(previewTimer);
       if (previewTicker) clearInterval(previewTicker);
       if (hideUITimer)   clearTimeout(hideUITimer);
-      if (needOfferTimer) clearInterval(needOfferTimer);
+      //if (needOfferTimer) clearInterval(needOfferTimer); //https://chatgpt.com/c/68ada965-6d7c-832b-9d16-e90772e321b9
       previewTimer = previewTicker = hideUITimer = needOfferTimer = null;
     
       // Stop pose loop/task
@@ -1144,7 +1221,7 @@
       if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
       const dutils = new DrawingUtils(ctx);
       ctx.save();
-      ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+      //ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height); //https://chatgpt.com/c/68ada965-6d7c-832b-9d16-e90772e321b9
       for (const lm of landmarks) {
         dutils.drawLandmarks(lm, {
           radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
@@ -1241,7 +1318,8 @@
       if (!poseLoopRunning) return;
       poseLoopRunning = false;
       if (poseRAF) { cancelAnimationFrame(poseRAF); poseRAF = 0; }
-      ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+      //ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+      if (!faceLoopRunning) ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
 
     function onPoseMessageFromReceiver(ev) {
@@ -1254,7 +1332,7 @@
     }
     function applyPoseUI() {
       //announceAIModes();
-      announcePoseMode();
+      //announcePoseMode(); //https://chatgpt.com/c/68ada965-6d7c-832b-9d16-e90772e321b9
       beginViewportSettle();
       if (!poseOn.checked) { stopSenderPoseLoop(); return; }
       if (started && poseWhere.value === 'sender') startSenderPoseLoop();
@@ -1341,7 +1419,7 @@
     function applyAudioUI() {
       if (started && audioAiOn?.checked && audioAiWhere?.value === 'sender') startSenderAudioLoop();
       else stopSenderAudioLoop();
-      announceAudioMode();
+      //announceAudioMode();  //https://chatgpt.com/c/68ada965-6d7c-832b-9d16-e90772e321b9
     }
 
     // face
@@ -1409,6 +1487,8 @@
       if (!faceLoopRunning) return;
       faceLoopRunning = false;
       if (faceRAF) { cancelAnimationFrame(faceRAF); faceRAF = 0; }
+      // If pose isn't drawing, clear the overlay once.
+      if (!poseLoopRunning) ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
 
     function announceFaceMode() {
@@ -1421,7 +1501,7 @@
     function applyFaceUI() {
       if (started && faceOn?.checked && faceWhere?.value === 'sender') startSenderFaceLoop();
       else stopSenderFaceLoop();
-      announceFaceMode();
+      //announceFaceMode();  //https://chatgpt.com/c/68ada965-6d7c-832b-9d16-e90772e321b9
     }
     
     announceAIModes(); // ← harmless early initialization
