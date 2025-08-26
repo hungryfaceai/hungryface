@@ -417,68 +417,71 @@
     }
 
     /* ---------- Hook up ReceiverCore ---------- */
-    const core = new ReceiverCore({
-      wsEndpoint: WS_ENDPOINT,
-      room,
-      onStatus: showStatus,
-      // Called when a new RTCPeerConnection is created; set up tracks & DCs here.
-      onCreatePC: (pc) => {
-        //pc.addTransceiver('video', { direction: 'recvonly' }); //https://chatgpt.com/c/68adc489-2820-8331-81dc-687f46885c7c
-        //pc.addTransceiver('audio', { direction: 'recvonly' }); //https://chatgpt.com/c/68adc489-2820-8331-81dc-687f46885c7c
+    
+const core = new ReceiverCore({
+  wsEndpoint: WS_ENDPOINT,
+  room,
+  onStatus: showStatus,
 
-        // Optional / symmetrical DC for face data
-        const ch = pc.createDataChannel('face');
-        ch.onopen  = () => console.log('[DC][receiver] face DC open');
-        ch.onclose = () => console.log('[DC][receiver] face DC close');
-        ch.onerror = (e) => console.warn('[DC][receiver] face DC error', e);
-        ch.onmessage = (ev) => {
-          try {
-            const msg = JSON.parse(ev.data);
-            if (msg.type === 'face-mode') {
-              faceEnabled = !!msg.enabled;
-              faceWhere   = msg.where || 'sender';
-              console.log('[FACE][receiver] mode:', { faceEnabled, faceWhere });
-              applyFaceMode();
-            } else if (msg.type === 'face') {
-              if (faceEnabled && faceWhere === 'sender') drawFaceLandmarks(msg.landmarks);
-            }
-          } catch {}
-        };
-        faceDC = ch;
+  // ✅ This is where the remote MediaStream should be attached
+  onStream: (stream, track) => {
+    if (remoteVideo.srcObject !== stream) {
+      remoteVideo.srcObject = stream;
+      tryStartMuted();
+      attachStreamEndHandlers(stream);
+    }
+    console.log('[TRACK][receiver]', track.kind);
+    beginViewportSettle();
+  },
 
-        pc.ontrack = (ev) => {
-          if (remoteVideo.srcObject !== ev.streams[0]) {
-            remoteVideo.srcObject = ev.streams[0];
-            tryStartMuted();
-            attachStreamEndHandlers(ev.streams[0]); // clear overlay when track stops/mutes
-          }
-          console.log('[TRACK][receiver] ontrack:', ev.track.kind);
-          beginViewportSettle();
-        };
+  // You can keep any other hooks you like (roster, hello, etc.)
+  onIceState: (state) => {
+    if (state === 'connected' || state === 'completed') {
+      showStatus('Connected');
+    } else if (state === 'failed') {
+      clearOverlayDrawing();
+      showStatus('ICE: failed – retrying…');
+    } else if (state === 'disconnected') {
+      clearOverlayDrawing();
+      showStatus('ICE: disconnected');
+    } else if (state === 'closed') {
+      clearOverlayDrawing();
+      showStatus('ICE: closed');
+    } else {
+      showStatus('ICE: ' + state);
+    }
+  },
 
-        // Keep the status overlay informative
-        pc.oniceconnectionstatechange = () => {
-          const state = pc.iceConnectionState;
-          console.log('[ICE]', state);
-          if (state === 'connected' || state === 'completed') {
-            showStatus('Connected');
-          } else if (state === 'failed') {
-            clearOverlayDrawing();
-            showStatus('ICE: failed – retrying…');
-          } else if (state === 'disconnected') {
-            clearOverlayDrawing();
-            showStatus('ICE: disconnected');
-          } else if (state === 'closed') {
-            clearOverlayDrawing();
-            showStatus('ICE: closed');
-          } else {
-            showStatus('ICE: ' + state);
-          }
-        };
-      },
-      // When the WS closes entirely, wipe drawings
-      onSignalingClosed: () => clearOverlayDrawing(),
-    });
+  onCreatePC: (pc) => {
+    // ❗ Use 'pose' so the sender adds this DC to poseDCs and sends AI messages here
+    const ch = pc.createDataChannel('pose');
+    ch.onopen  = () => console.log('[DC][receiver] pose DC open');
+    ch.onclose = () => console.log('[DC][receiver] pose DC close');
+    ch.onerror = (e) => console.warn('[DC][receiver] pose DC error', e);
+    ch.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+
+        // Sender broadcasts a consolidated 'ai-modes' PLUS per-feature modes
+        if (msg.type === 'ai-modes' && msg.face) {
+          faceEnabled = !!msg.face.enabled;
+          faceWhere   = msg.face.where || 'sender';
+          applyFaceMode();
+        } else if (msg.type === 'face-mode') {
+          faceEnabled = !!msg.enabled;
+          faceWhere   = msg.where || 'sender';
+          applyFaceMode();
+        } else if (msg.type === 'face') {
+          if (faceEnabled && faceWhere === 'sender') drawFaceLandmarks(msg.landmarks);
+        }
+      } catch {}
+    };
+
+    // NOTE: do NOT set pc.ontrack here — ReceiverCore sets it after this callback.
+    // Your stream attach now happens in onStream above.
+  },
+});
+
 
     // Clear drawings on common video stoppage states
     ['pause','ended','emptied','stalled','suspend','waiting'].forEach((ev) => {
