@@ -299,6 +299,9 @@
       };
       for (const ch of poseDCs) if (ch.readyState === 'open') {
         ch.send(JSON.stringify(payload));
+        ch.send(JSON.stringify({ type:'pose-mode',  enabled:payload.pose.enabled,  where:payload.pose.where }));
+        ch.send(JSON.stringify({ type:'audio-mode', enabled:payload.audio.enabled, where:payload.audio.where }));
+        ch.send(JSON.stringify({ type:'face-mode',  enabled:payload.face.enabled,  where:payload.face.where }));
       }
     }
 
@@ -386,7 +389,7 @@
     const peers = new Map();
     
     // Optional: if you keep the preview/pose logic as-is
-    let needOfferTimer = null; // (we won't use the interval anymore)
+    //let needOfferTimer = null; //https://chatgpt.com/c/68ada965-6d7c-832b-9d16-e90772e321b9
     //end bm - 22 aug 2025 - 16:43
 
     let previewTimer = null, previewTicker = null, previewEnd = 0;
@@ -402,6 +405,7 @@
     const ctx = poseCanvas.getContext('2d', { alpha: true });
     let lastClearedTs = -1; // ensures we clear once per animation frame
     let poseRAF = 0, faceRAF = 0;
+    let audioCtx = null, audioSource = null, audioProcessor = null;
     
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
     const currentRoom = () => (roomInput.value || 'Baby').trim();
@@ -1078,8 +1082,9 @@
       if (previewTimer)  clearTimeout(previewTimer);
       if (previewTicker) clearInterval(previewTicker);
       if (hideUITimer)   clearTimeout(hideUITimer);
-      //if (needOfferTimer) clearInterval(needOfferTimer); //https://chatgpt.com/c/68ada965-6d7c-832b-9d16-e90772e321b9
-      previewTimer = previewTicker = hideUITimer = needOfferTimer = null;
+      if (needOfferTimer) clearInterval(needOfferTimer); 
+      //previewTimer = previewTicker = hideUITimer = needOfferTimer = null;
+      previewTimer = previewTicker = hideUITimer = null; //https://chatgpt.com/c/68ada965-6d7c-832b-9d16-e90772e321b9
     
       // Stop pose loop/task
       try { poseLoopRunning = false; } catch {}
@@ -1351,12 +1356,19 @@
         return;
       }
     
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const source   = audioCtx.createMediaStreamSource(localStream);
-      const processor = audioCtx.createScriptProcessor(1024, 1, 1);
+      //const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      //const source   = audioCtx.createMediaStreamSource(localStream);
+      //const processor = audioCtx.createScriptProcessor(1024, 1, 1);
     
-      source.connect(processor);
-      processor.connect(audioCtx.destination);
+      //source.connect(processor);
+      //processor.connect(audioCtx.destination);
+
+      //https://chatgpt.com/c/68ada965-6d7c-832b-9d16-e90772e321b9:
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      audioSource   = audioCtx.createMediaStreamSource(localStream);
+      audioProcessor = audioCtx.createScriptProcessor(1024, 1, 1);
+      audioSource.connect(audioProcessor);
+      audioProcessor.connect(audioCtx.destination);
     
       const sr = audioCtx.sampleRate;
       const WINDOW_SEC = 0.975;
@@ -1368,12 +1380,20 @@
       audioLoopRunning = true;
       console.log('[AUDIO][sender] loop START @', sr, 'Hz');
     
-      processor.onaudioprocess = async (e) => {
+      /*processor.onaudioprocess = async (e) => {
         if (!audioLoopRunning || !started || !audioAiOn.checked || audioAiWhere.value !== 'sender') {
           console.log('[AUDIO][sender] loop STOP');
           try { processor.disconnect(); source.disconnect(); audioCtx.close(); } catch {}
           return;
-        }
+        }*/
+        audioProcessor.onaudioprocess = async (e) => {
+        if (!audioLoopRunning || !started || !audioAiOn.checked || audioAiWhere.value !== 'sender') {
+          try {
+            audioProcessor.disconnect(); audioSource.disconnect(); await audioCtx.close();
+          } catch {}
+          audioCtx = audioSource = audioProcessor = null;
+          return;
+        }      
         const frame = e.inputBuffer.getChannelData(0).slice(0);
         chunks.push(frame);
         totalSamples += frame.length;
@@ -1404,8 +1424,17 @@
       };
     }
     
+    /*function stopSenderAudioLoop() {
+      audioLoopRunning = false;
+    }*/
     function stopSenderAudioLoop() {
       audioLoopRunning = false;
+      try {
+        audioProcessor && audioProcessor.disconnect();
+        audioSource && audioSource.disconnect();
+        audioCtx && audioCtx.close();
+      } catch {}
+      audioCtx = audioSource = audioProcessor = null;
     }
     
     function announceAudioMode() {
