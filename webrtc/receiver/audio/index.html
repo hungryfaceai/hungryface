@@ -337,6 +337,7 @@
       alertOn: false,
       alertUntilMs: 0,
       audioTask: null,
+      audioTaskPromise: null,
       spectrumRaf: 0,
     };
 
@@ -541,23 +542,68 @@
       state.chart.update();
     }
 
-    /* ---------- MP Audio task ---------- */
+    /* ---------- MP Audio task (resilient load with retry + buffer fallback) ---------- */
     async function ensureAudioTask() {
       if (!AudioClassifier || !FilesetResolver) {
-        console.warn('[CRY] MediaPipe tasks audio not available');
+        console.warn('[CRY][mp] MediaPipe tasks audio not available');
         return null;
       }
       if (state.audioTask) return state.audioTask;
-      const resolver = await FilesetResolver.forAudioTasks(AUDIO_PKG_URL + "/wasm");
-      state.audioTask = await AudioClassifier.createFromOptions(resolver, {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite"
-        },
+      if (state.audioTaskPromise) return state.audioTaskPromise;
+
+      const WASM_DIR  = AUDIO_PKG_URL + "/wasm";
+      const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite";
+
+      const createWithPath = async (resolver) => AudioClassifier.createFromOptions(resolver, {
+        baseOptions: { modelAssetPath: MODEL_URL },
         runningMode: "AUDIO_CLIPS"
       });
-      console.log('[CRY][mp] audio task ready');
-      return state.audioTask;
+
+      const createWithBuffer = async (resolver) => {
+        console.warn('[CRY][mp] path load failed; fetching model (no-store)…');
+        const bust = MODEL_URL + (MODEL_URL.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+        const res = await fetch(bust, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`yamnet fetch ${res.status}`);
+        const buf = await res.arrayBuffer();
+        return AudioClassifier.createFromOptions(resolver, {
+          baseOptions: { modelAssetBuffer: buf },
+          runningMode: "AUDIO_CLIPS"
+        });
+      };
+
+      state.audioTaskPromise = (async () => {
+        let lastErr = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            setStatus('Loading audio model…');
+            console.log(`[CRY][mp] resolver attempt ${attempt}`);
+            const resolver = await FilesetResolver.forAudioTasks(WASM_DIR);
+            try {
+              console.log(`[CRY][mp] create (path) attempt ${attempt}`);
+              state.audioTask = await createWithPath(resolver);
+              console.log('[CRY][mp] audio task ready (path)');
+              setStatus('Ready');
+              return state.audioTask;
+            } catch (e1) {
+              lastErr = e1;
+              console.warn('[CRY][mp] create (path) failed:', e1?.message || e1);
+              state.audioTask = await createWithBuffer(resolver);
+              console.log('[CRY][mp] audio task ready (buffer)');
+              setStatus('Ready');
+              return state.audioTask;
+            }
+          } catch (e) {
+            lastErr = e;
+            console.warn('[CRY][mp] resolver/model attempt failed:', e?.message || e);
+            await new Promise(r => setTimeout(r, attempt * 600)); // backoff
+          }
+        }
+        setStatus('Audio model load failed');
+        state.audioTaskPromise = null;
+        throw lastErr || new Error('audio task init failed');
+      })();
+
+      return state.audioTaskPromise;
     }
 
     /* ---------- Alert logic ---------- */
@@ -698,7 +744,7 @@
 
     async function onAudioChunkReceiver(chunkFloat32, deviceSr) {
       if (!state.running || !state.usingMic) return;
-      const task = await ensureAudioTask();
+      const task = await ensureAudioTask().catch(e => { console.warn('[CRY][mp] task unavailable on chunk', e); return null; });
       if (!task) return;
       const params = getParams();
 
