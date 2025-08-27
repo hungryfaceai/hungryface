@@ -6,7 +6,7 @@
   <link rel="icon" href="data:," />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 
-  <!-- ⬇️ Shared sidebar stylesheet (same as pose receiver) -->
+  <!-- Shared sidebar stylesheet (same as pose receiver) -->
   <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
 
   <style>
@@ -29,7 +29,7 @@
       padding: 16px; box-sizing: border-box;
     }
 
-    /* Hidden video for remote A/V (we only need audio + a stream) */
+    /* Hidden video just to host the remote stream’s audio track */
     #remote {
       position: absolute; width: 1px; height: 1px; left: -99999px; top: -99999px;
     }
@@ -46,19 +46,6 @@
 
     .panel header h1 { margin: 0 0 2px 0; font-size: clamp(18px, 3vw, 22px); }
     .panel header .sub { margin: 0 0 12px 0; color: #bbb; font-size: 14px; }
-
-    .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .row + .row { margin-top: 10px; }
-
-    .btn {
-      padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
-      background: transparent; color: #fff; font-size: 16px; font-weight: 600;
-      cursor: pointer; box-shadow: none; text-shadow: 0 1px 2px rgba(0,0,0,0.6);
-    }
-    .btn.primary { border: 0; background: #2a2a2a; }
-    .btn.ghost   { border: 1px solid rgba(255,255,255,0.4); background: transparent; }
-    .btn:disabled { opacity: 0.5; cursor: default; }
-    .btn:active { transform: scale(0.99); }
 
     .status { color: #ddd; font-size: 14px; padding: 4px 0; white-space: pre-line; }
 
@@ -100,7 +87,7 @@
     .toggles { margin-top: 8px; display: flex; gap: 12px; align-items: center; font-size: 13px; color:#ddd; }
     .peak { margin-top: 6px; font-size: 13px; color:#ddd; }
 
-    /* Overlay (status) like pose receiver */
+    /* Overlay status (like pose page) */
     .overlay {
       position: fixed; inset: 0; display: flex;
       align-items: center; justify-content: center;
@@ -116,16 +103,22 @@
     /* Background turns red while alert is active */
     body.alert #stage { background: #1a0000; }
 
-    /* Fixed control bar (mimic pose receiver) */
+    /* Fixed control bar — exactly like pose */
     #controls {
       position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
       display: flex; align-items: center; gap: 12px; z-index: 6;
     }
+    .btn {
+      padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
+      background: transparent; color: #fff; font-size: 16px; font-weight: 600;
+      cursor: pointer; box-shadow: none; text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+    .btn:active { transform: scale(0.99); }
     #enableAudioBtn, #disableAudioBtn { display: none; }
   </style>
 </head>
 <body>
-  <!-- ⬇️ Inject the shared sidebar markup + behavior (same snippet as pose page) -->
+  <!-- Inject the shared sidebar markup + behavior (same snippet as pose page) -->
   <script type="module">
     (async () => {
       try {
@@ -142,13 +135,14 @@
           s.onerror = reject;
           document.body.appendChild(s);
         });
+        console.log('[CRY][sidebar] loaded');
       } catch (err) {
-        console.error('[Sidebar] failed to load shared assets:', err);
+        console.error('[CRY][sidebar] failed to load shared assets:', err);
       }
     })();
   </script>
 
-  <!-- Bottom controls (like pose page) -->
+  <!-- Bottom controls (exactly like pose) -->
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
     <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
@@ -156,79 +150,65 @@
   </div>
 
   <div id="stage">
-    <!-- Hidden media element to host remote A/V stream (we use its audio track) -->
     <video id="remote" autoplay playsinline></video>
 
     <div class="panel">
       <header>
         <h1>Live Baby Cry Detector</h1>
-        <p class="sub">Real-time inference on <strong id="whereLbl">—</strong></p>
+        <p class="sub">Inference on <strong id="whereLbl">—</strong></p>
+        <div id="status" class="status">Booting…</div>
       </header>
 
-      <section class="controls">
-        <div class="row">
-          <button id="btnStart" class="btn primary" disabled>Start</button>
-          <button id="btnStop" class="btn ghost" disabled>Stop</button>
-          <span id="status" class="status">Page ready.</span>
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <div class="grid">
+          <label>
+            <span>SR_TARGET (Hz)</span>
+            <input id="SR_TARGET" type="number" min="8000" step="1000" value="16000" />
+          </label>
+          <label>
+            <span>FRAME_LEN_S</span>
+            <input id="FRAME_LEN_S" type="number" min="0.1" step="0.01" value="0.96" />
+          </label>
+          <label>
+            <span>HOP_S</span>
+            <input id="HOP_S" type="number" min="0.01" step="0.01" value="0.48" />
+          </label>
+          <label>
+            <span>SMOOTH_WIN</span>
+            <input id="SMOOTH_WIN" type="number" min="1" step="1" value="5" />
+          </label>
+          <label>
+            <span>THRESH</span>
+            <input id="THRESH" type="number" min="0" max="1.5" step="0.01" value="0.15" />
+          </label>
+          <label>
+            <span>PLOT_WINDOW_S</span>
+            <input id="PLOT_WINDOW_S" type="number" min="5" step="1" value="60" />
+          </label>
         </div>
 
-        <details class="advanced">
-          <summary>Advanced</summary>
+        <label class="wide" style="display:block; margin-top:10px;">
+          <span>Include classes</span>
+          <textarea id="INCLUDE_CLASSES" rows="2" spellcheck="false">Baby cry; infant cry</textarea>
+        </label>
+        <p class="muted small">Separate multiple classes with semicolons (;) or new lines.</p>
 
-          <div class="grid">
-            <label>
-              <span>SR_TARGET (Hz)</span>
-              <input id="SR_TARGET" type="number" min="8000" step="1000" value="16000" />
-            </label>
-            <label>
-              <span>FRAME_LEN_S</span>
-              <input id="FRAME_LEN_S" type="number" min="0.1" step="0.01" value="0.96" />
-            </label>
-            <label>
-              <span>HOP_S</span>
-              <input id="HOP_S" type="number" min="0.01" step="0.01" value="0.48" />
-            </label>
-            <label>
-              <span>SMOOTH_WIN</span>
-              <input id="SMOOTH_WIN" type="number" min="1" step="1" value="5" />
-            </label>
-            <label>
-              <span>THRESH</span>
-              <input id="THRESH" type="number" min="0" max="1.5" step="0.01" value="0.15" />
-            </label>
-            <label>
-              <span>PLOT_WINDOW_S</span>
-              <input id="PLOT_WINDOW_S" type="number" min="5" step="1" value="60" />
-            </label>
-          </div>
-
-          <label class="wide" style="display:block; margin-top:10px;">
-            <span>Include classes</span>
-            <textarea id="INCLUDE_CLASSES" rows="2" spellcheck="false">Baby cry; infant cry</textarea>
+        <div class="grid-adv">
+          <label>
+            <span>ON extra (adds to THRESH)</span>
+            <input id="ALERT_ON_EXTRA" type="number" step="0.01" value="0.00" />
           </label>
-          <p class="muted small">Separate multiple classes with semicolons (;) or new lines. Matching is case-insensitive and substring-based.</p>
-
-          <div class="grid-adv">
-            <label>
-              <span>ON extra (adds to THRESH)</span>
-              <input id="ALERT_ON_EXTRA" type="number" step="0.01" value="0.00" />
-            </label>
-            <label>
-              <span>OFF delta (below ON)</span>
-              <input id="ALERT_OFF_DELTA" type="number" min="0" step="0.01" value="0.10" />
-            </label>
-            <label>
-              <span>HOLD time (ms)</span>
-              <input id="ALERT_HOLD_MS" type="number" min="0" step="100" value="3000" />
-            </label>
-          </div>
-
-          <p class="muted small">
-            Background turns red when the smoothed score crosses the ON threshold (= THRESH + ON extra),
-            and stays red until it falls below OFF threshold (= ON − OFF delta) and the hold time elapses.
-          </p>
-        </details>
-      </section>
+          <label>
+            <span>OFF delta (below ON)</span>
+            <input id="ALERT_OFF_DELTA" type="number" min="0" step="0.01" value="0.10" />
+          </label>
+          <label>
+            <span>HOLD time (ms)</span>
+            <input id="ALERT_HOLD_MS" type="number" min="0" step="100" value="3000" />
+          </label>
+        </div>
+      </details>
 
       <!-- Cry score chart -->
       <section class="plot">
@@ -254,13 +234,11 @@
         </div>
         <div id="peakReadout" class="peak">Peak: —</div>
       </section>
-
-      <footer>© 2025 Fishex Ltd. All rights reserved.</footer>
     </div>
   </div>
 
   <!-- Overlay status (same feel as pose page) -->
-  <div id="overlay" class="overlay hidden"><div id="overlayStatus" class="status">Idle</div></div>
+  <div id="overlay" class="overlay"><div id="overlayStatus" class="status">Idle</div></div>
 
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
@@ -271,8 +249,9 @@
 
     // MediaPipe Tasks Audio
     const AUDIO_PKG_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0";
-    const AudioMod = await import(AUDIO_PKG_URL).then(m => m.default ?? m);
-    const { AudioClassifier, FilesetResolver } = AudioMod;
+    const AudioMod = await import(AUDIO_PKG_URL).catch(e => { console.error('[CRY] MP audio import error', e); return null; });
+    const AudioClassifier = AudioMod?.AudioClassifier;
+    const FilesetResolver = AudioMod?.FilesetResolver;
 
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
@@ -287,8 +266,6 @@
     const fsBtn = document.getElementById('fsBtn');
 
     const els = {
-      btnStart: document.getElementById('btnStart'),
-      btnStop:  document.getElementById('btnStop'),
       status:   document.getElementById('status'),
       overlay:  document.getElementById('overlay'),
       overlayStatus: document.getElementById('overlayStatus'),
@@ -312,9 +289,17 @@
       }
     };
 
-    function setStatus(msg) { els.status.textContent = msg; els.overlayStatus.textContent = msg; }
+    function setStatus(msg) {
+      els.status.textContent = msg;
+      els.overlayStatus.textContent = msg;
+      console.log('[CRY][status]', msg);
+    }
     function showOverlay(show) { els.overlay.classList.toggle('hidden', !show); }
-    function setWhereLabel(where) { els.whereLbl.textContent = where === 'receiver' ? 'RECEIVER' : (where === 'sender' ? 'SENDER' : '—'); }
+    function setWhereLabel(where) {
+      const label = where === 'receiver' ? 'RECEIVER' : (where === 'sender' ? 'SENDER' : '—');
+      els.whereLbl.textContent = label;
+      console.log('[CRY] where =', label);
+    }
 
     /* ---------- Audio mode state (mirrors pose logic) ---------- */
     let audioDC = null;
@@ -323,15 +308,15 @@
 
     /* ---------- App state ---------- */
     const state = {
-      running: false,
-      usingMic: false,                  // true when receiver-mode loop has mic graph up
+      running: true,                    // auto-on (no Start/Stop UI)
+      usingMic: false,
       audioCtx: null,
       streamLocalMic: null,
       streamRemote: null,
-      sourceNode: null,                 // MediaStreamAudioSourceNode from mic OR remote
-      sinkNode: null,                   // Gain -> destination (muted)
-      processor: null,                  // Worklet or ScriptProcessor (only in receiver-mode)
-      analyser: null,                   // For spectrum (from active source)
+      sourceNode: null,
+      sinkNode: null,
+      processor: null,
+      analyser: null,
       ring16k: new Float32Array(0),
       lastPos: 0,
       timesSec: [],
@@ -340,7 +325,6 @@
       crySm: [],
       chart: null,
       spectrumChart: null,
-      // spectrum arrays
       specFreqs: [],
       specRawDb: [],
       specSmDb: [],
@@ -348,13 +332,10 @@
       specEndIdx: 0,
       specBinCountAll: 0,
       specLastUpdate: 0,
-      // peak
       peakFreq: null,
       peakDb: null,
-      // alert
       alertOn: false,
       alertUntilMs: 0,
-      // MP task
       audioTask: null,
       spectrumRaf: 0,
     };
@@ -399,6 +380,7 @@
     /* ---------- Charts ---------- */
     function setupChart(){
       if (state.chart) state.chart.destroy();
+      console.log('[CRY][chart] init');
       const ctx = els.chartCanvas.getContext('2d');
       state.chart = new Chart(ctx, {
         type: 'line',
@@ -447,6 +429,7 @@
 
     function setupSpectrumChart(freqs){
       if (state.spectrumChart) state.spectrumChart.destroy();
+      console.log('[CRY][spectrum] init axis with', freqs?.length, 'bins');
       const ctx = els.chartSpectrumCanvas.getContext('2d');
       state.spectrumChart = new Chart(ctx, {
         type: 'line',
@@ -462,7 +445,7 @@
             x: {
               type: 'logarithmic',
               min: 20,
-              max: Math.max(200, Math.round((freqs[freqs.length-1]||8000))),
+              max: Math.max(200, Math.round((freqs?.[freqs.length-1]||8000))),
               title: { display: true, text: 'Frequency (Hz, log)' },
               ticks: {
                 callback: (val) => {
@@ -488,6 +471,7 @@
       state.spectrumChart.data.datasets[0].hidden = !showRaw;
       state.spectrumChart.data.datasets[1].hidden = !showSm;
       state.spectrumChart.update();
+      console.log('[CRY][spectrum] vis raw=', showRaw, 'sm=', showSm);
     }
 
     function updateSpectrumChart() {
@@ -511,13 +495,11 @@
         state.peakFreq = state.specFreqs[maxIdx];
         state.peakDb = maxDb;
         state.spectrumChart.$peakFreq = state.peakFreq;
-        if (els.peakReadout) {
-          const f = state.peakFreq >= 1000 ? (state.peakFreq/1000).toFixed(2)+' kHz' : Math.round(state.peakFreq)+' Hz';
-          els.peakReadout.textContent = `Peak: ${Math.round(state.peakDb)} dB @ ${f}`;
-        }
+        const f = state.peakFreq >= 1000 ? (state.peakFreq/1000).toFixed(2)+' kHz' : Math.round(state.peakFreq)+' Hz';
+        els.peakReadout.textContent = `Peak: ${Math.round(state.peakDb)} dB @ ${f}`;
       } else {
         state.spectrumChart.$peakFreq = null;
-        if (els.peakReadout) els.peakReadout.textContent = 'Peak: —';
+        els.peakReadout.textContent = 'Peak: —';
       }
       state.spectrumChart.update();
     }
@@ -561,6 +543,10 @@
 
     /* ---------- MP Audio task ---------- */
     async function ensureAudioTask() {
+      if (!AudioClassifier || !FilesetResolver) {
+        console.warn('[CRY] MediaPipe tasks audio not available');
+        return null;
+      }
       if (state.audioTask) return state.audioTask;
       const resolver = await FilesetResolver.forAudioTasks(AUDIO_PKG_URL + "/wasm");
       state.audioTask = await AudioClassifier.createFromOptions(resolver, {
@@ -570,6 +556,7 @@
         },
         runningMode: "AUDIO_CLIPS"
       });
+      console.log('[CRY][mp] audio task ready');
       return state.audioTask;
     }
 
@@ -590,7 +577,7 @@
     }
     function setAlert(on){ document.body.classList.toggle('alert', !!on); }
 
-    /* ---------- Classification utils ---------- */
+    /* ---------- Class score utils ---------- */
     function classMatch(name, needles) {
       const L = (name || '').trim().toLowerCase();
       return needles.some(n => L.includes(n));
@@ -605,7 +592,7 @@
       return sum; // multi-label sum
     }
 
-    /* ---------- Push a score into series (shared by local + remote) ---------- */
+    /* ---------- Push a score into series ---------- */
     function pushScore(score) {
       const params = getParams();
       const hopMs = Math.round(params.HOP_S * 1000);
@@ -617,14 +604,16 @@
 
       updateChartWindow(params);
 
-      // Alert decision
       const smoothed = state.crySm[state.crySm.length - 1];
       const nowMs = Date.now();
       const alert = shouldAlert(smoothed, nowMs, params);
-      state.alertOn = alert;
-      setAlert(alert);
+      state.alertOn = alert; setAlert(alert);
 
-      // Periodic trimming to bound memory
+      if (state.timesSec.length % 100 === 0) {
+        console.log('[CRY][series] n=', state.timesSec.length, 'last raw=', score.toFixed(3), 'sm=', smoothed.toFixed(3));
+      }
+
+      // Bound memory
       if (state.timesSec.length % 400 === 0) {
         const keepFrom = Math.max(0, state.timesSec.length - Math.ceil(params.PLOT_WINDOW_S / params.HOP_S) - 10);
         if (keepFrom > 0) {
@@ -636,7 +625,7 @@
       }
     }
 
-    /* ---------- Receiver-mode audio processing (mic) ---------- */
+    /* ---------- Receiver-mode (mic) ---------- */
     function makeScriptProcessor(ctx, onAudio) {
       const sp = ctx.createScriptProcessor(4096, 1, 1);
       sp.onaudioprocess = (e) => onAudio(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate);
@@ -644,7 +633,7 @@
     }
 
     async function startReceiverMicGraph() {
-      // Build mic path + analyser + processor for inference
+      console.log('[CRY][mic] starting mic graph…');
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
       state.audioCtx = ctx;
       await ctx.resume();
@@ -679,21 +668,24 @@
         processor = new AudioWorkletNode(ctx, 'mic-processor', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
         processor.port.onmessage = (ev) => onAudioChunkReceiver(ev.data, ctx.sampleRate);
         src.connect(processor).connect(sink);
+        console.log('[CRY][mic] using AudioWorklet @', ctx.sampleRate, 'Hz');
       } catch {
         processor = makeScriptProcessor(ctx, onAudioChunkReceiver);
         src.connect(processor).connect(sink);
+        console.log('[CRY][mic] using ScriptProcessor @', ctx.sampleRate, 'Hz');
       }
       state.sourceNode = src;
       state.sinkNode = sink;
       state.processor = processor;
 
-      // Prepare spectrum from analyser
       prepareSpectrumArrays(ctx);
       startSpectrumLoop();
       state.usingMic = true;
     }
 
     function stopReceiverMicGraph() {
+      if (!state.usingMic) return;
+      console.log('[CRY][mic] stopping mic graph');
       try { state.processor?.disconnect(); } catch {}
       try { state.sourceNode?.disconnect(); } catch {}
       try { state.sinkNode?.disconnect(); } catch {}
@@ -706,10 +698,10 @@
 
     async function onAudioChunkReceiver(chunkFloat32, deviceSr) {
       if (!state.running || !state.usingMic) return;
-      await ensureAudioTask();
+      const task = await ensureAudioTask();
+      if (!task) return;
       const params = getParams();
 
-      // Resample to SR_TARGET
       const x16 = resampleLinear(chunkFloat32, deviceSr, params.SR_TARGET);
       for (let i=0;i<x16.length;i++) x16[i] = Math.max(-1, Math.min(1, x16[i]));
       state.ring16k = concatFloat32(state.ring16k, x16);
@@ -727,13 +719,12 @@
           w = pad;
         }
 
-        const result = await state.audioTask.classify({ audioClip: w, sampleRateHz: params.SR_TARGET });
+        const result = await task.classify({ audioClip: w, sampleRateHz: params.SR_TARGET });
         const categories = result?.classifications?.[0]?.categories ?? [];
         const score = getCryScoreFromCategories(categories, params.INCLUDE_CLASSES);
         pushScore(score);
 
         state.lastPos += frameHop;
-        // Trim input buffer occasionally
         if (state.lastPos > frameLen * 4) {
           const cut = state.lastPos - frameLen;
           state.ring16k = state.ring16k.slice(cut);
@@ -744,8 +735,8 @@
 
     /* ---------- Sender-mode spectrum from remote stream ---------- */
     function startRemoteSpectrumGraphIfPossible() {
-      if (!state.running || !state.streamRemote) return;
-      // Build analyser graph from remote stream (no inference here)
+      if (!state.streamRemote) { console.log('[CRY][remote] no stream yet'); return; }
+      console.log('[CRY][remote] starting spectrum from remote stream…');
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
       state.audioCtx = ctx;
 
@@ -764,14 +755,16 @@
 
       prepareSpectrumArrays(ctx);
       startSpectrumLoop();
-      // (no processor / no mic / no classification in sender-mode)
     }
 
     function stopRemoteSpectrumGraph() {
+      if (!state.analyser || state.usingMic) return;
+      console.log('[CRY][remote] stopping remote spectrum graph');
       try { state.sourceNode?.disconnect(); } catch {}
       try { state.sinkNode?.disconnect(); } catch {}
       try { state.audioCtx && state.audioCtx.state !== 'closed' && state.audioCtx.close(); } catch {}
       state.sourceNode = null; state.sinkNode = null; state.audioCtx = null;
+      state.analyser = null;
     }
 
     /* ---------- Spectrum arrays + loop ---------- */
@@ -794,15 +787,18 @@
 
       setupSpectrumChart(state.specFreqs.slice(state.specStartIdx, state.specEndIdx + 1));
       updateSpectrumChartVisibility();
+
+      console.log('[CRY][spectrum] prepared @ fs=', ctx.sampleRate, 'Hz, bins=', binCount, 'range=', state.specStartIdx, '-', state.specEndIdx);
     }
 
     function startSpectrumLoop() {
       cancelAnimationFrame(state.spectrumRaf);
-      state.specLastUpdate = 0;
+      if (!state.analyser) return;
       const analyser = state.analyser;
-      if (!analyser) return;
-
       const binCount = analyser.frequencyBinCount;
+      state.specLastUpdate = 0;
+      console.log('[CRY][spectrum] loop start');
+
       function spectrumTick(ts) {
         if (!state.running || !state.analyser) return;
         if (ts - state.specLastUpdate > 100) {
@@ -821,15 +817,21 @@
       state.spectrumRaf = requestAnimationFrame(spectrumTick);
     }
 
-    function stopSpectrumLoop() { cancelAnimationFrame(state.spectrumRaf); state.spectrumRaf = 0; }
+    function stopSpectrumLoop() {
+      if (state.spectrumRaf) console.log('[CRY][spectrum] loop stop');
+      cancelAnimationFrame(state.spectrumRaf);
+      state.spectrumRaf = 0;
+    }
 
-    /* ---------- Mode application (mimic pose receiver) ---------- */
+    /* ---------- Mode switching (pose-style) ---------- */
     async function applyAudioMode() {
       setWhereLabel(audioWhere);
+      console.log('[CRY][mode] apply → enabled=', audioEnabled, 'where=', audioWhere);
+
       if (!state.running) return;
 
       if (!audioEnabled) {
-        // Stop everything
+        setStatus('Audio AI disabled');
         stopSpectrumLoop();
         stopReceiverMicGraph();
         stopRemoteSpectrumGraph();
@@ -837,14 +839,18 @@
       }
 
       if (audioWhere === 'receiver') {
-        // Local mic inference
         stopRemoteSpectrumGraph();
         if (!state.usingMic) {
-          try { await ensureAudioTask(); await startReceiverMicGraph(); setStatus('Mic inference (receiver)'); }
-          catch (e) { console.warn('[CRY][receiver] mic start failed', e); setStatus('Mic error'); }
+          try {
+            await ensureAudioTask();
+            await startReceiverMicGraph();
+            setStatus('Mic inference (receiver)');
+          } catch (e) {
+            console.warn('[CRY][mode] mic start failed', e);
+            setStatus('Mic error – see console');
+          }
         }
       } else { // 'sender'
-        // Remote stream spectrum only; scores come from DC
         stopReceiverMicGraph();
         if (state.streamRemote) {
           startRemoteSpectrumGraphIfPossible();
@@ -855,7 +861,7 @@
       }
     }
 
-    /* ---------- DC, WS and stream (mimic pose receiver) ---------- */
+    /* ---------- Status overlay helpers ---------- */
     let hideStatusTimer = null;
     function showStatus(msg) {
       setStatus(msg);
@@ -869,6 +875,7 @@
       }
     }
 
+    /* ---------- Enable/Disable audio buttons (same as pose) ---------- */
     function updateAudioButtons() {
       if (remoteVideo.muted) {
         enableAudioBtn.style.display = 'block';
@@ -880,13 +887,13 @@
     }
     async function tryStartMuted() {
       try { remoteVideo.muted = true; remoteVideo.volume = 1.0; await remoteVideo.play(); }
-      catch (e) { console.warn('autoplay (muted) blocked:', e); }
+      catch (e) { console.warn('[CRY] autoplay (muted) blocked:', e); }
       updateAudioButtons();
     }
     enableAudioBtn.addEventListener('click', async (e) => {
       e?.stopPropagation?.(); e?.preventDefault?.();
       try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); }
-      catch (err) { console.warn('unmute play blocked:', err); }
+      catch (err) { console.warn('[CRY] unmute play blocked:', err); }
       updateAudioButtons();
     });
     disableAudioBtn.addEventListener('click', (e) => {
@@ -894,6 +901,7 @@
       remoteVideo.muted = true; updateAudioButtons();
     });
 
+    /* ---------- Fullscreen (same as pose) ---------- */
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -904,146 +912,93 @@
           await document.exitFullscreen();
           fsBtn.textContent = 'Fullscreen';
         }
-      } catch (err) { console.warn('fullscreen error', err); }
+      } catch (err) { console.warn('[CRY] fullscreen error', err); }
     });
     document.addEventListener('fullscreenchange', () => {
       fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
     });
 
+    /* ---------- WebRTC core ---------- */
     const core = new ReceiverCore({
       wsEndpoint: WS_ENDPOINT,
       room,
       onStatus: showStatus,
       onStream: (stream) => {
+        console.log('[CRY][pc] onStream, tracks=', stream.getTracks().map(t=>t.kind));
         if (remoteVideo.srcObject !== stream) {
           remoteVideo.srcObject = stream;
           state.streamRemote = stream;
           tryStartMuted();
-          // If we’re in sender-mode and running, wire the remote spectrum now
           if (state.running && audioEnabled && audioWhere === 'sender') {
             startRemoteSpectrumGraphIfPossible();
           }
         }
       },
-      onIceState: (s) => { if (s === 'failed' || s === 'disconnected' || s === 'closed') { /* nothing to clear visually */ } },
-      onBye: () => { /* clear UI state if needed */ },
+      onIceState: (s) => { console.log('[CRY][pc] ICE:', s); },
+      onBye: () => { console.log('[CRY][pc] bye'); },
       onCreatePC: (pc) => {
-        // Data channel (receiver initiates; reuses 'pose' channel for AI messages)
+        // Use the same DC name ('pose') so the sender’s code opens it
         const ch = pc.createDataChannel('pose');
-        ch.onopen = () => { console.log('[DC][receiver] cry DC open'); };
-        ch.onclose = () => { console.log('[DC][receiver] cry DC close'); };
-        ch.onerror = (e) => { console.warn('[DC][receiver] cry DC error', e); };
+        ch.onopen = () => { console.log('[CRY][dc] open'); };
+        ch.onclose = () => { console.log('[CRY][dc] close'); };
+        ch.onerror = (e) => { console.warn('[CRY][dc] error', e); };
         ch.onmessage = (ev) => {
-          try {
-            const msg = JSON.parse(ev.data);
-            if (msg.type === 'audio-mode') {
-              audioEnabled = !!msg.enabled;
-              audioWhere   = msg.where || 'sender';
-              console.log('[CRY][receiver] mode:', { audioEnabled, audioWhere });
-              applyAudioMode();
-            } else if (msg.type === 'ai-modes' && msg.audio) {
-              audioEnabled = !!msg.audio.enabled;
-              audioWhere   = msg.audio.where || 'sender';
-              console.log('[CRY][receiver] ai-modes audio:', { audioEnabled, audioWhere });
-              applyAudioMode();
-            } else if (msg.type === 'audio') {
-              // Sender is providing categories → compute a score and push
-              if (state.running && audioEnabled && audioWhere === 'sender') {
-                const params = getParams();
-                const score = getCryScoreFromCategories(msg.categories || [], params.INCLUDE_CLASSES);
-                pushScore(score);
+          let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+          if (!msg || !msg.type) return;
+          if (msg.type !== 'pose') console.log('[CRY][dc] msg:', msg.type);
+
+          if (msg.type === 'audio-mode') {
+            audioEnabled = !!msg.enabled;
+            audioWhere   = msg.where || 'sender';
+            applyAudioMode();
+          } else if (msg.type === 'ai-modes' && msg.audio) {
+            audioEnabled = !!msg.audio.enabled;
+            audioWhere   = msg.audio.where || 'sender';
+            applyAudioMode();
+          } else if (msg.type === 'audio') {
+            if (state.running && audioEnabled && audioWhere === 'sender') {
+              const params = getParams();
+              const categories = msg.categories || [];
+              const score = getCryScoreFromCategories(categories, params.INCLUDE_CLASSES);
+              pushScore(score);
+              if ((state.timesSec.length % 20) === 0) {
+                console.log('[CRY][dc] categories n=', categories.length, 'score=', score.toFixed(3));
               }
             }
-          } catch {}
+          }
         };
         audioDC = ch;
       },
-      onDataChannel: (e) => { console.log('[DC][receiver] inbound DC:', e.channel?.label); }
+      onDataChannel: (e) => { console.log('[CRY][pc] inbound DC:', e.channel?.label); }
     });
 
-    core.start().catch(console.warn);
+    core.start().catch(err => console.warn('[CRY] core start error', err));
 
-    /* ---------- Start/Stop (mimic behavior, but mode-aware) ---------- */
-    async function start() {
-      if (state.running) return;
-      try {
-        showOverlay(true); setStatus('Initializing…');
-        setupChart();
+    /* ---------- Wire UI & initial boot ---------- */
+    document.addEventListener('DOMContentLoaded', () => {
+      console.log('[CRY] DOM ready');
+      setupChart(); // show axes immediately
+      setStatus('Waiting for mode from sender…');
+      setWhereLabel(audioWhere);
 
-        // Reset series + flags
-        state.ring16k = new Float32Array(0);
-        state.lastPos = 0;
-        state.timesSec = [];
-        state.timesMs  = [];
-        state.cryRaw   = [];
-        state.crySm    = [];
-        state.alertOn  = false;
-        state.alertUntilMs = 0;
+      // toggles
+      Object.values(els.inputs).forEach(inp => {
+        inp?.addEventListener('change', () => {
+          console.log('[CRY][ui] params changed → update chart window');
+          updateChartWindow(getParams());
+        });
+      });
+      els.showRawSpec?.addEventListener('change', updateSpectrumChartVisibility);
+      els.showSmSpec?.addEventListener('change', updateSpectrumChartVisibility);
+    });
 
-        // Decide by current mode
-        if (audioEnabled && audioWhere === 'receiver') {
-          await ensureAudioTask();
-          await startReceiverMicGraph();
-          setStatus('Mic inference (receiver)');
-        } else {
-          // Sender-mode: don’t ask mic; set up spectrum from remote (if present)
-          stopReceiverMicGraph();
-          if (state.streamRemote) {
-            startRemoteSpectrumGraphIfPossible();
-            setStatus('Remote inference (sender) – waiting for scores…');
-          } else {
-            setStatus('Remote inference (sender) – waiting for stream…');
-          }
-        }
-
-        state.running = true;
-        els.btnStart.disabled = true;
-        els.btnStop.disabled  = false;
-        showOverlay(false);
-      } catch (err) {
-        console.error(err);
-        setStatus('Start failed'); showOverlay(true);
-        // Clean up anything partially started
-        stopSpectrumLoop();
-        stopReceiverMicGraph();
-        stopRemoteSpectrumGraph();
-        state.running = false;
-        els.btnStart.disabled = false;
-        els.btnStop.disabled  = true;
-      }
-    }
-
-    async function stop() {
+    window.addEventListener('beforeunload', () => {
+      try { core.close(); } catch {}
       stopSpectrumLoop();
       stopReceiverMicGraph();
       stopRemoteSpectrumGraph();
-
-      state.running = false;
-      els.btnStart.disabled = false;
-      els.btnStop.disabled  = true;
-      setStatus('Stopped'); showOverlay(false);
-      setAlert(false);
-    }
-
-    /* ---------- Wire UI ---------- */
-    document.addEventListener('DOMContentLoaded', () => {
-      els.btnStart.disabled = false;
-      els.btnStop.disabled  = true;
-      els.btnStart.addEventListener('click', start);
-      els.btnStop.addEventListener('click', stop);
-
-      Object.values(els.inputs).forEach(inp => {
-        inp?.addEventListener('change', () => updateChartWindow(getParams()));
-      });
-
-      els.showRawSpec?.addEventListener('change', updateSpectrumChartVisibility);
-      els.showSmSpec?.addEventListener('change', updateSpectrumChartVisibility);
-
-      setStatus('Page ready. Click Start.');
-      setWhereLabel(audioWhere);
+      console.log('[CRY] unload cleanup done');
     });
-
-    window.addEventListener('beforeunload', () => { try { core.close(); } catch {}; try { stop(); } catch {} });
   </script>
 </body>
 </html>
