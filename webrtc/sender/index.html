@@ -1284,7 +1284,7 @@
       return faceTask;
     }
 
-    async function ensureAudioTask() {
+    /*async function ensureAudioTask() {
       if (audioTask) return audioTask;
       if (!AudioClassifier || !AudioFilesetResolver) {
         ({ AudioClassifier, FilesetResolver: AudioFilesetResolver } = await import(AUDIO_TASKS_URL));
@@ -1299,7 +1299,63 @@
         runningMode: "AUDIO_CLIPS"
       });
       return audioTask;
+    }*/
+    //https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
+    async function ensureAudioTask() {
+      if (audioTask) return audioTask;
+    
+      // lazy-load the module once
+      if (!AudioClassifier || !AudioFilesetResolver) {
+        ({ AudioClassifier, FilesetResolver: AudioFilesetResolver } = await import(AUDIO_TASKS_URL));
+        console.log('[AUDIO][sender] AudioClassifier + FilesetResolver loaded');
+      }
+    
+      const WASM_DIR  = AUDIO_WASM_DIR; // you already defined this
+      const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite";
+    
+      const resolver = await AudioFilesetResolver.forAudioTasks(WASM_DIR);
+    
+      const createWithPath = () => AudioClassifier.createFromOptions(resolver, {
+        baseOptions: { modelAssetPath: MODEL_URL },
+        runningMode: "AUDIO_CLIPS"
+      });
+    
+      const createWithBuffer = async () => {
+        // Bust caches and avoid the browser cache pipeline that sometimes fails
+        const bust = MODEL_URL + (MODEL_URL.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+        const res = await fetch(bust, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`yamnet fetch ${res.status}`);
+        const buf = await res.arrayBuffer();
+        return AudioClassifier.createFromOptions(resolver, {
+          baseOptions: { modelAssetBuffer: buf },
+          runningMode: "AUDIO_CLIPS"
+        });
+      };
+    
+      // Try path first, then buffer, with a couple retries
+      let lastErr = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          audioTask = await createWithPath();
+          console.log('[AUDIO][sender] audio task ready (path)');
+          return audioTask;
+        } catch (e1) {
+          lastErr = e1;
+          console.warn('[AUDIO][sender] path load failed (attempt', attempt, '):', e1?.message || e1);
+          try {
+            audioTask = await createWithBuffer();
+            console.log('[AUDIO][sender] audio task ready (buffer)');
+            return audioTask;
+          } catch (e2) {
+            lastErr = e2;
+            console.warn('[AUDIO][sender] buffer load failed (attempt', attempt, '):', e2?.message || e2);
+          }
+          await new Promise(r => setTimeout(r, attempt * 600)); // small backoff
+        }
+      }
+      throw lastErr || new Error('audio task init failed');
     }
+
     
     function sendPoseToReceivers(landmarks) {
       const payload = JSON.stringify({ type:'pose', landmarks, ts: performance.now() });
@@ -1444,7 +1500,10 @@
         task = await ensureAudioTask();
       } catch (e) {
         audioStarting = false;           // release lock on failure
-        throw e;
+        console.warn('[AUDIO][sender] model init failed:', e);
+        setStatus('Audio model load failed');   // <- user-visible
+        return;
+        //throw e;
       }
       // Choose capture source: streaming mic if live+enabled, else open a local-only mic.
       let captureStream = null;
