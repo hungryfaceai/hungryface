@@ -18,17 +18,22 @@
       overflow: hidden;
     }
 
-    /* Stage wrapper to mirror receiver pages layout */
+    /* Fullscreen wrapper (matches pose receiver) */
     #stage {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;   /* fallback */
       width: 100dvw; height: 100dvh; /* dynamic viewport */
       width: 100svw; height: 100svh; /* small viewport (iOS URL bar safe) */
-      z-index: 1; background: #000; display: grid; place-items: center;
+      z-index: 1; background: #000;
+      display: grid; place-items: center;
       padding: 16px; box-sizing: border-box;
     }
 
-    /* Content panel */
+    /* Hidden video for remote A/V (we only need audio + a stream) */
+    #remote {
+      position: absolute; width: 1px; height: 1px; left: -99999px; top: -99999px;
+    }
+
     .panel {
       width: min(100%, 980px);
       background: #0b0b0b;
@@ -45,10 +50,8 @@
     .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     .row + .row { margin-top: 10px; }
 
-    /* Buttons: same vibe as receiver pose page */
     .btn {
-      padding: 12px 14px; border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.6);
+      padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
       background: transparent; color: #fff; font-size: 16px; font-weight: 600;
       cursor: pointer; box-shadow: none; text-shadow: 0 1px 2px rgba(0,0,0,0.6);
     }
@@ -97,7 +100,7 @@
     .toggles { margin-top: 8px; display: flex; gap: 12px; align-items: center; font-size: 13px; color:#ddd; }
     .peak { margin-top: 6px; font-size: 13px; color:#ddd; }
 
-    /* Overlay (status) like receiver pose page */
+    /* Overlay (status) like pose receiver */
     .overlay {
       position: fixed; inset: 0; display: flex;
       align-items: center; justify-content: center;
@@ -113,7 +116,12 @@
     /* Background turns red while alert is active */
     body.alert #stage { background: #1a0000; }
 
-    footer { margin-top: 12px; color: #888; font-size: 12px; text-align: center; }
+    /* Fixed control bar (mimic pose receiver) */
+    #controls {
+      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 12px; z-index: 6;
+    }
+    #enableAudioBtn, #disableAudioBtn { display: none; }
   </style>
 </head>
 <body>
@@ -140,11 +148,21 @@
     })();
   </script>
 
+  <!-- Bottom controls (like pose page) -->
+  <div id="controls">
+    <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
+    <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
+    <button id="fsBtn" class="btn" type="button">Fullscreen</button>
+  </div>
+
   <div id="stage">
+    <!-- Hidden media element to host remote A/V stream (we use its audio track) -->
+    <video id="remote" autoplay playsinline></video>
+
     <div class="panel">
       <header>
         <h1>Live Baby Cry Detector</h1>
-        <p class="sub">Real-time mic inference (on this device)</p>
+        <p class="sub">Real-time inference on <strong id="whereLbl">—</strong></p>
       </header>
 
       <section class="controls">
@@ -241,25 +259,40 @@
     </div>
   </div>
 
-  <!-- Overlay status (same behavior/feel as pose page) -->
+  <!-- Overlay status (same feel as pose page) -->
   <div id="overlay" class="overlay hidden"><div id="overlayStatus" class="status">Idle</div></div>
 
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 
-  <!-- App (MediaPipe Tasks Audio, no login) -->
+  <!-- App (ReceiverCore + MediaPipe Tasks Audio) -->
   <script type="module">
-    // MediaPipe Tasks Audio (ESM)
+    import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
+
+    // MediaPipe Tasks Audio
     const AUDIO_PKG_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0";
-    const { AudioClassifier, FilesetResolver } = await import(AUDIO_PKG_URL).then(m => m.default ?? m);
+    const AudioMod = await import(AUDIO_PKG_URL).then(m => m.default ?? m);
+    const { AudioClassifier, FilesetResolver } = AudioMod;
+
+    /* ---------- Constants ---------- */
+    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const room = new URLSearchParams(location.search).get("room") || "Baby";
+    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
     /* ---------- DOM ---------- */
+    const stage = document.getElementById('stage');
+    const remoteVideo = document.getElementById('remote');
+    const enableAudioBtn = document.getElementById('enableAudioBtn');
+    const disableAudioBtn = document.getElementById('disableAudioBtn');
+    const fsBtn = document.getElementById('fsBtn');
+
     const els = {
       btnStart: document.getElementById('btnStart'),
       btnStop:  document.getElementById('btnStop'),
       status:   document.getElementById('status'),
       overlay:  document.getElementById('overlay'),
       overlayStatus: document.getElementById('overlayStatus'),
+      whereLbl: document.getElementById('whereLbl'),
       chartCanvas: document.getElementById('chart'),
       chartSpectrumCanvas: document.getElementById('chartSpectrum'),
       showRawSpec: document.getElementById('showRawSpec'),
@@ -279,15 +312,59 @@
       }
     };
 
-    function setStatus(msg) {
-      els.status.textContent = msg;
-      els.overlayStatus.textContent = msg;
-    }
-    function showOverlay(show) {
-      els.overlay.classList.toggle('hidden', !show);
-    }
+    function setStatus(msg) { els.status.textContent = msg; els.overlayStatus.textContent = msg; }
+    function showOverlay(show) { els.overlay.classList.toggle('hidden', !show); }
+    function setWhereLabel(where) { els.whereLbl.textContent = where === 'receiver' ? 'RECEIVER' : (where === 'sender' ? 'SENDER' : '—'); }
 
-    /* ---------- Params ---------- */
+    /* ---------- Audio mode state (mirrors pose logic) ---------- */
+    let audioDC = null;
+    let audioEnabled = false;
+    let audioWhere = 'sender';          // 'sender' | 'receiver'
+
+    /* ---------- App state ---------- */
+    const state = {
+      running: false,
+      usingMic: false,                  // true when receiver-mode loop has mic graph up
+      audioCtx: null,
+      streamLocalMic: null,
+      streamRemote: null,
+      sourceNode: null,                 // MediaStreamAudioSourceNode from mic OR remote
+      sinkNode: null,                   // Gain -> destination (muted)
+      processor: null,                  // Worklet or ScriptProcessor (only in receiver-mode)
+      analyser: null,                   // For spectrum (from active source)
+      ring16k: new Float32Array(0),
+      lastPos: 0,
+      timesSec: [],
+      timesMs: [],
+      cryRaw: [],
+      crySm: [],
+      chart: null,
+      spectrumChart: null,
+      // spectrum arrays
+      specFreqs: [],
+      specRawDb: [],
+      specSmDb: [],
+      specStartIdx: 0,
+      specEndIdx: 0,
+      specBinCountAll: 0,
+      specLastUpdate: 0,
+      // peak
+      peakFreq: null,
+      peakDb: null,
+      // alert
+      alertOn: false,
+      alertUntilMs: 0,
+      // MP task
+      audioTask: null,
+      spectrumRaf: 0,
+    };
+
+    /* ---------- Small helpers ---------- */
+    const RAW_COLOR = '#60a5fa';
+    const SMOOTH_COLOR = '#ef4444';
+    const THRESH_ON_COLOR = '#f97316';
+    const THRESH_OFF_COLOR = '#fb923c';
+
     function splitClasses(text){ return String(text||'').split(/[;\n\r]+/).map(s=>s.trim()).filter(Boolean); }
     function getParams() {
       return {
@@ -303,41 +380,6 @@
         ALERT_HOLD_MS: Math.max(0, parseInt(els.inputs.ALERT_HOLD_MS?.value, 10) || 3000),
       };
     }
-
-    /* ---------- State ---------- */
-    const state = {
-      running: false,
-      audioCtx: null,
-      stream: null,
-      analyser: null,
-      processor: null,
-      ring16k: new Float32Array(0),
-      lastPos: 0,
-      timesSec: [],
-      timesMs: [],
-      cryRaw: [],
-      crySm: [],
-      chart: null,
-      spectrumChart: null,
-      // spectrum
-      specFreqs: [],
-      specRawDb: [],
-      specSmDb: [],
-      specStartIdx: 0,
-      specEndIdx: 0,
-      specBinCountAll: 0,
-      specLastUpdate: 0,
-      // peak
-      peakFreq: null,
-      peakDb: null,
-      // alert
-      alertOn: false,
-      alertUntilMs: 0,
-      // MP Tasks
-      audioTask: null,
-    };
-
-    /* ---------- Utils ---------- */
     function concatFloat32(a,b){const out=new Float32Array(a.length+b.length);out.set(a,0);out.set(b,a.length);return out;}
     function resampleLinear(x, fromSr, toSr){
       if (fromSr === toSr) return x;
@@ -355,11 +397,6 @@
     function formatClock(ms){ return new Date(ms).toLocaleTimeString(undefined,{hour12:false}); }
 
     /* ---------- Charts ---------- */
-    const RAW_COLOR = '#60a5fa';
-    const SMOOTH_COLOR = '#ef4444';
-    const THRESH_ON_COLOR = '#f97316';
-    const THRESH_OFF_COLOR = '#fb923c';
-
     function setupChart(){
       if (state.chart) state.chart.destroy();
       const ctx = els.chartCanvas.getContext('2d');
@@ -388,7 +425,6 @@
       afterDatasetsDraw(chart) {
         const { ctx, chartArea, scales } = chart;
         if (!chart.$peakFreq) return;
-        // Band shading 300–3000 Hz
         const x1 = scales.x.getPixelForValue(300);
         const x2 = scales.x.getPixelForValue(3000);
         ctx.save();
@@ -397,7 +433,6 @@
         const width = Math.abs(x2 - x1);
         ctx.fillRect(left, chartArea.top, width, chartArea.bottom - chartArea.top);
 
-        // Peak marker
         const xp = scales.x.getPixelForValue(chart.$peakFreq);
         ctx.strokeStyle = '#ef4444';
         ctx.lineWidth = 1;
@@ -427,7 +462,7 @@
             x: {
               type: 'logarithmic',
               min: 20,
-              max: Math.max(200, Math.round(freqs[freqs.length-1] || 8000)),
+              max: Math.max(200, Math.round((freqs[freqs.length-1]||8000))),
               title: { display: true, text: 'Frequency (Hz, log)' },
               ticks: {
                 callback: (val) => {
@@ -478,7 +513,7 @@
         state.spectrumChart.$peakFreq = state.peakFreq;
         if (els.peakReadout) {
           const f = state.peakFreq >= 1000 ? (state.peakFreq/1000).toFixed(2)+' kHz' : Math.round(state.peakFreq)+' Hz';
-          els.peakReadout.textContent = `Peak: ${f} @ ${Math.round(state.peakDb)} dB`;
+          els.peakReadout.textContent = `Peak: ${Math.round(state.peakDb)} dB @ ${f}`;
         }
       } else {
         state.spectrumChart.$peakFreq = null;
@@ -555,152 +590,7 @@
     }
     function setAlert(on){ document.body.classList.toggle('alert', !!on); }
 
-    /* ---------- Audio plumbing ---------- */
-    function makeScriptProcessor(ctx, onAudio) {
-      const sp = ctx.createScriptProcessor(4096, 1, 1);
-      sp.onaudioprocess = (e) => onAudio(new Float32Array(e.inputBuffer.getChannelData(0)));
-      return sp;
-    }
-
-    let spectrumRaf = 0;
-
-    async function start() {
-      if (state.running) return;
-      try {
-        setStatus('Initializing…'); showOverlay(true);
-
-        await ensureAudioTask();
-
-        // Reset series
-        state.ring16k = new Float32Array(0);
-        state.lastPos = 0;
-        state.timesSec = [];
-        state.timesMs  = [];
-        state.cryRaw   = [];
-        state.crySm    = [];
-        state.alertOn  = false;
-        state.alertUntilMs = 0;
-
-        setupChart();
-        setAlert(false);
-
-        // Audio graph
-        const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
-        state.audioCtx = ctx;
-        await ctx.resume();
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { channelCount: 1, noiseSuppression: false, echoCancellation: false, autoGainControl: false },
-          video: false
-        });
-        state.stream = stream;
-
-        const src = ctx.createMediaStreamSource(stream);
-        const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
-
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 2048;
-        analyser.smoothingTimeConstant = 0.0;
-        state.analyser = analyser;
-
-        src.connect(analyser);
-
-        // Worklet if available, else ScriptProcessor
-        let processor;
-        try {
-          const workletURL = URL.createObjectURL(new Blob([`
-            class MicProcessor extends AudioWorkletProcessor {
-              process(inputs) {
-                const input = inputs[0];
-                if (input && input[0]) this.port.postMessage(input[0].slice(0));
-                return true;
-              }
-            }
-            registerProcessor('mic-processor', MicProcessor);
-          `], { type: 'application/javascript' }));
-          await ctx.audioWorklet.addModule(workletURL);
-          processor = new AudioWorkletNode(ctx, 'mic-processor', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
-          processor.port.onmessage = (ev) => onAudioChunk(ev.data, ctx.sampleRate);
-          src.connect(processor).connect(sink);
-        } catch {
-          processor = makeScriptProcessor(ctx, (chunk) => onAudioChunk(chunk, ctx.sampleRate));
-          src.connect(processor).connect(sink);
-        }
-        state.processor = processor;
-
-        // Spectrum arrays
-        const binCount = analyser.frequencyBinCount;
-        state.specBinCountAll = binCount;
-        const nyquist = ctx.sampleRate / 2;
-        const fMax = Math.min(8000, nyquist);
-
-        state.specFreqs = new Array(binCount);
-        for (let i = 0; i < binCount; i++) state.specFreqs[i] = i * ctx.sampleRate / analyser.fftSize;
-
-        state.specStartIdx = 0; while (state.specStartIdx < binCount && state.specFreqs[state.specStartIdx] < 20) state.specStartIdx++;
-        state.specEndIdx = binCount - 1; while (state.specEndIdx > 0 && state.specFreqs[state.specEndIdx] > fMax) state.specEndIdx--;
-
-        state.specRawDb = new Array(binCount).fill(-100);
-        state.specSmDb  = new Array(binCount).fill(-100);
-
-        setupSpectrumChart(state.specFreqs.slice(state.specStartIdx, state.specEndIdx + 1));
-        updateSpectrumChartVisibility();
-
-        // Spectrum loop (~10 Hz)
-        state.specLastUpdate = 0;
-        function spectrumTick(ts) {
-          if (!state.running || !state.analyser) return;
-          if (ts - state.specLastUpdate > 100) {
-            const buf = new Float32Array(binCount);
-            state.analyser.getFloatFrequencyData(buf);
-            for (let i = state.specStartIdx; i <= state.specEndIdx; i++) {
-              const db = Math.max(-100, Math.min(0, buf[i]));
-              state.specRawDb[i] = db;
-              state.specSmDb[i] = 0.8 * state.specSmDb[i] + 0.2 * db;
-            }
-            updateSpectrumChart();
-            state.specLastUpdate = ts;
-          }
-          spectrumRaf = requestAnimationFrame(spectrumTick);
-        }
-        spectrumRaf = requestAnimationFrame(spectrumTick);
-
-        els.showRawSpec?.addEventListener('change', updateSpectrumChartVisibility);
-        els.showSmSpec?.addEventListener('change', updateSpectrumChartVisibility);
-
-        state.running = true;
-        els.btnStart.disabled = true;
-        els.btnStop.disabled  = false;
-        setStatus(`Listening @ ${ctx.sampleRate.toFixed(0)} Hz`);
-        showOverlay(false);
-      } catch (err) {
-        console.error(err);
-        setStatus('Start failed'); showOverlay(true);
-        try { state.processor?.disconnect(); } catch {}
-        try { if (state.audioCtx && state.audioCtx.state !== 'closed') await state.audioCtx.close(); } catch {}
-        try { state.stream?.getTracks().forEach(t => t.stop()); } catch {}
-        if (spectrumRaf) cancelAnimationFrame(spectrumRaf);
-        state.audioCtx = null; state.stream = null; state.processor = null; state.analyser = null;
-        state.running = false;
-        els.btnStart.disabled = false;
-        els.btnStop.disabled  = true;
-      }
-    }
-
-    async function stop() {
-      try { state.processor?.disconnect(); } catch {}
-      try { if (state.audioCtx) await state.audioCtx.close(); } catch {}
-      try { state.stream?.getTracks().forEach(t => t.stop()); } catch {}
-      if (spectrumRaf) cancelAnimationFrame(spectrumRaf);
-      state.running = false;
-      state.analyser = null;
-      els.btnStart.disabled = false;
-      els.btnStop.disabled  = true;
-      setStatus('Stopped'); showOverlay(false);
-      setAlert(false);
-    }
-
-    /* ---------- Inference step ---------- */
+    /* ---------- Classification utils ---------- */
     function classMatch(name, needles) {
       const L = (name || '').trim().toLowerCase();
       return needles.some(n => L.includes(n));
@@ -712,13 +602,112 @@
         const disp = c.displayName ?? c.categoryName ?? '';
         if (classMatch(disp, needles)) sum += (c.score || 0);
       }
-      return sum; // multi-label sum, can exceed 1
+      return sum; // multi-label sum
     }
 
-    async function onAudioChunk(chunkFloat32, deviceSr) {
-      if (!state.running) return;
+    /* ---------- Push a score into series (shared by local + remote) ---------- */
+    function pushScore(score) {
       const params = getParams();
       const hopMs = Math.round(params.HOP_S * 1000);
+      state.cryRaw.push(score);
+      state.crySm.push(movingAvgTail(state.cryRaw, params.SMOOTH_WIN));
+      state.timesSec.push(state.timesSec.length * params.HOP_S);
+      const nextMs = state.timesMs.length ? (state.timesMs[state.timesMs.length - 1] + hopMs) : Date.now();
+      state.timesMs.push(nextMs);
+
+      updateChartWindow(params);
+
+      // Alert decision
+      const smoothed = state.crySm[state.crySm.length - 1];
+      const nowMs = Date.now();
+      const alert = shouldAlert(smoothed, nowMs, params);
+      state.alertOn = alert;
+      setAlert(alert);
+
+      // Periodic trimming to bound memory
+      if (state.timesSec.length % 400 === 0) {
+        const keepFrom = Math.max(0, state.timesSec.length - Math.ceil(params.PLOT_WINDOW_S / params.HOP_S) - 10);
+        if (keepFrom > 0) {
+          state.timesSec = state.timesSec.slice(keepFrom);
+          state.timesMs  = state.timesMs.slice(keepFrom);
+          state.cryRaw   = state.cryRaw.slice(keepFrom);
+          state.crySm    = state.crySm.slice(keepFrom);
+        }
+      }
+    }
+
+    /* ---------- Receiver-mode audio processing (mic) ---------- */
+    function makeScriptProcessor(ctx, onAudio) {
+      const sp = ctx.createScriptProcessor(4096, 1, 1);
+      sp.onaudioprocess = (e) => onAudio(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate);
+      return sp;
+    }
+
+    async function startReceiverMicGraph() {
+      // Build mic path + analyser + processor for inference
+      const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
+      state.audioCtx = ctx;
+      await ctx.resume();
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, noiseSuppression: false, echoCancellation: false, autoGainControl: false },
+        video: false
+      });
+      state.streamLocalMic = stream;
+
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.0;
+      state.analyser = analyser;
+      src.connect(analyser);
+
+      const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
+      let processor;
+      try {
+        const workletURL = URL.createObjectURL(new Blob([`
+          class MicProcessor extends AudioWorkletProcessor {
+            process(inputs) {
+              const input = inputs[0];
+              if (input && input[0]) this.port.postMessage(input[0].slice(0));
+              return true;
+            }
+          }
+          registerProcessor('mic-processor', MicProcessor);
+        `], { type: 'application/javascript' }));
+        await ctx.audioWorklet.addModule(workletURL);
+        processor = new AudioWorkletNode(ctx, 'mic-processor', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
+        processor.port.onmessage = (ev) => onAudioChunkReceiver(ev.data, ctx.sampleRate);
+        src.connect(processor).connect(sink);
+      } catch {
+        processor = makeScriptProcessor(ctx, onAudioChunkReceiver);
+        src.connect(processor).connect(sink);
+      }
+      state.sourceNode = src;
+      state.sinkNode = sink;
+      state.processor = processor;
+
+      // Prepare spectrum from analyser
+      prepareSpectrumArrays(ctx);
+      startSpectrumLoop();
+      state.usingMic = true;
+    }
+
+    function stopReceiverMicGraph() {
+      try { state.processor?.disconnect(); } catch {}
+      try { state.sourceNode?.disconnect(); } catch {}
+      try { state.sinkNode?.disconnect(); } catch {}
+      try { state.streamLocalMic?.getTracks().forEach(t => t.stop()); } catch {}
+      try { state.audioCtx && state.audioCtx.state !== 'closed' && state.audioCtx.close(); } catch {}
+      state.processor = null; state.sourceNode = null; state.sinkNode = null;
+      state.streamLocalMic = null; state.audioCtx = null;
+      state.usingMic = false;
+    }
+
+    async function onAudioChunkReceiver(chunkFloat32, deviceSr) {
+      if (!state.running || !state.usingMic) return;
+      await ensureAudioTask();
+      const params = getParams();
 
       // Resample to SR_TARGET
       const x16 = resampleLinear(chunkFloat32, deviceSr, params.SR_TARGET);
@@ -738,52 +727,308 @@
           w = pad;
         }
 
-        // Classify with MediaPipe Tasks Audio
         const result = await state.audioTask.classify({ audioClip: w, sampleRateHz: params.SR_TARGET });
         const categories = result?.classifications?.[0]?.categories ?? [];
         const score = getCryScoreFromCategories(categories, params.INCLUDE_CLASSES);
-
-        // Series update
-        state.cryRaw.push(score);
-        state.crySm.push(movingAvgTail(state.cryRaw, params.SMOOTH_WIN));
-        state.timesSec.push(state.timesSec.length * params.HOP_S);
-        const nextMs = state.timesMs.length ? (state.timesMs[state.timesMs.length - 1] + hopMs) : Date.now();
-        state.timesMs.push(nextMs);
-
-        updateChartWindow(params);
-
-        // Alert decision
-        const smoothed = state.crySm[state.crySm.length - 1];
-        const nowMs = Date.now();
-        const alert = shouldAlert(smoothed, nowMs, params);
-        state.alertOn = alert;
-        setAlert(alert);
+        pushScore(score);
 
         state.lastPos += frameHop;
-
-        // Trim memory periodically
-        if (state.timesSec.length % 400 === 0) {
-          const keepFrom = Math.max(0, state.timesSec.length - Math.ceil(params.PLOT_WINDOW_S / params.HOP_S) - 10);
-          if (keepFrom > 0) {
-            state.timesSec = state.timesSec.slice(keepFrom);
-            state.timesMs  = state.timesMs.slice(keepFrom);
-            state.cryRaw   = state.cryRaw.slice(keepFrom);
-            state.crySm    = state.crySm.slice(keepFrom);
-          }
-          const minNeeded = state.lastPos - frameLen - frameHop;
-          if (minNeeded > 0) {
-            state.ring16k = state.ring16k.slice(minNeeded);
-            state.lastPos -= minNeeded;
-          }
+        // Trim input buffer occasionally
+        if (state.lastPos > frameLen * 4) {
+          const cut = state.lastPos - frameLen;
+          state.ring16k = state.ring16k.slice(cut);
+          state.lastPos -= cut;
         }
       }
     }
 
-    /* ---------- Wire up ---------- */
+    /* ---------- Sender-mode spectrum from remote stream ---------- */
+    function startRemoteSpectrumGraphIfPossible() {
+      if (!state.running || !state.streamRemote) return;
+      // Build analyser graph from remote stream (no inference here)
+      const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
+      state.audioCtx = ctx;
+
+      const src = ctx.createMediaStreamSource(state.streamRemote);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.0;
+      const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
+
+      src.connect(analyser);
+      src.connect(sink);
+
+      state.sourceNode = src;
+      state.analyser = analyser;
+      state.sinkNode = sink;
+
+      prepareSpectrumArrays(ctx);
+      startSpectrumLoop();
+      // (no processor / no mic / no classification in sender-mode)
+    }
+
+    function stopRemoteSpectrumGraph() {
+      try { state.sourceNode?.disconnect(); } catch {}
+      try { state.sinkNode?.disconnect(); } catch {}
+      try { state.audioCtx && state.audioCtx.state !== 'closed' && state.audioCtx.close(); } catch {}
+      state.sourceNode = null; state.sinkNode = null; state.audioCtx = null;
+    }
+
+    /* ---------- Spectrum arrays + loop ---------- */
+    function prepareSpectrumArrays(ctx) {
+      const analyser = state.analyser;
+      const binCount = analyser.frequencyBinCount;
+      state.specBinCountAll = binCount;
+
+      state.specFreqs = new Array(binCount);
+      for (let i = 0; i < binCount; i++) state.specFreqs[i] = i * ctx.sampleRate / analyser.fftSize;
+
+      const nyquist = ctx.sampleRate / 2;
+      const fMax = Math.min(8000, nyquist);
+
+      state.specStartIdx = 0; while (state.specStartIdx < binCount && state.specFreqs[state.specStartIdx] < 20) state.specStartIdx++;
+      state.specEndIdx   = binCount - 1; while (state.specEndIdx > 0 && state.specFreqs[state.specEndIdx] > fMax) state.specEndIdx--;
+
+      state.specRawDb = new Array(binCount).fill(-100);
+      state.specSmDb  = new Array(binCount).fill(-100);
+
+      setupSpectrumChart(state.specFreqs.slice(state.specStartIdx, state.specEndIdx + 1));
+      updateSpectrumChartVisibility();
+    }
+
+    function startSpectrumLoop() {
+      cancelAnimationFrame(state.spectrumRaf);
+      state.specLastUpdate = 0;
+      const analyser = state.analyser;
+      if (!analyser) return;
+
+      const binCount = analyser.frequencyBinCount;
+      function spectrumTick(ts) {
+        if (!state.running || !state.analyser) return;
+        if (ts - state.specLastUpdate > 100) {
+          const buf = new Float32Array(binCount);
+          state.analyser.getFloatFrequencyData(buf);
+          for (let i = state.specStartIdx; i <= state.specEndIdx; i++) {
+            const db = Math.max(-100, Math.min(0, buf[i]));
+            state.specRawDb[i] = db;
+            state.specSmDb[i] = 0.8 * state.specSmDb[i] + 0.2 * db;
+          }
+          updateSpectrumChart();
+          state.specLastUpdate = ts;
+        }
+        state.spectrumRaf = requestAnimationFrame(spectrumTick);
+      }
+      state.spectrumRaf = requestAnimationFrame(spectrumTick);
+    }
+
+    function stopSpectrumLoop() { cancelAnimationFrame(state.spectrumRaf); state.spectrumRaf = 0; }
+
+    /* ---------- Mode application (mimic pose receiver) ---------- */
+    async function applyAudioMode() {
+      setWhereLabel(audioWhere);
+      if (!state.running) return;
+
+      if (!audioEnabled) {
+        // Stop everything
+        stopSpectrumLoop();
+        stopReceiverMicGraph();
+        stopRemoteSpectrumGraph();
+        return;
+      }
+
+      if (audioWhere === 'receiver') {
+        // Local mic inference
+        stopRemoteSpectrumGraph();
+        if (!state.usingMic) {
+          try { await ensureAudioTask(); await startReceiverMicGraph(); setStatus('Mic inference (receiver)'); }
+          catch (e) { console.warn('[CRY][receiver] mic start failed', e); setStatus('Mic error'); }
+        }
+      } else { // 'sender'
+        // Remote stream spectrum only; scores come from DC
+        stopReceiverMicGraph();
+        if (state.streamRemote) {
+          startRemoteSpectrumGraphIfPossible();
+          setStatus('Remote inference (sender) – waiting for scores…');
+        } else {
+          setStatus('Remote inference (sender) – waiting for stream…');
+        }
+      }
+    }
+
+    /* ---------- DC, WS and stream (mimic pose receiver) ---------- */
+    let hideStatusTimer = null;
+    function showStatus(msg) {
+      setStatus(msg);
+      els.overlay.classList.remove('hidden');
+      if (msg === 'Connected') {
+        if (hideStatusTimer) clearTimeout(hideStatusTimer);
+        hideStatusTimer = setTimeout(() => els.overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
+      } else {
+        if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
+        els.overlay.classList.remove('hidden');
+      }
+    }
+
+    function updateAudioButtons() {
+      if (remoteVideo.muted) {
+        enableAudioBtn.style.display = 'block';
+        disableAudioBtn.style.display = 'none';
+      } else {
+        enableAudioBtn.style.display = 'none';
+        disableAudioBtn.style.display = 'block';
+      }
+    }
+    async function tryStartMuted() {
+      try { remoteVideo.muted = true; remoteVideo.volume = 1.0; await remoteVideo.play(); }
+      catch (e) { console.warn('autoplay (muted) blocked:', e); }
+      updateAudioButtons();
+    }
+    enableAudioBtn.addEventListener('click', async (e) => {
+      e?.stopPropagation?.(); e?.preventDefault?.();
+      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); }
+      catch (err) { console.warn('unmute play blocked:', err); }
+      updateAudioButtons();
+    });
+    disableAudioBtn.addEventListener('click', (e) => {
+      e?.stopPropagation?.(); e?.preventDefault?.();
+      remoteVideo.muted = true; updateAudioButtons();
+    });
+
+    fsBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        if (!document.fullscreenElement) {
+          await (stage.requestFullscreen?.call(stage) || document.documentElement.requestFullscreen());
+          fsBtn.textContent = 'Exit fullscreen';
+        } else {
+          await document.exitFullscreen();
+          fsBtn.textContent = 'Fullscreen';
+        }
+      } catch (err) { console.warn('fullscreen error', err); }
+    });
+    document.addEventListener('fullscreenchange', () => {
+      fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+    });
+
+    const core = new ReceiverCore({
+      wsEndpoint: WS_ENDPOINT,
+      room,
+      onStatus: showStatus,
+      onStream: (stream) => {
+        if (remoteVideo.srcObject !== stream) {
+          remoteVideo.srcObject = stream;
+          state.streamRemote = stream;
+          tryStartMuted();
+          // If we’re in sender-mode and running, wire the remote spectrum now
+          if (state.running && audioEnabled && audioWhere === 'sender') {
+            startRemoteSpectrumGraphIfPossible();
+          }
+        }
+      },
+      onIceState: (s) => { if (s === 'failed' || s === 'disconnected' || s === 'closed') { /* nothing to clear visually */ } },
+      onBye: () => { /* clear UI state if needed */ },
+      onCreatePC: (pc) => {
+        // Data channel (receiver initiates; reuses 'pose' channel for AI messages)
+        const ch = pc.createDataChannel('pose');
+        ch.onopen = () => { console.log('[DC][receiver] cry DC open'); };
+        ch.onclose = () => { console.log('[DC][receiver] cry DC close'); };
+        ch.onerror = (e) => { console.warn('[DC][receiver] cry DC error', e); };
+        ch.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'audio-mode') {
+              audioEnabled = !!msg.enabled;
+              audioWhere   = msg.where || 'sender';
+              console.log('[CRY][receiver] mode:', { audioEnabled, audioWhere });
+              applyAudioMode();
+            } else if (msg.type === 'ai-modes' && msg.audio) {
+              audioEnabled = !!msg.audio.enabled;
+              audioWhere   = msg.audio.where || 'sender';
+              console.log('[CRY][receiver] ai-modes audio:', { audioEnabled, audioWhere });
+              applyAudioMode();
+            } else if (msg.type === 'audio') {
+              // Sender is providing categories → compute a score and push
+              if (state.running && audioEnabled && audioWhere === 'sender') {
+                const params = getParams();
+                const score = getCryScoreFromCategories(msg.categories || [], params.INCLUDE_CLASSES);
+                pushScore(score);
+              }
+            }
+          } catch {}
+        };
+        audioDC = ch;
+      },
+      onDataChannel: (e) => { console.log('[DC][receiver] inbound DC:', e.channel?.label); }
+    });
+
+    core.start().catch(console.warn);
+
+    /* ---------- Start/Stop (mimic behavior, but mode-aware) ---------- */
+    async function start() {
+      if (state.running) return;
+      try {
+        showOverlay(true); setStatus('Initializing…');
+        setupChart();
+
+        // Reset series + flags
+        state.ring16k = new Float32Array(0);
+        state.lastPos = 0;
+        state.timesSec = [];
+        state.timesMs  = [];
+        state.cryRaw   = [];
+        state.crySm    = [];
+        state.alertOn  = false;
+        state.alertUntilMs = 0;
+
+        // Decide by current mode
+        if (audioEnabled && audioWhere === 'receiver') {
+          await ensureAudioTask();
+          await startReceiverMicGraph();
+          setStatus('Mic inference (receiver)');
+        } else {
+          // Sender-mode: don’t ask mic; set up spectrum from remote (if present)
+          stopReceiverMicGraph();
+          if (state.streamRemote) {
+            startRemoteSpectrumGraphIfPossible();
+            setStatus('Remote inference (sender) – waiting for scores…');
+          } else {
+            setStatus('Remote inference (sender) – waiting for stream…');
+          }
+        }
+
+        state.running = true;
+        els.btnStart.disabled = true;
+        els.btnStop.disabled  = false;
+        showOverlay(false);
+      } catch (err) {
+        console.error(err);
+        setStatus('Start failed'); showOverlay(true);
+        // Clean up anything partially started
+        stopSpectrumLoop();
+        stopReceiverMicGraph();
+        stopRemoteSpectrumGraph();
+        state.running = false;
+        els.btnStart.disabled = false;
+        els.btnStop.disabled  = true;
+      }
+    }
+
+    async function stop() {
+      stopSpectrumLoop();
+      stopReceiverMicGraph();
+      stopRemoteSpectrumGraph();
+
+      state.running = false;
+      els.btnStart.disabled = false;
+      els.btnStop.disabled  = true;
+      setStatus('Stopped'); showOverlay(false);
+      setAlert(false);
+    }
+
+    /* ---------- Wire UI ---------- */
     document.addEventListener('DOMContentLoaded', () => {
       els.btnStart.disabled = false;
       els.btnStop.disabled  = true;
-
       els.btnStart.addEventListener('click', start);
       els.btnStop.addEventListener('click', stop);
 
@@ -795,11 +1040,10 @@
       els.showSmSpec?.addEventListener('change', updateSpectrumChartVisibility);
 
       setStatus('Page ready. Click Start.');
-      showOverlay(false);
+      setWhereLabel(audioWhere);
     });
 
-    window.addEventListener('beforeunload', () => { try { stop(); } catch {} });
+    window.addEventListener('beforeunload', () => { try { core.close(); } catch {}; try { stop(); } catch {} });
   </script>
 </body>
 </html>
-
