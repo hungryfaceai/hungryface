@@ -1434,10 +1434,18 @@
       if (!started || !audioAiOn?.checked || audioAiWhere?.value !== 'sender') return;
       //if (audioLoopRunning) return; //https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
 
-      const task = await ensureAudioTask();
+      /*const task = await ensureAudioTask(); //https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
       if (audioLoopRunning || audioStarting) return;
-      audioStarting = true;
-
+      audioStarting = true;*/
+      if (audioLoopRunning || audioStarting) return;
+      audioStarting = true;              // lock before any await
+      let task;
+      try {
+        task = await ensureAudioTask();
+      } catch (e) {
+        audioStarting = false;           // release lock on failure
+        throw e;
+      }
       // Choose capture source: streaming mic if live+enabled, else open a local-only mic.
       let captureStream = null;
       const t = getLocalAudioTrack();
