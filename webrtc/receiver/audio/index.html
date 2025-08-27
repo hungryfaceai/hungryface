@@ -998,7 +998,26 @@
       fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
     });
 
-    // --- Initialize charts/labels before we connect ---
+    function initUI() {
+      Object.values(els.inputs).forEach(inp => {
+        inp?.addEventListener('change', () => updateChartWindow(getParams()));
+      });
+      els.showRawSpec?.addEventListener('change', updateSpectrumChartVisibility);
+      els.showSmSpec?.addEventListener('change', updateSpectrumChartVisibility);
+      updateMicButton();
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initUI);
+    } else {
+      initUI();
+    }
+
+    // WebAudio unlock on user gesture (iOS/Safari safety) //https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
+    ['click','touchstart'].forEach(ev =>
+      stage.addEventListener(ev, () => state.audioCtx?.resume?.(), { passive: true })
+    );
+
+    // --- Initialize charts/labels before we connect so early DC messages can't race it ---
     setupChart();
     setWhereLabel(audioWhere);
     setStatus('Waiting for mode from sender…');
