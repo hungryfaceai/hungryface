@@ -284,6 +284,44 @@
     const faceOn       = document.getElementById('faceOn');
     const faceWhere    = document.getElementById('faceWhere');    
 
+    function getLocalAudioTrack() {
+      return localStream?.getAudioTracks?.()[0] || null;
+    }
+    function getAudioSender(pc) {
+      return pc?.getSenders?.().find(s => s.track && s.track.kind === 'audio') || null;
+    }
+    function nudgePeerForOffer(peerId) {
+      try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: peerId })); } catch {}
+    }
+    
+    /** Ensure we have a mic track in localStream, attach to all PCs, and trigger renegotiation. */
+    async function ensureSenderHasAudioTrack() {
+      let track = getLocalAudioTrack();
+      if (!track) {
+        const s = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+        });
+        track = s.getAudioTracks()[0];
+        if (!localStream) localStream = new MediaStream();
+        localStream.addTrack(track);
+      }
+    
+      // Attach/replace on every per-peer PC
+      if (peers?.size) {
+        for (const [peerId, rec] of peers) {
+          const pc = rec.pc || getOrCreatePC(peerId);
+          const snd = getAudioSender(pc);
+          if (snd) {
+            await snd.replaceTrack(track);
+          } else {
+            pc.addTrack(track, localStream);
+          }
+          nudgePeerForOffer(peerId); // ask that receiver sends a new offer
+        }
+      }
+      return track;
+    }
+    
     function announceAIModes() {
       // 1) Apply local behavior + per-feature mode messages (pose/audio/face)
       applyPoseUI();
@@ -540,12 +578,33 @@
       beginViewportSettle();
       setStatus(videoOn.checked ? 'Video ON' : 'Video OFF');
     }
-    function applyAudioToggle() {
+    /*function applyAudioToggle() {
       if (!localStream) return;
       const at = localStream.getAudioTracks()[0];
       if (at) at.enabled = audioOn.checked;
       setStatus(audioOn.checked ? 'Audio ON' : 'Audio OFF');
+    }*/
+    //https://chatgpt.com/c/68ae2ead-e248-8320-9125-a36259529daf
+    async function applyAudioToggle() {
+      const want = audioOn.checked;
+      try {
+        if (want) {
+          // Make sure we actually HAVE an audio track, and wire it to all PCs.
+          const t = await ensureSenderHasAudioTrack();
+          if (t) t.enabled = true;
+          setStatus('Audio ON');
+        } else {
+          // Keep negotiation simple: just disable the track (saves bandwidth & battery).
+          const t = getLocalAudioTrack();
+          if (t) t.enabled = false;
+          setStatus('Audio OFF');
+        }
+      } catch (e) {
+        console.warn('[AUDIO][sender] toggle failed:', e);
+        setStatus('Audio error');
+      }
     }
+    
     videoOn.addEventListener('change', applyVideoToggle);
     audioOn.addEventListener('change', applyAudioToggle);
     cameraSel.addEventListener('change', () => { updateMirrorClass(); beginViewportSettle(); });
