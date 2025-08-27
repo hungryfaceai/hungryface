@@ -447,6 +447,7 @@
 
     // Local-only AI mic (used when the streaming mic is off)
     let aiMicStream = null;
+    let audioStarting = false;   // ← new https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
 
     // Simple helpers for audio resampling
     function concatFloat32(a,b){ const out=new Float32Array(a.length+b.length); out.set(a,0); out.set(b,a.length); return out; }
@@ -1431,9 +1432,11 @@
     //audio
     async function startSenderAudioLoop() {
       if (!started || !audioAiOn?.checked || audioAiWhere?.value !== 'sender') return;
-      if (audioLoopRunning) return;
+      //if (audioLoopRunning) return; //https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
 
       const task = await ensureAudioTask();
+      if (audioLoopRunning || audioStarting) return;
+      audioStarting = true;
 
       // Choose capture source: streaming mic if live+enabled, else open a local-only mic.
       let captureStream = null;
@@ -1473,6 +1476,7 @@
 
       audioLoopRunning = true;
       console.log('[AUDIO][sender] loop START @', SR_DEVICE, '→', SR_TARGET, 'Hz');
+      audioStarting = false; //https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
 
       audioProcessor.onaudioprocess = async (e) => {
         if (!audioLoopRunning || !started || !audioAiOn.checked || audioAiWhere.value !== 'sender') {
@@ -1515,6 +1519,7 @@
     }*/
     function stopSenderAudioLoop() {
       audioLoopRunning = false;
+      audioStarting = false; //https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
       try {
         audioProcessor && audioProcessor.disconnect();
         audioSource && audioSource.disconnect();
