@@ -807,6 +807,26 @@
       state.usingMic = false;
     }
 
+    // --- ADD: normalize MediaPipe result into a categories array ---
+    function extractCategories(res) {
+      if (!res) return [];
+      // 0.10.0 demo shape: array of results
+      if (Array.isArray(res)) {
+        // either .classifications[0].categories OR .classificationResult.classifications[0].categories
+        return (
+          res[0]?.classifications?.[0]?.categories ??
+          res[0]?.classificationResult?.classifications?.[0]?.categories ??
+          []
+        );
+      }
+      // fallback: some older/newer builds return an object
+      return (
+        res.classifications?.[0]?.categories ??
+        res.classificationResult?.classifications?.[0]?.categories ??
+        []
+      );
+    }
+
     async function onAudioChunkReceiver(chunkFloat32, deviceSr) {
       if (!state.running || !state.usingMic) return;
       const task = await ensureAudioTask().catch(e => { console.warn('[CRY][mp] task unavailable on chunk', e); return null; });
@@ -837,8 +857,18 @@
           w = pad;
         }
 
-        const result = await task.classify({ audioClip: w, sampleRateHz: params.SR_TARGET });
-        const categories = result?.classifications?.[0]?.categories ?? [];
+        //const result = await task.classify({ audioClip: w, sampleRateHz: params.SR_TARGET });
+        //const result = await task.classify(w, params.SR_TARGET); //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
+        //const categories = result?.classifications?.[0]?.categories ?? [];
+
+        const res = await task.classify(w, params.SR_TARGET);
+        const categories = extractCategories(res);
+        
+        // (optional) first-result dump so you can confirm the shape once
+        if (!window._dbgFirstMicResult) {
+          window._dbgFirstMicResult = true;
+          console.log('[CRY][mic] FIRST result =', res);
+        }
 
         // 🔎 DEBUG: show include list + top classes we got back //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
         if ((window._dbgCatEvery = (window._dbgCatEvery || 0) + 1) % 10 === 0) {
