@@ -806,6 +806,22 @@
       state.usingMic = false;
     }
 
+    function extractCategories(res) {
+      if (!res) return [];
+      if (Array.isArray(res)) {
+        return (
+          res[0]?.classifications?.[0]?.categories ??
+          res[0]?.classificationResult?.classifications?.[0]?.categories ??
+          []
+        );
+      }
+      return (
+        res.classifications?.[0]?.categories ??
+        res.classificationResult?.classifications?.[0]?.categories ??
+        []
+      );
+    }
+    
     async function onAudioChunkReceiver(chunkFloat32, deviceSr) {
       if (!state.running || !state.usingMic) return;
       const task = await ensureAudioTask().catch(e => { console.warn('[CRY][mp] task unavailable on chunk', e); return null; });
@@ -839,7 +855,8 @@
         }
 
         const result = await task.classify(w, params.SR_TARGET);
-        const categories = result?.classifications?.[0]?.categories ?? [];
+        //const categories = result?.classifications?.[0]?.categories ?? [];
+        const categories = extractCategories(result);
 
         // 🔎 DEBUG: top-N classes (gated)
         if (LOG.catEvery) {
