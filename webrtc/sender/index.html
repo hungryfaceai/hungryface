@@ -264,6 +264,17 @@
     const AUDIO_TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0";
     const AUDIO_WASM_DIR  = AUDIO_TASKS_URL + "/wasm";
 
+    /* ---------- DEBUG LOG SWITCHES (match receiver) ---------- */
+    const LOG = {
+      status: true,      // status transitions
+      dc: false,         // datachannel chatter
+      spectrum: false,   // (unused here, kept for parity)
+      rmsEvery: 0,       // 0 = off; e.g. 50 logs every 50 chunks
+      catEvery: 0,       // 0 = off; e.g. 20 logs every 20th classification
+      seriesEvery: 0,    // 0 = off; e.g. 100 to log series summary
+      firstResult: false // log first classification payload once
+    };
+
     const roomInput = document.getElementById('room');
     const videoOn   = document.getElementById('videoOn');
     const audioOn   = document.getElementById('audioOn');
@@ -486,8 +497,12 @@
         []
       );
     }
+    // Match receiver helper for nicer names in debug
+    function categoryLabel(c) {
+      return (c?.displayName || c?.categoryName || String(c?.index) || '').trim();
+    }
     
-    const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
+    const setStatus = (t) => { statusEl.textContent = t; if (LOG.status) console.log('[STATUS]', t); };
     const currentRoom = () => (roomInput.value || 'Baby').trim();
     const isFront = () => (cameraSel.value === 'user');
 
@@ -807,10 +822,10 @@
       pc.ondatachannel = (ev) => {
         if (ev.channel?.label === 'pose') {
           const ch = ev.channel;
-          console.log('[DC][sender] ondatachannel: pose from', peerId);
-          ch.onopen  = () => { console.log('[POSE][sender] DC open', peerId); poseDCs.add(ch); announceAIModes();};
-          ch.onclose = () => { console.log('[POSE][sender] DC close', peerId); poseDCs.delete(ch); };
-          ch.onerror = (e) => { console.log('[POSE][sender] DC error', peerId, e); };
+          if (LOG.dc) console.log('[DC][sender] ondatachannel: pose from', peerId);
+          ch.onopen  = () => { if (LOG.dc) console.log('[POSE][sender] DC open', peerId); poseDCs.add(ch); announceAIModes();};
+          ch.onclose = () => { if (LOG.dc) console.log('[POSE][sender] DC close', peerId); poseDCs.delete(ch); };
+          ch.onerror = (e) => { if (LOG.dc) console.log('[POSE][sender] DC error', peerId, e); };
           ch.onmessage = onPoseMessageFromReceiver;
         }
       };
@@ -1697,12 +1712,22 @@
       const WINDOW_SEC = 0.975;
       const CLIP_SAMPLES_16 = Math.round(SR_TARGET * WINDOW_SEC);
       let ring16 = new Float32Array(0);
+      let _seriesClips = 0; // for LOG.seriesEvery
     
       const onChunk = async (frameFloat32) => {
         if (!audioLoopRunning || !started || !audioAiOn.checked || audioAiWhere.value !== 'sender') {
           try { audioProcessor?.disconnect(); audioSource?.disconnect(); await audioCtx?.close?.(); } catch {}
           audioCtx = audioSource = audioProcessor = null;
           return;
+        }
+
+        // 🔎 DEBUG: mic RMS (gated)
+        if (LOG.rmsEvery) {
+          window._dbgMicCountS = (window._dbgMicCountS || 0) + 1;
+          if ((window._dbgMicCountS % LOG.rmsEvery) === 0) {
+            const rms = Math.sqrt(frameFloat32.reduce((s,x)=>s + x*x, 0) / Math.max(1, frameFloat32.length));
+            console.log('[AUDIO][sender] rms(device) =', rms.toFixed(4));
+          }
         }
     
         // Resample → 16 kHz and clamp
@@ -1715,22 +1740,35 @@
           const clip = ring16.subarray(0, CLIP_SAMPLES_16);
           ring16 = ring16.subarray(CLIP_SAMPLES_16);
           try {
-            //const result = await task.classify({ audioClip: clip, sampleRateHz: SR_TARGET });
-            //const classifications = result?.classifications?.[0]?.categories ?? [];
-            //const payload = JSON.stringify({ type:'audio', categories: classifications, ts: performance.now() });
-            //
             const res = await task.classify(clip, SR_TARGET);       // same signature as receiver
             const classifications = extractCategories(res);          // normalize shape
-            // (optional) one-time dump to confirm shape
-            if (!window._dbgFirstSenderResult) {
+
+            // 🔎 DEBUG: top-N classes (gated)
+            if (LOG.catEvery) {
+              window._dbgCatEveryS = (window._dbgCatEveryS || 0) + 1;
+              if ((window._dbgCatEveryS % LOG.catEvery) === 0) {
+                const top = classifications.slice(0,5).map(c => `${categoryLabel(c)}:${(c.score ?? 0).toFixed(3)}`);
+                console.log('[AUDIO][sender] top =', top.join(', '));
+              }
+            }
+
+            // Log the first raw result once (gated, parity with receiver)
+            if (LOG.firstResult && !window._dbgFirstSenderResult) {
               window._dbgFirstSenderResult = true;
               console.log('[AUDIO][sender] FIRST result =', res);
             }
+
             const payload = JSON.stringify({ type:'audio', categories: classifications, ts: performance.now() });
 
             let sent = 0;
             for (const ch of poseDCs) if (ch.readyState === 'open') { ch.send(payload); sent++; }
-            if (sent === 0) console.log('[AUDIO][sender] no open DCs to send scores');
+            if (sent === 0 && LOG.dc) console.log('[AUDIO][sender] no open DCs to send scores');
+
+            // Series summary (gated)
+            _seriesClips++;
+            if (LOG.seriesEvery && (_seriesClips % LOG.seriesEvery) === 0) {
+              console.log('[AUDIO][sender][series] clips =', _seriesClips);
+            }
           } catch (err) {
             console.warn('[AUDIO][sender] classify failed:', err);
           }
