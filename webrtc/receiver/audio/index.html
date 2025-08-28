@@ -260,6 +260,17 @@
     const room = new URLSearchParams(location.search).get("room") || "Baby";
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
+    /* ---------- DEBUG LOG SWITCHES ---------- */
+    const LOG = {
+      status: true,      // keep status transitions
+      dc: false,         // datachannel chatter
+      spectrum: false,   // spectrum init/vis logs
+      rmsEvery: 0,       // 0 = off, or e.g., 50 to log every 50 mic frames
+      catEvery: 0,       // 0 = off, or e.g., 20 to log every 20th classification
+      seriesEvery: 0,    // 0 = off, or e.g., 100 to log series summary
+      firstResult: false // log the very first classification payload once
+    };
+
     /* ---------- DOM ---------- */
     const stage = document.getElementById('stage');
     const remoteVideo = document.getElementById('remote');
@@ -295,7 +306,7 @@
     function setStatus(msg) {
       els.status.textContent = msg;
       els.overlayStatus.textContent = msg;
-      console.log('[CRY][status]', msg);
+      if (LOG.status) console.log('[CRY][status]', msg);
     }
     function showOverlay(show) { els.overlay.classList.toggle('hidden', !show); }
     function setWhereLabel(where) {
@@ -473,7 +484,7 @@
 
     function setupSpectrumChart(freqs){
       if (state.spectrumChart) state.spectrumChart.destroy();
-      console.log('[CRY][spectrum] init axis with', freqs?.length, 'bins');
+      if (LOG.spectrum) console.log('[CRY][spectrum] init axis with', freqs?.length, 'bins');
       const ctx = els.chartSpectrumCanvas.getContext('2d');
       state.spectrumChart = new Chart(ctx, {
         type: 'line',
@@ -515,7 +526,7 @@
       state.spectrumChart.data.datasets[0].hidden = !showRaw;
       state.spectrumChart.data.datasets[1].hidden = !showSm;
       state.spectrumChart.update();
-      console.log('[CRY][spectrum] vis raw=', showRaw, 'sm=', showSm);
+      if (LOG.spectrum) console.log('[CRY][spectrum] vis raw=', showRaw, 'sm=', showSm);
     }
 
     function updateSpectrumChart() {
@@ -607,18 +618,6 @@
       }
       });
 
-      /*const createWithBuffer = async (resolver) => {
-        console.warn('[CRY][mp] path load failed; fetching model (no-store)…');
-        const bust = MODEL_URL + (MODEL_URL.includes('?') ? '&' : '?') + 'cb=' + Date.now();
-        const res = await fetch(bust, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`yamnet fetch ${res.status}`);
-        const buf = await res.arrayBuffer();
-        return AudioClassifier.createFromOptions(resolver, {
-          baseOptions: { modelAssetBuffer: buf },
-          runningMode: "AUDIO_CLIPS"
-        });
-      };*/
-      //https://chatgpt.com/c/68b04e15-85d8-8329-9e6d-f967fd8ed6ed
       const createWithBuffer = async (resolver) => {
         const bust = MODEL_URL + (MODEL_URL.includes('?') ? '&' : '?') + 'cb=' + Date.now();
         const res = await fetch(bust, { cache: 'no-store' });
@@ -720,7 +719,7 @@
       const alert = shouldAlert(smoothed, nowMs, params);
       state.alertOn = alert; setAlert(alert);
 
-      if (state.timesSec.length % 100 === 0) {
+      if (LOG.seriesEvery && (state.timesSec.length % LOG.seriesEvery) === 0) {
         console.log('[CRY][series] n=', state.timesSec.length, 'last raw=', score.toFixed(3), 'sm=', smoothed.toFixed(3));
       }
 
@@ -807,37 +806,19 @@
       state.usingMic = false;
     }
 
-    // --- ADD: normalize MediaPipe result into a categories array ---
-    function extractCategories(res) {
-      if (!res) return [];
-      // 0.10.0 demo shape: array of results
-      if (Array.isArray(res)) {
-        // either .classifications[0].categories OR .classificationResult.classifications[0].categories
-        return (
-          res[0]?.classifications?.[0]?.categories ??
-          res[0]?.classificationResult?.classifications?.[0]?.categories ??
-          []
-        );
-      }
-      // fallback: some older/newer builds return an object
-      return (
-        res.classifications?.[0]?.categories ??
-        res.classificationResult?.classifications?.[0]?.categories ??
-        []
-      );
-    }
-
     async function onAudioChunkReceiver(chunkFloat32, deviceSr) {
       if (!state.running || !state.usingMic) return;
       const task = await ensureAudioTask().catch(e => { console.warn('[CRY][mp] task unavailable on chunk', e); return null; });
       if (!task) return;
       const params = getParams();
 
-      // 🔎 DEBUG: mic RMS every ~20 frames so we know we have signal //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
-      window._dbgMicCount = (window._dbgMicCount || 0) + 1;
-      if ((window._dbgMicCount % 20) === 0) {
-        const rms = Math.sqrt(chunkFloat32.reduce((s,x)=>s + x*x, 0) / Math.max(1, chunkFloat32.length));
-        console.log('[CRY][mic] rms(device) =', rms.toFixed(4));
+      // 🔎 DEBUG: mic RMS (gated)
+      if (LOG.rmsEvery) {
+        window._dbgMicCount = (window._dbgMicCount || 0) + 1;
+        if ((window._dbgMicCount % LOG.rmsEvery) === 0) {
+          const rms = Math.sqrt(chunkFloat32.reduce((s,x)=>s + x*x, 0) / Math.max(1, chunkFloat32.length));
+          console.log('[CRY][mic] rms(device) =', rms.toFixed(4));
+        }
       }
       
       const x16 = resampleLinear(chunkFloat32, deviceSr, params.SR_TARGET);
@@ -857,28 +838,22 @@
           w = pad;
         }
 
-        //const result = await task.classify({ audioClip: w, sampleRateHz: params.SR_TARGET });
-        //const result = await task.classify(w, params.SR_TARGET); //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
-        //const categories = result?.classifications?.[0]?.categories ?? [];
+        const result = await task.classify(w, params.SR_TARGET);
+        const categories = result?.classifications?.[0]?.categories ?? [];
 
-        const res = await task.classify(w, params.SR_TARGET);
-        const categories = extractCategories(res);
-        
-        // (optional) first-result dump so you can confirm the shape once
-        if (!window._dbgFirstMicResult) {
-          window._dbgFirstMicResult = true;
-          console.log('[CRY][mic] FIRST result =', res);
+        // 🔎 DEBUG: top-N classes (gated)
+        if (LOG.catEvery) {
+          window._dbgCatEvery = (window._dbgCatEvery || 0) + 1;
+          if ((window._dbgCatEvery % LOG.catEvery) === 0) {
+            const inc = params.INCLUDE_CLASSES;
+            const top = categories.slice(0,5).map(c => `${categoryLabel(c)}:${(c.score ?? 0).toFixed(3)}`);
+            console.log('[CRY][DEBUG] INCLUDE parsed:', inc);
+            console.log('[CRY][mic] categories length =', categories.length, 'top =', top.join(', '));
+          }
         }
 
-        // 🔎 DEBUG: show include list + top classes we got back //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
-        if ((window._dbgCatEvery = (window._dbgCatEvery || 0) + 1) % 10 === 0) {
-          const inc = params.INCLUDE_CLASSES;
-          const top = categories.slice(0,5).map(c => `${c.displayName ?? c.categoryName ?? c.index}:${(c.score ?? 0).toFixed(3)}`);
-          console.log('[CRY][DEBUG] INCLUDE parsed:', inc);
-          console.log('[CRY][mic] categories length =', categories.length, 'top =', top.join(', '));
-        }
-        // Log the first raw result so we can see the structure //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
-        if (!window._dbgFirstMicResult) {
+        // Log the first raw result once (gated)
+        if (LOG.firstResult && !window._dbgFirstMicResult) {
           window._dbgFirstMicResult = true;
           console.log('[CRY][mic] FIRST result =', result);
         }
@@ -915,7 +890,7 @@
       console.log('[CRY][remote] starting spectrum from remote stream…');
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
       state.audioCtx = ctx;
-      ctx.resume?.().catch(()=>{}); //https://chatgpt.com/c/68b04e15-85d8-8329-9e6d-f967fd8ed6ed
+      ctx.resume?.().catch(()=>{});
       const src = ctx.createMediaStreamSource(state.streamRemote);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
@@ -964,7 +939,7 @@
       setupSpectrumChart(state.specFreqs.slice(state.specStartIdx, state.specEndIdx + 1));
       updateSpectrumChartVisibility();
 
-      console.log('[CRY][spectrum] prepared @ fs=', ctx.sampleRate, 'Hz, bins=', binCount, 'range=', state.specStartIdx, '-', state.specEndIdx);
+      if (LOG.spectrum) console.log('[CRY][spectrum] prepared @ fs=', ctx.sampleRate, 'Hz, bins=', binCount, 'range=', state.specStartIdx, '-', state.specEndIdx);
     }
 
     function startSpectrumLoop() {
@@ -973,7 +948,7 @@
       const analyser = state.analyser;
       const binCount = analyser.frequencyBinCount;
       state.specLastUpdate = 0;
-      console.log('[CRY][spectrum] loop start');
+      if (LOG.spectrum) console.log('[CRY][spectrum] loop start');
 
       function spectrumTick(ts) {
         if (!state.running || !state.analyser) return;
@@ -994,7 +969,7 @@
     }
 
     function stopSpectrumLoop() {
-      if (state.spectrumRaf) console.log('[CRY][spectrum] loop stop');
+      if (state.spectrumRaf && LOG.spectrum) console.log('[CRY][spectrum] loop stop');
       cancelAnimationFrame(state.spectrumRaf);
       state.spectrumRaf = 0;
     }
@@ -1164,7 +1139,7 @@
         ch.onmessage = (ev) => {
           let msg; try { msg = JSON.parse(ev.data); } catch { return; }
           if (!msg || !msg.type) return;
-          if (msg.type !== 'pose') console.log('[CRY][dc] msg:', msg.type);
+          if (LOG.dc && msg.type !== 'pose') console.log('[CRY][dc] msg:', msg.type);
 
           if (msg.type === 'audio-mode') {
             audioEnabled = !!msg.enabled;
@@ -1176,27 +1151,24 @@
             applyAudioMode();
           } else if (msg.type === 'audio') {
             const cats = msg.categories || [];
-            const top = cats.slice(0, 5).map(c =>
-              `${c.categoryName ?? c.displayName ?? c.index}:${(c.score ?? 0).toFixed(3)}`
-            );
-            console.log('[CRY][dc] top =', top.join(', '));
+            if (LOG.dc) {
+              const top = cats.slice(0, 5).map(c =>
+                `${categoryLabel(c)}:${(c.score ?? 0).toFixed(3)}`
+              );
+              console.log('[CRY][dc] top =', top.join(', '));
+            }
 
-              /*// one-time full dump to verify payload shape //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63 - debug bm - 28 aug 2025 - 18:56
-              if (!window._firstAudioDumped) {
-                window._firstAudioDumped = true;
-                console.log('[CRY][dc] FIRST audio msg payload =', msg);
-              }*/
-            
             if (state.running && audioEnabled && audioWhere === 'sender') {
               const params = getParams();
               const categories = msg.categories || [];
 
-              // log the raw textarea and the parsed list (useful if you suspect parsing issues)
-              console.log('[CRY][DEBUG] INCLUDE raw:', els.inputs.INCLUDE_CLASSES?.value);
-              console.log('[CRY][DEBUG] INCLUDE parsed:', params.INCLUDE_CLASSES);
+              if (LOG.dc) {
+                console.log('[CRY][DEBUG] INCLUDE raw:', els.inputs.INCLUDE_CLASSES?.value);
+                console.log('[CRY][DEBUG] INCLUDE parsed:', params.INCLUDE_CLASSES);
+              }
               const score = getCryScoreFromCategories(categories, params.INCLUDE_CLASSES);
               pushScore(score);
-              if ((state.timesSec.length % 20) === 0) {
+              if (LOG.dc && (state.timesSec.length % 20) === 0) {
                 console.log('[CRY][dc] categories n=', categories.length, 'score=', score.toFixed(3));
               }
             }
@@ -1211,10 +1183,6 @@
 
     /* ---------- Wire UI & initial boot ---------- */
     document.addEventListener('DOMContentLoaded', () => {
-      //console.log('[CRY] DOM ready'); //https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
-      //setupChart(); // show axes immediately //https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
-      //setStatus('Waiting for mode from sender…'); //https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
-      //setWhereLabel(audioWhere); //https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
       console.log('[CRY] DOM ready');
 
       // toggles / inputs
