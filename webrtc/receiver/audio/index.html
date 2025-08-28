@@ -805,6 +805,13 @@
       if (!task) return;
       const params = getParams();
 
+        // 🔎 DEBUG: mic RMS every ~20 frames so we know we have signal //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
+        window._dbgMicCount = (window._dbgMicCount || 0) + 1;
+        if ((window._dbgMicCount % 20) === 0) {
+          const rms = Math.sqrt(chunkFloat32.reduce((s,x)=>s + x*x, 0) / Math.max(1, chunkFloat32.length));
+          console.log('[CRY][mic] rms(device) =', rms.toFixed(4));
+        }
+      
       const x16 = resampleLinear(chunkFloat32, deviceSr, params.SR_TARGET);
       for (let i=0;i<x16.length;i++) x16[i] = Math.max(-1, Math.min(1, x16[i]));
       state.ring16k = concatFloat32(state.ring16k, x16);
@@ -824,6 +831,15 @@
 
         const result = await task.classify({ audioClip: w, sampleRateHz: params.SR_TARGET });
         const categories = result?.classifications?.[0]?.categories ?? [];
+
+        // 🔎 DEBUG: show include list + top classes we got back //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
+        if ((window._dbgCatEvery = (window._dbgCatEvery || 0) + 1) % 10 === 0) {
+          const inc = params.INCLUDE_CLASSES;
+          const top = categories.slice(0,5).map(c => `${c.displayName ?? c.categoryName ?? c.index}:${(c.score ?? 0).toFixed(3)}`);
+          console.log('[CRY][DEBUG] INCLUDE parsed:', inc);
+          console.log('[CRY][mic] categories length =', categories.length, 'top =', top.join(', '));
+        }
+        
         const score = getCryScoreFromCategories(categories, params.INCLUDE_CLASSES);
         pushScore(score);
 
