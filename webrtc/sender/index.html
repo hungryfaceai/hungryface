@@ -1331,9 +1331,18 @@
     
       const resolver = await AudioFilesetResolver.forAudioTasks(WASM_DIR);
     
-      const createWithPath = () => AudioClassifier.createFromOptions(resolver, {
+      /*const createWithPath = () => AudioClassifier.createFromOptions(resolver, {
         baseOptions: { modelAssetPath: MODEL_URL },
         runningMode: "AUDIO_CLIPS"
+      });*/
+      //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
+      const createWithPath = () => AudioClassifier.createFromOptions(resolver, {
+        baseOptions: { modelAssetPath: MODEL_URL },
+        runningMode: "AUDIO_CLIPS",
+        classificationOptions: {
+          maxResults: 8,          // send top-8
+          scoreThreshold: 0       // no floor; let receiver decide
+        }
       });
     
       /*const createWithBuffer = async () => {
@@ -1356,7 +1365,11 @@
         console.log('[AUDIO][sender] yamnet bytes =', buf.byteLength);
         return AudioClassifier.createFromOptions(resolver, {
           baseOptions: { modelAssetBuffer: buf },
-          runningMode: "AUDIO_CLIPS"
+          runningMode: "AUDIO_CLIPS",
+          classificationOptions: {
+            maxResults: 8,
+            scoreThreshold: 0
+    }          
         });
       };
 
