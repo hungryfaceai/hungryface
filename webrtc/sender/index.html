@@ -468,6 +468,24 @@
       }
       return out;
     }
+
+    // --- normalize MediaPipe AudioClassifier result into a categories array ---
+    //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
+    function extractCategories(res) {
+      if (!res) return [];
+      if (Array.isArray(res)) {
+        return (
+          res[0]?.classifications?.[0]?.categories ??
+          res[0]?.classificationResult?.classifications?.[0]?.categories ??
+          []
+        );
+      }
+      return (
+        res.classifications?.[0]?.categories ??
+        res.classificationResult?.classifications?.[0]?.categories ??
+        []
+      );
+    }
     
     const setStatus = (t) => { statusEl.textContent = t; console.log('[STATUS]', t); };
     const currentRoom = () => (roomInput.value || 'Baby').trim();
@@ -1339,8 +1357,8 @@
       const createWithPath = () => AudioClassifier.createFromOptions(resolver, {
         baseOptions: { modelAssetPath: MODEL_URL },
         runningMode: "AUDIO_CLIPS",
-        classificationOptions: {
-          maxResults: 8,          // send top-8
+        classifierOptions: {
+          maxResults: 20,          // send top-8
           scoreThreshold: 0       // no floor; let receiver decide
         }
       });
@@ -1366,8 +1384,8 @@
         return AudioClassifier.createFromOptions(resolver, {
           baseOptions: { modelAssetBuffer: buf },
           runningMode: "AUDIO_CLIPS",
-          classificationOptions: {
-            maxResults: 8,
+          classifierOptions: {
+            maxResults: 20,
             scoreThreshold: 0
     }          
         });
@@ -1697,9 +1715,19 @@
           const clip = ring16.subarray(0, CLIP_SAMPLES_16);
           ring16 = ring16.subarray(CLIP_SAMPLES_16);
           try {
-            const result = await task.classify({ audioClip: clip, sampleRateHz: SR_TARGET });
-            const classifications = result?.classifications?.[0]?.categories ?? [];
+            //const result = await task.classify({ audioClip: clip, sampleRateHz: SR_TARGET });
+            //const classifications = result?.classifications?.[0]?.categories ?? [];
+            //const payload = JSON.stringify({ type:'audio', categories: classifications, ts: performance.now() });
+            //
+            const res = await task.classify(clip, SR_TARGET);       // same signature as receiver
+            const classifications = extractCategories(res);          // normalize shape
+            // (optional) one-time dump to confirm shape
+            if (!window._dbgFirstSenderResult) {
+              window._dbgFirstSenderResult = true;
+              console.log('[AUDIO][sender] FIRST result =', res);
+            }
             const payload = JSON.stringify({ type:'audio', categories: classifications, ts: performance.now() });
+
             let sent = 0;
             for (const ch of poseDCs) if (ch.readyState === 'open') { ch.send(payload); sent++; }
             if (sent === 0) console.log('[AUDIO][sender] no open DCs to send scores');
