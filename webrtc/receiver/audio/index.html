@@ -369,6 +369,46 @@
         ALERT_HOLD_MS: Math.max(0, parseInt(els.inputs.ALERT_HOLD_MS?.value, 10) || 3000),
       };
     }
+
+    //helper functions “score-with-details”
+    function categoryLabel(c) {
+      return (c.displayName || c.categoryName || String(c.index) || '').trim();
+    }
+    
+    function getCryScoreWithDetails(categories, includeList) {
+      const needles = (includeList || []).map(s => s.trim().toLowerCase()).filter(Boolean);
+      let sum = 0;
+      const matched = [];
+    
+      for (const c of (categories || [])) {
+        const name = categoryLabel(c);
+        const score = c?.score ?? 0;
+        const L = name.toLowerCase();
+        if (needles.some(n => L.includes(n))) {
+          sum += score;
+          matched.push({ name, score });
+        }
+      }
+    
+      matched.sort((a,b) => (b.score||0) - (a.score||0));
+      return { score: sum, matched };
+    }
+    
+    function computeAndLogScore(categories, includeList, srcLabel = 'DC') {
+      const { score, matched } = getCryScoreWithDetails(categories, includeList);
+      console.log(
+        `[CRY][score][${srcLabel}] include=`,
+        includeList,
+        '| matched=',
+        matched.length
+          ? matched.map(m => `${m.name}:${m.score.toFixed(3)}`).join(', ')
+          : '(none)',
+        '| sum=',
+        score.toFixed(3)
+      );
+      return score;
+    }
+
     function concatFloat32(a,b){const out=new Float32Array(a.length+b.length);out.set(a,0);out.set(b,a.length);return out;}
     function resampleLinear(x, fromSr, toSr){
       if (fromSr === toSr) return x;
@@ -1082,6 +1122,10 @@
             if (state.running && audioEnabled && audioWhere === 'sender') {
               const params = getParams();
               const categories = msg.categories || [];
+
+              // log the raw textarea and the parsed list (useful if you suspect parsing issues)
+              console.log('[CRY][DEBUG] INCLUDE raw:', els.inputs.INCLUDE_CLASSES?.value);
+              console.log('[CRY][DEBUG] INCLUDE parsed:', params.INCLUDE_CLASSES);
               const score = getCryScoreFromCategories(categories, params.INCLUDE_CLASSES);
               pushScore(score);
               if ((state.timesSec.length % 20) === 0) {
