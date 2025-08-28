@@ -1505,13 +1505,13 @@
     //poseWhere.addEventListener('change', () => { console.log(`[POSE][sender] UI → enabled: ${poseOn.checked} | where: ${poseWhere.value}`); announceAIModes(); });
 
     //audio
-    async function startSenderAudioLoop() {
+    /*async function startSenderAudioLoop() {
       if (!started || !audioAiOn?.checked || audioAiWhere?.value !== 'sender') return;
       //if (audioLoopRunning) return; //https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
 
-      /*const task = await ensureAudioTask(); //https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
-      if (audioLoopRunning || audioStarting) return;
-      audioStarting = true;*/
+      //const task = await ensureAudioTask(); //https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
+      //if (audioLoopRunning || audioStarting) return;
+      //audioStarting = true;
       if (audioLoopRunning || audioStarting) return;
       audioStarting = true;              // lock before any await
       let task;
@@ -1545,6 +1545,7 @@
         }
       }
 
+      //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       try { await audioCtx.resume(); } catch {}
       audioSource   = audioCtx.createMediaStreamSource(captureStream);
@@ -1598,7 +1599,123 @@
           }
         }
       };
+      //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
+    }*/ //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
+    
+    // REPLACE your existing startSenderAudioLoop() with this //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
+    async function startSenderAudioLoop() {
+      if (!started || !audioAiOn?.checked || audioAiWhere?.value !== 'sender') return;
+      if (audioLoopRunning || audioStarting) return;
+    
+      audioStarting = true; // lock
+      let task;
+      try {
+        task = await ensureAudioTask();
+      } catch (e) {
+        audioStarting = false;
+        console.warn('[AUDIO][sender] model init failed:', e);
+        setStatus('Audio model load failed');
+        return;
+      }
+    
+      // Choose capture source: streaming mic if live+enabled, else open a local-only mic.
+      let captureStream = null;
+      const t = getLocalAudioTrack();
+      const liveAndEnabled = !!(t && t.readyState === 'live' && t.enabled);
+      if (liveAndEnabled) {
+        captureStream = localStream;
+        console.log('[AUDIO][sender] using streaming mic for AI');
+      } else {
+        try {
+          aiMicStream = await navigator.mediaDevices.getUserMedia({
+            audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            video: false
+          });
+          captureStream = aiMicStream;
+          console.log('[AUDIO][sender] using local-only mic for AI (not sent)');
+        } catch (e) {
+          audioStarting = false;
+          console.warn('[AUDIO][sender] could not open mic for AI:', e);
+          return;
+        }
+      }
+    
+      // --- NEW graph (silent sink + worklet fallback) ---
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      try { await audioCtx.resume(); } catch {}
+      audioSource = audioCtx.createMediaStreamSource(captureStream);
+    
+      // Silent sink so the node stays "live" without making sound
+      const sink = audioCtx.createGain();
+      sink.gain.value = 0;
+      sink.connect(audioCtx.destination);
+    
+      // Shared chunk handler (your old onaudioprocess body, minus the e.* bits)
+      const SR_DEVICE = audioCtx.sampleRate;
+      const SR_TARGET = 16000;
+      const WINDOW_SEC = 0.975;
+      const CLIP_SAMPLES_16 = Math.round(SR_TARGET * WINDOW_SEC);
+      let ring16 = new Float32Array(0);
+    
+      const onChunk = async (frameFloat32) => {
+        if (!audioLoopRunning || !started || !audioAiOn.checked || audioAiWhere.value !== 'sender') {
+          try { audioProcessor?.disconnect(); audioSource?.disconnect(); await audioCtx?.close?.(); } catch {}
+          audioCtx = audioSource = audioProcessor = null;
+          return;
+        }
+    
+        // Resample → 16 kHz and clamp
+        let x16 = resampleLinear(frameFloat32, SR_DEVICE, SR_TARGET);
+        for (let i = 0; i < x16.length; i++) x16[i] = Math.max(-1, Math.min(1, x16[i]));
+        ring16 = concatFloat32(ring16, x16);
+    
+        // Process in ~0.975 s chunks
+        while (ring16.length >= CLIP_SAMPLES_16) {
+          const clip = ring16.subarray(0, CLIP_SAMPLES_16);
+          ring16 = ring16.subarray(CLIP_SAMPLES_16);
+          try {
+            const result = await task.classify({ audioClip: clip, sampleRateHz: SR_TARGET });
+            const classifications = result?.classifications?.[0]?.categories ?? [];
+            const payload = JSON.stringify({ type:'audio', categories: classifications, ts: performance.now() });
+            let sent = 0;
+            for (const ch of poseDCs) if (ch.readyState === 'open') { ch.send(payload); sent++; }
+            if (sent === 0) console.log('[AUDIO][sender] no open DCs to send scores');
+          } catch (err) {
+            console.warn('[AUDIO][sender] classify failed:', err);
+          }
+        }
+      };
+    
+      try {
+        // Prefer AudioWorklet for reliability
+        const modURL = URL.createObjectURL(new Blob([`
+          class AICapture extends AudioWorkletProcessor {
+            process(inputs) {
+              const ch = inputs[0]?.[0];
+              if (ch) this.port.postMessage(ch.slice(0));
+              return true;
+            }
+          }
+          registerProcessor('ai-capture', AICapture);
+        `], { type: 'application/javascript' }));
+        await audioCtx.audioWorklet.addModule(modURL);
+        audioProcessor = new AudioWorkletNode(audioCtx, 'ai-capture', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
+        audioProcessor.port.onmessage = (ev) => onChunk(ev.data);
+        audioSource.connect(audioProcessor).connect(sink);
+        console.log('[AUDIO][sender] using AudioWorklet @', SR_DEVICE, 'Hz');
+      } catch {
+        // Fallback to ScriptProcessor if Worklet unavailable
+        audioProcessor = audioCtx.createScriptProcessor(1024, 1, 1);
+        audioProcessor.onaudioprocess = (e) => onChunk(new Float32Array(e.inputBuffer.getChannelData(0)));
+        audioSource.connect(audioProcessor).connect(sink);
+        console.log('[AUDIO][sender] using ScriptProcessor @', SR_DEVICE, 'Hz');
+      }
+    
+      audioLoopRunning = true;
+      audioStarting = false;
+      console.log('[AUDIO][sender] loop START @', SR_DEVICE, '→', SR_TARGET, 'Hz');
     }
+      
     
     /*function stopSenderAudioLoop() {
       audioLoopRunning = false;
