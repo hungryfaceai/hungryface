@@ -1320,7 +1320,7 @@
         runningMode: "AUDIO_CLIPS"
       });
     
-      const createWithBuffer = async () => {
+      /*const createWithBuffer = async () => {
         // Bust caches and avoid the browser cache pipeline that sometimes fails
         const bust = MODEL_URL + (MODEL_URL.includes('?') ? '&' : '?') + 'cb=' + Date.now();
         const res = await fetch(bust, { cache: 'no-store' });
@@ -1330,7 +1330,20 @@
           baseOptions: { modelAssetBuffer: buf },
           runningMode: "AUDIO_CLIPS"
         });
+      };*/ 
+      //https://chatgpt.com/c/68b04e15-85d8-8329-9e6d-f967fd8ed6ed
+      const createWithBuffer = async () => {
+        const bust = MODEL_URL + (MODEL_URL.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+        const res = await fetch(bust, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`yamnet fetch ${res.status}`);
+        const buf = new Uint8Array(await res.arrayBuffer()); // <-- important
+        console.log('[AUDIO][sender] yamnet bytes =', buf.byteLength);
+        return AudioClassifier.createFromOptions(resolver, {
+          baseOptions: { modelAssetBuffer: buf },
+          runningMode: "AUDIO_CLIPS"
+        });
       };
+
     
       // Try path first, then buffer, with a couple retries
       let lastErr = null;
