@@ -526,10 +526,18 @@
         videoOn.checked &&
         document.body.classList.contains('previewing');*/
       //https://chatgpt.com/c/68ada965-6d7c-832b-9d16-e90772e321b9
+      /*const wantOverlay =
+        videoOn.checked &&
+        document.body.classList.contains('previewing') &&
+        (poseOn.checked || faceOn?.checked);*/
+      //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
       const wantOverlay =
         videoOn.checked &&
         document.body.classList.contains('previewing') &&
-        (poseOn.checked || faceOn?.checked);
+        (
+          (poseOn.checked && poseWhere.value === 'sender') ||
+          (faceOn?.checked && faceWhere?.value === 'sender')
+        );
       
       
       poseCanvas.style.display = wantOverlay ? 'block' : 'none';
@@ -1685,7 +1693,11 @@
           }
         }
       };
-    
+
+      // ✅ Set flags BEFORE wiring processor to avoid early close in onChunk
+      audioLoopRunning = true;
+      audioStarting = false;
+      
       try {
         // Prefer AudioWorklet for reliability
         const modURL = URL.createObjectURL(new Blob([`
@@ -1699,6 +1711,7 @@
           registerProcessor('ai-capture', AICapture);
         `], { type: 'application/javascript' }));
         await audioCtx.audioWorklet.addModule(modURL);
+        URL.revokeObjectURL(modURL); //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
         audioProcessor = new AudioWorkletNode(audioCtx, 'ai-capture', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
         audioProcessor.port.onmessage = (ev) => onChunk(ev.data);
         audioSource.connect(audioProcessor).connect(sink);
@@ -1711,8 +1724,8 @@
         console.log('[AUDIO][sender] using ScriptProcessor @', SR_DEVICE, 'Hz');
       }
     
-      audioLoopRunning = true;
-      audioStarting = false;
+      //audioLoopRunning = true;
+      //audioStarting = false;
       console.log('[AUDIO][sender] loop START @', SR_DEVICE, '→', SR_TARGET, 'Hz');
     }
       
