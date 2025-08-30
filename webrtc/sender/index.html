@@ -1678,62 +1678,62 @@
         setStatus('Audio model load failed');
         return;
       }
-    
--      // Choose capture source: streaming mic if live+enabled, else open a local-only mic.
--      let captureStream = null;
--      const t = getLocalAudioTrack();
--      const liveAndEnabled = !!(t && t.readyState === 'live' && t.enabled);
--      /*if (liveAndEnabled) {
--        captureStream = localStream;
--        console.log('[AUDIO][sender] using streaming mic for AI');
--      } else {*/
--      {
--        // always take the raw AI mic for classification https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
--        try {
--          aiMicStream = await navigator.mediaDevices.getUserMedia({
--            audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
--            video: false
--          });
--          captureStream = aiMicStream;
--          console.log('[AUDIO][sender] using local-only mic for AI (raw)');
--        } catch (e) {
--          audioStarting = false;
--          console.warn('[AUDIO][sender] could not open mic for AI:', e);
--          return;
--        }
--      }
-+      // Choose capture source: prefer separate raw AI mic; gracefully fall back to streaming mic
-+      let captureStream = null;
-+      const t = getLocalAudioTrack();
-+      const liveAndEnabled = !!(t && t.readyState === 'live' && t.enabled);
-+      try {
-+        aiMicStream = await navigator.mediaDevices.getUserMedia({
-+          audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-+          video: false
-+        });
-+        captureStream = aiMicStream;
-+        console.log('[AUDIO][sender] using local-only mic for AI (raw)');
-+      } catch (e) {
-+        console.warn('[AUDIO][sender] raw mic open failed:', e?.name || e);
-+        if (e?.name === 'NotReadableError' || e?.name === 'AbortError') {
-+          if (liveAndEnabled) {
-+            captureStream = localStream;
-+            console.log('[AUDIO][sender] FALLBACK → using streaming mic for AI (processed)');
-+          } else {
-+            setStatus('AI mic busy/unavailable');
-+            audioStarting = false;
-+            return;
-+          }
-+        } else if (e?.name === 'NotAllowedError' || e?.name === 'SecurityError') {
-+          setStatus('Allow microphone for AI audio');
-+          audioStarting = false;
-+          return;
-+        } else {
-+          setStatus('AI mic error');
-+          audioStarting = false;
-+          return;
-+        }
-+      }
+      /*
+      // Choose capture source: streaming mic if live+enabled, else open a local-only mic.
+      let captureStream = null;
+      const t = getLocalAudioTrack();
+      const liveAndEnabled = !!(t && t.readyState === 'live' && t.enabled);
+      //if (liveAndEnabled) {
+      //  captureStream = localStream;
+      //  console.log('[AUDIO][sender] using streaming mic for AI');
+      //} else {
+      {
+        // always take the raw AI mic for classification https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
+        try {
+          aiMicStream = await navigator.mediaDevices.getUserMedia({
+            audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+            video: false
+          });
+          captureStream = aiMicStream;
+          console.log('[AUDIO][sender] using local-only mic for AI (raw)');
+        } catch (e) {
+          audioStarting = false;
+          console.warn('[AUDIO][sender] could not open mic for AI:', e);
+          return;
+        }
+      }*/
+      // Choose capture source: prefer separate raw AI mic; gracefully fall back to streaming mic
+      let captureStream = null;
+      const t = getLocalAudioTrack();
+      const liveAndEnabled = !!(t && t.readyState === 'live' && t.enabled);
+      try {
+        aiMicStream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+          video: false
+        });
+        captureStream = aiMicStream;
+        console.log('[AUDIO][sender] using local-only mic for AI (raw)');
+      } catch (e) {
+        console.warn('[AUDIO][sender] raw mic open failed:', e?.name || e);
+        if (e?.name === 'NotReadableError' || e?.name === 'AbortError') {
+          if (liveAndEnabled) {
+            captureStream = localStream;
+            console.log('[AUDIO][sender] FALLBACK → using streaming mic for AI (processed)');
+          } else {
+            setStatus('AI mic busy/unavailable');
+            audioStarting = false;
+            return;
+          }
+        } else if (e?.name === 'NotAllowedError' || e?.name === 'SecurityError') {
+          setStatus('Allow microphone for AI audio');
+          audioStarting = false;
+          return;
+        } else {
+          setStatus('AI mic error');
+          audioStarting = false;
+          return;
+        }
+      }
     
       // --- NEW graph (silent sink + worklet fallback) ---
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
