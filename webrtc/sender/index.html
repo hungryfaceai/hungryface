@@ -146,36 +146,36 @@
 
     .home-link {
       position: static;     /* was: fixed */
-      /*top: 14px;               aligns with home page header padding
+      /*top: 14px;
       left: 20px;
       z-index: 9999;*/
   
       /* Typography and color to match the home page */
       font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-      font-size: 0.95rem;     /* same as header nav */
+      font-size: 0.95rem;
       color: #fff;
       text-decoration: none;
       opacity: 0.9;
 
-    /* Remove pill/background/border so it matches the plain header link */
-    background: transparent;
-    border: none;
-    padding: 0;
-  }
-  .home-link:hover,
-  .home-link:focus {
-    text-decoration: underline;
-    opacity: 1;
-  }
+																		   
+      background: transparent;
+      border: none;
+      padding: 0;
+    }
+    .home-link:hover,
+    .home-link:focus {
+      text-decoration: underline;
+      opacity: 1;
+    }
 
-  /* iPhone 12 mini (~360px): smaller nav text, same as home page tweak */
-  @media (max-width: 380px) {
-    .home-link { font-size: 0.82rem; }
-  }
+																		  
+    @media (max-width: 380px) {
+      .home-link { font-size: 0.82rem; }
+    }
     
-  .icon { width: var(--icon-size, 24px); height: var(--icon-size, 24px); display: block; }
-  .icon-home { --icon-size: 26px; } /* same size as landing page */    
-</style>
+    .icon { width: var(--icon-size, 24px); height: var(--icon-size, 24px); display: block; }
+    .icon-home { --icon-size: 26px; }
+  </style>
 
   <div id="stage">
     <video id="local" playsinline autoplay muted></video>
@@ -258,7 +258,7 @@
   <script type="module">
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
-    //const NEED_OFFER_INTERVAL_MS = 3000; //now unused https://chatgpt.com/c/68a874e7-225c-832b-b147-60cfea788ffb
+																												  
     const TASKS_URL  = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     const WASM_DIR   = TASKS_URL + "/wasm";
     const AUDIO_TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0";
@@ -266,13 +266,13 @@
 
     /* ---------- DEBUG LOG SWITCHES (match receiver) ---------- */
     const LOG = {
-      status: true,      // status transitions
-      dc: true,         // datachannel chatter
-      spectrum: false,   // (unused here, kept for parity)
-      rmsEvery: 0,       // 0 = off; e.g. 50 logs every 50 chunks
-      catEvery: 20,       // 0 = off; e.g. 20 logs every 20th classification
-      seriesEvery: 20,    // 0 = off; e.g. 100 to log series summary
-      firstResult: true // log first classification payload once
+      status: true,
+      dc: true,
+      spectrum: false,
+      rmsEvery: 0,       // set to e.g. 50 to log RMS every 50 chunks
+      catEvery: 20,
+      seriesEvery: 20,
+      firstResult: true
     };
 
     const roomInput = document.getElementById('room');
@@ -342,7 +342,7 @@
       // 2) Broadcast one consolidated snapshot
       const payload = {
         type: 'ai-modes',
-        pose:  { enabled: !!poseOn?.checked,       where: poseWhere?.value ?? 'sender' }, //https://chatgpt.com/c/68aed93f-b20c-8320-a4c5-2e84a0213f2e
+        pose:  { enabled: !!poseOn?.checked,       where: poseWhere?.value ?? 'sender' },
         audio: { enabled: !!audioAiOn?.checked,    where: audioAiWhere?.value ?? 'sender' },
         face:  { enabled: !!faceOn?.checked,       where: faceWhere?.value ?? 'sender' }
       };
@@ -361,12 +361,12 @@
 
 
     /* -----------------------
-       PERSISTENCE (localStorage) — no behavior changes
+       PERSISTENCE (localStorage)
        ----------------------- */
     (function () {
       const PREFIX = 'bm_sender_';
 
-      // Map of controls to persist
+								   
       const entries = [
         ['videoOn',    'checkbox', document.getElementById('videoOn')],
         ['audioOn',    'checkbox', document.getElementById('audioOn')],
@@ -374,19 +374,19 @@
         ['room',       'text',     document.getElementById('room')],
         ['previewMins','number',   document.getElementById('previewMins')],
         ['poseOn',     'checkbox', document.getElementById('poseOn')],
-        ['poseWhere',    'select',   poseWhere],
-    
-        // NEW: persist Audio + Face AI exactly the same way
+        ['poseWhere',  'select',   poseWhere],
+	
+															
         ['audioAiOn',    'checkbox', audioAiOn],
         ['audioAiWhere', 'select',   audioAiWhere],
         ['faceOn',       'checkbox', faceOn],
         ['faceWhere',    'select',   faceWhere],
-      ].filter(([, , el]) => !!el); // keep only those that exist
+      ].filter(([, , el]) => !!el);
 
       function loadOne(key, type, el) {
         if (!el) return;
         const v = localStorage.getItem(PREFIX + key);
-        if (v == null) return; // leave current default if nothing saved
+        if (v == null) return;
         if (type === 'checkbox') el.checked = (v === '1' || v === 'true');
         else el.value = v;
       }
@@ -397,36 +397,36 @@
         try { localStorage.setItem(PREFIX + key, v); } catch {}
       }
 
-      // Apply saved values (does NOT dispatch events, so no behavior changes)
+																			  
       entries.forEach(([k, t, el]) => loadOne(k, t, el));
 
-      // Save on change
+					   
       entries.forEach(([k, t, el]) => el && el.addEventListener('change', () => saveOne(k, t, el)));
 
-      // If a ?room= is present, persist that value too (existing code still sets the input)
+																							
       const qsRoomVal = new URLSearchParams(location.search).get('room');
       if (qsRoomVal) { try { localStorage.setItem(PREFIX + 'room', qsRoomVal); } catch {} }
     })();
 
-    /* bm - 22 aug 2025 - 16:43
-    let ws = null, pc = null, localStream = null;
-    let started = false, hideUITimer = null;
+							   
+												 
+											
 
-    let remoteDescriptionSet = false;
-    const candidateQueue = [];
-    //let needOfferTimer = null; //https://chatgpt.com/c/68ada965-6d7c-832b-9d16-e90772e321b9
-    lastOfferSdp = null;
-    */
+									 
+							  
+																							 
+						
+	  
     let ws = null, localStream = null;
     let started = false, hideUITimer = null;
     
     // One RTCPeerConnection per receiver
-    // peers: Map<peerId, { pc, remoteDescriptionSet: boolean, candidateQueue: RTCIceCandidate[], lastOfferSdp: string|null }>
+																															  
     const peers = new Map();
     
-    // Optional: if you keep the preview/pose logic as-is
-    //let needOfferTimer = null; //https://chatgpt.com/c/68ada965-6d7c-832b-9d16-e90772e321b9
-    //end bm - 22 aug 2025 - 16:43
+														 
+																							 
+								  
 
     let previewTimer = null, previewTicker = null, previewEnd = 0;
     const poseDCs = new Set();
@@ -436,23 +436,23 @@
 
     let FaceLandmarker, faceTask = null, faceLoopRunning = false;
     let AudioClassifier, audioTask = null, audioLoopRunning = false;
-    let AudioFilesetResolver; // alias to avoid clashing with vision FilesetResolver
+    let AudioFilesetResolver;
     
     const ctx = poseCanvas.getContext('2d', { alpha: true });
-    let lastClearedTs = -1; // ensures we clear once per animation frame
+    let lastClearedTs = -1;
     let poseRAF = 0, faceRAF = 0;
     let audioCtx = null, audioSource = null, audioProcessor = null;
 
     // 🔓 WebAudio unlock on any user gesture (sender)
-    // Using `document` so clicks on the Start button count, even when #ui overlays #stage
+																						  
     ['click','touchstart'].forEach(ev =>
       document.addEventListener(ev, () => audioCtx?.resume?.(), { passive: true })
     );
     
     // Local-only AI mic (used when the streaming mic is off)
     let aiMicStream = null;
-    let aiTapTrack  = null;   // ← NEW: clone of the streaming mic used for AI tap
-    let audioStarting = false;   // ← new https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
+    let aiTapTrack  = null;   // clone of the streaming mic used for AI tap
+    let audioStarting = false;
 
     // Simple helpers for audio resampling
     function concatFloat32(a,b){ const out=new Float32Array(a.length+b.length); out.set(a,0); out.set(b,a.length); return out; }
@@ -469,23 +469,23 @@
     }
 
     // --- normalize MediaPipe AudioClassifier result into a categories array ---
-    //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
+																
     function extractCategories(res) {
       if (!res) return [];
       if (Array.isArray(res)) {
         return (
-          res[0]?.classifications?.[0]?.categories ??
-          res[0]?.classificationResult?.classifications?.[0]?.categories ??
-          []
+													 
+          res[0]?.classifications?.[0]?.categories ?? res[0]?.classificationResult?.classifications?.[0]?.categories ?? []
+			
         );
       }
-      return (
-        res.classifications?.[0]?.categories ??
-        res.classificationResult?.classifications?.[0]?.categories ??
-        []
-      );
+			  
+											   
+      return (res.classifications?.[0]?.categories ?? res.classificationResult?.classifications?.[0]?.categories ?? []);
+		  
+		
     }
-    // Match receiver helper for nicer names in debug
+													 
     function categoryLabel(c) {
       return (c?.displayName || c?.categoryName || String(c?.index) || '').trim();
     }
@@ -528,14 +528,14 @@
         poseCanvas.height = needH;
       }
 
-      //https://chatgpt.com/c/68ac9cc0-ccc8-8330-877e-aea76507f26e
-      // after poseCanvas.width = needW; poseCanvas.height = needH;
+      // prime canvas once per resize (Safari quirk guard)
+																   
       ctx.save();
-      ctx.globalAlpha = 0;      // draw nothing visible
+      ctx.globalAlpha = 0;
       ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, 1, 1); // 1px is enough to prime
+      ctx.fillRect(0, 0, 1, 1);
       ctx.restore();
-      //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
+
       const wantOverlay =
         videoOn.checked &&
         document.body.classList.contains('previewing') &&
@@ -544,14 +544,14 @@
           (faceOn?.checked && faceWhere?.value === 'sender')
         );
       
-      
+	  
       poseCanvas.style.display = wantOverlay ? 'block' : 'none';
-      
+	  
 
       ctx.setTransform(1,0,0,1,0,0);
     }
 
-    // Post-change settle loop (iOS toolbars/orientation)
+														 
     let settleRAF = 0, settleUntil = 0;
     function beginViewportSettle(durationMs = 1200) {
       settleUntil = performance.now() + durationMs;
@@ -603,6 +603,7 @@
       const vt = stream.getVideoTracks()[0];
       const at = stream.getAudioTracks()[0];
       if (vt && 'contentHint' in vt) { try { vt.contentHint = 'motion'; } catch {} }
+      if (at && 'contentHint' in at) { try { at.contentHint = 'speech'; } catch {} }  /* ★ added */
       if (vt) vt.enabled = wantVideo;
       if (at) at.enabled = wantAudio;
       return stream;
@@ -615,17 +616,17 @@
       beginViewportSettle();
       setStatus(videoOn.checked ? 'Video ON' : 'Video OFF');
     }
-    //https://chatgpt.com/c/68ae2ead-e248-8320-9125-a36259529daf
+
     async function applyAudioToggle() {
       const want = audioOn.checked;
       try {
         if (want) {
-          // Make sure we actually HAVE an audio track, and wire it to all PCs.
+																			   
           const t = await ensureSenderHasAudioTrack();
           if (t) t.enabled = true;
           setStatus('Audio ON');
         } else {
-          // Keep negotiation simple: just disable the track (saves bandwidth & battery).
+																						 
           const t = getLocalAudioTrack();
           if (t) t.enabled = false;
           setStatus('Audio OFF');
@@ -637,7 +638,11 @@
     }
     
     videoOn.addEventListener('change', applyVideoToggle);
-    audioOn.addEventListener('change', applyAudioToggle);
+    /* ★ restart AI loop when Audio ON/OFF changes so the source (tap vs raw) switches */
+    audioOn.addEventListener('change', async () => {
+      await applyAudioToggle();
+      applyAudioUI();
+    });
     cameraSel.addEventListener('change', () => { updateMirrorClass(); beginViewportSettle(); });
 
     function connectWS(room) {
@@ -656,13 +661,13 @@
           opened = true; clearTimeout(t);
           setStatus('Signaling: connected');
           send({ type: 'join', room, role: 'sender' });
-        
-          // Optional: one-time nudge so any already-open receivers offer
-          send({ type: 'need-offer' });
-        
+		
+          send({ type: 'need-offer' }); // nudge any already-open receivers
+									   
+		
           resolve();
         };
-        //end bm - 22 aug 2025 - 16:48                         
+															   
         sock.onmessage = onSignal;
         sock.onerror = (e) => { console.warn('[WS error]', e); };
         sock.onclose  = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); };
@@ -670,7 +675,7 @@
     }
     const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
-    /* revised multi-peer helpers omitted for brevity in this comment – full code continues below */
+																									  
     function getOrCreatePC(peerId) {
       let rec = peers.get(peerId);
       if (rec && rec.pc) return rec.pc;
@@ -685,7 +690,7 @@
         sdpSemantics: 'unified-plan'
       });
     
-      // Attach local tracks to *this* connection
+												 
       if (localStream) {
         localStream.getTracks().forEach(track => {
           console.log('[TRACK][sender] addTrack', track.kind, '→', peerId);
@@ -693,7 +698,7 @@
         });
       }
     
-      // "pose" DC handling (unchanged)
+									   
       pc.ondatachannel = (ev) => {
         if (ev.channel?.label === 'pose') {
           const ch = ev.channel;
@@ -717,7 +722,7 @@
         if (st === 'failed' || st === 'closed') cleanupPeer(peerId, 'pc-state:' + st);
       };
     
-      // Preserve any existing queued candidates / flags
+														
       if (!rec) {
         rec = {
           pc,
@@ -735,7 +740,7 @@
       return pc;
     }
       
-    
+	
     function cleanupPeer(peerId, reason = 'cleanup') {
       const rec = peers.get(peerId);
       if (!rec) return;
@@ -748,29 +753,29 @@
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
       const t = msg?.type;
     
-      if (t === 'peer-left' && msg.id) {
-        cleanupPeer(msg.id, 'peer-left');
-        return;
-      }
+										
+      if (t === 'peer-left' && msg.id) { cleanupPeer(msg.id, 'peer-left'); return; }
+			   
+	   
+	
+									
+      if (t === 'bye' && msg.from) { cleanupPeer(msg.from, 'bye'); return; }
+			   
+	   
     
-      if (t === 'bye' && msg.from) {
-        cleanupPeer(msg.from, 'bye');
-        return;
-      }
-    
-      // When a receiver joins, nudge *that* peer only
+													  
       if (t === 'peer-joined' && msg.id && msg.role === 'receiver') {
-        ws?.readyState === WebSocket.OPEN &&
-          ws.send(JSON.stringify({ type: 'need-offer', to: msg.id }));
+											
+        ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: msg.id }));
         return;
       }
     
-      // Optional: if /rooms has existing receivers when we connect
+																   
       if (t === 'roster' && Array.isArray(msg.peers)) {
         for (const p of msg.peers) {
           if (p.role === 'receiver') {
-            ws?.readyState === WebSocket.OPEN &&
-              ws.send(JSON.stringify({ type: 'need-offer', to: p.id }));
+												
+            ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: p.id }));
           }
         }
         return;
@@ -778,73 +783,73 @@
 
       if (t === 'offer' && msg.from) {
         setStatus('Got offer, creating answer…');
-      
-        // Ensure a peer record
+	  
+							   
         let rec = peers.get(msg.from);
-        if (!rec) {
-          getOrCreatePC(msg.from);
-          rec = peers.get(msg.from);
-        }
-      
-        // Drop exact duplicates
-        if (rec.lastOfferSdp === msg.sdp) {
-          console.log('[DUP] identical offer ignored from', msg.from);
-          return;
-        }
-      
-        // Don’t overlap answer flows
-        if (rec.processingOffer) {
-          console.log('[SENDER] skipping offer from', msg.from, '(answer in progress)');
-          return;
-        }
+				   
+        if (!rec) { getOrCreatePC(msg.from); rec = peers.get(msg.from); }
+									
+		 
+	  
+								
+										   
+        if (rec.lastOfferSdp === msg.sdp) { console.log('[DUP] identical offer ignored from', msg.from); return; }
+				 
+		 
+	  
+									   
+								  
+        if (rec.processingOffer) { console.log('[SENDER] skipping offer from', msg.from, '(answer in progress)'); return; }
+				 
+		 
         rec.processingOffer = true;
-      
+	  
         const pc = rec.pc || getOrCreatePC(msg.from);
-      
+	  
         try {
-          if (pc.signalingState === 'have-local-offer') {
-            try { await pc.setLocalDescription({ type: 'rollback' }); } catch {}
-          }
-      
+														 
+          if (pc.signalingState === 'have-local-offer') { try { await pc.setLocalDescription({ type: 'rollback' }); } catch {} }
+		   
+	  
           await pc.setRemoteDescription(new RTCSessionDescription(msg));
-      
-          // Only answer from the correct state
+	  
+											   
           if (pc.signalingState !== 'have-remote-offer') {
             console.warn('[SENDER] unexpected signalingState before answer:', pc.signalingState);
             return;
           }
-      
+	  
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-      
+	  
           ws.send(JSON.stringify({ type: answer.type, sdp: answer.sdp, to: msg.from }));
           console.log('[WS OUT] answer →', msg.from);
-      
+	  
           rec.remoteDescriptionSet = true;
           rec.lastOfferSdp = msg.sdp;
-      
-          // Flush any queued ICE
+	  
+								 
           for (const c of rec.candidateQueue) {
             try { await pc.addIceCandidate(c); } catch (err) { console.warn('[SENDER] late ICE add failed', msg.from, err); }
           }
           rec.candidateQueue.length = 0;
-      
+	  
         } finally {
           rec.processingOffer = false;
         }
         return;
       }
 
-    
+	
       if (t === 'candidate' && msg.from && msg.candidate) {
         const rec = peers.get(msg.from);
         if (!rec) {
           peers.set(msg.from, {
-            pc: null,
-            remoteDescriptionSet: false,
+					 
+            pc: null, remoteDescriptionSet: false,
             candidateQueue: [new RTCIceCandidate(msg.candidate)],
-            lastOfferSdp: null,
-            processingOffer: false
+							   
+            lastOfferSdp: null, processingOffer: false
           });
           return;
         }
@@ -858,7 +863,7 @@
         return;
       }
     
-      // Ignore noise
+					 
       if (t === 'hello' || t === 'keepalive') return;
     }
 
@@ -951,7 +956,7 @@
         startBtn.disabled = false;
 
         applyVideoToggle();
-        applyAudioToggle();
+        await applyAudioToggle();
         announceAIModes();
 
         // Ensure AI mic starts under this user gesture if it should run on the sender
@@ -970,13 +975,13 @@
     async function stopStreaming() {
       try { send({ type: 'bye' }); } catch {}
     
-      // Stop timers
+					
       if (previewTimer)  clearTimeout(previewTimer);
       if (previewTicker) clearInterval(previewTicker);
       if (hideUITimer)   clearTimeout(hideUITimer);
       previewTimer = previewTicker = hideUITimer = null;
     
-      // Stop pose loop/task
+							
       try { poseLoopRunning = false; } catch {}
       try { poseTask && poseTask.close && poseTask.close(); } catch {}
       poseTask = null;
@@ -985,12 +990,12 @@
       try { audioTask && audioTask.close && audioTask.close(); } catch {}
       audioTask = null;
 
-      // Stop face loop/task
+							
       try { faceLoopRunning = false; } catch {}
       try { faceTask && faceTask.close && faceTask.close(); } catch {}
       faceTask = null;
     
-      // ---- Close all RTCPeerConnections ----
+											   
       try {
         if (typeof peers !== 'undefined' && peers && typeof peers.forEach === 'function') {
           for (const [peerId, rec] of peers) {
@@ -1001,7 +1006,7 @@
         }
       } catch {}
     
-      // Fallback for the original single-PC implementation
+														   
       try {
         if (typeof pc !== 'undefined' && pc) {
           try { pc.getSenders()?.forEach(s => s.track && s.track.stop()); } catch {}
@@ -1009,21 +1014,21 @@
         }
       } catch {}
     
-      // Stop local media + WS
+							  
       try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
       try { ws && ws.close(); } catch {}
     
-      // Datachannels / references
+								  
       poseDCs.clear();
-    
-      // Null refs
+	
+				  
       try { localStream = null; } catch {}
       try { ws = null; } catch {}
       try { if (typeof pc !== 'undefined') pc = null; } catch {}
     
       started = false;
     
-      // UI reset
+				 
       document.body.classList.remove('previewing','streaming','ui-visible');
       document.body.classList.add('blackout');
     
@@ -1079,7 +1084,7 @@
     async function ensureAudioTask() {
       if (audioTask) return audioTask;
     
-      // lazy-load the module once
+								  
       if (!AudioClassifier || !AudioFilesetResolver) {
         ({ AudioClassifier, FilesetResolver: AudioFilesetResolver } = await import(AUDIO_TASKS_URL));
         console.log('[AUDIO][sender] AudioClassifier + FilesetResolver loaded');
@@ -1092,10 +1097,10 @@
       const createWithPath = () => AudioClassifier.createFromOptions(resolver, {
         baseOptions: { modelAssetPath: MODEL_URL },
         runningMode: "AUDIO_CLIPS",
-        classifierOptions: {
-          maxResults: 20,
-          scoreThreshold: 0
-        }
+        classifierOptions: { maxResults: 20, scoreThreshold: 0 }
+						 
+						   
+		 
       });
       const createWithBuffer = async () => {
         const bust = MODEL_URL + (MODEL_URL.includes('?') ? '&' : '?') + 'cb=' + Date.now();
@@ -1106,10 +1111,10 @@
         return AudioClassifier.createFromOptions(resolver, {
           baseOptions: { modelAssetBuffer: buf },
           runningMode: "AUDIO_CLIPS",
-          classifierOptions: {
-            maxResults: 20,
-            scoreThreshold: 0
-          }
+          classifierOptions: { maxResults: 20, scoreThreshold: 0 }
+						   
+							 
+		   
         });
       };
 
@@ -1181,7 +1186,7 @@
           return;
         }
     
-        // Clear once per frame (shared with face via lastClearedTs)
+																	
         if (document.body.classList.contains('previewing') && ts !== lastClearedTs) {
           ctx.setTransform(1,0,0,1,0,0);
           ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
@@ -1240,16 +1245,16 @@
         return;
       }
 
-      // ----- TAP THE STREAMING MIC (clone) OR FALL BACK TO A SEPARATE MIC -----
+      // ----- TAP THE STREAMING MIC (clone) ONLY IF LIVE+ENABLED; ELSE OPEN A SEPARATE AI MIC -----
       let captureStream = null;
       let tapUsed = false;
       const t = getLocalAudioTrack();
-      const liveAndEnabled = !!(t && t.readyState === 'live' && t.enabled);
+      const canTap = !!(t && t.readyState === 'live' && t.enabled);   /* ★ key condition */
 
       try {
-        if (t && t.readyState === 'live') {
-          // Use a clone of the exact mic track you are sending via WebRTC.
-          // This avoids the "2nd getUserMedia returns silence" problem.
+        if (canTap) {
+																		   
+																		
           aiTapTrack = t.clone();
           try { aiTapTrack.enabled = true; } catch {}
           captureStream = new MediaStream([aiTapTrack]);
@@ -1269,10 +1274,10 @@
           captureStream = aiMicStream;
           console.log('[AUDIO][sender] opened separate mic for AI (raw)');
         } catch (e) {
-          // If we cannot open a second mic, but the streaming mic is live+enabled, we can still tap *its stream*
-          if (liveAndEnabled && localStream) {
+          // last resort: if tapping is allowed, try direct (non-cloned) tap
+          if (canTap) {
             try {
-              captureStream = new MediaStream([t]); // direct (non-cloned) tap as a last resort
+              captureStream = new MediaStream([t]);
               tapUsed = true;
               console.log('[AUDIO][sender] fallback: tapping streaming mic track directly');
             } catch {}
@@ -1292,12 +1297,12 @@
       try { await audioCtx.resume(); } catch {}
       audioSource = audioCtx.createMediaStreamSource(captureStream);
     
-      // Silent sink so the node stays "live" without making sound
+																  
       const sink = audioCtx.createGain();
       sink.gain.value = 0;
       sink.connect(audioCtx.destination);
     
-      // Shared chunk handler
+							 
       const SR_DEVICE = audioCtx.sampleRate;
       const SR_TARGET = 16000;
       const WINDOW_SEC = 0.975;
@@ -1312,7 +1317,7 @@
           return;
         }
 
-        // 🔎 Optional RMS debug: set LOG.rmsEvery above to any >0 to log
+																		   
         if (LOG.rmsEvery) {
           window._dbgMicCountS = (window._dbgMicCountS || 0) + 1;
           if ((window._dbgMicCountS % LOG.rmsEvery) === 0) {
@@ -1321,12 +1326,12 @@
           }
         }
     
-        // Resample → 16 kHz and clamp
+										
         let x16 = resampleLinear(frameFloat32, SR_DEVICE, SR_TARGET);
         for (let i = 0; i < x16.length; i++) x16[i] = Math.max(-1, Math.min(1, x16[i]));
         ring16 = concatFloat32(ring16, x16);
     
-        // Process in ~0.975 s chunks
+									 
         while (ring16.length >= CLIP_SAMPLES_16) {
           const clip = ring16.subarray(0, CLIP_SAMPLES_16);
           ring16 = ring16.subarray(CLIP_SAMPLES_16);
@@ -1363,12 +1368,12 @@
         }
       };
 
-      // Flags BEFORE wiring processor
+									  
       audioLoopRunning = true;
       audioStarting = false;
       
       try {
-        // Prefer AudioWorklet for reliability
+											  
         const modURL = URL.createObjectURL(new Blob([`
           class AICapture extends AudioWorkletProcessor {
             process(inputs) {
@@ -1386,7 +1391,7 @@
         audioSource.connect(audioProcessor).connect(sink);
         console.log('[AUDIO][sender] using AudioWorklet @', SR_DEVICE, 'Hz');
       } catch {
-        // Fallback to ScriptProcessor if Worklet unavailable
+															 
         audioProcessor = audioCtx.createScriptProcessor(1024, 1, 1);
         audioProcessor.onaudioprocess = (e) => onChunk(new Float32Array(e.inputBuffer.getChannelData(0)));
         audioSource.connect(audioProcessor).connect(sink);
@@ -1406,11 +1411,11 @@
       } catch {}
       audioCtx = audioSource = audioProcessor = null;
 
-      // stop local-only AI mic if it was opened
+												
       try { aiMicStream && aiMicStream.getTracks().forEach(t => t.stop()); } catch {}
       aiMicStream = null;
 
-      // stop cloned tap track if we created one
+												
       try { aiTapTrack && aiTapTrack.stop(); } catch {}
       aiTapTrack = null;
     }
