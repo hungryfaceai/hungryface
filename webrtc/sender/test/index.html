@@ -1169,6 +1169,13 @@
 
       audioSource = sourceNodeBuilder();
 
+      // (Optional) hint channels on the source node
+      try {
+        audioSource.channelCount = 2;
+        audioSource.channelCountMode = 'explicit';
+        audioSource.channelInterpretation = 'discrete';
+      } catch {}
+
       // Prepare resampling + ring
       const SR_DEVICE = audioCtx.sampleRate;
       const SR_TARGET = 16000;
@@ -1254,8 +1261,25 @@
         const modURL = URL.createObjectURL(new Blob([`
           class AICapture extends AudioWorkletProcessor {
             process(inputs) {
-              const ch = inputs[0]?.[0];
-              if (ch) this.port.postMessage(ch.slice(0));
+              const chans = inputs[0];
+              if (!chans || chans.length === 0) return true;
+
+              const chCount = chans.length;
+              const N = (chans[0]?.length) || 0;
+              if (!N) return true;
+
+              // Downmix ALL channels -> mono
+              const out = new Float32Array(N);
+              for (let ch = 0; ch < chCount; ch++) {
+                const c = chans[ch];
+                if (!c) continue;
+                for (let i = 0; i < N; i++) out[i] += c[i];
+              }
+              const denom = Math.max(1, chCount);
+              for (let i = 0; i < N; i++) out[i] /= denom;
+
+              // Transfer ownership to avoid a copy
+              this.port.postMessage(out, [out.buffer]);
               return true;
             }
           }
@@ -1263,13 +1287,30 @@
         `], { type: 'application/javascript' }));
         await audioCtx.audioWorklet.addModule(modURL);
         URL.revokeObjectURL(modURL);
-        audioProcessor = new AudioWorkletNode(audioCtx, 'ai-capture', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
+        audioProcessor = new AudioWorkletNode(audioCtx, 'ai-capture', {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          channelCount: 2,                     // allow stereo input
+          channelCountMode: 'explicit',
+          channelInterpretation: 'discrete'
+        });
         audioProcessor.port.onmessage = (ev) => onChunk(ev.data);
         audioSource.connect(audioProcessor).connect(sink);
         console.log('[AUDIO][sender] using AudioWorklet @', SR_DEVICE, 'Hz');
       } catch {
-        audioProcessor = audioCtx.createScriptProcessor(1024, 1, 1);
-        audioProcessor.onaudioprocess = (e) => onChunk(new Float32Array(e.inputBuffer.getChannelData(0)));
+        audioProcessor = audioCtx.createScriptProcessor(1024, 2, 1); // allow up to 2 input channels
+        audioProcessor.onaudioprocess = (e) => {
+          const ib = e.inputBuffer;
+          const N = ib.length;
+          const C = Math.max(1, ib.numberOfChannels || 1);
+          const mix = new Float32Array(N);
+          for (let ch = 0; ch < C; ch++) {
+            const d = ib.getChannelData(ch);
+            for (let i = 0; i < N; i++) mix[i] += d[i];
+          }
+          for (let i = 0; i < N; i++) mix[i] /= C;
+          onChunk(mix);
+        };
         // For ScriptProcessor, connect source -> processor -> sink
         audioSource.connect(audioProcessor).connect(sink);
         console.log('[AUDIO][sender] using ScriptProcessor @', SR_DEVICE, 'Hz');
