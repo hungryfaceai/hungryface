@@ -30,8 +30,7 @@
     /* Canvas positioned by JS to cover the visible video box */
     #stage > canvas#poseCanvas {
       position: absolute; /* left/top/width/height set in JS */
-      display: none; background: transparent !important; 
-      /* helps Safari’s compositor behave */
+      display: none; background: transparent !important;
       mix-blend-mode: normal;
       pointer-events: none;
     }
@@ -48,13 +47,11 @@
       #ui { align-items: flex-start; padding-top: 0; }
       .page-header { padding: 2px 10px; }
     }
-
     @media (max-height: 660px) {
       .page-header { padding: 2px 10px; }
       .icon-home   { --icon-size: 26px; }
     }
 
-    /* Kill first-heading top margin + keep tight line-height */
     .page-header h1,
     .page-header h2,
     #ui > h1:first-child,
@@ -62,28 +59,23 @@
       margin-top: 0;
       line-height: 1.15;
     }
-    
-    /* Header hugs the notch; only real safe-area padding remains */
+
     .page-header {
       padding-top: max(env(safe-area-inset-top), 2px);
       padding-bottom: 4px;
     }
-    
-    /* Use visible viewport height to avoid iOS toolbar gap */
+
     #ui { min-height: 100svh; }
-    
-    /* On short screens, keep header tight; no extra top padding */
+
     @media (max-height: 740px) {
       #ui { padding-top: 0; }
       .page-header { padding: 2px 10px; }
     }
 
-    
     .card {
       width: 100%; max-width: 520px; background: #0b0b0b; border: 1px solid #141414; border-radius: 14px;
       padding: 18px; box-sizing: border-box;
     }
-
     .card h2 { font-size: clamp(16px, 2.6vw, 18px); }
 
     .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; }
@@ -126,7 +118,6 @@
   </style>
 </head>
 <body class="blackout">
-
   <!-- Header -->
   <header class="page-header">
     <a href="https://hungryfaceai.github.io/hungryface/home/" class="home-link" aria-label="Home">
@@ -136,43 +127,26 @@
       </svg>
     </a>
   </header>
-  
+
   <style>
     .page-header {
       position: relative;
-      z-index: 7;          /* above #stage (z:1), #ui (z:5) and #tap (z:6), so it stays clickable */
-      padding: 14px 20px;  /* matches landing header spacing */
+      z-index: 7;
+      padding: 14px 20px;
     }
-
     .home-link {
-      position: static;     /* was: fixed */
-      /*top: 14px;
-      left: 20px;
-      z-index: 9999;*/
-  
-      /* Typography and color to match the home page */
+      position: static;
       font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
       font-size: 0.95rem;
       color: #fff;
       text-decoration: none;
       opacity: 0.9;
-
-																		   
       background: transparent;
       border: none;
       padding: 0;
     }
-    .home-link:hover,
-    .home-link:focus {
-      text-decoration: underline;
-      opacity: 1;
-    }
-
-																		  
-    @media (max-width: 380px) {
-      .home-link { font-size: 0.82rem; }
-    }
-    
+    .home-link:hover,.home-link:focus { text-decoration: underline; opacity: 1; }
+    @media (max-width: 380px) { .home-link { font-size: 0.82rem; } }
     .icon { width: var(--icon-size, 24px); height: var(--icon-size, 24px); display: block; }
     .icon-home { --icon-size: 26px; }
   </style>
@@ -223,7 +197,7 @@
             <option value="receiver">On receiver</option>
           </select>
         </div>
-        
+
         <div class="ai-row">
           <label class="switch">
             <input id="audioAiOn" type="checkbox"><span>Audio</span>
@@ -233,7 +207,7 @@
             <option value="receiver">On receiver</option>
           </select>
         </div>
-        
+
         <div class="ai-row">
           <label class="switch">
             <input id="faceOn" type="checkbox"><span>Face</span>
@@ -243,7 +217,6 @@
             <option value="receiver">On receiver</option>
           </select>
         </div>
-
       </fieldset>
 
       <div class="row" style="margin-top:14px;">
@@ -258,18 +231,18 @@
   <script type="module">
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
-																												  
+
     const TASKS_URL  = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     const WASM_DIR   = TASKS_URL + "/wasm";
     const AUDIO_TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0";
     const AUDIO_WASM_DIR  = AUDIO_TASKS_URL + "/wasm";
 
-    /* ---------- DEBUG LOG SWITCHES (match receiver) ---------- */
+    /* ---------- DEBUG LOG SWITCHES ---------- */
     const LOG = {
       status: true,
       dc: true,
       spectrum: false,
-      rmsEvery: 0,       // set to e.g. 50 to log RMS every 50 chunks
+      rmsEvery: 0,
       catEvery: 20,
       seriesEvery: 20,
       firstResult: true
@@ -293,7 +266,7 @@
     const audioAiOn    = document.getElementById('audioAiOn');
     const audioAiWhere = document.getElementById('audioAiWhere');
     const faceOn       = document.getElementById('faceOn');
-    const faceWhere    = document.getElementById('faceWhere');    
+    const faceWhere    = document.getElementById('faceWhere');
 
     function getLocalAudioTrack() {
       return localStream?.getAudioTracks?.()[0] || null;
@@ -304,7 +277,7 @@
     function nudgePeerForOffer(peerId) {
       try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: peerId })); } catch {}
     }
-    
+
     /** Ensure we have a mic track in localStream, attach to all PCs, and trigger renegotiation. */
     async function ensureSenderHasAudioTrack() {
       let track = getLocalAudioTrack();
@@ -316,8 +289,7 @@
         if (!localStream) localStream = new MediaStream();
         localStream.addTrack(track);
       }
-    
-      // Attach/replace on every per-peer PC
+
       if (peers?.size) {
         for (const [peerId, rec] of peers) {
           const pc = rec.pc || getOrCreatePC(peerId);
@@ -327,19 +299,17 @@
           } else {
             pc.addTrack(track, localStream);
           }
-          nudgePeerForOffer(peerId); // ask that receiver sends a new offer
+          nudgePeerForOffer(peerId);
         }
       }
       return track;
     }
-    
+
     function announceAIModes() {
-      // 1) Apply local behavior + per-feature mode messages (pose/audio/face)
       applyPoseUI();
       applyAudioUI();
       applyFaceUI();
-    
-      // 2) Broadcast one consolidated snapshot
+
       const payload = {
         type: 'ai-modes',
         pose:  { enabled: !!poseOn?.checked,       where: poseWhere?.value ?? 'sender' },
@@ -354,19 +324,13 @@
       }
     }
 
-    // One compact block for ALL AI controls (pose + audio + face)
     [poseOn, poseWhere, audioAiOn, audioAiWhere, faceOn, faceWhere]
       .filter(Boolean)
       .forEach(el => el.addEventListener('change', announceAIModes));
 
-
-    /* -----------------------
-       PERSISTENCE (localStorage)
-       ----------------------- */
+    /* ----------------------- PERSISTENCE ----------------------- */
     (function () {
       const PREFIX = 'bm_sender_';
-
-								   
       const entries = [
         ['videoOn',    'checkbox', document.getElementById('videoOn')],
         ['audioOn',    'checkbox', document.getElementById('audioOn')],
@@ -375,8 +339,6 @@
         ['previewMins','number',   document.getElementById('previewMins')],
         ['poseOn',     'checkbox', document.getElementById('poseOn')],
         ['poseWhere',  'select',   poseWhere],
-	
-															
         ['audioAiOn',    'checkbox', audioAiOn],
         ['audioAiWhere', 'select',   audioAiWhere],
         ['faceOn',       'checkbox', faceOn],
@@ -390,43 +352,24 @@
         if (type === 'checkbox') el.checked = (v === '1' || v === 'true');
         else el.value = v;
       }
-
       function saveOne(key, type, el) {
         if (!el) return;
         const v = (type === 'checkbox') ? (el.checked ? '1' : '0') : el.value;
         try { localStorage.setItem(PREFIX + key, v); } catch {}
       }
 
-																			  
       entries.forEach(([k, t, el]) => loadOne(k, t, el));
-
-					   
       entries.forEach(([k, t, el]) => el && el.addEventListener('change', () => saveOne(k, t, el)));
 
-																							
       const qsRoomVal = new URLSearchParams(location.search).get('room');
       if (qsRoomVal) { try { localStorage.setItem(PREFIX + 'room', qsRoomVal); } catch {} }
     })();
 
-							   
-												 
-											
-
-									 
-							  
-																							 
-						
-	  
     let ws = null, localStream = null;
     let started = false, hideUITimer = null;
-    
+
     // One RTCPeerConnection per receiver
-																															  
     const peers = new Map();
-    
-														 
-																							 
-								  
 
     let previewTimer = null, previewTicker = null, previewEnd = 0;
     const poseDCs = new Set();
@@ -437,24 +380,25 @@
     let FaceLandmarker, faceTask = null, faceLoopRunning = false;
     let AudioClassifier, audioTask = null, audioLoopRunning = false;
     let AudioFilesetResolver;
-    
+
     const ctx = poseCanvas.getContext('2d', { alpha: true });
     let lastClearedTs = -1;
     let poseRAF = 0, faceRAF = 0;
+
+    // AUDIO graph nodes/state
     let audioCtx = null, audioSource = null, audioProcessor = null;
 
     // 🔓 WebAudio unlock on any user gesture (sender)
-																						  
     ['click','touchstart'].forEach(ev =>
       document.addEventListener(ev, () => audioCtx?.resume?.(), { passive: true })
     );
-    
+
     // Local-only AI mic (used when the streaming mic is off)
     let aiMicStream = null;
-    let aiTapTrack  = null;   // clone of the streaming mic used for AI tap
+    let aiTapTrack  = null;   // retained for cleanup compatibility
     let audioStarting = false;
 
-    // Simple helpers for audio resampling
+    // --------- Audio helpers ----------
     function concatFloat32(a,b){ const out=new Float32Array(a.length+b.length); out.set(a,0); out.set(b,a.length); return out; }
     function resampleLinear(x, fromSr, toSr){
       if (fromSr === toSr) return x;
@@ -467,29 +411,33 @@
       }
       return out;
     }
+    // Prefer track-node tap (avoids silent clone bug); fallback to stream source
+    function makeSourceFromTrack(ctx, track) {
+      try {
+        return new MediaStreamTrackAudioSourceNode(ctx, { mediaStreamTrack: track });
+      } catch {
+        const tmp = new MediaStream([track]);
+        return ctx.createMediaStreamSource(tmp);
+      }
+    }
+    function rmsOf(x) {
+      if (!x || !x.length) return 0;
+      let s = 0; for (let i=0;i<x.length;i++){ const v=x[i]; s += v*v; }
+      return Math.sqrt(s / x.length);
+    }
 
     // --- normalize MediaPipe AudioClassifier result into a categories array ---
-																
     function extractCategories(res) {
       if (!res) return [];
       if (Array.isArray(res)) {
-        return (
-													 
-          res[0]?.classifications?.[0]?.categories ?? res[0]?.classificationResult?.classifications?.[0]?.categories ?? []
-			
-        );
+        return (res[0]?.classifications?.[0]?.categories ?? res[0]?.classificationResult?.classifications?.[0]?.categories ?? []);
       }
-			  
-											   
       return (res.classifications?.[0]?.categories ?? res.classificationResult?.classifications?.[0]?.categories ?? []);
-		  
-		
     }
-													 
     function categoryLabel(c) {
       return (c?.displayName || c?.categoryName || String(c?.index) || '').trim();
     }
-    
+
     const setStatus = (t) => { statusEl.textContent = t; if (LOG.status) console.log('[STATUS]', t); };
     const currentRoom = () => (roomInput.value || 'Baby').trim();
     const isFront = () => (cameraSel.value === 'user');
@@ -529,12 +477,7 @@
       }
 
       // prime canvas once per resize (Safari quirk guard)
-																   
-      ctx.save();
-      ctx.globalAlpha = 0;
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, 1, 1);
-      ctx.restore();
+      ctx.save(); ctx.globalAlpha = 0; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 1, 1); ctx.restore();
 
       const wantOverlay =
         videoOn.checked &&
@@ -543,15 +486,11 @@
           (poseOn.checked && poseWhere.value === 'sender') ||
           (faceOn?.checked && faceWhere?.value === 'sender')
         );
-      
-	  
       poseCanvas.style.display = wantOverlay ? 'block' : 'none';
-	  
 
       ctx.setTransform(1,0,0,1,0,0);
     }
 
-														 
     let settleRAF = 0, settleUntil = 0;
     function beginViewportSettle(durationMs = 1200) {
       settleUntil = performance.now() + durationMs;
@@ -603,7 +542,7 @@
       const vt = stream.getVideoTracks()[0];
       const at = stream.getAudioTracks()[0];
       if (vt && 'contentHint' in vt) { try { vt.contentHint = 'motion'; } catch {} }
-      if (at && 'contentHint' in at) { try { at.contentHint = 'speech'; } catch {} }  /* ★ added */
+      if (at && 'contentHint' in at) { try { at.contentHint = 'speech'; } catch {} }
       if (vt) vt.enabled = wantVideo;
       if (at) at.enabled = wantAudio;
       return stream;
@@ -621,12 +560,10 @@
       const want = audioOn.checked;
       try {
         if (want) {
-																			   
           const t = await ensureSenderHasAudioTrack();
           if (t) t.enabled = true;
           setStatus('Audio ON');
         } else {
-																						 
           const t = getLocalAudioTrack();
           if (t) t.enabled = false;
           setStatus('Audio OFF');
@@ -636,9 +573,8 @@
         setStatus('Audio error');
       }
     }
-    
+
     videoOn.addEventListener('change', applyVideoToggle);
-    /* ★ restart AI loop when Audio ON/OFF changes so the source (tap vs raw) switches */
     audioOn.addEventListener('change', async () => {
       await applyAudioToggle();
       applyAudioUI();
@@ -661,13 +597,9 @@
           opened = true; clearTimeout(t);
           setStatus('Signaling: connected');
           send({ type: 'join', room, role: 'sender' });
-		
           send({ type: 'need-offer' }); // nudge any already-open receivers
-									   
-		
           resolve();
         };
-															   
         sock.onmessage = onSignal;
         sock.onerror = (e) => { console.warn('[WS error]', e); };
         sock.onclose  = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); };
@@ -675,30 +607,27 @@
     }
     const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
-																									  
     function getOrCreatePC(peerId) {
       let rec = peers.get(peerId);
       if (rec && rec.pc) return rec.pc;
-    
+
       if (!localStream) {
         console.warn('[SENDER] localStream missing; startOrStop() must run first');
       }
-    
+
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
         bundlePolicy: 'max-bundle',
         sdpSemantics: 'unified-plan'
       });
-    
-												 
+
       if (localStream) {
         localStream.getTracks().forEach(track => {
           console.log('[TRACK][sender] addTrack', track.kind, '→', peerId);
           pc.addTrack(track, localStream);
         });
       }
-    
-									   
+
       pc.ondatachannel = (ev) => {
         if (ev.channel?.label === 'pose') {
           const ch = ev.channel;
@@ -709,20 +638,19 @@
           ch.onmessage = onPoseMessageFromReceiver;
         }
       };
-    
+
       pc.onicecandidate = (e) => {
         if (e.candidate && ws?.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'candidate', to: peerId, candidate: e.candidate }));
         }
       };
-    
+
       pc.onconnectionstatechange = () => {
         const st = pc.connectionState;
         console.log('[SENDER][PC]', peerId, st);
         if (st === 'failed' || st === 'closed') cleanupPeer(peerId, 'pc-state:' + st);
       };
-    
-														
+
       if (!rec) {
         rec = {
           pc,
@@ -739,8 +667,7 @@
 
       return pc;
     }
-      
-	
+
     function cleanupPeer(peerId, reason = 'cleanup') {
       const rec = peers.get(peerId);
       if (!rec) return;
@@ -752,29 +679,18 @@
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
       const t = msg?.type;
-    
-										
+
       if (t === 'peer-left' && msg.id) { cleanupPeer(msg.id, 'peer-left'); return; }
-			   
-	   
-	
-									
       if (t === 'bye' && msg.from) { cleanupPeer(msg.from, 'bye'); return; }
-			   
-	   
-    
-													  
+
       if (t === 'peer-joined' && msg.id && msg.role === 'receiver') {
-											
         ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: msg.id }));
         return;
       }
-    
-																   
+
       if (t === 'roster' && Array.isArray(msg.peers)) {
         for (const p of msg.peers) {
           if (p.role === 'receiver') {
-												
             ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: p.id }));
           }
         }
@@ -783,72 +699,52 @@
 
       if (t === 'offer' && msg.from) {
         setStatus('Got offer, creating answer…');
-	  
-							   
+
         let rec = peers.get(msg.from);
-				   
         if (!rec) { getOrCreatePC(msg.from); rec = peers.get(msg.from); }
-									
-		 
-	  
-								
-										   
+
         if (rec.lastOfferSdp === msg.sdp) { console.log('[DUP] identical offer ignored from', msg.from); return; }
-				 
-		 
-	  
-									   
-								  
         if (rec.processingOffer) { console.log('[SENDER] skipping offer from', msg.from, '(answer in progress)'); return; }
-				 
-		 
         rec.processingOffer = true;
-	  
+
         const pc = rec.pc || getOrCreatePC(msg.from);
-	  
+
         try {
-														 
           if (pc.signalingState === 'have-local-offer') { try { await pc.setLocalDescription({ type: 'rollback' }); } catch {} }
-		   
-	  
+
           await pc.setRemoteDescription(new RTCSessionDescription(msg));
-	  
-											   
+
           if (pc.signalingState !== 'have-remote-offer') {
             console.warn('[SENDER] unexpected signalingState before answer:', pc.signalingState);
             return;
           }
-	  
+
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-	  
+
           ws.send(JSON.stringify({ type: answer.type, sdp: answer.sdp, to: msg.from }));
           console.log('[WS OUT] answer →', msg.from);
-	  
+
           rec.remoteDescriptionSet = true;
           rec.lastOfferSdp = msg.sdp;
-	  
-								 
+
           for (const c of rec.candidateQueue) {
             try { await pc.addIceCandidate(c); } catch (err) { console.warn('[SENDER] late ICE add failed', msg.from, err); }
           }
           rec.candidateQueue.length = 0;
-	  
+
         } finally {
           rec.processingOffer = false;
         }
         return;
       }
 
-	
       if (t === 'candidate' && msg.from && msg.candidate) {
         const rec = peers.get(msg.from);
         if (!rec) {
           peers.set(msg.from, {
-					 
             pc: null, remoteDescriptionSet: false,
             candidateQueue: [new RTCIceCandidate(msg.candidate)],
-							   
             lastOfferSdp: null, processingOffer: false
           });
           return;
@@ -862,8 +758,7 @@
         }
         return;
       }
-    
-					 
+
       if (t === 'hello' || t === 'keepalive') return;
     }
 
@@ -974,14 +869,12 @@
 
     async function stopStreaming() {
       try { send({ type: 'bye' }); } catch {}
-    
-					
+
       if (previewTimer)  clearTimeout(previewTimer);
       if (previewTicker) clearInterval(previewTicker);
       if (hideUITimer)   clearTimeout(hideUITimer);
       previewTimer = previewTicker = hideUITimer = null;
-    
-							
+
       try { poseLoopRunning = false; } catch {}
       try { poseTask && poseTask.close && poseTask.close(); } catch {}
       poseTask = null;
@@ -990,12 +883,10 @@
       try { audioTask && audioTask.close && audioTask.close(); } catch {}
       audioTask = null;
 
-							
       try { faceLoopRunning = false; } catch {}
       try { faceTask && faceTask.close && faceTask.close(); } catch {}
       faceTask = null;
-    
-											   
+
       try {
         if (typeof peers !== 'undefined' && peers && typeof peers.forEach === 'function') {
           for (const [peerId, rec] of peers) {
@@ -1005,38 +896,33 @@
           peers.clear();
         }
       } catch {}
-    
-														   
+
       try {
         if (typeof pc !== 'undefined' && pc) {
           try { pc.getSenders()?.forEach(s => s.track && s.track.stop()); } catch {}
           try { pc.close(); } catch {}
         }
       } catch {}
-    
-							  
+
       try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
       try { ws && ws.close(); } catch {}
-    
-								  
+
       poseDCs.clear();
-	
-				  
+
       try { localStream = null; } catch {}
       try { ws = null; } catch {}
       try { if (typeof pc !== 'undefined') pc = null; } catch {}
-    
+
       started = false;
-    
-				 
+
       document.body.classList.remove('previewing','streaming','ui-visible');
       document.body.classList.add('blackout');
-    
+
       ui.style.display = '';
       localVideo.style.display = 'none';
       poseCanvas.style.display = 'none';
       ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-    
+
       setStatus('Stopped');
       startBtn.textContent = 'Start streaming';
     }
@@ -1083,24 +969,19 @@
 
     async function ensureAudioTask() {
       if (audioTask) return audioTask;
-    
-								  
       if (!AudioClassifier || !AudioFilesetResolver) {
         ({ AudioClassifier, FilesetResolver: AudioFilesetResolver } = await import(AUDIO_TASKS_URL));
         console.log('[AUDIO][sender] AudioClassifier + FilesetResolver loaded');
       }
-    
+
       const WASM_DIR  = AUDIO_WASM_DIR;
       const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite";
-    
+
       const resolver = await AudioFilesetResolver.forAudioTasks(WASM_DIR);
       const createWithPath = () => AudioClassifier.createFromOptions(resolver, {
         baseOptions: { modelAssetPath: MODEL_URL },
         runningMode: "AUDIO_CLIPS",
         classifierOptions: { maxResults: 20, scoreThreshold: 0 }
-						 
-						   
-		 
       });
       const createWithBuffer = async () => {
         const bust = MODEL_URL + (MODEL_URL.includes('?') ? '&' : '?') + 'cb=' + Date.now();
@@ -1112,9 +993,6 @@
           baseOptions: { modelAssetBuffer: buf },
           runningMode: "AUDIO_CLIPS",
           classifierOptions: { maxResults: 20, scoreThreshold: 0 }
-						   
-							 
-		   
         });
       };
 
@@ -1141,7 +1019,6 @@
       throw lastErr || new Error('audio task init failed');
     }
 
-    
     function sendPoseToReceivers(landmarks) {
       const payload = JSON.stringify({ type:'pose', landmarks, ts: performance.now() });
       for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
@@ -1158,7 +1035,6 @@
       }
       ctx.restore();
     }
-
     function drawFaceOnSender(faces) {
       if (!faces?.length || !poseCanvas.width || !poseCanvas.height) return;
       const dutils = new DrawingUtils(ctx);
@@ -1167,7 +1043,7 @@
           radius: 0.5,
           color:    "#00FF00",
           fillColor:"#00FF00",
-        });        
+        });
       }
     }
 
@@ -1175,24 +1051,23 @@
       if (!started || !poseOn.checked || poseWhere.value !== 'sender') return;
       if (poseLoopRunning) return;
       const task = await ensurePoseTask();
-    
+
       poseLoopRunning = true;
       if (poseRAF) cancelAnimationFrame(poseRAF);
       console.log('[POSE][sender] inference START (sender)');
-    
+
       const loop = (ts) => {
         if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') {
-          console.log('[POSE][sender] inference STOP (sender)'); 
+          console.log('[POSE][sender] inference STOP (sender)');
           return;
         }
-    
-																	
+
         if (document.body.classList.contains('previewing') && ts !== lastClearedTs) {
           ctx.setTransform(1,0,0,1,0,0);
           ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
           lastClearedTs = ts;
         }
-    
+
         try {
           const result = task.detectForVideo(localVideo, ts);
           if (result?.landmarks?.length) {
@@ -1200,13 +1075,12 @@
             sendPoseToReceivers(result.landmarks);
           }
         } catch (e) {}
-    
+
         poseRAF = requestAnimationFrame(loop);
       };
-    
+
       poseRAF = requestAnimationFrame(loop);
     }
-    
     function stopSenderPoseLoop() {
       if (!poseLoopRunning) return;
       poseLoopRunning = false;
@@ -1233,7 +1107,7 @@
     async function startSenderAudioLoop() {
       if (!started || !audioAiOn?.checked || audioAiWhere?.value !== 'sender') return;
       if (audioLoopRunning || audioStarting) return;
-    
+
       audioStarting = true; // lock
       let task;
       try {
@@ -1245,44 +1119,40 @@
         return;
       }
 
-      // ----- TAP THE STREAMING MIC (clone) ONLY IF LIVE+ENABLED; ELSE OPEN A SEPARATE AI MIC -----
-      let captureStream = null;
-      let tapUsed = false;
-      const t = getLocalAudioTrack();
-      const canTap = !!(t && t.readyState === 'live' && t.enabled);   /* ★ key condition */
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      try { await audioCtx.resume(); } catch {}
 
-      try {
-        if (canTap) {
-																		   
-																		
-          aiTapTrack = t.clone();
-          try { aiTapTrack.enabled = true; } catch {}
-          captureStream = new MediaStream([aiTapTrack]);
-          tapUsed = true;
-          console.log('[AUDIO][sender] tapping streaming mic track for AI (clone)');
-        }
-      } catch (e) {
-        console.warn('[AUDIO][sender] mic clone failed, will try fallback mic:', e?.name || e);
+      // ----- ROBUST CAPTURE SELECTION (no cloning; track-node first, then fallback) -----
+      let tapUsed = false;
+      let useSeparateMic = false;
+      let sourceNodeBuilder = null;   // () => AudioNode
+      let originLabel = '(none)';
+
+      const t = getLocalAudioTrack();
+      const canTap = !!(t && t.readyState === 'live' && t.enabled);
+
+      if (canTap) {
+        sourceNodeBuilder = () => makeSourceFromTrack(audioCtx, t);
+        tapUsed = true;
+        originLabel = 'live streaming track (direct)';
+      } else {
+        useSeparateMic = true;
+        originLabel = 'separate mic';
       }
 
-      if (!captureStream) {
+      if (useSeparateMic) {
         try {
           aiMicStream = await navigator.mediaDevices.getUserMedia({
             audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
             video: false
           });
-          captureStream = aiMicStream;
-          console.log('[AUDIO][sender] opened separate mic for AI (raw)');
+          sourceNodeBuilder = () => audioCtx.createMediaStreamSource(aiMicStream);
         } catch (e) {
-          // last resort: if tapping is allowed, try direct (non-cloned) tap
           if (canTap) {
-            try {
-              captureStream = new MediaStream([t]);
-              tapUsed = true;
-              console.log('[AUDIO][sender] fallback: tapping streaming mic track directly');
-            } catch {}
-          }
-          if (!captureStream) {
+            sourceNodeBuilder = () => makeSourceFromTrack(audioCtx, t);
+            tapUsed = true;
+            originLabel = 'live streaming track (direct fallback)';
+          } else {
             audioStarting = false;
             console.warn('[AUDIO][sender] no capture source available for AI:', e?.name || e);
             setStatus('AI mic unavailable');
@@ -1290,48 +1160,59 @@
           }
         }
       }
-      // ------------------------------------------------------------
+      console.log('[AUDIO][sender] capture source =', originLabel);
 
-      // --- Graph (silent sink + worklet fallback) ---
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      try { await audioCtx.resume(); } catch {}
-      audioSource = audioCtx.createMediaStreamSource(captureStream);
-    
-																  
+      // Build graph
       const sink = audioCtx.createGain();
       sink.gain.value = 0;
       sink.connect(audioCtx.destination);
-    
-							 
+
+      audioSource = sourceNodeBuilder();
+
+      // Prepare resampling + ring
       const SR_DEVICE = audioCtx.sampleRate;
       const SR_TARGET = 16000;
       const WINDOW_SEC = 0.975;
       const CLIP_SAMPLES_16 = Math.round(SR_TARGET * WINDOW_SEC);
       let ring16 = new Float32Array(0);
       let _seriesClips = 0;
-    
+
+      // Silence watchdog
+      let silentFrames = 0;
+      const SILENCE_RMS = 1e-4;   // ~ -80 dBFS
+      const SILENCE_LIMIT = 60;   // ~ 0.8–1.5s depending on callback size
+
       const onChunk = async (frameFloat32) => {
         if (!audioLoopRunning || !started || !audioAiOn.checked || audioAiWhere.value !== 'sender') {
-          try { audioProcessor?.disconnect(); audioSource?.disconnect(); await audioCtx?.close?.(); } catch {}
+          try { audioProcessor?.disconnect(); audioSource?.disconnect?.(); await audioCtx?.close?.(); } catch {}
           audioCtx = audioSource = audioProcessor = null;
           return;
         }
 
-																		   
+        // --- silence detection ---
+        const r = rmsOf(frameFloat32);
+        if (r < SILENCE_RMS) {
+          if (++silentFrames >= SILENCE_LIMIT) {
+            console.warn('[AUDIO][sender] silent buffers detected; restarting AI capture with fallback');
+            stopSenderAudioLoop();
+            try { await startSenderAudioLoop(); } catch {}
+            return;
+          }
+        } else {
+          silentFrames = 0;
+        }
+
         if (LOG.rmsEvery) {
           window._dbgMicCountS = (window._dbgMicCountS || 0) + 1;
           if ((window._dbgMicCountS % LOG.rmsEvery) === 0) {
-            const rms = Math.sqrt(frameFloat32.reduce((s,x)=>s + x*x, 0) / Math.max(1, frameFloat32.length));
-            console.log('[AUDIO][sender] rms(device) =', rms.toFixed(4));
+            console.log('[AUDIO][sender] rms(device) =', r.toFixed(4));
           }
         }
-    
-										
+
         let x16 = resampleLinear(frameFloat32, SR_DEVICE, SR_TARGET);
         for (let i = 0; i < x16.length; i++) x16[i] = Math.max(-1, Math.min(1, x16[i]));
         ring16 = concatFloat32(ring16, x16);
-    
-									 
+
         while (ring16.length >= CLIP_SAMPLES_16) {
           const clip = ring16.subarray(0, CLIP_SAMPLES_16);
           ring16 = ring16.subarray(CLIP_SAMPLES_16);
@@ -1346,14 +1227,12 @@
                 console.log('[AUDIO][sender] top =', top.join(', '));
               }
             }
-
             if (LOG.firstResult && !window._dbgFirstSenderResult) {
               window._dbgFirstSenderResult = true;
               console.log('[AUDIO][sender] FIRST result =', res);
             }
 
             const payload = JSON.stringify({ type:'audio', categories: classifications, ts: performance.now() });
-
             let sent = 0;
             for (const ch of poseDCs) if (ch.readyState === 'open') { ch.send(payload); sent++; }
             if (sent === 0 && LOG.dc) console.log('[AUDIO][sender] no open DCs to send scores');
@@ -1368,12 +1247,10 @@
         }
       };
 
-									  
       audioLoopRunning = true;
       audioStarting = false;
-      
+
       try {
-											  
         const modURL = URL.createObjectURL(new Blob([`
           class AICapture extends AudioWorkletProcessor {
             process(inputs) {
@@ -1391,35 +1268,33 @@
         audioSource.connect(audioProcessor).connect(sink);
         console.log('[AUDIO][sender] using AudioWorklet @', SR_DEVICE, 'Hz');
       } catch {
-															 
         audioProcessor = audioCtx.createScriptProcessor(1024, 1, 1);
         audioProcessor.onaudioprocess = (e) => onChunk(new Float32Array(e.inputBuffer.getChannelData(0)));
+        // For ScriptProcessor, connect source -> processor -> sink
         audioSource.connect(audioProcessor).connect(sink);
         console.log('[AUDIO][sender] using ScriptProcessor @', SR_DEVICE, 'Hz');
       }
-    
+
       console.log('[AUDIO][sender] loop START @', SR_DEVICE, '→', SR_TARGET, 'Hz');
     }
-      
+
     function stopSenderAudioLoop() {
       audioLoopRunning = false;
       audioStarting = false;
       try {
         audioProcessor && audioProcessor.disconnect();
-        audioSource && audioSource.disconnect();
+        audioSource && audioSource.disconnect?.();
         audioCtx && audioCtx.close();
       } catch {}
       audioCtx = audioSource = audioProcessor = null;
 
-												
       try { aiMicStream && aiMicStream.getTracks().forEach(t => t.stop()); } catch {}
       aiMicStream = null;
 
-												
       try { aiTapTrack && aiTapTrack.stop(); } catch {}
       aiTapTrack = null;
     }
-    
+
     function announceAudioMode() {
       const enabled = !!audioAiOn?.checked;
       const where   = audioAiWhere?.value;
@@ -1427,7 +1302,6 @@
         ch.send(JSON.stringify({ type:'audio-mode', enabled, where }));
       }
     }
-    
     function applyAudioUI() {
       if (started && audioAiOn?.checked && audioAiWhere?.value === 'sender') startSenderAudioLoop();
       else stopSenderAudioLoop();
@@ -1440,35 +1314,35 @@
       const task = await ensureFaceTask();
       faceLoopRunning = true;
       if (faceRAF) cancelAnimationFrame(faceRAF);
-    
+
       console.log('[FACE][sender] loop START (sender)');
-    
+
       const loop = (ts) => {
         if (!faceLoopRunning || !started || !faceOn.checked || faceWhere?.value !== 'sender') {
-          console.log('[FACE][sender] loop STOP (sender)'); 
+          console.log('[FACE][sender] loop STOP (sender)');
           return;
         }
-    
+
         if (document.body.classList.contains('previewing') && ts !== lastClearedTs) {
           ctx.setTransform(1,0,0,1,0,0);
           ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
           lastClearedTs = ts;
         }
-    
+
         const result = task.detectForVideo(localVideo, ts);
         if (document.body.classList.contains('previewing')) {
           drawFaceOnSender(result?.faceLandmarks);
         }
-    
+
         const payload = JSON.stringify({ type:'face', landmarks: result?.faceLandmarks ?? null, ts });
         for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
-    
+
         faceRAF = requestAnimationFrame(loop);
       };
-    
+
       faceRAF = requestAnimationFrame(loop);
     }
-    
+
     function stopSenderFaceLoop() {
       if (!faceLoopRunning) return;
       faceLoopRunning = false;
@@ -1487,7 +1361,7 @@
       if (started && faceOn?.checked && faceWhere?.value === 'sender') startSenderFaceLoop();
       else stopSenderFaceLoop();
     }
-    
+
     announceAIModes(); // harmless early initialization
     const qsRoom = new URLSearchParams(location.search).get('room');
     if (qsRoom) roomInput.value = qsRoom;
