@@ -49,6 +49,28 @@
 
     .status { color: #ddd; font-size: 14px; padding: 4px 0; white-space: pre-line; }
 
+    /* NEW: signal health row + meter */
+    .signal { margin: 8px 0 12px 0; }
+    .health {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 13px; color: #ccc; margin-bottom: 6px;
+      flex-wrap: wrap;
+    }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      display: inline-block; background: #9ca3af; /* gray */
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.15) inset;
+    }
+    .meter {
+      width: 100%; height: 10px; border-radius: 8px;
+      background: #0a0a0a; border: 1px solid #222; overflow: hidden;
+    }
+    .meter .fill {
+      height: 100%; width: 0%;
+      background: linear-gradient(to right, rgba(96,165,250,0.9), rgba(239,68,68,0.9));
+      transition: width 120ms linear;
+    }
+
     details.advanced {
       border: 1px solid #222; border-radius: 12px; padding: 8px 12px; margin-top: 10px;
     }
@@ -146,7 +168,7 @@
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
     <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
-    <!-- NEW: mic-enable button for receiver-side inference (user gesture) -->
+    <!-- Mic-enable button for receiver-side inference (user gesture) -->
     <button id="enableMicBtn" class="btn" type="button" style="display:none">Enable mic</button>
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
   </div>
@@ -159,6 +181,18 @@
         <h1>Live Baby Cry Detector</h1>
         <p class="sub">Inference on <strong id="whereLbl">—</strong></p>
         <div id="status" class="status">Booting…</div>
+
+        <!-- NEW: signal health + RMS meter -->
+        <div class="signal">
+          <div class="health">
+            <span class="dot" id="tapDot" title="Tap health dot"></span>
+            <span id="tapText">Tap: —</span>
+            <span id="rmsText" style="opacity:.9">RMS: —</span>
+          </div>
+          <div class="meter" aria-label="Input level">
+            <div id="rmsFill" class="fill"></div>
+          </div>
+        </div>
       </header>
 
       <details class="advanced">
@@ -262,13 +296,13 @@
 
     /* ---------- DEBUG LOG SWITCHES ---------- */
     const LOG = {
-      status: true,      // keep status transitions
-      dc: true,         // datachannel chatter
-      spectrum: false,   // spectrum init/vis logs
-      rmsEvery: 0,       // 0 = off, or e.g., 50 to log every 50 mic frames
-      catEvery: 20,       // 0 = off, or e.g., 20 to log every 20th classification
-      seriesEvery: 0,    // 0 = off, or e.g., 100 to log series summary
-      firstResult: true // log the very first classification payload once
+      status: true,
+      dc: true,
+      spectrum: false,
+      rmsEvery: 0,
+      catEvery: 20,
+      seriesEvery: 0,
+      firstResult: true
     };
 
     /* ---------- DOM ---------- */
@@ -276,7 +310,7 @@
     const remoteVideo = document.getElementById('remote');
     const enableAudioBtn = document.getElementById('enableAudioBtn');
     const disableAudioBtn = document.getElementById('disableAudioBtn');
-    const enableMicBtn = document.getElementById('enableMicBtn'); // NEW
+    const enableMicBtn = document.getElementById('enableMicBtn');
     const fsBtn = document.getElementById('fsBtn');
 
     const els = {
@@ -289,6 +323,10 @@
       showRawSpec: document.getElementById('showRawSpec'),
       showSmSpec:  document.getElementById('showSmSpec'),
       peakReadout: document.getElementById('peakReadout'),
+      rmsFill: document.getElementById('rmsFill'),
+      rmsText: document.getElementById('rmsText'),
+      tapDot: document.getElementById('tapDot'),
+      tapText: document.getElementById('tapText'),
       inputs: {
         SR_TARGET:      document.getElementById('SR_TARGET'),
         FRAME_LEN_S:    document.getElementById('FRAME_LEN_S'),
@@ -315,14 +353,14 @@
       console.log('[CRY] where =', label);
     }
 
-    /* ---------- Audio mode state (mirrors pose logic) ---------- */
+    /* ---------- Audio mode state ---------- */
     let audioDC = null;
     let audioEnabled = false;
-    let audioWhere = 'sender';          // 'sender' | 'receiver'
+    let audioWhere = 'sender';
 
     /* ---------- App state ---------- */
     const state = {
-      running: true,                    // auto-on (no Start/Stop UI)
+      running: true,
       usingMic: false,
       audioCtx: null,
       streamLocalMic: null,
@@ -331,6 +369,7 @@
       sinkNode: null,
       processor: null,
       analyser: null,
+      tdAnalyser: null,       // NEW: time-domain analyser for RMS
       ring16k: new Float32Array(0),
       lastPos: 0,
       timesSec: [],
@@ -353,9 +392,14 @@
       audioTask: null,
       audioTaskPromise: null,
       spectrumRaf: 0,
+
+      // NEW: signal health
+      rmsNow: 0,
+      rmsDb: -120,
+      lastNonSilent: 0
     };
 
-    // Guard to avoid redundant re-initialization in applyAudioMode
+    // Guard to avoid redundant re-initialization
     let _activeAudio = { enabled: null, where: null };
 
     /* ---------- Small helpers ---------- */
@@ -374,63 +418,43 @@
         THRESH: parseFloat(els.inputs.THRESH?.value) || 0.15,
         PLOT_WINDOW_S: Math.max(5, parseFloat(els.inputs.PLOT_WINDOW_S?.value) || 60),
         INCLUDE_CLASSES: splitClasses(els.inputs.INCLUDE_CLASSES?.value || "Baby cry, infant cry"),
-        //INCLUDE_CLASSES: ['Conversation'], //debug bm 28 aug 2025 - https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
         ALERT_ON_EXTRA: parseFloat(els.inputs.ALERT_ON_EXTRA?.value ?? '0') || 0,
         ALERT_OFF_DELTA: Math.max(0, parseFloat(els.inputs.ALERT_OFF_DELTA?.value ?? '0.1') || 0.1),
         ALERT_HOLD_MS: Math.max(0, parseInt(els.inputs.ALERT_HOLD_MS?.value, 10) || 3000),
       };
     }
 
-    //helper functions “score-with-details”
-    function categoryLabel(c) {
-      return (c.displayName || c.categoryName || String(c.index) || '').trim();
-    }
-    function getCryScoreWithDetails(categories, includeList) {
-      const needles = (includeList || []).map(s => s.trim().toLowerCase()).filter(Boolean);
+    // score utils
+    function categoryLabel(c) { return (c.displayName || c.categoryName || String(c.index) || '').trim(); }
+    function classMatch(name, needles) { const L = (name || '').trim().toLowerCase(); return needles.some(n => L.includes(n)); }
+    function getCryScoreFromCategories(categories, includeList) {
+      const needles = includeList.map(s=>s.trim().toLowerCase()).filter(Boolean);
       let sum = 0;
-      const matched = [];
       for (const c of (categories || [])) {
-        const name = categoryLabel(c);
-        const score = c?.score ?? 0;
-        const L = name.toLowerCase();
-        if (needles.some(n => L.includes(n))) {
-          sum += score;
-          matched.push({ name, score });
-        }
+        const disp = categoryLabel(c);
+        if (classMatch(disp, needles)) sum += (c.score || 0);
       }
-      matched.sort((a,b) => (b.score||0) - (a.score||0));
-      return { score: sum, matched };
-    }
-    function computeAndLogScore(categories, includeList, srcLabel = 'DC') {
-      const { score, matched } = getCryScoreWithDetails(categories, includeList);
-      console.log(
-        `[CRY][score][${srcLabel}] include=`,
-        includeList,
-        '| matched=',
-        matched.length
-          ? matched.map(m => `${m.name}:${m.score.toFixed(3)}`).join(', ')
-          : '(none)',
-        '| sum=',
-        score.toFixed(3)
-      );
-      return score;
-    }
-
-    function concatFloat32(a,b){const out=new Float32Array(a.length+b.length);out.set(a,0);out.set(b,a.length);return out;}
-    function resampleLinear(x, fromSr, toSr){
-      if (fromSr === toSr) return x;
-      const ratio = toSr / fromSr;
-      const n = Math.max(1, Math.round(x.length * ratio));
-      const out = new Float32Array(n);
-      const dx = (x.length - 1) / (n - 1);
-      for (let i = 0; i < n; i++) {
-        const pos = i * dx, i0 = Math.floor(pos), i1 = Math.min(i0+1, x.length-1), frac = pos - i0;
-        out[i] = x[i0]*(1-frac) + x[i1]*frac;
-      }
-      return out;
+      return sum;
     }
     function movingAvgTail(arr, k){ if(!arr.length) return 0; const s=Math.max(0,arr.length-k); let sum=0; for(let i=s;i<arr.length;i++) sum+=arr[i]; return sum/(arr.length-s); }
     function formatClock(ms){ return new Date(ms).toLocaleTimeString(undefined,{hour12:false}); }
+
+    // NEW: signal UI updater
+    function setSignalRMS(r) {
+      // clamp 0..1
+      const x = Math.max(0, Math.min(1, r || 0));
+      state.rmsNow = x;
+      state.rmsDb = x > 0 ? (20*Math.log10(x)) : -120;
+      const pct = Math.round(x * 100);
+      els.rmsFill.style.width = pct + '%';
+      els.rmsText.textContent = `RMS: ${pct}% (${Math.round(state.rmsDb)} dB)`;
+
+      const now = performance.now();
+      if (x > 0.01) state.lastNonSilent = now;
+      const silent = (now - (state.lastNonSilent || 0)) > 1500; // >1.5s
+      els.tapText.textContent = silent ? 'Tap: silent' : 'Tap: OK';
+      els.tapDot.style.background = silent ? '#b91c1c' : '#16a34a'; // red / green
+    }
 
     /* ---------- Charts ---------- */
     function setupChart(){
@@ -540,7 +564,6 @@
       state.spectrumChart.data.datasets[0].data = raw;
       state.spectrumChart.data.datasets[1].data = sm;
 
-      // Peak from smoothed data
       let maxDb = -Infinity, maxIdx = -1;
       for (let i = state.specStartIdx; i <= state.specEndIdx; i++) {
         const v = state.specSmDb[i];
@@ -560,7 +583,7 @@
     }
 
     function updateChartWindow(params) {
-      if (!state.chart) return;               // guard against early calls https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
+      if (!state.chart) return;
       const { PLOT_WINDOW_S } = params;
       const tMs = state.timesMs, r = state.cryRaw, s = state.crySm;
 
@@ -597,7 +620,7 @@
       state.chart.update();
     }
 
-    /* ---------- MP Audio task (resilient load with retry + buffer fallback) ---------- */
+    /* ---------- MP Audio task (resilient load) ---------- */
     async function ensureAudioTask() {
       if (!AudioClassifier || !FilesetResolver) {
         console.warn('[CRY][mp] MediaPipe tasks audio not available');
@@ -612,28 +635,20 @@
       const createWithPath = async (resolver) => AudioClassifier.createFromOptions(resolver, {
         baseOptions: { modelAssetPath: MODEL_URL },
         runningMode: "AUDIO_CLIPS",
-        classifierOptions: {
-        scoreThreshold: 0.0,  // be permissive
-        maxResults: 20        // return a bunch so we can see what's there
-      }
+        classifierOptions: { scoreThreshold: 0.0, maxResults: 20 }
       });
-
       const createWithBuffer = async (resolver) => {
         const bust = MODEL_URL + (MODEL_URL.includes('?') ? '&' : '?') + 'cb=' + Date.now();
         const res = await fetch(bust, { cache: 'no-store' });
         if (!res.ok) throw new Error(`yamnet fetch ${res.status}`);
-        const buf = new Uint8Array(await res.arrayBuffer()); // <-- important
+        const buf = new Uint8Array(await res.arrayBuffer());
         console.log('[CRY][mp] yamnet bytes =', buf.byteLength);
         return AudioClassifier.createFromOptions(resolver, {
           baseOptions: { modelAssetBuffer: buf },
           runningMode: "AUDIO_CLIPS",
-          classifierOptions: {
-            scoreThreshold: 0.0,
-            maxResults: 20
-          }          
+          classifierOptions: { scoreThreshold: 0.0, maxResults: 20 }
         });
       };
-      
 
       state.audioTaskPromise = (async () => {
         let lastErr = null;
@@ -659,7 +674,7 @@
           } catch (e) {
             lastErr = e;
             console.warn('[CRY][mp] resolver/model attempt failed:', e?.message || e);
-            await new Promise(r => setTimeout(r, attempt * 600)); // backoff
+            await new Promise(r => setTimeout(r, attempt * 600));
           }
         }
         setStatus('Audio model load failed');
@@ -687,26 +702,6 @@
     }
     function setAlert(on){ document.body.classList.toggle('alert', !!on); }
 
-    /* ---------- Class score utils ---------- */
-    function classMatch(name, needles) {
-      const L = (name || '').trim().toLowerCase();
-      return needles.some(n => L.includes(n));
-    }
-    function getCryScoreFromCategories(categories, includeList) {
-      const needles = includeList.map(s=>s.trim().toLowerCase()).filter(Boolean);
-      let sum = 0;
-      for (const c of (categories || [])) {
-        //const disp = c.displayName ?? c.categoryName ?? ''; //https://chatgpt.com/c/68b06d4c-a170-8324-b1bd-cf61dc1aca63
-        // Option 1: same fallback as your top-line printer
-        //const disp = c.displayName || c.categoryName || '';
-        // Option 2: reuse your helper for consistency
-        const disp = categoryLabel(c);
-
-        if (classMatch(disp, needles)) sum += (c.score || 0);
-      }
-      return sum; // multi-label sum
-    }
-
     /* ---------- Push a score into series ---------- */
     function pushScore(score) {
       const params = getParams();
@@ -728,7 +723,6 @@
         console.log('[CRY][series] n=', state.timesSec.length, 'last raw=', score.toFixed(3), 'sm=', smoothed.toFixed(3));
       }
 
-      // Bound memory
       if (state.timesSec.length % 400 === 0) {
         const keepFrom = Math.max(0, state.timesSec.length - Math.ceil(params.PLOT_WINDOW_S / params.HOP_S) - 10);
         if (keepFrom > 0) {
@@ -765,6 +759,12 @@
       analyser.smoothingTimeConstant = 0.0;
       state.analyser = analyser;
       src.connect(analyser);
+
+      // NEW: time-domain analyser for RMS
+      const td = ctx.createAnalyser();
+      td.fftSize = 1024;
+      state.tdAnalyser = td;
+      src.connect(td);
 
       const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
       let processor;
@@ -826,22 +826,24 @@
         []
       );
     }
-    
+
     async function onAudioChunkReceiver(chunkFloat32, deviceSr) {
       if (!state.running || !state.usingMic) return;
       const task = await ensureAudioTask().catch(e => { console.warn('[CRY][mp] task unavailable on chunk', e); return null; });
       if (!task) return;
       const params = getParams();
 
-      // 🔎 DEBUG: mic RMS (gated)
+      // live RMS (mic)
+      let s = 0; for (let i=0;i<chunkFloat32.length;i++){ const v=chunkFloat32[i]; s += v*v; }
+      const r = Math.sqrt(s / Math.max(1, chunkFloat32.length));
+      setSignalRMS(r);
       if (LOG.rmsEvery) {
         window._dbgMicCount = (window._dbgMicCount || 0) + 1;
         if ((window._dbgMicCount % LOG.rmsEvery) === 0) {
-          const rms = Math.sqrt(chunkFloat32.reduce((s,x)=>s + x*x, 0) / Math.max(1, chunkFloat32.length));
-          console.log('[CRY][mic] rms(device) =', rms.toFixed(4));
+          console.log('[CRY][mic] rms(device) =', r.toFixed(4));
         }
       }
-      
+
       const x16 = resampleLinear(chunkFloat32, deviceSr, params.SR_TARGET);
       for (let i=0;i<x16.length;i++) x16[i] = Math.max(-1, Math.min(1, x16[i]));
       state.ring16k = concatFloat32(state.ring16k, x16);
@@ -859,29 +861,20 @@
           w = pad;
         }
 
-        //const result = await task.classify(w, params.SR_TARGET);
-        //const categories = result?.classifications?.[0]?.categories ?? [];
         const result = await task.classify({ audioClip: w, sampleRateHz: params.SR_TARGET });
         const categories = extractCategories(result);
 
-        // 🔎 DEBUG: top-N classes (gated)
         if (LOG.catEvery) {
           window._dbgCatEvery = (window._dbgCatEvery || 0) + 1;
           if ((window._dbgCatEvery % LOG.catEvery) === 0) {
-            const inc = params.INCLUDE_CLASSES;
             const top = categories.slice(0,5).map(c => `${categoryLabel(c)}:${(c.score ?? 0).toFixed(3)}`);
-            console.log('[CRY][DEBUG] INCLUDE parsed:', inc);
             console.log('[CRY][mic] categories length =', categories.length, 'top =', top.join(', '));
           }
         }
-
-        // Log the first raw result once (gated)
         if (LOG.firstResult && !window._dbgFirstMicResult) {
           window._dbgFirstMicResult = true;
           console.log('[CRY][mic] FIRST result =', result);
         }
-        
-        // If still empty, say so loudly (every ~10 windows to avoid spam)
         window._dbgEmptyCount = (window._dbgEmptyCount || 0) + 1;
         if (!categories.length && (window._dbgEmptyCount % 10 === 0)) {
           console.warn('[CRY][mic] categories EMPTY (len=0). result.classifications =', result?.classifications);
@@ -899,15 +892,29 @@
       }
     }
 
+    // concat/resample (shared)
+    function concatFloat32(a,b){const out=new Float32Array(a.length+b.length);out.set(a,0);out.set(b,a.length);return out;}
+    function resampleLinear(x, fromSr, toSr){
+      if (fromSr === toSr) return x;
+      const ratio = toSr / fromSr;
+      const n = Math.max(1, Math.round(x.length * ratio));
+      const out = new Float32Array(n);
+      const dx = (x.length - 1) / (n - 1);
+      for (let i = 0; i < n; i++) {
+        const pos = i * dx, i0 = Math.floor(pos), i1 = Math.min(i0+1, x.length-1), frac = pos - i0;
+        out[i] = x[i0]*(1-frac) + x[i1]*frac;
+      }
+      return out;
+    }
+
     /* ---------- Sender-mode spectrum from remote stream ---------- */
     function startRemoteSpectrumGraphIfPossible() {
       if (!state.streamRemote) { console.log('[CRY][remote] no stream yet'); return; }
-      if (state.analyser && !state.usingMic) { // already running on remote
+      if (state.analyser && !state.usingMic) {
         console.log('[CRY][remote] spectrum already running');
         return;
       }
 
-      // Ensure any previous remote graph is stopped before starting
       stopRemoteSpectrumGraph();
 
       console.log('[CRY][remote] starting spectrum from remote stream…');
@@ -922,6 +929,12 @@
 
       src.connect(analyser);
       src.connect(sink);
+
+      // NEW: time-domain analyser for RMS in sender mode
+      const td = ctx.createAnalyser();
+      td.fftSize = 1024;
+      src.connect(td);
+      state.tdAnalyser = td;
 
       state.sourceNode = src;
       state.analyser = analyser;
@@ -938,7 +951,7 @@
       try { state.sinkNode?.disconnect(); } catch {}
       try { state.audioCtx && state.audioCtx.state !== 'closed' && state.audioCtx.close(); } catch {}
       state.sourceNode = null; state.sinkNode = null; state.audioCtx = null;
-      state.analyser = null;
+      state.analyser = null; state.tdAnalyser = null;
     }
 
     /* ---------- Spectrum arrays + loop ---------- */
@@ -973,6 +986,9 @@
       state.specLastUpdate = 0;
       if (LOG.spectrum) console.log('[CRY][spectrum] loop start');
 
+      const td = state.tdAnalyser;
+      const tdBuf = td ? new Float32Array(td.fftSize) : null;
+
       function spectrumTick(ts) {
         if (!state.running || !state.analyser) return;
         if (ts - state.specLastUpdate > 100) {
@@ -984,6 +1000,19 @@
             state.specSmDb[i] = 0.8 * state.specSmDb[i] + 0.2 * db;
           }
           updateSpectrumChart();
+
+          // NEW: update RMS from time-domain analyser (sender mode)
+          if (td && tdBuf) {
+            td.getFloatTimeDomainData(tdBuf);
+            // convert from [-1,1] floats in dB to linear samples: for FFT time-domain data in WebAudio,
+            // getFloatTimeDomainData returns linear floats [-1,1] already (not dB).
+            // But on some browsers it's not available; guard above handles it.
+            let s = 0;
+            for (let i=0;i<tdBuf.length;i++){ const v = tdBuf[i]; s += v*v; }
+            const r = Math.sqrt(s / Math.max(1, tdBuf.length));
+            setSignalRMS(r);
+          }
+
           state.specLastUpdate = ts;
         }
         state.spectrumRaf = requestAnimationFrame(spectrumTick);
@@ -1006,7 +1035,7 @@
       e.stopPropagation();
       try {
         await ensureAudioTask();
-        await startReceiverMicGraph();     // now allowed by user gesture
+        await startReceiverMicGraph();
         setStatus('Mic inference (receiver)');
       } catch (err) {
         console.warn('[CRY] enable mic failed', err);
@@ -1016,11 +1045,10 @@
       }
     });
 
-    /* ---------- Mode switching (pose-style) ---------- */
+    /* ---------- Mode switching ---------- */
     async function applyAudioMode() {
       setWhereLabel(audioWhere);
 
-      // No-op if nothing changed (prevents double init from ai-modes + audio-mode)
       if (_activeAudio.enabled === audioEnabled && _activeAudio.where === audioWhere) return;
       _activeAudio = { enabled: audioEnabled, where: audioWhere };
 
@@ -1034,12 +1062,13 @@
         stopReceiverMicGraph();
         stopRemoteSpectrumGraph();
         updateMicButton();
+        // zero the meter
+        setSignalRMS(0);
         return;
       }
 
       if (audioWhere === 'receiver') {
         stopRemoteSpectrumGraph();
-        // Do not auto-start mic; wait for user gesture (button)
         updateMicButton();
         setStatus(state.usingMic ? 'Mic inference (receiver)' : 'Tap “Enable mic”');
       } else { // 'sender'
@@ -1125,16 +1154,16 @@
       initUI();
     }
 
-    // WebAudio unlock on user gesture (iOS/Safari safety) //https://chatgpt.com/c/68af22f5-a430-8330-95d4-bb5559f2768b
+    // WebAudio unlock on user gesture (iOS/Safari safety)
     ['click','touchstart'].forEach(ev =>
       stage.addEventListener(ev, () => state.audioCtx?.resume?.(), { passive: true })
     );
 
-    // --- Initialize charts/labels before we connect so early DC messages can't race it ---
+    // Initialize charts/labels before we connect
     setupChart();
     setWhereLabel(audioWhere);
     setStatus('Waiting for mode from sender…');
-    
+
     /* ---------- WebRTC core ---------- */
     const core = new ReceiverCore({
       wsEndpoint: WS_ENDPOINT,
@@ -1154,7 +1183,6 @@
       onIceState: (s) => { console.log('[CRY][pc] ICE:', s); },
       onBye: () => { console.log('[CRY][pc] bye'); },
       onCreatePC: (pc) => {
-        // Use the same DC name ('pose') so the sender’s code opens it
         const ch = pc.createDataChannel('pose');
         ch.onopen = () => { console.log('[CRY][dc] open'); state.audioCtx?.resume?.().catch(()=>{});};
         ch.onclose = () => { console.log('[CRY][dc] close'); };
@@ -1184,11 +1212,6 @@
             if (state.running && audioEnabled && audioWhere === 'sender') {
               const params = getParams();
               const categories = msg.categories || [];
-
-              if (LOG.dc) {
-                console.log('[CRY][DEBUG] INCLUDE raw:', els.inputs.INCLUDE_CLASSES?.value);
-                console.log('[CRY][DEBUG] INCLUDE parsed:', params.INCLUDE_CLASSES);
-              }
               const score = getCryScoreFromCategories(categories, params.INCLUDE_CLASSES);
               pushScore(score);
               if (LOG.dc && (state.timesSec.length % 20) === 0) {
@@ -1207,8 +1230,6 @@
     /* ---------- Wire UI & initial boot ---------- */
     document.addEventListener('DOMContentLoaded', () => {
       console.log('[CRY] DOM ready');
-
-      // toggles / inputs
       Object.values(els.inputs).forEach(inp => {
         inp?.addEventListener('change', () => {
           console.log('[CRY][ui] params changed → update chart window');
@@ -1217,8 +1238,7 @@
       });
       els.showRawSpec?.addEventListener('change', updateSpectrumChartVisibility);
       els.showSmSpec?.addEventListener('change', updateSpectrumChartVisibility);
-
-      updateMicButton(); // NEW: initialize mic button visibility
+      updateMicButton();
     });
 
     window.addEventListener('beforeunload', () => {
