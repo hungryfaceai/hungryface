@@ -1184,7 +1184,12 @@
       onBye: () => { console.log('[CRY][pc] bye'); },
       onCreatePC: (pc) => {
         const ch = pc.createDataChannel('pose');
-        ch.onopen = () => { console.log('[CRY][dc] open'); state.audioCtx?.resume?.().catch(()=>{});};
+        ch.onopen  = () => {
+          console.log('[CRY][dc] open');
+          state.audioCtx?.resume?.().catch(()=>{});
+          // politely ask the sender to (re)announce modes, in case our page loaded late
+          try { ch.send(JSON.stringify({ type: 'need-modes' })); } catch {}
+        };
         ch.onclose = () => { console.log('[CRY][dc] close'); };
         ch.onerror = (e) => { console.warn('[CRY][dc] error', e); };
         ch.onmessage = (ev) => {
@@ -1201,17 +1206,23 @@
             audioWhere   = msg.audio.where || 'sender';
             applyAudioMode();
           } else if (msg.type === 'audio') {
-            const cats = msg.categories || [];
+            const categories = msg.categories || [];
             if (LOG.dc) {
-              const top = cats.slice(0, 5).map(c =>
+              const top = categories.slice(0, 5).map(c =>
                 `${categoryLabel(c)}:${(c.score ?? 0).toFixed(3)}`
               );
               console.log('[CRY][dc] top =', top.join(', '));
             }
 
-            if (state.running && audioEnabled && audioWhere === 'sender') {
+            // If scores arrive before we heard the mode, assume sender-inference and enable it.
+            if (!audioEnabled || audioWhere !== 'sender') {
+              audioEnabled = true;
+              audioWhere = 'sender';
+              applyAudioMode();
+            }
+
+            if (state.running) {
               const params = getParams();
-              const categories = msg.categories || [];
               const score = getCryScoreFromCategories(categories, params.INCLUDE_CLASSES);
               pushScore(score);
               if (LOG.dc && (state.timesSec.length % 20) === 0) {
