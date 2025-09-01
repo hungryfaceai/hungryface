@@ -351,3 +351,1289 @@
           const snd = getAudioSender(pc);
           if (snd) {
             await snd.replaceTrack(track);
+          } else {
+            pc.addTrack(track, localStream);
+          }
+          nudgePeerForOffer(peerId);
+        }
+      }
+      /* start/refresh the streaming-track monitor */
+      try { startStreamMonitor(track); } catch (e) { console.warn('[DBG] stream monitor start fail:', e); }
+      return track;
+    }
+
+    function announceAIModes() {
+      applyPoseUI();
+      applyAudioUI();
+      applyFaceUI();
+
+      const payload = {
+        type: 'ai-modes',
+        pose:  { enabled: !!poseOn?.checked,       where: poseWhere?.value ?? 'sender' },
+        audio: { enabled: !!audioAiOn?.checked,    where: audioAiWhere?.value ?? 'sender' },
+        face:  { enabled: !!faceOn?.checked,       where: faceWhere?.value ?? 'sender' }
+      };
+      for (const ch of poseDCs) if (ch.readyState === 'open') {
+        ch.send(JSON.stringify(payload));
+        ch.send(JSON.stringify({ type:'pose-mode',  enabled:payload.pose.enabled,  where:payload.pose.where }));
+        ch.send(JSON.stringify({ type:'audio-mode', enabled:payload.audio.enabled, where:payload.audio.where }));
+        ch.send(JSON.stringify({ type:'face-mode',  enabled:payload.face.enabled,  where:payload.face.where }));
+      }
+    }
+
+    [poseOn, poseWhere, audioAiOn, audioAiWhere, faceOn, faceWhere]
+      .filter(Boolean)
+      .forEach(el => el.addEventListener('change', announceAIModes));
+
+    /* ----------------------- PERSISTENCE ----------------------- */
+    (function () {
+      const PREFIX = 'bm_sender_';
+      const entries = [
+        ['videoOn',    'checkbox', document.getElementById('videoOn')],
+        ['audioOn',    'checkbox', document.getElementById('audioOn')],
+        ['cameraSel',  'select',   document.getElementById('cameraSel')],
+        ['room',       'text',     document.getElementById('room')],
+        ['previewMins','number',   document.getElementById('previewMins')],
+        ['poseOn',     'checkbox', document.getElementById('poseOn')],
+        ['poseWhere',  'select',   poseWhere],
+        ['audioAiOn',    'checkbox', audioAiOn],
+        ['audioAiWhere', 'select',   audioAiWhere],
+        ['faceOn',       'checkbox', faceOn],
+        ['faceWhere',    'select',   faceWhere],
+      ].filter(([, , el]) => !!el);
+
+      function loadOne(key, type, el) {
+        if (!el) return;
+        const v = localStorage.getItem(PREFIX + key);
+        if (v == null) return;
+        if (type === 'checkbox') el.checked = (v === '1' || v === 'true');
+        else el.value = v;
+      }
+      function saveOne(key, type, el) {
+        if (!el) return;
+        const v = (type === 'checkbox') ? (el.checked ? '1' : '0') : el.value;
+        try { localStorage.setItem(PREFIX + key, v); } catch {}
+      }
+
+      entries.forEach(([k, t, el]) => loadOne(k, t, el));
+      entries.forEach(([k, t, el]) => el && el.addEventListener('change', () => saveOne(k, t, el)));
+
+      const qsRoomVal = new URLSearchParams(location.search).get('room');
+      if (qsRoomVal) { try { localStorage.setItem(PREFIX + 'room', qsRoomVal); } catch {} }
+    })();
+
+    let ws = null, localStream = null;
+    let started = false, hideUITimer = null;
+
+    // One RTCPeerConnection per receiver
+    const peers = new Map();
+
+    let previewTimer = null, previewTicker = null, previewEnd = 0;
+    const poseDCs = new Set();
+
+    let PoseLandmarker, FilesetResolver, DrawingUtils;
+    let poseTask = null, poseLoopRunning = false;
+
+    let FaceLandmarker, faceTask = null, faceLoopRunning = false;
+    let AudioClassifier, audioTask = null, audioLoopRunning = false;
+    let AudioFilesetResolver;
+
+    const ctx = poseCanvas.getContext('2d', { alpha: true });
+    let lastClearedTs = -1;
+    let poseRAF = 0, faceRAF = 0;
+
+    // AUDIO graph nodes/state
+    let audioCtx = null, audioSource = null, audioProcessor = null;
+
+    // 🔓 WebAudio unlock on any user gesture (sender)
+    ['click','touchstart'].forEach(ev =>
+      document.addEventListener(ev, () => { try { audioCtx?.resume?.(); streamMon.ctx?.resume?.(); } catch {} }, { passive: true })
+    );
+
+    // Local-only AI mic (used when the streaming mic is off)
+    let aiMicStream = null;
+    let aiTapTrack  = null;   // retained for cleanup compatibility
+    let audioStarting = false;
+
+    // --------- Audio helpers ----------
+    function concatFloat32(a,b){ const out=new Float32Array(a.length+b.length); out.set(a,0); out.set(b,a.length); return out; }
+    function resampleLinear(x, fromSr, toSr){
+      if (fromSr === toSr) return x;
+      const n = Math.max(1, Math.round(x.length * (toSr / fromSr)));
+      const out = new Float32Array(n);
+      const dx = (x.length - 1) / (n - 1);
+      for (let i = 0; i < n; i++) {
+        const pos = i * dx, i0 = Math.floor(pos), i1 = Math.min(i0+1, x.length-1), frac = pos - i0;
+        out[i] = x[i0]*(1-frac) + x[i1]*frac;
+      }
+      return out;
+    }
+    // Prefer track-node tap (avoids silent clone bug); fallback to stream source
+    function makeSourceFromTrack(ctx, track) {
+      try {
+        return new MediaStreamTrackAudioSourceNode(ctx, { mediaStreamTrack: track });
+      } catch {
+        const tmp = new MediaStream([track]);
+        return ctx.createMediaStreamSource(tmp);
+      }
+    }
+    function rmsOf(x) {
+      if (!x || !x.length) return 0;
+      let s = 0; for (let i=0;i<x.length;i++){ const v=x[i]; s += v*v; }
+      return Math.sqrt(s / x.length);
+    }
+
+    // --- normalize MediaPipe AudioClassifier result into a categories array ---
+    function extractCategories(res) {
+      if (!res) return [];
+      if (Array.isArray(res)) {
+        return (res[0]?.classifications?.[0]?.categories ?? res[0]?.classificationResult?.classifications?.[0]?.categories ?? []);
+      }
+      return (res.classifications?.[0]?.categories ?? res.classificationResult?.classifications?.[0]?.categories ?? []);
+    }
+    function categoryLabel(c) {
+      return (c?.displayName || c?.categoryName || String(c?.index) || '').trim();
+    }
+
+    const setStatus = (t) => { statusEl.textContent = t; if (LOG.status) console.log('[STATUS]', t); };
+    const currentRoom = () => (roomInput.value || 'Baby').trim();
+    const isFront = () => (cameraSel.value === 'user');
+
+    function updateMirrorClass() {
+      document.body.classList.toggle('mirror', isFront());
+    }
+
+    /* ----- Canvas alignment (letterbox-aware inside #stage) ----- */
+    function resizeCanvasToVideo() {
+      const showVideo = document.body.classList.contains('previewing') && videoOn.checked;
+      localVideo.style.display = showVideo ? 'block' : 'none';
+
+      const stageBox = stage.getBoundingClientRect();
+      const containerW = Math.round(stageBox.width);
+      const containerH = Math.round(stageBox.height);
+      const vidW = localVideo.videoWidth  || 1;
+      const vidH = localVideo.videoHeight || 1;
+
+      const scale = Math.min(containerW / vidW, containerH / vidH);
+      const fitW = Math.round(vidW * scale);
+      const fitH = Math.round(vidH * scale);
+      const fitLeft = Math.floor((containerW - fitW) / 2);
+      const fitTop  = Math.floor((containerH - fitH) / 2);
+
+      poseCanvas.style.left   = fitLeft + 'px';
+      poseCanvas.style.top    = fitTop  + 'px';
+      poseCanvas.style.width  = fitW + 'px';
+      poseCanvas.style.height = fitH + 'px';
+
+      const dpr = window.devicePixelRatio || 1;
+      const needW = Math.max(1, Math.round(fitW * dpr));
+      const needH = Math.max(1, Math.round(fitH * dpr));
+      if (poseCanvas.width !== needW || poseCanvas.height !== needH) {
+        poseCanvas.width  = needW;
+        poseCanvas.height = needH;
+      }
+
+      // prime canvas once per resize (Safari quirk guard)
+      ctx.save(); ctx.globalAlpha = 0; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 1, 1); ctx.restore();
+
+      const wantOverlay =
+        videoOn.checked &&
+        document.body.classList.contains('previewing') &&
+        (
+          (poseOn.checked && poseWhere.value === 'sender') ||
+          (faceOn?.checked && faceWhere?.value === 'sender')
+        );
+      poseCanvas.style.display = wantOverlay ? 'block' : 'none';
+
+      ctx.setTransform(1,0,0,1,0,0);
+    }
+
+    let settleRAF = 0, settleUntil = 0;
+    function beginViewportSettle(durationMs = 1200) {
+      settleUntil = performance.now() + durationMs;
+      if (settleRAF) return;
+      const tick = () => {
+        resizeCanvasToVideo();
+        if (performance.now() < settleUntil) {
+          settleRAF = requestAnimationFrame(tick);
+        } else {
+          cancelAnimationFrame(settleRAF); settleRAF = 0;
+          resizeCanvasToVideo();
+        }
+      };
+      tick();
+    }
+
+    localVideo.addEventListener('loadedmetadata', () => {
+      console.log('[MEDIA] local video meta', localVideo.videoWidth, 'x', localVideo.videoHeight);
+      beginViewportSettle();
+    });
+    localVideo.addEventListener('resize', beginViewportSettle);
+
+    const vpAlign = () => beginViewportSettle();
+    ['resize','orientationchange','scroll'].forEach(ev =>
+      window.addEventListener(ev, vpAlign, { passive: true })
+    );
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', vpAlign, { passive: true });
+      window.visualViewport.addEventListener('scroll',  vpAlign, { passive: true });
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) beginViewportSettle();
+    });
+
+    async function getMedia() {
+      const wantVideo = videoOn.checked;
+      const wantAudio = audioOn.checked;
+      if (!wantVideo && !wantAudio) throw new Error('Both video and audio are OFF.');
+
+      const constraints = {
+        video: wantVideo ? {
+          facingMode: cameraSel.value || 'environment',
+          width: { ideal: 1280 }, height: { ideal: 720 },
+          frameRate: { ideal: 30, max: 30 }
+        } : false,
+        audio: wantAudio ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true } : false
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const vt = stream.getVideoTracks()[0];
+      const at = stream.getAudioTracks()[0];
+      if (vt && 'contentHint' in vt) { try { vt.contentHint = 'motion'; } catch {} }
+      if (at && 'contentHint' in at) { try { at.contentHint = 'speech'; } catch {} }
+      if (vt) vt.enabled = wantVideo;
+      if (at) at.enabled = wantAudio;
+
+      if (at) {
+        const s = at.getSettings?.() || {};
+        console.log('[AUDIO][gUM] track.id', at.id, 'label', at.label, 'settings', s);
+      }
+      return stream;
+    }
+
+    function applyVideoToggle() {
+      if (!localStream) return;
+      const vt = localStream.getVideoTracks()[0];
+      if (vt) vt.enabled = videoOn.checked;
+      beginViewportSettle();
+      setStatus(videoOn.checked ? 'Video ON' : 'Video OFF');
+    }
+
+    async function applyAudioToggle() {
+      const want = audioOn.checked;
+      try {
+        if (want) {
+          const t = await ensureSenderHasAudioTrack();
+          if (t) t.enabled = true;
+          setStatus('Audio ON');
+        } else {
+          const t = getLocalAudioTrack();
+          if (t) t.enabled = false;
+          setStatus('Audio OFF');
+        }
+      } catch (e) {
+        console.warn('[AUDIO][sender] toggle failed:', e);
+        setStatus('Audio error');
+      }
+    }
+
+    videoOn.addEventListener('change', applyVideoToggle);
+    audioOn.addEventListener('change', async () => {
+      await applyAudioToggle();
+      applyAudioUI();
+    });
+    cameraSel.addEventListener('change', () => { updateMirrorClass(); beginViewportSettle(); });
+
+    function connectWS(room) {
+      return new Promise((resolve, reject) => {
+        const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
+        setStatus('Connecting to signaling…');
+        const sock = new WebSocket(url);
+        ws = sock;
+
+        let opened = false;
+        const t = setTimeout(() => {
+          if (!opened) { try { sock.close(); } catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); }
+        }, 15000);
+
+        sock.onopen = () => {
+          opened = true; clearTimeout(t);
+          setStatus('Signaling: connected');
+          send({ type: 'join', room, role: 'sender' });
+          send({ type: 'need-offer' }); // nudge any already-open receivers
+          resolve();
+        };
+        sock.onmessage = onSignal;
+        sock.onerror = (e) => { console.warn('[WS error]', e); };
+        sock.onclose  = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); };
+      });
+    }
+    const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
+
+    function getOrCreatePC(peerId) {
+      let rec = peers.get(peerId);
+      if (rec && rec.pc) return rec.pc;
+
+      if (!localStream) {
+        console.warn('[SENDER] localStream missing; startOrStop() must run first');
+      }
+
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+        bundlePolicy: 'max-bundle',
+        sdpSemantics: 'unified-plan'
+      });
+
+      if (localStream) {
+        localStream.getTracks().forEach(track => {
+          console.log('[TRACK][sender] addTrack', track.kind, '→', peerId);
+          pc.addTrack(track, localStream);
+        });
+      }
+
+      pc.ondatachannel = (ev) => {
+        if (ev.channel?.label === 'pose') {
+          const ch = ev.channel;
+          if (LOG.dc) console.log('[DC][sender] ondatachannel: pose from', peerId);
+          ch.onopen  = () => { if (LOG.dc) console.log('[POSE][sender] DC open', peerId); poseDCs.add(ch); announceAIModes();};
+          ch.onclose = () => { if (LOG.dc) console.log('[POSE][sender] DC close', peerId); poseDCs.delete(ch); };
+          ch.onerror = (e) => { if (LOG.dc) console.log('[POSE][sender] DC error', peerId, e); };
+          ch.onmessage = onPoseMessageFromReceiver;
+        }
+      };
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate && ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'candidate', to: peerId, candidate: e.candidate }));
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        const st = pc.connectionState;
+        console.log('[SENDER][PC]', peerId, st);
+        if (st === 'failed' || st === 'closed') cleanupPeer(peerId, 'pc-state:' + st);
+      };
+
+      if (!rec) {
+        rec = {
+          pc,
+          remoteDescriptionSet: false,
+          candidateQueue: [],
+          lastOfferSdp: null,
+          processingOffer: false
+        };
+      } else {
+        rec.pc = pc;
+        if (rec.processingOffer == null) rec.processingOffer = false;
+      }
+      peers.set(peerId, rec);
+
+      return pc;
+    }
+
+    function cleanupPeer(peerId, reason = 'cleanup') {
+      const rec = peers.get(peerId);
+      if (!rec) return;
+      try { rec.pc.close(); } catch {}
+      peers.delete(peerId);
+      console.log('[SENDER] cleaned', peerId, reason);
+    }
+
+    async function onSignal(evt) {
+      let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+      const t = msg?.type;
+
+      if (t === 'peer-left' && msg.id) { cleanupPeer(msg.id, 'peer-left'); return; }
+      if (t === 'bye' && msg.from) { cleanupPeer(msg.from, 'bye'); return; }
+
+      if (t === 'peer-joined' && msg.id && msg.role === 'receiver') {
+        ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: msg.id }));
+        return;
+      }
+
+      if (t === 'roster' && Array.isArray(msg.peers)) {
+        for (const p of msg.peers) {
+          if (p.role === 'receiver') {
+            ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: p.id }));
+          }
+        }
+        return;
+      }
+
+      if (t === 'offer' && msg.from) {
+        setStatus('Got offer, creating answer…');
+
+        let rec = peers.get(msg.from);
+        if (!rec) { getOrCreatePC(msg.from); rec = peers.get(msg.from); }
+
+        if (rec.lastOfferSdp === msg.sdp) { console.log('[DUP] identical offer ignored from', msg.from); return; }
+        if (rec.processingOffer) { console.log('[SENDER] skipping offer from', msg.from, '(answer in progress)'); return; }
+        rec.processingOffer = true;
+
+        const pc = rec.pc || getOrCreatePC(msg.from);
+
+        try {
+          if (pc.signalingState === 'have-local-offer') { try { await pc.setLocalDescription({ type: 'rollback' }); } catch {} }
+
+          await pc.setRemoteDescription(new RTCSessionDescription(msg));
+
+          if (pc.signalingState !== 'have-remote-offer') {
+            console.warn('[SENDER] unexpected signalingState before answer:', pc.signalingState);
+            return;
+          }
+
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+
+          ws.send(JSON.stringify({ type: answer.type, sdp: answer.sdp, to: msg.from }));
+          console.log('[WS OUT] answer →', msg.from);
+
+          rec.remoteDescriptionSet = true;
+          rec.lastOfferSdp = msg.sdp;
+
+          for (const c of rec.candidateQueue) {
+            try { await pc.addIceCandidate(c); } catch (err) { console.warn('[SENDER] late ICE add failed', msg.from, err); }
+          }
+          rec.candidateQueue.length = 0;
+
+        } finally {
+          rec.processingOffer = false;
+        }
+        return;
+      }
+
+      if (t === 'candidate' && msg.from && msg.candidate) {
+        const rec = peers.get(msg.from);
+        if (!rec) {
+          peers.set(msg.from, {
+            pc: null, remoteDescriptionSet: false,
+            candidateQueue: [new RTCIceCandidate(msg.candidate)],
+            lastOfferSdp: null, processingOffer: false
+          });
+          return;
+        }
+        const pc = rec.pc || getOrCreatePC(msg.from);
+        const cand = new RTCIceCandidate(msg.candidate);
+        if (rec.remoteDescriptionSet) {
+          try { await pc.addIceCandidate(cand); } catch (err) { console.warn('[SENDER] ICE add failed', msg.from, err); }
+        } else {
+          rec.candidateQueue.push(cand);
+        }
+        return;
+      }
+
+      if (t === 'hello' || t === 'keepalive') return;
+    }
+
+    function beginPreviewWindow(minutes) {
+      const ms = Math.max(0, Math.round((Number(minutes) || 1) * 60000));
+      if (ms === 0) { enterBlackout(); return; }
+
+      document.body.classList.remove('blackout');
+      document.body.classList.add('previewing');
+      document.body.classList.add('streaming');
+      document.body.classList.remove('ui-visible');
+
+      beginViewportSettle();
+
+      previewEnd = Date.now() + ms;
+      tickPreviewCountdown();
+      previewTicker = setInterval(tickPreviewCountdown, 1000);
+      previewTimer  = setTimeout(endPreviewNow, ms);
+    }
+    function tickPreviewCountdown() {
+      const remain = Math.max(0, previewEnd - Date.now());
+      const sec = Math.ceil(remain / 1000);
+      const mm = String(Math.floor(sec / 60)).padStart(2,'0');
+      const ss = String(sec % 60).padStart(2,'0');
+      statusEl.textContent = `Preview ends in ${mm}:${ss}`;
+    }
+    function endPreviewNow() {
+      if (previewTimer) clearTimeout(previewTimer);
+      if (previewTicker) clearInterval(previewTicker);
+      previewTimer = previewTicker = null;
+      enterBlackout();
+    }
+    function enterBlackout() {
+      document.body.classList.remove('previewing');
+      document.body.classList.add('streaming');
+      document.body.classList.remove('ui-visible');
+      localVideo.style.display = 'none';
+      poseCanvas.style.display = 'none';
+      setStatus('Streaming...');
+      clearTimeout(hideUITimer); hideUITimer = null;
+    }
+
+    document.addEventListener('click', (e) => {
+      if (document.body.classList.contains('previewing')) { endPreviewNow(); return; }
+      if (document.body.classList.contains('streaming') && !document.body.classList.contains('ui-visible')) {
+        document.body.classList.add('ui-visible'); setStatus('Streaming...'); scheduleAutoHideUI(); return;
+      }
+      if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
+        const inCard = e.target.closest('.card');
+        if (!inCard) { document.body.classList.remove('ui-visible'); setStatus('Streaming...'); clearTimeout(hideUITimer); hideUITimer = null; }
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (document.body.classList.contains('previewing')) { endPreviewNow(); }
+        else if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
+          document.body.classList.remove('ui-visible'); setStatus('Streaming...'); clearTimeout(hideUITimer); hideUITimer = null;
+        }
+      }
+    });
+    function scheduleAutoHideUI() {
+      clearTimeout(hideUITimer);
+      hideUITimer = setTimeout(() => {
+        if (document.body.classList.contains('streaming')) {
+          document.body.classList.remove('ui-visible');
+          setStatus('Streaming...');
+        }
+      }, UI_AUTOHIDE_MS);
+    }
+
+    async function startOrStop() {
+      try {
+        if (started) { await stopStreaming(); return; }
+
+        startBtn.disabled = true;
+
+        updateMirrorClass();
+        const room = currentRoom();
+        setStatus('Starting camera…');
+        localStream = await getMedia();
+        localVideo.srcObject = localStream;
+        try { await localVideo.play(); } catch (e) { console.warn('local play blocked', e); }
+        beginViewportSettle();
+
+        /* Start streaming-track monitor right away (even if AI off) */
+        try { const t = getLocalAudioTrack(); if (t) startStreamMonitor(t); } catch {}
+
+        beginPreviewWindow(Number(previewMinsInput.value) || 1);
+
+        await connectWS(room);
+        started = true;
+        startBtn.textContent = 'Stop streaming';
+        startBtn.disabled = false;
+
+        applyVideoToggle();
+        await applyAudioToggle();
+        announceAIModes();
+
+        if (audioAiOn?.checked && audioAiWhere?.value === 'sender') {
+          try { await startSenderAudioLoop(); } catch {}
+        }
+
+        startRtpStatsLoop();
+
+      } catch (err) {
+        console.error(err);
+        alert(err.message || err);
+        setStatus('Idle');
+        startBtn.disabled = false;
+      }
+    }
+
+    async function stopStreaming() {
+      try { send({ type: 'bye' }); } catch {}
+
+      if (previewTimer)  clearTimeout(previewTimer);
+      if (previewTicker) clearInterval(previewTicker);
+      if (hideUITimer)   clearTimeout(hideUITimer);
+      previewTimer = previewTicker = hideUITimer = null;
+
+      try { poseLoopRunning = false; } catch {}
+      try { poseTask && poseTask.close && poseTask.close(); } catch {}
+      poseTask = null;
+
+      stopSenderAudioLoop();
+      try { audioTask && audioTask.close && audioTask.close(); } catch {}
+      audioTask = null;
+
+      stopStreamMonitor();
+
+      try { faceLoopRunning = false; } catch {}
+      try { faceTask && faceTask.close && faceTask.close(); } catch {}
+      faceTask = null;
+
+      try {
+        if (typeof peers !== 'undefined' && peers && typeof peers.forEach === 'function') {
+          for (const [peerId, rec] of peers) {
+            try { rec.pc && rec.pc.getSenders()?.forEach(s => s.track && s.track.stop()); } catch {}
+            try { rec.pc && rec.pc.close(); } catch {}
+          }
+          peers.clear();
+        }
+      } catch {}
+
+      try {
+        if (typeof pc !== 'undefined' && pc) {
+          try { pc.getSenders()?.forEach(s => s.track && s.track.stop()); } catch {}
+          try { pc.close(); } catch {}
+        }
+      } catch {}
+
+      try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
+      try { ws && ws.close(); } catch {}
+
+      poseDCs.clear();
+
+      try { localStream = null; } catch {}
+      try { ws = null; } catch {}
+      try { if (typeof pc !== 'undefined') pc = null; } catch {}
+
+      stopRtpStatsLoop();
+
+      started = false;
+
+      document.body.classList.remove('previewing','streaming','ui-visible');
+      document.body.classList.add('blackout');
+
+      ui.style.display = '';
+      localVideo.style.display = 'none';
+      poseCanvas.style.display = 'none';
+      ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+
+      elDbgStream.textContent = '—';
+      elDbgAI.textContent = '—';
+      elDbgRtp.textContent = '—';
+      elTopCats.textContent = 'Top: —';
+      setBar(elBarStream, 0); setBar(elBarAIdev, 0); setBar(elBarAI16, 0);
+
+      setStatus('Stopped');
+      startBtn.textContent = 'Start streaming';
+    }
+    window.addEventListener('beforeunload', stopStreaming);
+    startBtn.addEventListener('click', startOrStop);
+
+    async function ensureTasksLoaded() {
+      if (PoseLandmarker && FaceLandmarker && FilesetResolver && DrawingUtils) return;
+      ({ PoseLandmarker, FaceLandmarker, FilesetResolver, DrawingUtils } = await import(TASKS_URL));
+      console.log('[TASKS] Vision tasks loaded');
+    }
+
+    async function ensurePoseTask() {
+      await ensureTasksLoaded();
+      if (poseTask) return poseTask;
+      const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
+      poseTask = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+          delegate: "GPU"
+        },
+        runningMode: "VIDEO",
+        numPoses: 1
+      });
+      return poseTask;
+    }
+
+    async function ensureFaceTask() {
+      await ensureTasksLoaded();
+      if (faceTask) return faceTask;
+      const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
+      faceTask = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+          delegate: "GPU"
+        },
+        runningMode: "VIDEO",
+        numFaces: 1
+      });
+      return faceTask;
+    }
+
+    async function ensureAudioTask() {
+      if (audioTask) return audioTask;
+      if (!AudioClassifier || !AudioFilesetResolver) {
+        ({ AudioClassifier, FilesetResolver: AudioFilesetResolver } = await import(AUDIO_TASKS_URL));
+        console.log('[AUDIO][sender] AudioClassifier + FilesetResolver loaded');
+      }
+
+      const WASM_DIR  = AUDIO_WASM_DIR;
+      const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite";
+
+      const resolver = await AudioFilesetResolver.forAudioTasks(WASM_DIR);
+      const createWithPath = () => AudioClassifier.createFromOptions(resolver, {
+        baseOptions: { modelAssetPath: MODEL_URL },
+        runningMode: "AUDIO_CLIPS",
+        classifierOptions: { maxResults: 20, scoreThreshold: 0 }
+      });
+      const createWithBuffer = async () => {
+        const bust = MODEL_URL + (MODEL_URL.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+        const res = await fetch(bust, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`yamnet fetch ${res.status}`);
+        const buf = new Uint8Array(await res.arrayBuffer());
+        console.log('[AUDIO][sender] yamnet bytes =', buf.byteLength);
+        return AudioClassifier.createFromOptions(resolver, {
+          baseOptions: { modelAssetBuffer: buf },
+          runningMode: "AUDIO_CLIPS",
+          classifierOptions: { maxResults: 20, scoreThreshold: 0 }
+        });
+      };
+
+      let lastErr = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          audioTask = await createWithPath();
+          console.log('[AUDIO][sender] audio task ready (path)');
+          return audioTask;
+        } catch (e1) {
+          lastErr = e1;
+          console.warn('[AUDIO][sender] path load failed (attempt', attempt, '):', e1?.message || e1);
+          try {
+            audioTask = await createWithBuffer();
+            console.log('[AUDIO][sender] audio task ready (buffer)');
+            return audioTask;
+          } catch (e2) {
+            lastErr = e2;
+            console.warn('[AUDIO][sender] buffer load failed (attempt', attempt, '):', e2?.message || e2);
+          }
+          await new Promise(r => setTimeout(r, attempt * 600));
+        }
+      }
+      throw lastErr || new Error('audio task init failed');
+    }
+
+    function sendPoseToReceivers(landmarks) {
+      const payload = JSON.stringify({ type:'pose', landmarks, ts: performance.now() });
+      for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
+    }
+    function drawPoseOnSender(landmarks) {
+      if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
+      const dutils = new DrawingUtils(ctx);
+      ctx.save();
+      for (const lm of landmarks) {
+        dutils.drawLandmarks(lm, {
+          radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
+        });
+        dutils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+      }
+      ctx.restore();
+    }
+    function drawFaceOnSender(faces) {
+      if (!faces?.length || !poseCanvas.width || !poseCanvas.height) return;
+      const dutils = new DrawingUtils(ctx);
+      for (const lm of faces) {
+        dutils.drawLandmarks(lm, {
+          radius: 0.5,
+          color:    "#00FF00",
+          fillColor:"#00FF00",
+        });
+      }
+    }
+
+    async function startSenderPoseLoop() {
+      if (!started || !poseOn.checked || poseWhere.value !== 'sender') return;
+      if (poseLoopRunning) return;
+      const task = await ensurePoseTask();
+
+      poseLoopRunning = true;
+      if (poseRAF) cancelAnimationFrame(poseRAF);
+      console.log('[POSE][sender] inference START (sender)');
+
+      const loop = (ts) => {
+        if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') {
+          console.log('[POSE][sender] inference STOP (sender)');
+          return;
+        }
+
+        if (document.body.classList.contains('previewing') && ts !== lastClearedTs) {
+          ctx.setTransform(1,0,0,1,0,0);
+          ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+          lastClearedTs = ts;
+        }
+
+        try {
+          const result = task.detectForVideo(localVideo, ts);
+          if (result?.landmarks?.length) {
+            if (document.body.classList.contains('previewing')) drawPoseOnSender(result.landmarks);
+            sendPoseToReceivers(result.landmarks);
+          }
+        } catch (e) {}
+
+        poseRAF = requestAnimationFrame(loop);
+      };
+
+      poseRAF = requestAnimationFrame(loop);
+    }
+    function stopSenderPoseLoop() {
+      if (!poseLoopRunning) return;
+      poseLoopRunning = false;
+      if (poseRAF) { cancelAnimationFrame(poseRAF); poseRAF = 0; }
+      if (!faceLoopRunning) ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+    }
+
+    function onPoseMessageFromReceiver(ev) {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'pose' && document.body.classList.contains('previewing')) {
+          drawPoseOnSender(msg.landmarks);
+        }
+      } catch {}
+    }
+    function applyPoseUI() {
+      beginViewportSettle();
+      if (!poseOn.checked) { stopSenderPoseLoop(); return; }
+      if (started && poseWhere.value === 'sender') startSenderPoseLoop();
+      else stopSenderPoseLoop();
+    }
+
+    // ======= AUDIO (SENDER) =======
+    let aiOrigin = '—';           // 'tap' | 'separate-mic'
+    let aiTrackId = '—';
+    let aiLastRmsDev = 0;
+    let aiLastRms16  = 0;
+    let aiSilentFrames = 0;
+
+    async function startSenderAudioLoop() {
+      if (!started || !audioAiOn?.checked || audioAiWhere?.value !== 'sender') return;
+      if (audioLoopRunning || audioStarting) return;
+
+      audioStarting = true; // lock
+      let task;
+      try {
+        task = await ensureAudioTask();
+      } catch (e) {
+        audioStarting = false;
+        console.warn('[AUDIO][sender] model init failed:', e);
+        setStatus('Audio model load failed');
+        return;
+      }
+
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      try { await audioCtx.resume(); } catch {}
+
+      // ----- ROBUST CAPTURE SELECTION (no cloning; track-node first, then fallback) -----
+      let tapUsed = false;
+      let useSeparateMic = false;
+      let sourceNodeBuilder = null;   // () => AudioNode
+      let originLabel = '(none)';
+
+      const t = getLocalAudioTrack();
+      const canTap = !!(t && t.readyState === 'live' && t.enabled);
+
+      if (canTap) {
+        sourceNodeBuilder = () => makeSourceFromTrack(audioCtx, t);
+        tapUsed = true;
+        originLabel = 'tap: streaming track';
+      } else {
+        useSeparateMic = true;
+        originLabel = 'separate mic';
+      }
+
+      if (useSeparateMic) {
+        try {
+          aiMicStream = await navigator.mediaDevices.getUserMedia({
+            audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+            video: false
+          });
+          sourceNodeBuilder = () => audioCtx.createMediaStreamSource(aiMicStream);
+        } catch (e) {
+          if (canTap) {
+            sourceNodeBuilder = () => makeSourceFromTrack(audioCtx, t);
+            tapUsed = true;
+            originLabel = 'tap: streaming track (fallback)';
+          } else {
+            audioStarting = false;
+            console.warn('[AUDIO][sender] no capture source available for AI:', e?.name || e);
+            setStatus('AI mic unavailable');
+            return;
+          }
+        }
+      }
+      aiOrigin = tapUsed ? 'tap' : 'separate-mic';
+      aiTrackId = tapUsed ? (t?.id || '—') : 'n/a';
+      console.log('[AUDIO][sender] classifier capture source =', originLabel, 'trackId=', aiTrackId);
+
+      // Build graph
+      const sink = audioCtx.createGain();
+      sink.gain.value = 0;
+      sink.connect(audioCtx.destination);
+
+      audioSource = sourceNodeBuilder();
+
+      // (Optional) hint channels on the source node
+      try {
+        audioSource.channelCount = 2;
+        audioSource.channelCountMode = 'explicit';
+        audioSource.channelInterpretation = 'discrete';
+      } catch {}
+
+      // Prepare resampling + ring
+      const SR_DEVICE = audioCtx.sampleRate;
+      const SR_TARGET = 16000;
+      const WINDOW_SEC = 0.975;
+      const CLIP_SAMPLES_16 = Math.round(SR_TARGET * WINDOW_SEC);
+      let ring16 = new Float32Array(0);
+      let _seriesClips = 0;
+
+      // Silence watchdog
+      aiSilentFrames = 0;
+      const SILENCE_RMS = 1e-4;   // ~ -80 dBFS
+      const SILENCE_LIMIT = 60;   // ~ 0.8–1.5s depending on callback size
+
+      const onChunk = async (frameFloat32) => {
+        if (!audioLoopRunning || !started || !audioAiOn.checked || audioAiWhere.value !== 'sender') {
+          try { audioProcessor?.disconnect(); audioSource?.disconnect?.(); await audioCtx?.close?.(); } catch {}
+          audioCtx = audioSource = audioProcessor = null;
+          return;
+        }
+
+        // --- silence detection (pre-resample) ---
+        const r = rmsOf(frameFloat32);
+        aiLastRmsDev = r;
+        if (r < SILENCE_RMS) {
+          if (++aiSilentFrames >= SILENCE_LIMIT) {
+            console.warn('[AUDIO][sender] AI input looks silent; restarting AI capture with fallback');
+            stopSenderAudioLoop();
+            try { await startSenderAudioLoop(); } catch {}
+            return;
+          }
+        } else {
+          aiSilentFrames = 0;
+        }
+
+        if (LOG.rmsEvery) {
+          window._dbgMicCountS = (window._dbgMicCountS || 0) + 1;
+          if ((window._dbgMicCountS % LOG.rmsEvery) === 0) {
+            console.log('[AUDIO][sender] rms(device) =', r.toFixed(4));
+          }
+        }
+
+        let x16 = resampleLinear(frameFloat32, SR_DEVICE, SR_TARGET);
+        for (let i = 0; i < x16.length; i++) x16[i] = Math.max(-1, Math.min(1, x16[i]));
+        ring16 = concatFloat32(ring16, x16);
+
+        while (ring16.length >= CLIP_SAMPLES_16) {
+          const clip = ring16.subarray(0, CLIP_SAMPLES_16);
+          ring16 = ring16.subarray(CLIP_SAMPLES_16);
+          aiLastRms16 = rmsOf(clip);
+          try {
+            const res = await task.classify({ audioClip: clip, sampleRateHz: SR_TARGET });
+            const classifications = extractCategories(res);
+
+            if (LOG.catEvery) {
+              window._dbgCatEveryS = (window._dbgCatEveryS || 0) + 1;
+              if ((window._dbgCatEveryS % LOG.catEvery) === 0) {
+                const top = classifications.slice(0,5).map(c => `${categoryLabel(c)}:${(c.score ?? 0).toFixed(3)}`);
+                console.log('[AUDIO][sender] top =', top.join(', '));
+              }
+            }
+            if (LOG.firstResult && !window._dbgFirstSenderResult) {
+              window._dbgFirstSenderResult = true;
+              console.log('[AUDIO][sender] FIRST result =', res);
+            }
+
+            // --- update debug UI with top-3
+            const top3 = classifications.slice(0,3)
+              .map(c => `${categoryLabel(c)}(${(c.score??0).toFixed(3)})`).join(', ');
+            elTopCats.textContent = 'Top: ' + (top3 || '—');
+
+            // send to receivers (unchanged)
+            const payload = JSON.stringify({ type:'audio', categories: classifications, ts: performance.now() });
+            let sent = 0;
+            for (const ch of poseDCs) if (ch.readyState === 'open') { ch.send(payload); sent++; }
+            if (sent === 0 && LOG.dc) console.log('[AUDIO][sender] no open DCs to send scores');
+
+            _seriesClips++;
+            if (LOG.seriesEvery && (_seriesClips % LOG.seriesEvery) === 0) {
+              console.log('[AUDIO][sender][series] clips =', _seriesClips, tapUsed ? '(tap)' : '(separate mic)');
+            }
+          } catch (err) {
+            console.warn('[AUDIO][sender] classify failed:', err);
+          }
+        }
+
+        // UI bars
+        setBar(elBarAIdev, aiLastRmsDev);
+        setBar(elBarAI16, aiLastRms16);
+        elDbgAI.textContent = `src=${aiOrigin}${tapUsed?`#${aiTrackId}`:''} | ctxSR=${SR_DEVICE}Hz | rms(dev)=${aiLastRmsDev.toFixed(4)} (${fmtDb(rmsToDb(aiLastRmsDev))} dBFS) | rms(16k)=${aiLastRms16.toFixed(4)} (${fmtDb(rmsToDb(aiLastRms16))} dBFS) | silentFrames=${aiSilentFrames}`;
+      };
+
+      audioLoopRunning = true;
+      audioStarting = false;
+
+      try {
+        const modURL = URL.createObjectURL(new Blob([`
+          class AICapture extends AudioWorkletProcessor {
+            process(inputs) {
+              const chans = inputs[0];
+              if (!chans || chans.length === 0) return true;
+
+              const chCount = chans.length;
+              const N = (chans[0]?.length) || 0;
+              if (!N) return true;
+
+              // Downmix ALL channels -> mono
+              const out = new Float32Array(N);
+              for (let ch = 0; ch < chCount; ch++) {
+                const c = chans[ch];
+                if (!c) continue;
+                for (let i = 0; i < N; i++) out[i] += c[i];
+              }
+              const denom = Math.max(1, chCount);
+              for (let i = 0; i < N; i++) out[i] /= denom;
+
+              this.port.postMessage(out, [out.buffer]);
+              return true;
+            }
+          }
+          registerProcessor('ai-capture', AICapture);
+        `], { type: 'application/javascript' }));
+        await audioCtx.audioWorklet.addModule(modURL);
+        URL.revokeObjectURL(modURL);
+        audioProcessor = new AudioWorkletNode(audioCtx, 'ai-capture', {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          channelCount: 2,
+          channelCountMode: 'explicit',
+          channelInterpretation: 'discrete'
+        });
+        audioProcessor.port.onmessage = (ev) => onChunk(ev.data);
+        audioSource.connect(audioProcessor).connect(sink);
+        console.log('[AUDIO][sender] using AudioWorklet @', SR_DEVICE, 'Hz');
+      } catch {
+        audioProcessor = audioCtx.createScriptProcessor(1024, 2, 1);
+        audioProcessor.onaudioprocess = (e) => {
+          const ib = e.inputBuffer;
+          const N = ib.length;
+          const C = Math.max(1, ib.numberOfChannels || 1);
+          const mix = new Float32Array(N);
+          for (let ch = 0; ch < C; ch++) {
+            const d = ib.getChannelData(ch);
+            for (let i = 0; i < N; i++) mix[i] += d[i];
+          }
+          for (let i = 0; i < N; i++) mix[i] /= C;
+          onChunk(mix);
+        };
+        audioSource.connect(audioProcessor).connect(sink);
+        console.log('[AUDIO][sender] using ScriptProcessor');
+      }
+
+      console.log('[AUDIO][sender] loop START @', SR_DEVICE, '→', SR_TARGET, 'Hz');
+    }
+
+    function stopSenderAudioLoop() {
+      audioLoopRunning = false;
+      audioStarting = false;
+      try {
+        audioProcessor && audioProcessor.disconnect();
+        audioSource && audioSource.disconnect?.();
+        audioCtx && audioCtx.close();
+      } catch {}
+      audioCtx = audioSource = audioProcessor = null;
+
+      try { aiMicStream && aiMicStream.getTracks().forEach(t => t.stop()); } catch {}
+      aiMicStream = null;
+
+      try { aiTapTrack && aiTapTrack.stop(); } catch {}
+      aiTapTrack = null;
+
+      aiOrigin = '—'; aiTrackId = '—'; aiLastRmsDev = aiLastRms16 = 0; aiSilentFrames = 0;
+      setBar(elBarAIdev, 0); setBar(elBarAI16, 0);
+      elDbgAI.textContent = '—';
+      elTopCats.textContent = 'Top: —';
+    }
+
+    function announceAudioMode() {
+      const enabled = !!audioAiOn?.checked;
+      const where   = audioAiWhere?.value;
+      for (const ch of poseDCs) if (ch.readyState === 'open') {
+        ch.send(JSON.stringify({ type:'audio-mode', enabled, where }));
+      }
+    }
+    function applyAudioUI() {
+      if (started && audioAiOn?.checked && audioAiWhere?.value === 'sender') startSenderAudioLoop();
+      else stopSenderAudioLoop();
+    }
+
+    // ======= STREAMING TRACK MONITOR (always-on when mic present) =======
+    const streamMon = { ctx:null, source:null, proc:null, sink:null, silent:0, lastRms:0, sr:0, trackId:'—' };
+
+    function stopStreamMonitor() {
+      try { streamMon.proc && streamMon.proc.disconnect(); } catch {}
+      try { streamMon.source && streamMon.source.disconnect?.(); } catch {}
+      try { streamMon.ctx && streamMon.ctx.close?.(); } catch {}
+      streamMon.ctx = streamMon.source = streamMon.proc = streamMon.sink = null;
+      streamMon.silent = 0; streamMon.lastRms = 0; streamMon.sr = 0; streamMon.trackId = '—';
+      setBar(elBarStream, 0); elDbgStream.textContent = '—';
+    }
+
+    async function startStreamMonitor(track) {
+      if (!track) { stopStreamMonitor(); return; }
+      // Reuse AI ctx if available to avoid extra unlocks
+      const ctx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      try { await ctx.resume(); } catch {}
+      streamMon.ctx = ctx;
+      streamMon.trackId = track.id;
+      streamMon.sr = ctx.sampleRate;
+
+      const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
+      streamMon.sink = sink;
+
+      let proc;
+      try {
+        const modURL = URL.createObjectURL(new Blob([`
+          class RMSMon extends AudioWorkletProcessor {
+            process(inputs) {
+              const chans = inputs[0];
+              if (!chans || chans.length === 0) return true;
+              const chCount = chans.length;
+              const N = (chans[0]?.length) || 0;
+              if (!N) return true;
+              let sum = 0;
+              for (let ch=0; ch<chCount; ch++){
+                const d = chans[ch]; if (!d) continue;
+                for (let i=0;i<N;i++){ const v=d[i]; sum += v*v; }
+              }
+              const rms = Math.sqrt(sum / (N*chCount));
+              this.port.postMessage(rms);
+              return true;
+            }
+          }
+          registerProcessor('rms-mon', RMSMon);
+        `], { type: 'application/javascript' }));
+        await ctx.audioWorklet.addModule(modURL);
+        URL.revokeObjectURL(modURL);
+        proc = new AudioWorkletNode(ctx, 'rms-mon', {
+          numberOfInputs: 1, numberOfOutputs: 1, channelCount: 2,
+          channelCountMode: 'explicit', channelInterpretation: 'discrete'
+        });
+        streamMon.proc = proc;
+      } catch {
+        // ScriptProcessor fallback
+        const sp = ctx.createScriptProcessor(1024, 2, 1);
+        sp.onaudioprocess = (e) => {
+          const ib = e.inputBuffer;
+          const N = ib.length;
+          const C = Math.max(1, ib.numberOfChannels || 1);
+          let sum = 0;
+          for (let ch=0; ch<C; ch++){
+            const d = ib.getChannelData(ch);
+            for (let i=0;i<N;i++){ const v=d[i]; sum += v*v; }
+          }
+          const rms = Math.sqrt(sum / (N*C));
+          onRms(rms);
+        };
+        streamMon.proc = sp;
+      }
+
+      const source = makeSourceFromTrack(ctx, track);
+      streamMon.source = source;
+
+      const onRms = (rms) => {
+        streamMon.lastRms = rms;
+        const SILENCE_RMS = 1e-4;
+        if (rms < SILENCE_RMS) streamMon.silent++; else streamMon.silent = 0;
+        setBar(elBarStream, rms);
+        elDbgStream.textContent =
+          `id=${streamMon.trackId} | enabled=${fmtBool(track.enabled)} | muted=${fmtBool(track.muted)} | ready=${track.readyState} | ctxSR=${streamMon.sr}Hz | rms=${rms.toFixed(4)} (${fmtDb(rmsToDb(rms))} dBFS) | silentFrames=${streamMon.silent}`;
+      };
+
+      if (proc.port) proc.port.onmessage = (ev)=> onRms(ev.data);
+      source.connect(streamMon.proc).connect(sink);
+
+      console.log('[DBG] stream monitor started on track', track.id);
+    }
+
+    // ======= FACE (SENDER) =======
+    async function startSenderFaceLoop() {
+      if (!started || !faceOn?.checked || faceWhere?.value !== 'sender') return;
+      if (faceLoopRunning) return;
+      const task = await ensureFaceTask();
+      faceLoopRunning = true;
+      if (faceRAF) cancelAnimationFrame(faceRAF);
+
+      console.log('[FACE][sender] loop START (sender)');
+
+      const loop = (ts) => {
+        if (!faceLoopRunning || !started || !faceOn.checked || faceWhere?.value !== 'sender') {
+          console.log('[FACE][sender] loop STOP (sender)');
+          return;
+        }
+
+        if (document.body.classList.contains('previewing') && ts !== lastClearedTs) {
+          ctx.setTransform(1,0,0,1,0,0);
+          ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+          lastClearedTs = ts;
+        }
+
+        const result = task.detectForVideo(localVideo, ts);
+        if (document.body.classList.contains('previewing')) {
+          drawFaceOnSender(result?.faceLandmarks);
+        }
+
+        const payload = JSON.stringify({ type:'face', landmarks: result?.faceLandmarks ?? null, ts });
+        for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
+
+        faceRAF = requestAnimationFrame(loop);
+      };
+
+      faceRAF = requestAnimationFrame(loop);
+    }
+
+    function stopSenderFaceLoop() {
+      if (!faceLoopRunning) return;
+      faceLoopRunning = false;
+      if (faceRAF) { cancelAnimationFrame(faceRAF); faceRAF = 0; }
+      if (!poseLoopRunning) ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+    }
+
+    function announceFaceMode() {
+      const enabled = !!faceOn?.checked;
+      const where   = faceWhere?.value;
+      for (const ch of poseDCs) if (ch.readyState === 'open') {
+        ch.send(JSON.stringify({ type:'face-mode', enabled, where }));
+      }
+    }
+    function applyFaceUI() {
+      if (started && faceOn?.checked && faceWhere?.value === 'sender') startSenderFaceLoop();
+      else stopSenderFaceLoop();
+    }
+
+    // ======= WebRTC sender stats =======
+    let rtpStatsTimer = null, rtpStatsBusy = false;
+    function startRtpStatsLoop() {
+      if (rtpStatsTimer) return;
+      rtpStatsTimer = setInterval(async () => {
+        if (rtpStatsBusy) return;
+        rtpStatsBusy = true;
+        try {
+          let lines = [];
+          for (const [peerId, rec] of peers) {
+            const pc = rec.pc;
+            if (!pc) continue;
+            const snd = getAudioSender(pc);
+            if (!snd) continue;
+            const stats = await pc.getStats(snd);
+            let level = null, energy = null, dur = null;
+            stats.forEach(r => {
+              if (r.type === 'outbound-rtp' && r.kind === 'audio') {
+                if (typeof r.totalAudioEnergy === 'number') energy = r.totalAudioEnergy;
+                if (typeof r.totalSamplesDuration === 'number') dur = r.totalSamplesDuration;
+              }
+              if ((r.type === 'track' || r.type === 'media-source') && typeof r.audioLevel === 'number') {
+                level = r.audioLevel; // 0..1 if present
+              }
+            });
+            let lvl = (level!=null) ? level.toFixed(3) : 'n/a';
+            let rmsEst = (energy!=null && dur>0) ? Math.sqrt(energy/dur) : null;
+            lines.push(`${peerId.slice(0,6)}: audioLevel=${lvl}${rmsEst!=null?` estRMS=${rmsEst.toFixed(4)}`:''}`);
+          }
+          elDbgRtp.textContent = lines.length ? lines.join('  |  ') : 'no peers';
+        } catch (e) {
+          elDbgRtp.textContent = 'stats n/a';
+        } finally {
+          rtpStatsBusy = false;
+        }
+      }, 1000);
+    }
+    function stopRtpStatsLoop() { if (rtpStatsTimer) clearInterval(rtpStatsTimer); rtpStatsTimer = null; }
+
+    announceAIModes(); // harmless early initialization
+    const qsRoom = new URLSearchParams(location.search).get('room');
+    if (qsRoom) roomInput.value = qsRoom;
+  </script>
+</body>
+</html>
