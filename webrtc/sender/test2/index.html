@@ -279,8 +279,9 @@
     };
 
     // --- DEBUG / CALIB ---
+    // Keep WebRTC processed; feed RAW mic to classifier by default.
     const DEBUG_AUDIO = {
-      FORCE_TAP: false,   // prefer tapping the *streaming* track for classifier input
+      FORCE_TAP: false,   // true = always tap the streamed (processed) track for AI
       PREGAIN_DB: 0       // pre-gain for classifier path only (keeps WebRTC stream untouched)
     };
 
@@ -307,7 +308,7 @@
 
     const poseOn    = document.getElementById('poseOn');
     const poseWhere = document.getElementById('poseWhere');
-    const audioAiOn    = document.getElementById('audioAiOn');
+    the audioAiOn  = document.getElementById('audioAiOn');
     const audioAiWhere = document.getElementById('audioAiWhere');
     const faceOn       = document.getElementById('faceOn');
     const faceWhere    = document.getElementById('faceWhere');
@@ -1234,46 +1235,56 @@
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       try { await audioCtx.resume(); } catch {}
 
-      // ----- CAPTURE SELECTION -----
+      // ----- CAPTURE SELECTION (separate RAW mic by default; fallback to tap) -----
+      const streamedTrack = getLocalAudioTrack();
+      const canTap = !!(streamedTrack && streamedTrack.readyState === 'live' && streamedTrack.enabled);
+
+      let originLabel = 'separate mic';
       let tapUsed = false;
-      let useSeparateMic = false;
-      let sourceNodeBuilder = null;   // () => AudioNode
-      let originLabel = '(none)';
+      let useSeparateMic = !DEBUG_AUDIO.FORCE_TAP; // default: prefer separate RAW mic
+      let openedSeparate = false;
 
-      const t = getLocalAudioTrack();
-      const canTap = !!(t && t.readyState === 'live');
-
-      if ((DEBUG_AUDIO.FORCE_TAP && t) || (canTap && t.enabled)) {
-        sourceNodeBuilder = () => makeSourceFromTrack(audioCtx, t);
-        tapUsed = true;
-        useSeparateMic = false;
-        originLabel = DEBUG_AUDIO.FORCE_TAP ? 'tap: streaming track (forced)' : 'tap: streaming track';
-      } else {
-        useSeparateMic = true;
-        originLabel = 'separate mic';
-      }
-      console.log('[AUDIO][sender] capture source =', originLabel);
-
-      // Build sink (muted)
+      // Build muted sink
       const sink = audioCtx.createGain();
       sink.gain.value = 0;
       sink.connect(audioCtx.destination);
 
-      audioSource = sourceNodeBuilder ? sourceNodeBuilder() : null;
-
-      // If we couldn't tap (no live track), open a separate mic now
-      if (!audioSource) {
+      // Try separate RAW mic first (AEC/NS/AGC OFF), unless FORCE_TAP
+      if (useSeparateMic) {
         try {
           aiMicStream = await navigator.mediaDevices.getUserMedia({
             audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
             video: false
           });
           audioSource = audioCtx.createMediaStreamSource(aiMicStream);
+          openedSeparate = true;
+          tapUsed = false;
+          originLabel = 'separate mic';
         } catch (e) {
-          audioStarting = false;
-          console.warn('[AUDIO][sender] could not open mic for AI:', e);
-          return;
+          console.warn('[AUDIO][sender] raw mic failed; considering tap fallback:', e?.message || e);
         }
+      }
+
+      // Fallback or FORCE_TAP → tap the processed streaming track
+      if (!openedSeparate) {
+        if (DEBUG_AUDIO.FORCE_TAP && !canTap) {
+          console.warn('[AUDIO][sender] FORCE_TAP requested but no live enabled streaming track to tap.');
+        }
+        if (canTap) {
+          try {
+            audioSource = makeSourceFromTrack(audioCtx, streamedTrack);
+            tapUsed = true;
+            originLabel = DEBUG_AUDIO.FORCE_TAP ? 'tap: streaming track (forced)' : 'tap: streaming track (fallback)';
+          } catch (e) {
+            console.warn('[AUDIO][sender] unable to tap streamed track:', e);
+          }
+        }
+      }
+
+      if (!audioSource) {
+        audioStarting = false;
+        console.warn('[AUDIO][sender] no audio source available for classifier');
+        return;
       }
 
       // (Optional) hint channels on the source node
@@ -1297,7 +1308,7 @@
       const SILENCE_RMS = 1e-4;   // ~ -80 dBFS
       const SILENCE_LIMIT = 60;   // ~ 0.8–1.5s depending on callback size
 
-      // --- Worklet: define both ai-capture (downmix->post samples) and rms-meter (downmix->post rms)
+      // Worklet modules (classifier + RMS)
       try {
         const modURL = URL.createObjectURL(new Blob([`
           class AICapture extends AudioWorkletProcessor {
@@ -1350,7 +1361,11 @@
       // --- Classification path
       const onChunk = async (frameFloat32) => {
         if (!audioLoopRunning || !started || !audioAiOn.checked || audioAiWhere.value !== 'sender') {
-          try { audioProcessor?.disconnect(); audioSource?.disconnect?.(); monProcessor?.disconnect?.(); monSource?.disconnect?.(); await audioCtx?.close?.(); } catch {}
+          try {
+            audioProcessor?.disconnect(); audioSource?.disconnect?.();
+            monProcessor?.disconnect?.(); monSource?.disconnect?.();
+            await audioCtx?.close?.();
+          } catch {}
           audioCtx = audioSource = audioProcessor = monSource = monProcessor = null;
           return;
         }
@@ -1395,7 +1410,6 @@
           const clip = ring16.subarray(0, CLIP_SAMPLES_16);
           ring16 = ring16.subarray(CLIP_SAMPLES_16);
           try {
-            // ✅ FIX: correct API for @mediapipe/tasks-audio@0.10.0
             const res = task.classify(clip, SR_TARGET);
             const classifications = extractCategories(res);
 
@@ -1433,7 +1447,7 @@
 
       audioLoopRunning = true;
       audioStarting = false;
-      lastAIMode = tapUsed ? 'tap' : (useSeparateMic ? 'separate' : 'unknown');
+      lastAIMode = tapUsed ? (DEBUG_AUDIO.FORCE_TAP ? 'tap-forced' : 'tap-fallback') : 'separate';
 
       // Try worklet for classification
       try {
@@ -1446,7 +1460,7 @@
         });
         audioProcessor.port.onmessage = (ev) => onChunk(ev.data);
         audioSource.connect(audioProcessor).connect(sink);
-        console.log('[AUDIO][sender] using AudioWorklet for classifier @', SR_DEVICE, 'Hz');
+        console.log('[AUDIO][sender] using AudioWorklet for classifier @', SR_DEVICE, 'Hz | src =', originLabel);
       } catch {
         // Fallback to ScriptProcessor
         audioProcessor = audioCtx.createScriptProcessor(2048, 2, 1);
@@ -1463,13 +1477,13 @@
           onChunk(mix);
         };
         audioSource.connect(audioProcessor).connect(sink);
-        console.log('[AUDIO][sender] using ScriptProcessor for classifier @', SR_DEVICE, 'Hz');
+        console.log('[AUDIO][sender] using ScriptProcessor for classifier @', SR_DEVICE, 'Hz | src =', originLabel);
       }
 
       // --- Parallel RMS monitor for the *streaming track* (always from localStream track)
-      if (t) {
+      if (streamedTrack) {
         try {
-          monSource = makeSourceFromTrack(audioCtx, t);
+          monSource = makeSourceFromTrack(audioCtx, streamedTrack);
           monProcessor = new AudioWorkletNode(audioCtx, 'rms-meter', {
             numberOfInputs: 1,
             numberOfOutputs: 1,
@@ -1501,7 +1515,7 @@
             if (r < SILENCE_RMS) streamSilentFrames++;
             else streamSilentFrames = 0;
           };
-          monSource = makeSourceFromTrack(audioCtx, t);
+          monSource = makeSourceFromTrack(audioCtx, streamedTrack);
           monSource.connect(sp).connect(sink);
         }
       }
