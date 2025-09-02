@@ -189,6 +189,9 @@
 
     <!-- EMA -->
     <div class="groupTitle">Short-term (EMA)</div>
+    <div class="checkRow">
+      <label><input id="useEma" type="checkbox"> Enable EMA detector</label>
+    </div>
     <div class="row">
       <label for="ema">EMA α</label>
       <input id="ema" type="range" min="0.01" max="0.90" step="0.01">
@@ -207,6 +210,9 @@
 
     <!-- Integrator -->
     <div class="groupTitle">Long-term (Integrator)</div>
+    <div class="checkRow">
+      <label><input id="useInt" type="checkbox"> Enable Integrator</label>
+    </div>
     <div class="row">
       <label for="tau">INT τ (s)</label>
       <input id="tau" type="range" min="0.5" max="8.0" step="0.1">
@@ -225,6 +231,9 @@
 
     <!-- Baseline drift -->
     <div class="groupTitle">Baseline drift</div>
+    <div class="checkRow">
+      <label><input id="useDrift" type="checkbox"> Enable Drift detector</label>
+    </div>
     <div class="row">
       <label for="driftTau">Baseline τ (s)</label>
       <input id="driftTau" type="range" min="0.5" max="8.0" step="0.1">
@@ -320,7 +329,12 @@
       DRIFT_TAU: 2.5,
       DRIFT_ON:  0.080,
       DRIFT_OFF: 0.050,
-      DRIFT_TORSO_REL: true
+      DRIFT_TORSO_REL: true,
+
+      // NEW: detector toggles
+      USE_EMA: true,
+      USE_INT: true,
+      USE_DRIFT: true
     };
     const LS_KEY = 'naptio-move-config-v4';
     const MOVE = { ...MOVE_DEFAULTS, ...loadMoveConfig() };
@@ -373,6 +387,11 @@
     const driftOff    = document.getElementById('driftOff');   const driftOffOut = document.getElementById('driftOffOut');
     const driftTorsoRel = document.getElementById('driftTorsoRel');
     const driftReset  = document.getElementById('driftReset');
+
+    // NEW toggles
+    const useEma   = document.getElementById('useEma');
+    const useInt   = document.getElementById('useInt');
+    const useDrift = document.getElementById('useDrift');
 
     // Calibration UI
     const calStartBtn = document.getElementById('calStart');
@@ -625,7 +644,7 @@
       return dst;
     }
 
-    /* ---------- On-screen badge: bars instead of numbers ---------- */
+    /* ---------- On-screen badge: bars (dim if disabled) ---------- */
     function drawMovementBadge(movingState, emaVal, intVal, driftVal) {
       const ctx = poseCtx;
       const dpr = window.devicePixelRatio || 1;
@@ -655,11 +674,9 @@
       const pillW = Math.round(ctx.measureText(stateTxt).width + pillPadX*2);
       const pillH = Math.round(18*dpr);
 
-      // Compute box size
       const boxW = Math.max(LABEL_W + INNER + BAR_W + INNER, pillW + INNER*2);
       const boxH = Math.round(ROW_H * 3 + INNER*2);
 
-      // Background
       ctx.globalAlpha = 0.7;
       ctx.fillStyle = BG;
       ctx.fillRect(x, y, boxW, boxH);
@@ -680,9 +697,9 @@
 
       // Metrics → bars
       const metrics = [
-        { label:'EMA', val: emaVal,   on: MOVE.ON,        off: MOVE.OFF        },
-        { label:'INT', val: intVal,   on: MOVE.INT_ON,    off: MOVE.INT_OFF    },
-        { label:'DRF', val: driftVal, on: MOVE.DRIFT_ON,  off: MOVE.DRIFT_OFF  },
+        { label:'EMA', val: emaVal,   on: MOVE.ON,       off: MOVE.OFF,       enabled: !!MOVE.USE_EMA },
+        { label:'INT', val: intVal,   on: MOVE.INT_ON,   off: MOVE.INT_OFF,   enabled: !!MOVE.USE_INT },
+        { label:'DRF', val: driftVal, on: MOVE.DRIFT_ON, off: MOVE.DRIFT_OFF, enabled: !!MOVE.USE_DRIFT },
       ];
 
       ctx.font = `${Math.round(11*dpr)}px -apple-system,system-ui,Segoe UI,Roboto,sans-serif`;
@@ -692,6 +709,7 @@
         const rowY = baseY + i*ROW_H;
 
         // Label
+        ctx.globalAlpha = metrics[i].enabled ? 1.0 : 0.35;
         ctx.fillStyle = TXT_DIM;
         ctx.fillText(metrics[i].label, x + INNER, rowY + Math.round(8*dpr));
 
@@ -707,31 +725,33 @@
         const rClamped = Math.max(0, Math.min(ratio, 1));
         const fillW = Math.round(BAR_W * rClamped);
 
-        // Color stages
         let fillCol = '#6ecb8b'; // green < 0.9
         if (ratio >= 0.9 && ratio < 1.0) fillCol = '#ffcc80'; // amber near threshold
         if (ratio >= 1.0) fillCol = '#ff7a7a'; // red beyond ON
 
+        ctx.globalAlpha = metrics[i].enabled ? 1.0 : 0.35;
         ctx.fillStyle = fillCol;
         ctx.fillRect(barX, barY, fillW, BAR_H);
 
-        // If exceeded, draw a thin cap to indicate overflow
+        // Overflow cap
         if (ratio > 1.0) {
-          ctx.globalAlpha = 0.9;
+          ctx.globalAlpha = metrics[i].enabled ? 0.9 : 0.35;
           ctx.strokeStyle = '#ff7a7a';
           ctx.beginPath();
           ctx.moveTo(barX + BAR_W + 0.5, barY);
           ctx.lineTo(barX + BAR_W + 0.5, barY + BAR_H);
           ctx.stroke();
-          ctx.globalAlpha = 1.0;
         }
 
-        // ON threshold tick (at end of bar)
-        ctx.strokeStyle = TICK;
+        // ON threshold tick
+        ctx.globalAlpha = metrics[i].enabled ? 1.0 : 0.35;
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
         ctx.beginPath();
         ctx.moveTo(barX + BAR_W + 0.5, barY - Math.round(2*dpr));
         ctx.lineTo(barX + BAR_W + 0.5, barY + BAR_H + Math.round(2*dpr));
         ctx.stroke();
+
+        ctx.globalAlpha = 1.0;
       }
 
       ctx.restore();
@@ -775,9 +795,11 @@
       if (driftTrigger) lastDriftHitTs = now;
       const driftHoldOk  = (driftScore > MOVE.DRIFT_OFF) || ((now - lastDriftHitTs) < MOVE.OFF_HOLD_MS);
 
-      // Combine
-      const wantMoving = moving ? (shortHoldOk || longHoldOk || driftHoldOk)
-                                : (shortTrigger || longTrigger || driftTrigger);
+      // Combine: ONLY enabled detectors contribute
+      let wantMoving = false;
+      if (MOVE.USE_EMA)   wantMoving ||= moving ? shortHoldOk  : shortTrigger;
+      if (MOVE.USE_INT)   wantMoving ||= moving ? longHoldOk   : longTrigger;
+      if (MOVE.USE_DRIFT) wantMoving ||= moving ? driftHoldOk  : driftTrigger;
 
       if (wantMoving !== moving) {
         moving = wantMoving;
@@ -800,7 +822,7 @@
         if (t >= CAL_DURATION_MS) finishCalibration();
       }
 
-      // Draw bars overlay + reflect panel
+      // Draw overlay + reflect panel
       poseCtx.save();
       drawMovementBadge(moving, moveEma, intScore, driftScore);
       poseCtx.restore();
@@ -1042,28 +1064,26 @@
     }
 
     function initMovePanel() {
+      // Confidence gates
       visMin.value = MOVE.VIS_MIN; visOut.textContent = fmt(MOVE.VIS_MIN,2);
       presMin.value = MOVE.PRES_MIN; presOut.textContent = fmt(MOVE.PRES_MIN,2);
 
+      // EMA
+      useEma.checked = !!MOVE.USE_EMA;
       ema.value = MOVE.EMA_ALPHA; emaOut.textContent = fmt(MOVE.EMA_ALPHA,2);
-
-      onTh.value = MOVE.ON; onOut.textContent = fmt(MOVE.ON);
-      ensureSliderRange(onTh, MOVE.ON);
-
+      onTh.value = MOVE.ON; onOut.textContent = fmt(MOVE.ON); ensureSliderRange(onTh, MOVE.ON);
       offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF);
 
+      // Integrator
+      useInt.checked = !!MOVE.USE_INT;
       tau.value = MOVE.INT_TAU; tauOut.textContent = fmt(MOVE.INT_TAU,1)+' s';
-
-      intOnEl.value = MOVE.INT_ON; intOnOut.textContent = fmt(MOVE.INT_ON);
-      ensureSliderRange(intOnEl, MOVE.INT_ON);
-
+      intOnEl.value = MOVE.INT_ON; intOnOut.textContent = fmt(MOVE.INT_ON); ensureSliderRange(intOnEl, MOVE.INT_ON);
       intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF);
 
+      // Drift
+      useDrift.checked = !!MOVE.USE_DRIFT;
       driftTau.value = MOVE.DRIFT_TAU; driftTauOut.textContent = fmt(MOVE.DRIFT_TAU,1)+' s';
-
-      driftOnEl.value = MOVE.DRIFT_ON; driftOnOut.textContent = fmt(MOVE.DRIFT_ON);
-      ensureSliderRange(driftOnEl, MOVE.DRIFT_ON);
-
+      driftOnEl.value = MOVE.DRIFT_ON; driftOnOut.textContent = fmt(MOVE.DRIFT_ON); ensureSliderRange(driftOnEl, MOVE.DRIFT_ON);
       driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF);
       driftTorsoRel.checked = !!MOVE.DRIFT_TORSO_REL;
 
@@ -1077,37 +1097,43 @@
     moveClose.addEventListener('click', closeMovePanel);
     window.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'm') movePanel.classList.toggle('hidden'); });
 
+    // Gates
     visMin.addEventListener('input', ()=>{ MOVE.VIS_MIN = clampUi(parseFloat(visMin.value),0,0.99); visOut.textContent = fmt(MOVE.VIS_MIN,2); saveMoveConfig(); });
     presMin.addEventListener('input', ()=>{ MOVE.PRES_MIN = clampUi(parseFloat(presMin.value),0,0.99); presOut.textContent = fmt(MOVE.PRES_MIN,2); saveMoveConfig(); });
 
-    ema.addEventListener('input', ()=>{ MOVE.EMA_ALPHA = clampUi(parseFloat(ema.value),0.01,0.90); emaOut.textContent = fmt(MOVE.EMA_ALPHA,2); saveMoveConfig(); });
+    // Toggles
+    useEma.addEventListener('change', ()=>{ MOVE.USE_EMA = !!useEma.checked; saveMoveConfig(); });
+    useInt.addEventListener('change', ()=>{ MOVE.USE_INT = !!useInt.checked; saveMoveConfig(); });
+    useDrift.addEventListener('change', ()=>{ MOVE.USE_DRIFT = !!useDrift.checked; saveMoveConfig(); });
 
+    // EMA sliders
+    ema.addEventListener('input', ()=>{ MOVE.EMA_ALPHA = clampUi(parseFloat(ema.value),0.01,0.90); emaOut.textContent = fmt(MOVE.EMA_ALPHA,2); saveMoveConfig(); });
     onTh.addEventListener('input', ()=>{
       MOVE.ON = Math.max(0.005, parseFloat(onTh.value) || 0);
       if (MOVE.OFF > MOVE.ON){ MOVE.OFF = MOVE.ON; offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF); }
       onOut.textContent = fmt(MOVE.ON);
       ensureSliderRange(onTh, MOVE.ON); saveMoveConfig();
     });
+    offTh.addEventListener('input', ()=>{ MOVE.OFF = clampUi(parseFloat(offTh.value),0.005,Math.max(0.005,MOVE.ON)); if (MOVE.OFF > MOVE.ON){ MOVE.OFF = MOVE.ON; offTh.value = MOVE.OFF; } offOut.textContent = fmt(MOVE.OFF); saveMoveConfig(); });
 
+    // Integrator sliders
+    tau.addEventListener('input', ()=>{ MOVE.INT_TAU = clampUi(parseFloat(tau.value),0.5,8.0); tauOut.textContent = fmt(MOVE.INT_TAU,1)+' s'; saveMoveConfig(); });
     intOnEl.addEventListener('input', ()=>{
       MOVE.INT_ON = Math.max(0.005, parseFloat(intOnEl.value) || 0);
       if (MOVE.INT_OFF > MOVE.INT_ON){ MOVE.INT_OFF = MOVE.INT_ON; intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF); }
       intOnOut.textContent = fmt(MOVE.INT_ON);
       ensureSliderRange(intOnEl, MOVE.INT_ON); saveMoveConfig();
     });
+    intOff.addEventListener('input', ()=>{ MOVE.INT_OFF = clampUi(parseFloat(intOff.value),0.005,Math.max(0.005,MOVE.INT_ON)); if (MOVE.INT_OFF > MOVE.INT_ON){ MOVE.INT_OFF = MOVE.INT_ON; intOff.value = MOVE.INT_OFF; } intOffOut.textContent = fmt(MOVE.INT_OFF); saveMoveConfig(); });
 
+    // Drift sliders
+    driftTau.addEventListener('input', ()=>{ MOVE.DRIFT_TAU = clampUi(parseFloat(driftTau.value),0.5,8.0); driftTauOut.textContent = fmt(MOVE.DRIFT_TAU,1)+' s'; saveMoveConfig(); });
     driftOnEl.addEventListener('input', ()=>{
       MOVE.DRIFT_ON = Math.max(0.005, parseFloat(driftOnEl.value) || 0);
       if (MOVE.DRIFT_OFF > MOVE.DRIFT_ON){ MOVE.DRIFT_OFF = MOVE.DRIFT_ON; driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF); }
       driftOnOut.textContent = fmt(MOVE.DRIFT_ON);
       ensureSliderRange(driftOnEl, MOVE.DRIFT_ON); saveMoveConfig();
     });
-
-    offTh.addEventListener('input', ()=>{ MOVE.OFF = clampUi(parseFloat(offTh.value),0.005,Math.max(0.005,MOVE.ON)); if (MOVE.OFF > MOVE.ON){ MOVE.OFF = MOVE.ON; offTh.value = MOVE.OFF; } offOut.textContent = fmt(MOVE.OFF); saveMoveConfig(); });
-    tau.addEventListener('input', ()=>{ MOVE.INT_TAU = clampUi(parseFloat(tau.value),0.5,8.0); tauOut.textContent = fmt(MOVE.INT_TAU,1)+' s'; saveMoveConfig(); });
-    intOff.addEventListener('input', ()=>{ MOVE.INT_OFF = clampUi(parseFloat(intOff.value),0.005,Math.max(0.005,MOVE.INT_ON)); if (MOVE.INT_OFF > MOVE.INT_ON){ MOVE.INT_OFF = MOVE.INT_ON; intOff.value = MOVE.INT_OFF; } intOffOut.textContent = fmt(MOVE.INT_OFF); saveMoveConfig(); });
-
-    driftTau.addEventListener('input', ()=>{ MOVE.DRIFT_TAU = clampUi(parseFloat(driftTau.value),0.5,8.0); driftTauOut.textContent = fmt(MOVE.DRIFT_TAU,1)+' s'; saveMoveConfig(); });
     driftOff.addEventListener('input', ()=>{ MOVE.DRIFT_OFF = clampUi(parseFloat(driftOff.value),0.005,Math.max(0.005,MOVE.DRIFT_ON)); if (MOVE.DRIFT_OFF > MOVE.DRIFT_ON){ MOVE.DRIFT_OFF = MOVE.DRIFT_ON; driftOff.value = MOVE.DRIFT_OFF; } driftOffOut.textContent = fmt(MOVE.DRIFT_OFF); saveMoveConfig(); });
     driftTorsoRel.addEventListener('change', ()=>{ MOVE.DRIFT_TORSO_REL = !!driftTorsoRel.checked; saveMoveConfig(); });
 
@@ -1121,6 +1147,7 @@
       calStats.style.display = 'none';
     });
 
+    // Calibration button
     calStartBtn.addEventListener('click', () => {
       openMovePanel();
       startCalibration();
