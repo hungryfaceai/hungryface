@@ -260,6 +260,18 @@
       <progress id="calProg" max="1" value="0"></progress>
       <output id="calTime">15s</output>
     </div>
+    <!-- Calibration stats (hidden until first run) -->
+    <div id="calStats" style="display:none">
+      <div class="row">
+        <label>Median</label><span></span><output id="calMedian">—</output>
+      </div>
+      <div class="row">
+        <label>95th pct</label><span></span><output id="calP95">—</output>
+      </div>
+      <div class="row">
+        <label>Samples</label><span></span><output id="calN">0</output>
+      </div>
+    </div>
 
     <div class="actions">
       <button id="moveReset" class="btn small" type="button">Reset all defaults</button>
@@ -353,12 +365,12 @@
     const onTh  = document.getElementById('onTh');  const onOut  = document.getElementById('onOut');
     const offTh = document.getElementById('offTh'); const offOut = document.getElementById('offOut');
 
-    const tau     = document.getElementById('tau');     const tauOut     = document.getElementById('tauOut');
-    const intOn   = document.getElementById('intOn');   const intOnOut   = document.getElementById('intOnOut');
-    const intOff  = document.getElementById('intOff');  const intOffOut  = document.getElementById('intOffOut');
+    const tau       = document.getElementById('tau');     const tauOut     = document.getElementById('tauOut');
+    const intOnEl   = document.getElementById('intOn');   const intOnOut   = document.getElementById('intOnOut');
+    const intOff    = document.getElementById('intOff');  const intOffOut  = document.getElementById('intOffOut');
 
     const driftTau    = document.getElementById('driftTau');   const driftTauOut = document.getElementById('driftTauOut');
-    const driftOn     = document.getElementById('driftOn');    const driftOnOut  = document.getElementById('driftOnOut');
+    const driftOnEl   = document.getElementById('driftOn');    const driftOnOut  = document.getElementById('driftOnOut');
     const driftOff    = document.getElementById('driftOff');   const driftOffOut = document.getElementById('driftOffOut');
     const driftTorsoRel = document.getElementById('driftTorsoRel');
     const driftReset  = document.getElementById('driftReset');
@@ -369,6 +381,10 @@
     const calProgRow  = document.getElementById('calProgRow');
     const calProg     = document.getElementById('calProg');
     const calTime     = document.getElementById('calTime');
+    const calStats    = document.getElementById('calStats');
+    const calMedian   = document.getElementById('calMedian');
+    const calP95      = document.getElementById('calP95');
+    const calN        = document.getElementById('calN');
 
     /* ---------- State ---------- */
     let hideStatusTimer = null;
@@ -727,7 +743,11 @@
       if (calActive) return;
       calActive = true; calStart = performance.now();
       calSamples = []; lastGoodLm = null;
-      calStatus.className = 'muted'; calStatus.textContent = 'Calibrating — keep still';
+
+      // UI: show progress, hide old stats, set status line
+      calStats.style.display = 'none';
+      calStatus.className = 'muted';
+      calStatus.textContent = 'Calibrating — keep still';
       calProgRow.style.display = 'grid';
       calProg.value = 0; calTime.textContent = Math.round(CAL_DURATION_MS/1000) + 's';
     }
@@ -740,6 +760,7 @@
       // Stats from raw per-frame motion
       const m   = quantile(calSamples, 0.5);
       const p95 = quantile(calSamples, 0.95);
+      const n   = calSamples.length;
       const floor = (v, min) => Math.max(min, v);
 
       // EMA thresholds
@@ -748,13 +769,13 @@
       MOVE.OFF = Math.min(MOVE.ON, Math.max(0.005, MOVE.ON*0.65));
 
       // Integrator thresholds (time-aware; scales with τ)
-      const intOn = MOVE.INT_TAU * m * 2.5;
-      MOVE.INT_ON  = floor(intOn, 0.005);
+      const intOnCalc = MOVE.INT_TAU * m * 2.5;
+      MOVE.INT_ON  = floor(intOnCalc, 0.005);
       MOVE.INT_OFF = Math.min(MOVE.INT_ON, Math.max(0.005, MOVE.INT_ON*0.6));
 
       // Drift thresholds (posture change vs baseline)
-      const driftOn = Math.max(5.0*m, 1.5*MOVE.ON, 0.02);
-      MOVE.DRIFT_ON  = floor(driftOn, 0.02);
+      const driftOnCalc = Math.max(5.0*m, 1.5*MOVE.ON, 0.02);
+      MOVE.DRIFT_ON  = floor(driftOnCalc, 0.02);
       MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_ON, Math.max(0.005, MOVE.DRIFT_ON*0.65));
 
       // Seed baseline from last good frame; clear dynamics so we’re stable
@@ -764,15 +785,19 @@
       // Persist + reflect UI and make sure sliders can show new values
       saveMoveConfig();
       ensureSliderRange(onTh,     MOVE.ON);
-      ensureSliderRange(intOn,    MOVE.INT_ON);
-      ensureSliderRange(driftOn,  MOVE.DRIFT_ON);
+      ensureSliderRange(intOnEl,  MOVE.INT_ON);
+      ensureSliderRange(driftOnEl, MOVE.DRIFT_ON);
       initMovePanel();
 
-      // Result summary
-      const summary = `OK · median=${m.toFixed(4)}, p95=${p95.toFixed(4)} → EMA ON=${MOVE.ON.toFixed(3)}, INT ON=${MOVE.INT_ON.toFixed(3)}, DRIFT ON=${MOVE.DRIFT_ON.toFixed(3)}`;
+      // ---- Expose stats & clear the "Calibrating" message ----
+      calMedian.textContent = m.toFixed(4);
+      calP95.textContent    = p95.toFixed(4);
+      calN.textContent      = String(n);
+      calStats.style.display = 'block';
+
       calStatus.className = 'ok';
-      calStatus.textContent = summary;
-      setTimeout(()=>{ calStatus.className = 'muted'; }, 6000);
+      calStatus.textContent = 'Calibrated';
+      setTimeout(()=>{ if (!calActive) calStatus.textContent = ''; }, 4000);
     }
 
     /* ---------- Clear / stream end helpers ---------- */
@@ -949,15 +974,15 @@
 
       tau.value = MOVE.INT_TAU; tauOut.textContent = fmt(MOVE.INT_TAU,1)+' s';
 
-      intOn.value = MOVE.INT_ON; intOnOut.textContent = fmt(MOVE.INT_ON);
-      ensureSliderRange(intOn, MOVE.INT_ON);
+      intOnEl.value = MOVE.INT_ON; intOnOut.textContent = fmt(MOVE.INT_ON);
+      ensureSliderRange(intOnEl, MOVE.INT_ON);
 
       intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF);
 
       driftTau.value = MOVE.DRIFT_TAU; driftTauOut.textContent = fmt(MOVE.DRIFT_TAU,1)+' s';
 
-      driftOn.value = MOVE.DRIFT_ON; driftOnOut.textContent = fmt(MOVE.DRIFT_ON);
-      ensureSliderRange(driftOn, MOVE.DRIFT_ON);
+      driftOnEl.value = MOVE.DRIFT_ON; driftOnOut.textContent = fmt(MOVE.DRIFT_ON);
+      ensureSliderRange(driftOnEl, MOVE.DRIFT_ON);
 
       driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF);
       driftTorsoRel.checked = !!MOVE.DRIFT_TORSO_REL;
@@ -987,19 +1012,19 @@
       saveMoveConfig();
     });
 
-    intOn.addEventListener('input', ()=>{
-      MOVE.INT_ON = Math.max(0.005, parseFloat(intOn.value) || 0);
+    intOnEl.addEventListener('input', ()=>{
+      MOVE.INT_ON = Math.max(0.005, parseFloat(intOnEl.value) || 0);
       if (MOVE.INT_OFF > MOVE.INT_ON){ MOVE.INT_OFF = MOVE.INT_ON; intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF); }
       intOnOut.textContent = fmt(MOVE.INT_ON);
-      ensureSliderRange(intOn, MOVE.INT_ON);
+      ensureSliderRange(intOnEl, MOVE.INT_ON);
       saveMoveConfig();
     });
 
-    driftOn.addEventListener('input', ()=>{
-      MOVE.DRIFT_ON = Math.max(0.005, parseFloat(driftOn.value) || 0);
+    driftOnEl.addEventListener('input', ()=>{
+      MOVE.DRIFT_ON = Math.max(0.005, parseFloat(driftOnEl.value) || 0);
       if (MOVE.DRIFT_OFF > MOVE.DRIFT_ON){ MOVE.DRIFT_OFF = MOVE.DRIFT_ON; driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF); }
       driftOnOut.textContent = fmt(MOVE.DRIFT_ON);
-      ensureSliderRange(driftOn, MOVE.DRIFT_ON);
+      ensureSliderRange(driftOnEl, MOVE.DRIFT_ON);
       saveMoveConfig();
     });
 
@@ -1019,6 +1044,7 @@
       initMovePanel(); saveMoveConfig();
       baseLm = null; moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
       calStatus.className='muted'; calStatus.textContent='Defaults restored';
+      calStats.style.display = 'none';
     });
 
     // Calibration button
