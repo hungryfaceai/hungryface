@@ -257,11 +257,19 @@
       <button id="driftReset" class="btn small" type="button">Reset baseline</button>
     </div>
 
-    <!-- Auto-calibration -->
+    <!-- Calibration -->
     <div class="groupTitle">Calibration</div>
     <div class="row">
+      <label for="calSecs">Duration</label>
+      <input id="calSecs" type="range" min="5" max="60" step="1">
+      <output id="calSecsOut">15 s</output>
+    </div>
+    <div class="checkRow">
+      <label><input id="calLive" type="checkbox"> Apply thresholds while running</label>
+    </div>
+    <div class="row">
       <label>Auto-calibrate</label>
-      <button id="calStart" class="btn small" type="button">Auto-calibrate (15s)</button>
+      <button id="calStart" class="btn small" type="button">Start</button>
       <output id="calStatus" class="muted">Idle</output>
     </div>
     <div class="row" id="calProgRow">
@@ -269,7 +277,7 @@
       <progress id="calProg" max="1" value="0"></progress>
       <output id="calTime">15s</output>
     </div>
-    <!-- Calibration stats (hidden until first run) -->
+    <!-- Calibration stats (visible during & after) -->
     <div id="calStats" style="display:none">
       <div class="row">
         <label>Median</label><span></span><output id="calMedian">—</output>
@@ -334,9 +342,13 @@
       // Detector toggles
       USE_EMA: true,
       USE_INT: true,
-      USE_DRIFT: true
+      USE_DRIFT: true,
+
+      // CAL: user-configurable duration + live apply
+      CAL_SECS: 15,
+      CAL_LIVE: true
     };
-    const LS_KEY = 'naptio-move-config-v5';
+    const LS_KEY = 'naptio-move-config-v6';
     const MOVE = { ...MOVE_DEFAULTS, ...loadMoveConfig() };
 
     // Mediapipe assets
@@ -394,6 +406,9 @@
     const useDrift = document.getElementById('useDrift');
 
     // Calibration UI
+    const calSecs     = document.getElementById('calSecs');
+    const calSecsOut  = document.getElementById('calSecsOut');
+    const calLive     = document.getElementById('calLive');
     const calStartBtn = document.getElementById('calStart');
     const calStatus   = document.getElementById('calStatus');
     const calProgRow  = document.getElementById('calProgRow');
@@ -428,10 +443,11 @@
     let lastTs = 0;
 
     // Calibration state
-    const CAL_DURATION_MS = 15000;
-    let calActive = false, calStart = 0;
+    let calActive = false, calStartMs = 0, calEndMs = 0;
     let calSamples = [];
     let lastGoodLm = null;
+    let lastCalUIRedraw = 0;
+    const CAL_RECAL_MS = 250; // throttle live recompute/UI
 
     // NEW: OFF follows ON until user touches OFF
     let offLink = { ema: false, int: false, drift: false };
@@ -647,7 +663,7 @@
       return dst;
     }
 
-    /* ---------- On-screen badge: bars (dim if disabled) ---------- */
+    /* ---------- On-screen badge: bars ---------- */
     function drawMovementBadge(movingState, emaVal, intVal, driftVal) {
       const ctx = poseCtx;
       const dpr = window.devicePixelRatio || 1;
@@ -664,7 +680,6 @@
       // Colors
       const BG      = movingState ? '#4a2a00' : '#111111';
       const BORDER  = movingState ? '#ffa64d' : 'rgba(255,255,255,0.25)';
-      const BAR_BG  = 'rgba(255,255,255,0.18)';
       const TXT_DIM = movingState ? '#ffcc80' : '#dddddd';
 
       // State pill
@@ -804,14 +819,35 @@
         baseLm = blendLm(baseLm, lm, a);
       }
 
-      // Calibration sampling/progress
+      /* ---- CAL: live sampling + (optional) live threshold updates ---- */
       if (calActive) {
         calSamples.push(raw);
         lastGoodLm = cloneLm(lm);
-        const t = now - calStart;
-        calProg.value = Math.min(1, t / CAL_DURATION_MS);
-        calTime.textContent = Math.max(0, Math.ceil((CAL_DURATION_MS - t)/1000)) + 's';
-        if (t >= CAL_DURATION_MS) finishCalibration();
+        // Update progress/time using dynamic end time
+        const t = now - calStartMs;
+        const durMs = Math.max(1000, Math.round((calEndMs - calStartMs)));
+        calProg.value = Math.min(1, t / durMs);
+        calTime.textContent = Math.max(0, Math.ceil((calEndMs - now)/1000)) + 's';
+
+        // Throttled recompute of stats & live apply
+        if ((now - lastCalUIRedraw) >= CAL_RECAL_MS) {
+          lastCalUIRedraw = now;
+          const m   = quantile(calSamples, 0.5);
+          const p95 = quantile(calSamples, 0.95);
+          const n   = calSamples.length;
+
+          // show stats during calibration too
+          calStats.style.display = 'block';
+          calMedian.textContent = m.toFixed(4);
+          calP95.textContent    = p95.toFixed(4);
+          calN.textContent      = String(n);
+
+          if (MOVE.CAL_LIVE && n >= 20) {
+            applyThresholdsFromStats(m, p95, /*isFinal=*/false);
+          }
+        }
+
+        if (now >= calEndMs) finishCalibration();
       }
 
       // Draw overlay + reflect panel
@@ -845,16 +881,57 @@
       return a[i]*(1-w) + a[j]*w;
     }
 
+    // CAL: single place to compute thresholds (used live & at finish)
+    function applyThresholdsFromStats(m, p95, isFinal) {
+      // Compute ON thresholds (no artificial cap in math)
+      const emaOn   = Math.max(3.5*m, 1.2*p95, 0.01);
+      const intOn   = MOVE.INT_TAU * m * 2.5;
+      const driftOn = Math.max(5.0*m, 1.5*emaOn, 0.02);
+
+      MOVE.ON        = Math.max(0.005, emaOn);
+      MOVE.INT_ON    = Math.max(0.005, intOn);
+      MOVE.DRIFT_ON  = Math.max(0.005, driftOn);
+
+      // OFF = ON (and kept ≤ ON). If user hasn't edited OFF yet, keep them linked.
+      if (isFinal || offLink.ema)   { MOVE.OFF       = MOVE.ON; }
+      if (isFinal || offLink.int)   { MOVE.INT_OFF   = MOVE.INT_ON; }
+      if (isFinal || offLink.drift) { MOVE.DRIFT_OFF = MOVE.DRIFT_ON; }
+
+      // Reflect sliders + caps (and maintain OFF ≤ ON)
+      onTh.value       = MOVE.ON;       onOut.textContent       = MOVE.ON.toFixed(3);
+      intOnEl.value    = MOVE.INT_ON;   intOnOut.textContent    = MOVE.INT_ON.toFixed(3);
+      driftOnEl.value  = MOVE.DRIFT_ON; driftOnOut.textContent  = MOVE.DRIFT_ON.toFixed(3);
+
+      offTh.value      = Math.min(MOVE.OFF, MOVE.ON);
+      offOut.textContent = (MOVE.OFF = Math.min(MOVE.OFF, MOVE.ON)).toFixed(3);
+
+      intOff.value     = Math.min(MOVE.INT_OFF, MOVE.INT_ON);
+      intOffOut.textContent = (MOVE.INT_OFF = Math.min(MOVE.INT_OFF, MOVE.INT_ON)).toFixed(3);
+
+      driftOff.value   = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON);
+      driftOffOut.textContent = (MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON)).toFixed(3);
+
+      applyOnCaps();
+      // NOTE: we avoid saveMoveConfig() here to not spam localStorage during live updates.
+    }
+
     function startCalibration() {
       if (calActive) return;
-      calActive = true; calStart = performance.now();
-      calSamples = []; lastGoodLm = null;
+      calActive = true;
+      calStartMs = performance.now();
+      calEndMs   = calStartMs + (Math.max(5, Math.min(60, MOVE.CAL_SECS)) * 1000);
+      calSamples = [];
+      lastGoodLm = null;
+      lastCalUIRedraw = 0;
 
       calStats.style.display = 'none';
       calStatus.className = 'muted';
       calStatus.textContent = 'Calibrating — keep still';
       calProgRow.style.display = 'grid';
-      calProg.value = 0; calTime.textContent = Math.round(CAL_DURATION_MS/1000) + 's';
+      calProg.value = 0; calTime.textContent = Math.round((calEndMs - calStartMs)/1000) + 's';
+
+      // While calibrating, keep OFFs linked so they follow ONs unless user edits.
+      offLink = { ema: true, int: true, drift: true };
     }
 
     function finishCalibration() {
@@ -864,46 +941,18 @@
       const m   = quantile(calSamples, 0.5);
       const p95 = quantile(calSamples, 0.95);
       const n   = calSamples.length;
-      const floor = (v, min) => Math.max(min, v);
 
-      // Compute ON thresholds (no artificial cap in the math)
-      const emaOn    = Math.max(3.5*m, 1.2*p95, 0.01);
-      const intOn    = MOVE.INT_TAU * m * 2.5;
-      const driftOn  = Math.max(5.0*m, 1.5*emaOn, 0.02);
-
-      MOVE.ON        = floor(emaOn, 0.005);
-      MOVE.INT_ON    = floor(intOn, 0.005);
-      MOVE.DRIFT_ON  = floor(driftOn, 0.005);
-
-      // OFF = ON by default after calibration; OFF ≤ ON invariant
-      MOVE.OFF       = MOVE.ON;
-      MOVE.INT_OFF   = MOVE.INT_ON;
-      MOVE.DRIFT_OFF = MOVE.DRIFT_ON;
-
-      // Mark OFFs as "linked" until the user changes them
-      offLink = { ema: true, int: true, drift: true };
+      applyThresholdsFromStats(m, p95, /*isFinal=*/true);
 
       // Seed baseline & clear dynamic scores for stability
       if (lastGoodLm) baseLm = cloneLm(lastGoodLm);
       moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
 
-      // Reflect UI values
-      onTh.value       = MOVE.ON;       onOut.textContent       = MOVE.ON.toFixed(3);
-      intOnEl.value    = MOVE.INT_ON;   intOnOut.textContent    = MOVE.INT_ON.toFixed(3);
-      driftOnEl.value  = MOVE.DRIFT_ON; driftOnOut.textContent  = MOVE.DRIFT_ON.toFixed(3);
-
-      offTh.value      = MOVE.OFF;      offOut.textContent      = MOVE.OFF.toFixed(3);
-      intOff.value     = MOVE.INT_OFF;  intOffOut.textContent   = MOVE.INT_OFF.toFixed(3);
-      driftOff.value   = MOVE.DRIFT_OFF;driftOffOut.textContent = MOVE.DRIFT_OFF.toFixed(3);
-
-      // Apply ON caps to sliders (and clamp if calibration exceeded caps)
-      applyOnCaps();
-
       // Persist + refresh panel text
       saveMoveConfig();
       initMovePanel();
 
-      // Stats
+      // Stats visible after calibration
       calMedian.textContent = m.toFixed(4);
       calP95.textContent    = p95.toFixed(4);
       calN.textContent      = String(n);
@@ -911,7 +960,7 @@
 
       calStatus.className = 'ok';
       calStatus.textContent = 'Calibrated';
-      setTimeout(()=>{ if (!calActive) calStatus.textContent = ''; }, 4000);
+      setTimeout(()=>{ if (!calActive) calStatus.textContent = ''; }, 3000);
     }
 
     /* ---------- Clear / stream end helpers ---------- */
@@ -1066,17 +1115,13 @@
     const clampUi = (v,min,max)=>Math.max(min,Math.min(max,v));
     const fmt = (n,d=3)=>Number(n).toFixed(d);
 
-    // NEW: Cap ON sliders and clamp values if needed
+    // Cap ON sliders + enforce OFF≤ON
     function applyOnCaps() {
-      // Static caps
       onTh.max      = '0.500';   // EMA ON cap
       driftOnEl.max = '1.000';   // DRIFT ON cap
-
-      // INT ON cap depends on tau
       const intCap = Math.min(2.0, MOVE.INT_TAU * 0.8);
       intOnEl.max = intCap.toFixed(3);
 
-      // Clamp current values to caps
       if (parseFloat(onTh.value) > parseFloat(onTh.max)) {
         onTh.value = onTh.max; MOVE.ON = parseFloat(onTh.max); onOut.textContent = fmt(MOVE.ON);
       }
@@ -1087,7 +1132,7 @@
         intOnEl.value = intOnEl.max; MOVE.INT_ON = parseFloat(intOnEl.max); intOnOut.textContent = fmt(MOVE.INT_ON);
       }
 
-      // Enforce OFF ≤ ON (and keep links)
+      // OFF ≤ ON (and keep links honored)
       if (offLink.ema || MOVE.OFF > MOVE.ON) {
         MOVE.OFF = Math.min(MOVE.OFF, MOVE.ON); offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF);
       }
@@ -1123,9 +1168,13 @@
       driftOff.value = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON); driftOffOut.textContent = fmt(MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON));
       driftTorsoRel.checked = !!MOVE.DRIFT_TORSO_REL;
 
-      // Apply caps now that values are set
-      applyOnCaps();
+      // CAL controls
+      calSecs.value = clampUi(MOVE.CAL_SECS, 5, 60);
+      calSecsOut.textContent = `${calSecs.value} s`;
+      MOVE.CAL_SECS = parseInt(calSecs.value,10);
+      calLive.checked = !!MOVE.CAL_LIVE;
 
+      applyOnCaps();
       reflectPanel();
     }
 
@@ -1153,7 +1202,6 @@
     });
     onTh.addEventListener('input', ()=>{
       MOVE.ON = Math.max(0.005, parseFloat(onTh.value) || 0);
-      // keep OFF ≤ ON; if linked, follow
       if (offLink.ema || MOVE.OFF > MOVE.ON) {
         MOVE.OFF = MOVE.ON;
         offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF);
@@ -1215,9 +1263,28 @@
 
     driftReset.addEventListener('click', ()=>{ baseLm = null; calStatus.className='muted'; calStatus.textContent='Baseline reset'; });
 
+    // CAL controls wiring
+    calSecs.addEventListener('input', ()=>{
+      MOVE.CAL_SECS = Math.max(5, Math.min(60, parseInt(calSecs.value,10) || 15));
+      calSecsOut.textContent = `${MOVE.CAL_SECS} s`;
+      saveMoveConfig();
+      // If running, shift the end time live
+      if (calActive) {
+        calEndMs = calStartMs + MOVE.CAL_SECS * 1000;
+      }
+    });
+    calLive.addEventListener('change', ()=>{
+      MOVE.CAL_LIVE = !!calLive.checked;
+      saveMoveConfig();
+    });
+    const calStartBtn = document.getElementById('calStart');
+    calStartBtn.addEventListener('click', () => {
+      openMovePanel();
+      startCalibration();
+    });
+
     moveReset.addEventListener('click', () => {
       Object.assign(MOVE, MOVE_DEFAULTS);
-      // When resetting to defaults, OFF should not exceed ON
       MOVE.OFF       = Math.min(MOVE.OFF, MOVE.ON);
       MOVE.INT_OFF   = Math.min(MOVE.INT_OFF, MOVE.INT_ON);
       MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON);
@@ -1226,12 +1293,6 @@
       baseLm = null; moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
       calStatus.className='muted'; calStatus.textContent='Defaults restored';
       calStats.style.display = 'none';
-    });
-
-    // Calibration button
-    calStartBtn.addEventListener('click', () => {
-      openMovePanel();
-      startCalibration();
     });
 
     initMovePanel();
