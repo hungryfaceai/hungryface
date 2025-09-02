@@ -735,6 +735,7 @@
     }
 
     /* ---------- Receiver-mode (mic) ---------- */
+    // (retained but unused; we now classify from remote stream)
     function makeScriptProcessor(ctx, onAudio) {
       const sp = ctx.createScriptProcessor(4096, 1, 1);
       sp.onaudioprocess = (e) => onAudio(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate);
@@ -828,19 +829,19 @@
     }
 
     async function onAudioChunkReceiver(chunkFloat32, deviceSr) {
-      if (!state.running || !state.usingMic) return;
+      if (!state.running /* no mic flag check; we also use this for remote */) return;
       const task = await ensureAudioTask().catch(e => { console.warn('[CRY][mp] task unavailable on chunk', e); return null; });
       if (!task) return;
       const params = getParams();
 
-      // live RMS (mic)
+      // live RMS (mic/remote)
       let s = 0; for (let i=0;i<chunkFloat32.length;i++){ const v=chunkFloat32[i]; s += v*v; }
       const r = Math.sqrt(s / Math.max(1, chunkFloat32.length));
       setSignalRMS(r);
       if (LOG.rmsEvery) {
         window._dbgMicCount = (window._dbgMicCount || 0) + 1;
         if ((window._dbgMicCount % LOG.rmsEvery) === 0) {
-          console.log('[CRY][mic] rms(device) =', r.toFixed(4));
+          console.log('[CRY][rx] rms(device) =', r.toFixed(4));
         }
       }
 
@@ -861,7 +862,7 @@
           w = pad;
         }
 
-        //const result = await task.classify({ audioClip: w, sampleRateHz: params.SR_TARGET }); //https://chatgpt.com/c/68b43191-f6a0-8320-a3d7-da575e4c13df
+        //const result = await task.classify({ audioClip: w, sampleRateHz: params.SR_TARGET });
         const result = await task.classify(w, params.SR_TARGET);
         const categories = extractCategories(result);
 
@@ -869,16 +870,16 @@
           window._dbgCatEvery = (window._dbgCatEvery || 0) + 1;
           if ((window._dbgCatEvery % LOG.catEvery) === 0) {
             const top = categories.slice(0,5).map(c => `${categoryLabel(c)}:${(c.score ?? 0).toFixed(3)}`);
-            console.log('[CRY][mic] categories length =', categories.length, 'top =', top.join(', '));
+            console.log('[CRY][rx] categories length =', categories.length, 'top =', top.join(', '));
           }
         }
         if (LOG.firstResult && !window._dbgFirstMicResult) {
           window._dbgFirstMicResult = true;
-          console.log('[CRY][mic] FIRST result =', result);
+          console.log('[CRY][rx] FIRST result =', result);
         }
         window._dbgEmptyCount = (window._dbgEmptyCount || 0) + 1;
         if (!categories.length && (window._dbgEmptyCount % 10 === 0)) {
-          console.warn('[CRY][mic] categories EMPTY (len=0). result.classifications =', result?.classifications);
+          console.warn('[CRY][rx] categories EMPTY (len=0). result.classifications =', result?.classifications);
         }
 
         const score = getCryScoreFromCategories(categories, params.INCLUDE_CLASSES);
@@ -908,75 +909,102 @@
       return out;
     }
 
-    /* ---------- Sender-mode spectrum from remote stream ---------- */
-    function startRemoteSpectrumGraphIfPossible() {
+    /* ---------- Remote-stream tap (spectrum + optional classification) ---------- */
+    function startRemoteStreamGraph(doClassify) {
       if (!state.streamRemote) { console.log('[CRY][remote] no stream yet'); return; }
-      if (state.analyser && !state.usingMic) {
-        console.log('[CRY][remote] spectrum already running');
+
+      // If graph already running in the requested mode, keep it.
+      if (state.analyser && !!state.processor === !!doClassify && !state.usingMic) {
+        console.log('[CRY][remote] stream graph already running (classify=', !!doClassify, ')');
         return;
       }
 
-      stopRemoteSpectrumGraph();
+      stopRemoteStreamGraph(); // clean prior graph
 
-      console.log('[CRY][remote] starting spectrum from remote stream…');
+      console.log('[CRY][remote] starting stream graph… classify =', !!doClassify);
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
       state.audioCtx = ctx;
       ctx.resume?.().catch(()=>{});
+
       const src = ctx.createMediaStreamSource(state.streamRemote);
+
+      // FFT analyser (for spectrum chart)
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.0;
+
+      // Time-domain analyser (RMS meter)
+      const td = ctx.createAnalyser();
+      td.fftSize = 1024;
+
+      // Silent sink (avoid feedback)
       const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
 
       src.connect(analyser);
+      src.connect(td);
       src.connect(sink);
 
-      // NEW: time-domain analyser for RMS in sender mode
-      const td = ctx.createAnalyser();
-      td.fftSize = 1024;
-      src.connect(td);
-      state.tdAnalyser = td;
-
       state.sourceNode = src;
-      state.analyser = analyser;
-      state.sinkNode = sink;
+      state.analyser   = analyser;
+      state.tdAnalyser = td;
+      state.sinkNode   = sink;
+      state.usingMic   = false; // we are not using the local mic
 
+      // Optional: classification tap from the remote stream
+      if (doClassify) {
+        let proc;
+        (async () => {
+          try {
+            const workletURL = URL.createObjectURL(new Blob([`
+              class TapProcessor extends AudioWorkletProcessor {
+                process(inputs) {
+                  const input = inputs[0];
+                  if (input && input[0]) this.port.postMessage(input[0].slice(0));
+                  return true;
+                }
+              }
+              registerProcessor('tap-processor', TapProcessor);
+            `], { type: 'application/javascript' }));
+            await ctx.audioWorklet.addModule(workletURL);
+            URL.revokeObjectURL(workletURL);
+
+            proc = new AudioWorkletNode(ctx, 'tap-processor', {
+              numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1
+            });
+            proc.port.onmessage = (ev) => onAudioChunkReceiver(ev.data, ctx.sampleRate);
+          } catch {
+            // Fallback: ScriptProcessor (works everywhere)
+            proc = ctx.createScriptProcessor(4096, 1, 1);
+            proc.onaudioprocess = (e) => {
+              onAudioChunkReceiver(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate);
+            };
+          }
+          src.connect(proc).connect(sink);
+          state.processor = proc;
+          console.log('[CRY][remote] classification tap active @', ctx.sampleRate, 'Hz');
+        })();
+      } else {
+        state.processor = null;
+      }
+
+      // Charts + RMS loop
       prepareSpectrumArrays(ctx);
       startSpectrumLoop();
     }
 
-    function stopRemoteSpectrumGraph() {
-      if (!state.analyser || state.usingMic) return;
-      console.log('[CRY][remote] stopping remote spectrum graph');
+    function stopRemoteStreamGraph() {
+      if (!state.analyser && !state.processor && state.usingMic === false) return;
+      console.log('[CRY][remote] stopping stream graph');
+      try { state.processor?.disconnect(); } catch {}
       try { state.sourceNode?.disconnect(); } catch {}
       try { state.sinkNode?.disconnect(); } catch {}
       try { state.audioCtx && state.audioCtx.state !== 'closed' && state.audioCtx.close(); } catch {}
-      state.sourceNode = null; state.sinkNode = null; state.audioCtx = null;
-      state.analyser = null; state.tdAnalyser = null;
-    }
-
-    /* ---------- Spectrum arrays + loop ---------- */
-    function prepareSpectrumArrays(ctx) {
-      const analyser = state.analyser;
-      const binCount = analyser.frequencyBinCount;
-      state.specBinCountAll = binCount;
-
-      state.specFreqs = new Array(binCount);
-      for (let i = 0; i < binCount; i++) state.specFreqs[i] = i * ctx.sampleRate / analyser.fftSize;
-
-      const nyquist = ctx.sampleRate / 2;
-      const fMax = Math.min(8000, nyquist);
-
-      state.specStartIdx = 0; while (state.specStartIdx < binCount && state.specFreqs[state.specStartIdx] < 20) state.specStartIdx++;
-      state.specEndIdx   = binCount - 1; while (state.specEndIdx > 0 && state.specFreqs[state.specEndIdx] > fMax) state.specEndIdx--;
-
-      state.specRawDb = new Array(binCount).fill(-100);
-      state.specSmDb  = new Array(binCount).fill(-100);
-
-      setupSpectrumChart(state.specFreqs.slice(state.specStartIdx, state.specEndIdx + 1));
-      updateSpectrumChartVisibility();
-
-      if (LOG.spectrum) console.log('[CRY][spectrum] prepared @ fs=', ctx.sampleRate, 'Hz, bins=', binCount, 'range=', state.specStartIdx, '-', state.specEndIdx);
+      state.processor = null;
+      state.sourceNode = null;
+      state.sinkNode = null;
+      state.analyser = null;
+      state.tdAnalyser = null;
+      state.audioCtx = null;
     }
 
     function startSpectrumLoop() {
@@ -1002,12 +1030,9 @@
           }
           updateSpectrumChart();
 
-          // NEW: update RMS from time-domain analyser (sender mode)
+          // NEW: update RMS from time-domain analyser
           if (td && tdBuf) {
             td.getFloatTimeDomainData(tdBuf);
-            // convert from [-1,1] floats in dB to linear samples: for FFT time-domain data in WebAudio,
-            // getFloatTimeDomainData returns linear floats [-1,1] already (not dB).
-            // But on some browsers it's not available; guard above handles it.
             let s = 0;
             for (let i=0;i<tdBuf.length;i++){ const v = tdBuf[i]; s += v*v; }
             const r = Math.sqrt(s / Math.max(1, tdBuf.length));
@@ -1029,7 +1054,8 @@
 
     /* ---------- Mic enable UI (user gesture) ---------- */
     function updateMicButton() {
-      enableMicBtn.style.display = (audioEnabled && audioWhere === 'receiver' && !state.usingMic) ? 'block' : 'none';
+      // We classify from the remote stream; hide mic button entirely.
+      enableMicBtn.style.display = 'none';
     }
 
     enableMicBtn.addEventListener('click', async (e) => {
@@ -1061,7 +1087,7 @@
         setStatus('Audio AI disabled');
         stopSpectrumLoop();
         stopReceiverMicGraph();
-        stopRemoteSpectrumGraph();
+        stopRemoteStreamGraph();
         updateMicButton();
         // zero the meter
         setSignalRMS(0);
@@ -1069,16 +1095,24 @@
       }
 
       if (audioWhere === 'receiver') {
-        stopRemoteSpectrumGraph();
-        updateMicButton();
-        setStatus(state.usingMic ? 'Mic inference (receiver)' : 'Tap “Enable mic”');
-      } else { // 'sender'
+        // Classify from REMOTE stream on the receiver
         stopReceiverMicGraph();
-        updateMicButton(); // hide mic button
+        updateMicButton(); // keep hidden
         if (state.streamRemote) {
-          startRemoteSpectrumGraphIfPossible();
+          startRemoteStreamGraph(true); // classify = true
+          setStatus('Inference on receiver (tapped remote stream)');
+        } else {
+          setStatus('Receiver inference – waiting for remote stream…');
+        }
+      } else { // 'sender'
+        // No local classification; keep spectrum/RMS from remote for health
+        stopReceiverMicGraph();
+        updateMicButton();
+        if (state.streamRemote) {
+          startRemoteStreamGraph(false); // spectrum only, scores come via DC
           setStatus('Remote inference (sender) – waiting for scores…');
         } else {
+          stopRemoteStreamGraph();
           setStatus('Remote inference (sender) – waiting for stream…');
         }
       }
@@ -1176,8 +1210,11 @@
           remoteVideo.srcObject = stream;
           state.streamRemote = stream;
           tryStartMuted();
-          if (state.running && audioEnabled && audioWhere === 'sender') {
-            startRemoteSpectrumGraphIfPossible();
+          if (state.running && audioEnabled) {
+            startRemoteStreamGraph(audioWhere === 'receiver'); // classify only in receiver mode
+            setStatus(audioWhere === 'receiver'
+              ? 'Inference on receiver (tapped remote stream)'
+              : 'Remote inference (sender) – waiting for scores…');
           }
         }
       },
@@ -1257,7 +1294,7 @@
       try { core.close(); } catch {}
       stopSpectrumLoop();
       stopReceiverMicGraph();
-      stopRemoteSpectrumGraph();
+      stopRemoteStreamGraph(); // (renamed)
       console.log('[CRY] unload cleanup done');
     });
   </script>
