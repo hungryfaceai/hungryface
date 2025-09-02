@@ -449,7 +449,7 @@
     let lastCalUIRedraw = 0;
     const CAL_RECAL_MS = 250; // throttle live recompute/UI
 
-    // NEW: OFF follows ON until user touches OFF
+    // OFF follows ON until user touches OFF
     let offLink = { ema: false, int: false, drift: false };
 
     /* ---------- Status overlay ---------- */
@@ -819,24 +819,21 @@
         baseLm = blendLm(baseLm, lm, a);
       }
 
-      /* ---- CAL: live sampling + (optional) live threshold updates ---- */
+      /* ---- Calibration: live sampling + (optional) live threshold updates ---- */
       if (calActive) {
         calSamples.push(raw);
         lastGoodLm = cloneLm(lm);
-        // Update progress/time using dynamic end time
         const t = now - calStartMs;
         const durMs = Math.max(1000, Math.round((calEndMs - calStartMs)));
         calProg.value = Math.min(1, t / durMs);
         calTime.textContent = Math.max(0, Math.ceil((calEndMs - now)/1000)) + 's';
 
-        // Throttled recompute of stats & live apply
         if ((now - lastCalUIRedraw) >= CAL_RECAL_MS) {
           lastCalUIRedraw = now;
           const m   = quantile(calSamples, 0.5);
           const p95 = quantile(calSamples, 0.95);
           const n   = calSamples.length;
 
-          // show stats during calibration too
           calStats.style.display = 'block';
           calMedian.textContent = m.toFixed(4);
           calP95.textContent    = p95.toFixed(4);
@@ -881,9 +878,7 @@
       return a[i]*(1-w) + a[j]*w;
     }
 
-    // CAL: single place to compute thresholds (used live & at finish)
     function applyThresholdsFromStats(m, p95, isFinal) {
-      // Compute ON thresholds (no artificial cap in math)
       const emaOn   = Math.max(3.5*m, 1.2*p95, 0.01);
       const intOn   = MOVE.INT_TAU * m * 2.5;
       const driftOn = Math.max(5.0*m, 1.5*emaOn, 0.02);
@@ -892,12 +887,10 @@
       MOVE.INT_ON    = Math.max(0.005, intOn);
       MOVE.DRIFT_ON  = Math.max(0.005, driftOn);
 
-      // OFF = ON (and kept ≤ ON). If user hasn't edited OFF yet, keep them linked.
       if (isFinal || offLink.ema)   { MOVE.OFF       = MOVE.ON; }
       if (isFinal || offLink.int)   { MOVE.INT_OFF   = MOVE.INT_ON; }
       if (isFinal || offLink.drift) { MOVE.DRIFT_OFF = MOVE.DRIFT_ON; }
 
-      // Reflect sliders + caps (and maintain OFF ≤ ON)
       onTh.value       = MOVE.ON;       onOut.textContent       = MOVE.ON.toFixed(3);
       intOnEl.value    = MOVE.INT_ON;   intOnOut.textContent    = MOVE.INT_ON.toFixed(3);
       driftOnEl.value  = MOVE.DRIFT_ON; driftOnOut.textContent  = MOVE.DRIFT_ON.toFixed(3);
@@ -912,7 +905,6 @@
       driftOffOut.textContent = (MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON)).toFixed(3);
 
       applyOnCaps();
-      // NOTE: we avoid saveMoveConfig() here to not spam localStorage during live updates.
     }
 
     function startCalibration() {
@@ -1268,16 +1260,12 @@
       MOVE.CAL_SECS = Math.max(5, Math.min(60, parseInt(calSecs.value,10) || 15));
       calSecsOut.textContent = `${MOVE.CAL_SECS} s`;
       saveMoveConfig();
-      // If running, shift the end time live
-      if (calActive) {
-        calEndMs = calStartMs + MOVE.CAL_SECS * 1000;
-      }
+      if (calActive) calEndMs = calStartMs + MOVE.CAL_SECS * 1000; // update live
     });
     calLive.addEventListener('change', ()=>{
       MOVE.CAL_LIVE = !!calLive.checked;
       saveMoveConfig();
     });
-    const calStartBtn = document.getElementById('calStart');
     calStartBtn.addEventListener('click', () => {
       openMovePanel();
       startCalibration();
