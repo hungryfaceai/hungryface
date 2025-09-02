@@ -66,9 +66,6 @@
     #movePanel {
       position: fixed; right: 16px; bottom: 80px; z-index: 7;
       width: min(380px, 92vw);
-      max-height: 80vh;          /* allow scrolling */
-      overflow-y: auto;          /* allow scrolling */
-      -webkit-overflow-scrolling: touch;
       background: rgba(20,20,20,0.9);
       border: 1px solid rgba(255,255,255,0.12);
       border-radius: 14px;
@@ -202,12 +199,12 @@
     </div>
     <div class="row">
       <label for="onTh">EMA ON</label>
-      <input id="onTh" type="range" min="0.005" max="0.500" step="0.005">
+      <input id="onTh" type="range" min="0.005" max="1.000" step="0.005">
       <output id="onOut">0.060</output>
     </div>
     <div class="row">
       <label for="offTh">EMA OFF</label>
-      <input id="offTh" type="range" min="0.005" max="0.500" step="0.005">
+      <input id="offTh" type="range" min="0.005" max="0.300" step="0.005">
       <output id="offOut">0.030</output>
     </div>
 
@@ -223,12 +220,12 @@
     </div>
     <div class="row">
       <label for="intOn">INT ON</label>
-      <input id="intOn" type="range" min="0.005" max="2.000" step="0.005">
+      <input id="intOn" type="range" min="0.005" max="1.000" step="0.005">
       <output id="intOnOut">0.035</output>
     </div>
     <div class="row">
       <label for="intOff">INT OFF</label>
-      <input id="intOff" type="range" min="0.005" max="2.000" step="0.005">
+      <input id="intOff" type="range" min="0.005" max="0.100" step="0.005">
       <output id="intOffOut">0.020</output>
     </div>
 
@@ -249,7 +246,7 @@
     </div>
     <div class="row">
       <label for="driftOff">DRIFT OFF</label>
-      <input id="driftOff" type="range" min="0.005" max="1.000" step="0.005">
+      <input id="driftOff" type="range" min="0.005" max="0.150" step="0.005">
       <output id="driftOffOut">0.050</output>
     </div>
     <div class="checkRow">
@@ -898,7 +895,6 @@
       intOnEl.value    = MOVE.INT_ON;   intOnOut.textContent    = MOVE.INT_ON.toFixed(3);
       driftOnEl.value  = MOVE.DRIFT_ON; driftOnOut.textContent  = MOVE.DRIFT_ON.toFixed(3);
 
-      // Keep OFF ≤ ON and update displays
       offTh.value      = Math.min(MOVE.OFF, MOVE.ON);
       offOut.textContent = (MOVE.OFF = Math.min(MOVE.OFF, MOVE.ON)).toFixed(3);
 
@@ -1111,20 +1107,13 @@
     const clampUi = (v,min,max)=>Math.max(min,Math.min(max,v));
     const fmt = (n,d=3)=>Number(n).toFixed(d);
 
-    // Cap ON sliders + enforce OFF≤ON and keep OFF ranges identical to ON
+    // Cap ON sliders + enforce OFF≤ON
     function applyOnCaps() {
-      // Caps for ON
-      onTh.max      = '0.500';                       // EMA ON cap
-      driftOnEl.max = '1.000';                       // DRIFT ON cap
+      onTh.max      = '0.500';   // EMA ON cap
+      driftOnEl.max = '1.000';   // DRIFT ON cap
       const intCap = Math.min(2.0, MOVE.INT_TAU * 0.8);
-      intOnEl.max = intCap.toFixed(3);               // INT ON cap depends on τ
+      intOnEl.max = intCap.toFixed(3);
 
-      // Make OFF share the same range as ON
-      offTh.max   = onTh.max;                        // EMA OFF max == EMA ON max
-      intOff.max  = intOnEl.max;                     // INT OFF max == INT ON max
-      driftOff.max= driftOnEl.max;                   // DRIFT OFF max == DRIFT ON max
-
-      // Clamp ON to caps (if needed)
       if (parseFloat(onTh.value) > parseFloat(onTh.max)) {
         onTh.value = onTh.max; MOVE.ON = parseFloat(onTh.max); onOut.textContent = fmt(MOVE.ON);
       }
@@ -1135,18 +1124,15 @@
         intOnEl.value = intOnEl.max; MOVE.INT_ON = parseFloat(intOnEl.max); intOnOut.textContent = fmt(MOVE.INT_ON);
       }
 
-      // Enforce OFF ≤ ON (and keep links honored)
+      // OFF ≤ ON (and keep links honored)
       if (offLink.ema || MOVE.OFF > MOVE.ON) {
-        MOVE.OFF = Math.min(MOVE.OFF, MOVE.ON);
-        offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF);
+        MOVE.OFF = Math.min(MOVE.OFF, MOVE.ON); offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF);
       }
       if (offLink.int || MOVE.INT_OFF > MOVE.INT_ON) {
-        MOVE.INT_OFF = Math.min(MOVE.INT_OFF, MOVE.INT_ON);
-        intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF);
+        MOVE.INT_OFF = Math.min(MOVE.INT_OFF, MOVE.INT_ON); intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF);
       }
       if (offLink.drift || MOVE.DRIFT_OFF > MOVE.DRIFT_ON) {
-        MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON);
-        driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF);
+        MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON); driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF);
       }
     }
 
