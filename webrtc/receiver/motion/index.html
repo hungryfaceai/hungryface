@@ -41,7 +41,6 @@
       cursor: pointer; box-shadow: none;
       text-shadow: 0 1px 2px rgba(0,0,0,0.6);
     }
-    .btn.small { padding: 8px 10px; font-size: 13px; border-radius: 10px; }
     .btn:active { transform: scale(0.99); }
 
     #controls {
@@ -79,7 +78,9 @@
       display: flex; align-items: center; justify-content: space-between;
       gap: 8px; margin-bottom: 6px;
     }
-    #movePanel h3 { margin: 0; font-size: 14px; font-weight: 700; color: #eee; }
+    #movePanel h3 {
+      margin: 0; font-size: 14px; font-weight: 700; color: #eee;
+    }
     #movePanel .close {
       appearance: none; border: none; background: transparent; color: #aaa;
       font-size: 20px; line-height: 1; cursor: pointer; padding: 2px 6px;
@@ -107,16 +108,18 @@
     #movePanel .pill.moving  { background: #4a2a00; color: #ffcc80; border-color: #ffa64d; }
     #movePanel .pill.still   { background: #111;   color: #ddd;     border-color: rgba(255,255,255,0.25); }
     #movePanel .groupTitle { margin: 10px 0 2px; font-size: 12px; color: #bbb; font-weight: 700; }
+    #movePanel .row3 { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; }
     #movePanel .actions {
       display: flex; gap: 8px; justify-content: space-between; margin-top: 6px; align-items: center;
     }
-
-    /* Calibration bits */
-    #calProgRow { display: none; }
-    #calStatus.ok { color: #b7f0b7; }
-    #calStatus.warn { color: #ffd27a; }
-    #calStatus.err { color: #ff9b9b; }
-    progress { width: 100%; height: 6px; border-radius: 999px; overflow: hidden; }
+    #movePanel .small {
+      padding: 8px 10px; font-size: 13px; border-radius: 10px;
+    }
+    #movePanel .checkRow {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; margin-top: 4px;
+    }
+    #movePanel .checkRow label { display: flex; align-items: center; gap: 8px; }
   </style>
 </head>
 <body>
@@ -145,7 +148,7 @@
 
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
-    <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
+    <button id="disableAudioBtn" class="btn" type="button">Disable audio</</button>
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
     <button id="moveBtn" class="btn" type="button">Movement settings</button>
   </div>
@@ -164,7 +167,7 @@
       </div>
     </div>
 
-    <!-- Confidence gates -->
+    <!-- Visibility / presence gates -->
     <div class="groupTitle">Confidence gates</div>
     <div class="row">
       <label for="visMin">Visibility min</label>
@@ -230,28 +233,12 @@
       <input id="driftOff" type="range" min="0.005" max="0.150" step="0.005">
       <output id="driftOffOut">0.050</output>
     </div>
-    <div class="row">
-      <label for="driftTorsoRel">Torso-relative</label>
-      <input id="driftTorsoRel" type="checkbox">
-      <output></output>
-    </div>
-    <div class="row">
-      <label>Baseline</label>
+    <div class="checkRow">
+      <label>
+        <input id="driftTorsoRel" type="checkbox">
+        Torso-relative baseline (reduces camera shake)
+      </label>
       <button id="driftReset" class="btn small" type="button">Reset baseline</button>
-      <output></output>
-    </div>
-
-    <!-- Auto-calibration -->
-    <div class="groupTitle">Calibration</div>
-    <div class="row">
-      <label>Auto-calibrate</label>
-      <button id="calStart" class="btn small" type="button">Auto-calibrate (15s)</button>
-      <output id="calStatus" class="muted">Idle</output>
-    </div>
-    <div class="row" id="calProgRow">
-      <label>Progress</label>
-      <progress id="calProg" max="1" value="0"></progress>
-      <output id="calTime">0s</output>
     </div>
 
     <div class="actions">
@@ -294,17 +281,17 @@
       MIN_SCALE: 0.02,
 
       // Long-term (Integrator)
-      INT_TAU: 3.0,   // seconds
+      INT_TAU: 3.0,   // seconds, decay time-constant
       INT_ON:  0.035,
       INT_OFF: 0.020,
 
       // Baseline drift
-      DRIFT_TAU: 2.5,      // seconds (adapts only when STILL)
+      DRIFT_TAU: 2.5,      // seconds, baseline adapt speed (only when STILL)
       DRIFT_ON:  0.080,
       DRIFT_OFF: 0.050,
       DRIFT_TORSO_REL: true
     };
-    const LS_KEY = 'naptio-move-config-v4';
+    const LS_KEY = 'naptio-move-config-v3';
     const MOVE = { ...MOVE_DEFAULTS, ...loadMoveConfig() };
 
     // Mediapipe assets
@@ -356,13 +343,6 @@
     const driftTorsoRel = document.getElementById('driftTorsoRel');
     const driftReset  = document.getElementById('driftReset');
 
-    // Calibration UI
-    const calStartBtn = document.getElementById('calStart');
-    const calStatus   = document.getElementById('calStatus');
-    const calProgRow  = document.getElementById('calProgRow');
-    const calProg     = document.getElementById('calProg');
-    const calTime     = document.getElementById('calTime');
-
     /* ---------- State ---------- */
     let hideStatusTimer = null;
 
@@ -386,21 +366,17 @@
     let lastDriftHitTs = 0;      // last time drift ≥ DRIFT_ON
     let lastTs = 0;              // ms (local perf clock)
 
-    // Calibration state
-    const CAL_DURATION_MS = 15000;
-    let calActive = false, calStart = 0;
-    let calSamples = [];         // raw per-frame scores
-    let lastGoodLm = null;       // remember a good frame to seed baseline at end
-
     /* ---------- Status overlay ---------- */
     function showStatus(msg) {
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
+      console.log('[STATUS]', msg);
       if (msg === 'Connected') {
         if (hideStatusTimer) clearTimeout(hideStatusTimer);
         hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
       } else {
         if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
+        overlay.classList.remove('hidden');
       }
     }
 
@@ -506,6 +482,23 @@
     }
     document.addEventListener('visibilitychange', () => { if (!document.hidden) beginViewportSettle(); });
 
+    /* ---------- Overlay helpers ---------- */
+    function setOverlayVisible(v) {
+      poseCanvas.style.display = v ? 'block' : 'none';
+      if (v) beginViewportSettle();
+      else poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+    }
+    function drawPoseLandmarks(landmarks) {
+      if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
+      const utils = new DrawingUtils(poseCtx);
+      for (const lm of landmarks) {
+        utils.drawLandmarks(lm, {
+          radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
+        });
+        utils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+      }
+    }
+
     /* ---------- Movement math helpers ---------- */
     const L = { L_SHOULDER: 11, R_SHOULDER: 12, L_HIP: 23, R_HIP: 24 };
     const lmOk = (p) =>
@@ -521,6 +514,7 @@
       if (lmOk(ls) && lmOk(rs)) { c.x += (ls.x+rs.x)/2; c.y += (ls.y+rs.y)/2; c.n++; }
       if (lmOk(lh) && lmOk(rh)) { c.x += (lh.x+rh.x)/2; c.y += (lh.y+rh.y)/2; c.n++; }
       if (c.n) return { x: c.x/c.n, y: c.y/c.n };
+      // fallback: centroid of all kept
       let n=0, sx=0, sy=0;
       for (const p of lm) if (lmOk(p)) { sx+=p.x; sy+=p.y; n++; }
       return n ? { x:sx/n, y:sy/n } : { x:0.5, y:0.5 };
@@ -571,6 +565,7 @@
       return lm?.map(p => p ? { x:p.x, y:p.y, z:p.z, visibility:p.visibility, presence:p.presence } : null) || null;
     }
     function blendLm(dst, src, a) {
+      // dst := lerp(dst, src, a) for ok points; create if absent
       if (!src) return dst;
       if (!dst || dst.length !== src.length) dst = cloneLm(src);
       for (let i=0; i<src.length; i++) {
@@ -634,6 +629,7 @@
       const longHoldOk  = (intScore > MOVE.INT_OFF) || ((now - lastIntHitTs) < MOVE.OFF_HOLD_MS);
 
       // --- Baseline drift vs slowly-adapting baseline (only adapts when STILL) ---
+      // lazily seed baseline if missing and we have landmarks
       if (!baseLm) baseLm = cloneLm(lm);
       driftScore = computeDriftScore(lm, baseLm, MOVE.DRIFT_TORSO_REL);
 
@@ -648,22 +644,14 @@
       if (wantMoving !== moving) {
         moving = wantMoving;
         if (moving) movingSince = now;
+        console.log('[MOVE] state:', moving ? 'MOVING' : 'STILL',
+          'ema=', moveEma.toFixed(3), 'int=', intScore.toFixed(3), 'drift=', driftScore.toFixed(3));
       }
 
-      // Baseline adaptation: ONLY when STILL
+      // Baseline adaptation: ONLY when STILL to avoid chasing motion
       if (!moving && baseLm) {
-        const a = 1 - Math.exp(-dt / MOVE.DRIFT_TAU);
+        const a = 1 - Math.exp(-dt / MOVE.DRIFT_TAU); // time-constant-based blend
         baseLm = blendLm(baseLm, lm, a);
-      }
-
-      // Calibration sampling
-      if (calActive) {
-        calSamples.push(raw);
-        lastGoodLm = cloneLm(lm);
-        const t = now - calStart;
-        calProg.value = Math.min(1, t / CAL_DURATION_MS);
-        calTime.textContent = Math.max(0, Math.ceil((CAL_DURATION_MS - t)/1000)) + 's';
-        if (t >= CAL_DURATION_MS) finishCalibration();
       }
 
       // draw + panel
@@ -672,7 +660,7 @@
       poseCtx.restore();
       reflectPanel();
 
-      // optionally send movement packet
+      // optionally send movement packet to sender when we own inference
       if (canSend && poseWhere === 'receiver' && poseDC?.readyState === 'open') {
         poseDC.send(JSON.stringify({
           type: 'movement',
@@ -684,61 +672,6 @@
           ts: now
         }));
       }
-    }
-
-    /* ---------- Calibration helpers ---------- */
-    function quantile(arr, q) {
-      if (!arr.length) return 0;
-      const a = arr.slice().sort((x,y)=>x-y);
-      const pos = (a.length - 1) * q;
-      const i = Math.floor(pos), j = Math.ceil(pos);
-      if (i === j) return a[i];
-      const w = pos - i;
-      return a[i]*(1-w) + a[j]*w;
-    }
-
-    function startCalibration() {
-      if (calActive) return;
-      calActive = true; calStart = performance.now();
-      calSamples = []; lastGoodLm = null;
-      calStatus.className = 'muted'; calStatus.textContent = 'Calibrating — keep still';
-      calProgRow.style.display = 'grid';
-      calProg.value = 0; calTime.textContent = Math.round(CAL_DURATION_MS/1000) + 's';
-    }
-
-    function finishCalibration() {
-      calActive = false;
-      calProgRow.style.display = 'none';
-
-      // Stats
-      const m = quantile(calSamples, 0.5);
-      const p95 = quantile(calSamples, 0.95);
-
-      // Heuristics from the cheat-sheet
-      const onBase = Math.max(3.5*m, 1.2*p95, 0.01);
-      MOVE.ON  = clamp(onBase, 0.01, 0.20);
-      MOVE.OFF = Math.max(0.005, Math.min(MOVE.ON, MOVE.ON*0.65));
-
-      const intOn = MOVE.INT_TAU * m * 2.5;
-      MOVE.INT_ON  = clamp(intOn, 0.005, 0.10);
-      MOVE.INT_OFF = Math.min(MOVE.INT_ON, Math.max(0.005, MOVE.INT_ON*0.6));
-
-      const driftOn = Math.max(5.0*m, 1.5*MOVE.ON, 0.02);
-      MOVE.DRIFT_ON  = clamp(driftOn, 0.02, 0.20);
-      MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_ON, Math.max(0.005, MOVE.DRIFT_ON*0.65));
-
-      // Seed baseline from last good landmarks; clear dynamic scores
-      if (lastGoodLm) baseLm = cloneLm(lastGoodLm);
-      moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
-
-      // Reflect in UI + persist
-      syncSlidersFromMove();
-      saveMoveConfig();
-
-      // Status message
-      const summary = `OK · median=${m.toFixed(4)}, p95=${p95.toFixed(4)} → ON=${MOVE.ON.toFixed(3)}, INT_ON=${MOVE.INT_ON.toFixed(3)}, DRIFT_ON=${MOVE.DRIFT_ON.toFixed(3)}`;
-      calStatus.className = 'ok'; calStatus.textContent = summary;
-      setTimeout(()=>{ calStatus.className = 'muted'; }, 5000);
     }
 
     /* ---------- Clear / stream end helpers ---------- */
@@ -782,9 +715,10 @@
       await ensurePoseTask(); await waitForVideoFrame(remoteVideo);
       useRVFC = 'requestVideoFrameCallback' in remoteVideo;
       poseLoopRunning = true;
+      console.log('[POSE][receiver] inference START (receiver)');
 
       const onFrame = () => {
-        if (!poseLoopRunning || !poseEnabled || poseWhere !== 'receiver') return;
+        if (!poseLoopRunning || !poseEnabled || poseWhere !== 'receiver') { console.log('[POSE] stop'); return; }
         if (!videoHasFrame(remoteVideo)) { poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height); scheduleNext(); return; }
         try {
           const ts = performance.now();
@@ -811,6 +745,7 @@
       poseLoopRunning = false;
       prevLm = null;
       moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
+      // keep baseline; user can reset
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
       reflectPanel();
     }
@@ -825,7 +760,9 @@
     const core = new ReceiverCore({
       wsEndpoint: WS_ENDPOINT,
       room,
+
       onStatus: showStatus,
+
       onStream: (stream) => {
         if (remoteVideo.srcObject !== stream) {
           remoteVideo.srcObject = stream;
@@ -833,10 +770,13 @@
           attachStreamEndHandlers(stream);
         }
       },
+
       onIceState: (state) => {
         if (state === 'failed' || state === 'disconnected' || state === 'closed') clearOverlayDrawing();
       },
+
       onBye: () => { clearOverlayDrawing(); },
+
       onCreatePC: (pc) => {
         const ch = pc.createDataChannel('pose');
         ch.onopen  = () => console.log('[DC][receiver] pose DC open');
@@ -848,6 +788,7 @@
             if (msg.type === 'pose-mode') {
               poseEnabled = !!msg.enabled;
               poseWhere   = msg.where || 'sender';
+              console.log('[POSE][receiver] mode:', { poseEnabled, poseWhere });
               applyPoseMode();
             } else if (msg.type === 'pose') {
               if (poseEnabled && poseWhere === 'sender' && msg.landmarks?.length) {
@@ -861,7 +802,10 @@
         };
         poseDC = ch;
       },
-      onDataChannel: (e) => { console.log('[DC][receiver] inbound datachannel (leaving open):', e.channel?.label); }
+
+      onDataChannel: (e) => {
+        console.log('[DC][receiver] inbound datachannel (leaving open):', e.channel?.label);
+      }
     });
     core.start().catch(console.warn);
 
@@ -882,7 +826,7 @@
     const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
     const fmt = (n,d=3)=>Number(n).toFixed(d);
 
-    function syncSlidersFromMove() {
+    function initMovePanel() {
       visMin.value = MOVE.VIS_MIN; visOut.textContent = fmt(MOVE.VIS_MIN,2);
       presMin.value = MOVE.PRES_MIN; presOut.textContent = fmt(MOVE.PRES_MIN,2);
 
@@ -901,8 +845,6 @@
 
       reflectPanel();
     }
-
-    function initMovePanel() { syncSlidersFromMove(); }
 
     function openMovePanel(){ movePanel.classList.remove('hidden'); }
     function closeMovePanel(){ movePanel.classList.add('hidden'); }
@@ -928,19 +870,11 @@
     driftOff.addEventListener('input', ()=>{ MOVE.DRIFT_OFF = clamp(parseFloat(driftOff.value),0.005,0.150); if (MOVE.DRIFT_OFF > MOVE.DRIFT_ON){ MOVE.DRIFT_OFF = MOVE.DRIFT_ON; driftOff.value = MOVE.DRIFT_OFF; } driftOffOut.textContent = fmt(MOVE.DRIFT_OFF); saveMoveConfig(); });
     driftTorsoRel.addEventListener('change', ()=>{ MOVE.DRIFT_TORSO_REL = !!driftTorsoRel.checked; saveMoveConfig(); });
 
-    driftReset.addEventListener('click', ()=>{ baseLm = null; calStatus.className='muted'; calStatus.textContent='Baseline reset'; });
-
-    // Calibration button
-    calStartBtn.addEventListener('click', () => {
-      openMovePanel();
-      startCalibration();
-    });
+    driftReset.addEventListener('click', ()=>{ baseLm = null; console.log('[DRIFT] baseline reset'); });
 
     moveReset.addEventListener('click', () => {
       Object.assign(MOVE, MOVE_DEFAULTS);
       initMovePanel(); saveMoveConfig();
-      baseLm = null; moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
-      calStatus.className='muted'; calStatus.textContent='Defaults restored';
     });
 
     initMovePanel();
@@ -956,7 +890,7 @@
       stopReceiverPoseLoop();
     });
 
-    // tiny typo guard (legacy)
+    // tiny typo guard used in logs (legacy)
     function beginViewportSetle(){ beginViewportSettle(); }
   </script>
 </body>
