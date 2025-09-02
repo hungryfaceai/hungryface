@@ -299,7 +299,6 @@
 
     // Movement detection config (defaults + persistence)
     const MOVE_DEFAULTS = {
-      // Confidence gates
       VIS_MIN: 0.50,
       PRES_MIN: 0.00,
 
@@ -313,12 +312,12 @@
       MIN_SCALE: 0.02,
 
       // Long-term (Integrator)
-      INT_TAU: 3.0,   // seconds, decay time-constant
+      INT_TAU: 3.0,
       INT_ON:  0.035,
       INT_OFF: 0.020,
 
       // Baseline drift
-      DRIFT_TAU: 2.5,      // seconds, baseline adapt speed (only when STILL)
+      DRIFT_TAU: 2.5,
       DRIFT_ON:  0.080,
       DRIFT_OFF: 0.050,
       DRIFT_TORSO_REL: true
@@ -404,16 +403,16 @@
     let driftScore = 0;          // baseline drift score
     let moving = false;
     let movingSince = 0;
-    let lastAboveOnTs = 0;       // last time EMA raw >= ON (for EMA hold)
-    let lastIntHitTs = 0;        // last time integrator ≥ INT_ON
-    let lastDriftHitTs = 0;      // last time drift ≥ DRIFT_ON
-    let lastTs = 0;              // ms (local perf clock)
+    let lastAboveOnTs = 0;
+    let lastIntHitTs = 0;
+    let lastDriftHitTs = 0;
+    let lastTs = 0;
 
     // Calibration state
     const CAL_DURATION_MS = 15000;
     let calActive = false, calStart = 0;
-    let calSamples = [];         // raw per-frame scores
-    let lastGoodLm = null;       // last good frame to seed baseline
+    let calSamples = [];
+    let lastGoodLm = null;
 
     /* ---------- Status overlay ---------- */
     function showStatus(msg) {
@@ -612,7 +611,6 @@
       return lm?.map(p => p ? { x:p.x, y:p.y, z:p.z, visibility:p.visibility, presence:p.presence } : null) || null;
     }
     function blendLm(dst, src, a) {
-      // dst := lerp(dst, src, a) for ok points; create if absent
       if (!src) return dst;
       if (!dst || dst.length !== src.length) dst = cloneLm(src);
       for (let i=0; i<src.length; i++) {
@@ -627,24 +625,119 @@
       return dst;
     }
 
-    /* ---------- Main per-frame update ---------- */
+    /* ---------- On-screen badge: bars instead of numbers ---------- */
     function drawMovementBadge(movingState, emaVal, intVal, driftVal) {
       const ctx = poseCtx;
       const dpr = window.devicePixelRatio || 1;
-      const pad = Math.round(8*dpr), x = pad, y = pad;
-      const txt = `EMA ${emaVal.toFixed(3)}  ·  INT ${intVal.toFixed(3)}  ·  DRIFT ${driftVal.toFixed(3)}   ${movingState ? '• MOVING' : '• STILL'}`;
 
+      // Dimensions
+      const pad = Math.round(8*dpr);
+      const x = pad, y = pad;
+      const LABEL_W = Math.round(32*dpr);
+      const BAR_W   = Math.round(190*dpr);
+      const BAR_H   = Math.round(8*dpr);
+      const ROW_H   = Math.round(18*dpr);
+      const INNER   = Math.round(8*dpr);
+
+      // Colors
+      const BG      = movingState ? '#4a2a00' : '#111111';
+      const BORDER  = movingState ? '#ffa64d' : 'rgba(255,255,255,0.25)';
+      const BAR_BG  = 'rgba(255,255,255,0.18)';
+      const TICK    = 'rgba(255,255,255,0.9)';
+      const TXT_DIM = movingState ? '#ffcc80' : '#dddddd';
+
+      // State pill
       ctx.save();
-      ctx.font = `${Math.round(14*dpr)}px -apple-system,system-ui,Segoe UI,Roboto,sans-serif`;
-      const textW = ctx.measureText(txt).width;
-      const boxW = Math.round(textW + pad*2), boxH = Math.round(26*dpr);
+      ctx.font = `${Math.round(12*dpr)}px -apple-system,system-ui,Segoe UI,Roboto,sans-serif`;
+      const stateTxt = movingState ? '• MOVING' : '• STILL';
+      const pillPadX = Math.round(8*dpr);
+      const pillPadY = Math.round(4*dpr);
+      const pillW = Math.round(ctx.measureText(stateTxt).width + pillPadX*2);
+      const pillH = Math.round(18*dpr);
 
-      ctx.globalAlpha = 0.7; ctx.fillStyle = movingState ? '#4a2a00' : '#111'; ctx.fillRect(x,y,boxW,boxH);
-      ctx.globalAlpha = 0.9; ctx.strokeStyle = movingState ? '#ffa64d' : 'rgba(255,255,255,0.25)'; ctx.lineWidth = Math.max(1, Math.round(1*dpr)); ctx.strokeRect(x+0.5,y+0.5,boxW-1,boxH-1);
-      ctx.globalAlpha = 1; ctx.fillStyle = movingState ? '#ffcc80' : '#ddd'; ctx.fillText(txt, x+pad, y+boxH - Math.round(8*dpr));
+      // Compute box size
+      const boxW = Math.max(LABEL_W + INNER + BAR_W + INNER, pillW + INNER*2);
+      const boxH = Math.round(ROW_H * 3 + INNER*2);
+
+      // Background
+      ctx.globalAlpha = 0.7;
+      ctx.fillStyle = BG;
+      ctx.fillRect(x, y, boxW, boxH);
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = BORDER;
+      ctx.lineWidth = Math.max(1, Math.round(1*dpr));
+      ctx.strokeRect(x+0.5, y+0.5, boxW-1, boxH-1);
+
+      // Pill (top-right)
+      const pillX = x + boxW - pillW - INNER;
+      const pillY = y + INNER - Math.round(2*dpr);
+      ctx.fillStyle = movingState ? '#4a2a00' : '#111111';
+      ctx.fillRect(pillX, pillY, pillW, pillH);
+      ctx.strokeStyle = BORDER;
+      ctx.strokeRect(pillX+0.5, pillY+0.5, pillW-1, pillH-1);
+      ctx.fillStyle = TXT_DIM;
+      ctx.fillText(stateTxt, pillX + pillPadX, pillY + pillH - Math.round(5*dpr));
+
+      // Metrics → bars
+      const metrics = [
+        { label:'EMA', val: emaVal,   on: MOVE.ON,        off: MOVE.OFF        },
+        { label:'INT', val: intVal,   on: MOVE.INT_ON,    off: MOVE.INT_OFF    },
+        { label:'DRF', val: driftVal, on: MOVE.DRIFT_ON,  off: MOVE.DRIFT_OFF  },
+      ];
+
+      ctx.font = `${Math.round(11*dpr)}px -apple-system,system-ui,Segoe UI,Roboto,sans-serif`;
+
+      const baseY = y + INNER + Math.round(6*dpr);
+      for (let i=0; i<metrics.length; i++) {
+        const rowY = baseY + i*ROW_H;
+
+        // Label
+        ctx.fillStyle = TXT_DIM;
+        ctx.fillText(metrics[i].label, x + INNER, rowY + Math.round(8*dpr));
+
+        // Bar background
+        const barX = x + INNER + LABEL_W;
+        const barY = rowY - Math.round(BAR_H/2) + Math.round(8*dpr);
+        ctx.fillStyle = BAR_BG;
+        ctx.fillRect(barX, barY, BAR_W, BAR_H);
+
+        // Fill based on ratio to ON threshold
+        const on = Math.max(1e-6, metrics[i].on);
+        const ratio = metrics[i].val / on;
+        const rClamped = Math.max(0, Math.min(ratio, 1));
+        const fillW = Math.round(BAR_W * rClamped);
+
+        // Color stages
+        let fillCol = '#6ecb8b'; // green < 0.9
+        if (ratio >= 0.9 && ratio < 1.0) fillCol = '#ffcc80'; // amber near threshold
+        if (ratio >= 1.0) fillCol = '#ff7a7a'; // red beyond ON
+
+        ctx.fillStyle = fillCol;
+        ctx.fillRect(barX, barY, fillW, BAR_H);
+
+        // If exceeded, draw a thin cap to indicate overflow
+        if (ratio > 1.0) {
+          ctx.globalAlpha = 0.9;
+          ctx.strokeStyle = '#ff7a7a';
+          ctx.beginPath();
+          ctx.moveTo(barX + BAR_W + 0.5, barY);
+          ctx.lineTo(barX + BAR_W + 0.5, barY + BAR_H);
+          ctx.stroke();
+          ctx.globalAlpha = 1.0;
+        }
+
+        // ON threshold tick (at end of bar)
+        ctx.strokeStyle = TICK;
+        ctx.beginPath();
+        ctx.moveTo(barX + BAR_W + 0.5, barY - Math.round(2*dpr));
+        ctx.lineTo(barX + BAR_W + 0.5, barY + BAR_H + Math.round(2*dpr));
+        ctx.stroke();
+      }
+
       ctx.restore();
     }
 
+    /* ---------- Main per-frame update ---------- */
     function reflectPanel() {
       emaScoreTxt.textContent   = moveEma.toFixed(3);
       intScoreTxt.textContent   = intScore.toFixed(3);
@@ -657,10 +750,10 @@
     function updateMovementFromLandmarks(lm, canSend=true) {
       const now = performance.now();
       if (!lastTs) lastTs = now;
-      const dt = Math.max(1/120, Math.min(0.2, (now - lastTs) / 1000)); // clamp 8.3ms..200ms
+      const dt = Math.max(1/120, Math.min(0.2, (now - lastTs) / 1000));
       lastTs = now;
 
-      // --- Short-term: EMA of per-frame normalized displacement ---
+      // Short-term
       const raw = rawMovementScore(lm, prevLm);
       prevLm = lm;
       moveEma = moveEma + MOVE.EMA_ALPHA * (raw - moveEma);
@@ -668,22 +761,21 @@
       const shortTrigger = (moveEma >= MOVE.ON);
       const shortHoldOk  = (moveEma > MOVE.OFF) || ((now - lastAboveOnTs) < MOVE.OFF_HOLD_MS);
 
-      // --- Long-term: Leaky integrator (FPS-independent) ---
+      // Long-term
       const decay = Math.exp(-dt / MOVE.INT_TAU);
       intScore = intScore * decay + raw * dt;
       const longTrigger = (intScore >= MOVE.INT_ON);
       if (longTrigger) lastIntHitTs = now;
       const longHoldOk  = (intScore > MOVE.INT_OFF) || ((now - lastIntHitTs) < MOVE.OFF_HOLD_MS);
 
-      // --- Baseline drift vs slowly-adapting baseline (only adapts when STILL) ---
+      // Drift vs baseline
       if (!baseLm) baseLm = cloneLm(lm);
       driftScore = computeDriftScore(lm, baseLm, MOVE.DRIFT_TORSO_REL);
-
       const driftTrigger = (driftScore >= MOVE.DRIFT_ON);
       if (driftTrigger) lastDriftHitTs = now;
       const driftHoldOk  = (driftScore > MOVE.DRIFT_OFF) || ((now - lastDriftHitTs) < MOVE.OFF_HOLD_MS);
 
-      // Combine: either path can enter; any hold can keep it
+      // Combine
       const wantMoving = moving ? (shortHoldOk || longHoldOk || driftHoldOk)
                                 : (shortTrigger || longTrigger || driftTrigger);
 
@@ -692,13 +784,13 @@
         if (moving) movingSince = now;
       }
 
-      // Baseline adaptation: ONLY when STILL to avoid chasing motion
+      // Baseline adapts only when STILL
       if (!moving && baseLm) {
-        const a = 1 - Math.exp(-dt / MOVE.DRIFT_TAU); // time-constant-based blend
+        const a = 1 - Math.exp(-dt / MOVE.DRIFT_TAU);
         baseLm = blendLm(baseLm, lm, a);
       }
 
-      /* ---- Calibration sampling/progress ---- */
+      // Calibration sampling/progress
       if (calActive) {
         calSamples.push(raw);
         lastGoodLm = cloneLm(lm);
@@ -708,13 +800,13 @@
         if (t >= CAL_DURATION_MS) finishCalibration();
       }
 
-      // draw + panel
+      // Draw bars overlay + reflect panel
       poseCtx.save();
       drawMovementBadge(moving, moveEma, intScore, driftScore);
       poseCtx.restore();
       reflectPanel();
 
-      // optionally send movement packet to sender when we own inference
+      // Optional movement packet
       if (canSend && poseWhere === 'receiver' && poseDC?.readyState === 'open') {
         poseDC.send(JSON.stringify({
           type: 'movement',
@@ -744,7 +836,6 @@
       calActive = true; calStart = performance.now();
       calSamples = []; lastGoodLm = null;
 
-      // UI: show progress, hide old stats, set status line
       calStats.style.display = 'none';
       calStatus.className = 'muted';
       calStatus.textContent = 'Calibrating — keep still';
@@ -752,44 +843,36 @@
       calProg.value = 0; calTime.textContent = Math.round(CAL_DURATION_MS/1000) + 's';
     }
 
-    // === NO UPPER CAPS on ON thresholds (floors only) ===
     function finishCalibration() {
       calActive = false;
       calProgRow.style.display = 'none';
 
-      // Stats from raw per-frame motion
       const m   = quantile(calSamples, 0.5);
       const p95 = quantile(calSamples, 0.95);
       const n   = calSamples.length;
       const floor = (v, min) => Math.max(min, v);
 
-      // EMA thresholds
       const onBase = Math.max(3.5*m, 1.2*p95, 0.01);
       MOVE.ON  = floor(onBase, 0.01);
       MOVE.OFF = Math.min(MOVE.ON, Math.max(0.005, MOVE.ON*0.65));
 
-      // Integrator thresholds (time-aware; scales with τ)
       const intOnCalc = MOVE.INT_TAU * m * 2.5;
       MOVE.INT_ON  = floor(intOnCalc, 0.005);
       MOVE.INT_OFF = Math.min(MOVE.INT_ON, Math.max(0.005, MOVE.INT_ON*0.6));
 
-      // Drift thresholds (posture change vs baseline)
       const driftOnCalc = Math.max(5.0*m, 1.5*MOVE.ON, 0.02);
       MOVE.DRIFT_ON  = floor(driftOnCalc, 0.02);
       MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_ON, Math.max(0.005, MOVE.DRIFT_ON*0.65));
 
-      // Seed baseline from last good frame; clear dynamics so we’re stable
       if (lastGoodLm) baseLm = cloneLm(lastGoodLm);
       moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
 
-      // Persist + reflect UI and make sure sliders can show new values
       saveMoveConfig();
       ensureSliderRange(onTh,     MOVE.ON);
       ensureSliderRange(intOnEl,  MOVE.INT_ON);
-      ensureSliderRange(driftOnEl, MOVE.DRIFT_ON);
+      ensureSliderRange(driftOnEl,MOVE.DRIFT_ON);
       initMovePanel();
 
-      // ---- Expose stats & clear the "Calibrating" message ----
       calMedian.textContent = m.toFixed(4);
       calP95.textContent    = p95.toFixed(4);
       calN.textContent      = String(n);
@@ -870,7 +953,6 @@
       poseLoopRunning = false;
       prevLm = null;
       moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
-      // keep baseline; user can reset
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
       reflectPanel();
     }
@@ -878,10 +960,10 @@
       setOverlayVisible(poseEnabled);
       if (!poseEnabled) { stopReceiverPoseLoop(); return; }
       if (poseWhere === 'receiver') startReceiverPoseLoop();
-      else stopReceiverPoseLoop(); // sender mode: draw only what we receive
+      else stopReceiverPoseLoop();
     }
 
-    /* ---------- Shared WebRTC core (signaling + PC) ---------- */
+    /* ---------- Shared WebRTC core ---------- */
     const core = new ReceiverCore({
       wsEndpoint: WS_ENDPOINT,
       room,
@@ -907,7 +989,6 @@
       },
 
       onCreatePC: (pc) => {
-        // Pose DC (receiver initiates; bidirectional)
         const ch = pc.createDataChannel('pose');
         ch.onopen = () => {};
         ch.onclose = () => {};
@@ -954,7 +1035,6 @@
     const clampUi = (v,min,max)=>Math.max(min,Math.min(max,v));
     const fmt = (n,d=3)=>Number(n).toFixed(d);
 
-    // Let sliders grow if calibration/user sets bigger values
     function ensureSliderRange(inputEl, val, pad=1.5) {
       const curMax = Number(inputEl.max) || 0.3;
       const wantMax = Math.max(curMax, val * pad);
@@ -997,38 +1077,32 @@
     moveClose.addEventListener('click', closeMovePanel);
     window.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'm') movePanel.classList.toggle('hidden'); });
 
-    // sliders
     visMin.addEventListener('input', ()=>{ MOVE.VIS_MIN = clampUi(parseFloat(visMin.value),0,0.99); visOut.textContent = fmt(MOVE.VIS_MIN,2); saveMoveConfig(); });
     presMin.addEventListener('input', ()=>{ MOVE.PRES_MIN = clampUi(parseFloat(presMin.value),0,0.99); presOut.textContent = fmt(MOVE.PRES_MIN,2); saveMoveConfig(); });
 
     ema.addEventListener('input', ()=>{ MOVE.EMA_ALPHA = clampUi(parseFloat(ema.value),0.01,0.90); emaOut.textContent = fmt(MOVE.EMA_ALPHA,2); saveMoveConfig(); });
 
-    // ON sliders: floors only, and grow headroom dynamically
     onTh.addEventListener('input', ()=>{
       MOVE.ON = Math.max(0.005, parseFloat(onTh.value) || 0);
       if (MOVE.OFF > MOVE.ON){ MOVE.OFF = MOVE.ON; offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF); }
       onOut.textContent = fmt(MOVE.ON);
-      ensureSliderRange(onTh, MOVE.ON);
-      saveMoveConfig();
+      ensureSliderRange(onTh, MOVE.ON); saveMoveConfig();
     });
 
     intOnEl.addEventListener('input', ()=>{
       MOVE.INT_ON = Math.max(0.005, parseFloat(intOnEl.value) || 0);
       if (MOVE.INT_OFF > MOVE.INT_ON){ MOVE.INT_OFF = MOVE.INT_ON; intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF); }
       intOnOut.textContent = fmt(MOVE.INT_ON);
-      ensureSliderRange(intOnEl, MOVE.INT_ON);
-      saveMoveConfig();
+      ensureSliderRange(intOnEl, MOVE.INT_ON); saveMoveConfig();
     });
 
     driftOnEl.addEventListener('input', ()=>{
       MOVE.DRIFT_ON = Math.max(0.005, parseFloat(driftOnEl.value) || 0);
       if (MOVE.DRIFT_OFF > MOVE.DRIFT_ON){ MOVE.DRIFT_OFF = MOVE.DRIFT_ON; driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF); }
       driftOnOut.textContent = fmt(MOVE.DRIFT_ON);
-      ensureSliderRange(driftOnEl, MOVE.DRIFT_ON);
-      saveMoveConfig();
+      ensureSliderRange(driftOnEl, MOVE.DRIFT_ON); saveMoveConfig();
     });
 
-    // OFF sliders keep their upper bound tied to ON
     offTh.addEventListener('input', ()=>{ MOVE.OFF = clampUi(parseFloat(offTh.value),0.005,Math.max(0.005,MOVE.ON)); if (MOVE.OFF > MOVE.ON){ MOVE.OFF = MOVE.ON; offTh.value = MOVE.OFF; } offOut.textContent = fmt(MOVE.OFF); saveMoveConfig(); });
     tau.addEventListener('input', ()=>{ MOVE.INT_TAU = clampUi(parseFloat(tau.value),0.5,8.0); tauOut.textContent = fmt(MOVE.INT_TAU,1)+' s'; saveMoveConfig(); });
     intOff.addEventListener('input', ()=>{ MOVE.INT_OFF = clampUi(parseFloat(intOff.value),0.005,Math.max(0.005,MOVE.INT_ON)); if (MOVE.INT_OFF > MOVE.INT_ON){ MOVE.INT_OFF = MOVE.INT_ON; intOff.value = MOVE.INT_OFF; } intOffOut.textContent = fmt(MOVE.INT_OFF); saveMoveConfig(); });
@@ -1047,7 +1121,6 @@
       calStats.style.display = 'none';
     });
 
-    // Calibration button
     calStartBtn.addEventListener('click', () => {
       openMovePanel();
       startCalibration();
@@ -1066,7 +1139,6 @@
       stopReceiverPoseLoop();
     });
 
-    // tiny typo guard used in logs (legacy)
     function beginViewportSetle(){ beginViewportSettle(); }
   </script>
 </body>
