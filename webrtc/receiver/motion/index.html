@@ -65,7 +65,7 @@
     /* Movement panel */
     #movePanel {
       position: fixed; right: 16px; bottom: 80px; z-index: 7;
-      width: min(360px, 92vw);
+      width: min(380px, 92vw);
       background: rgba(20,20,20,0.9);
       border: 1px solid rgba(255,255,255,0.12);
       border-radius: 14px;
@@ -107,12 +107,19 @@
     }
     #movePanel .pill.moving  { background: #4a2a00; color: #ffcc80; border-color: #ffa64d; }
     #movePanel .pill.still   { background: #111;   color: #ddd;     border-color: rgba(255,255,255,0.25); }
+    #movePanel .groupTitle { margin: 10px 0 2px; font-size: 12px; color: #bbb; font-weight: 700; }
+    #movePanel .row3 { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; }
     #movePanel .actions {
-      display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px;
+      display: flex; gap: 8px; justify-content: space-between; margin-top: 6px; align-items: center;
     }
     #movePanel .small {
       padding: 8px 10px; font-size: 13px; border-radius: 10px;
     }
+    #movePanel .checkRow {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; margin-top: 4px;
+    }
+    #movePanel .checkRow label { display: flex; align-items: center; gap: 8px; }
   </style>
 </head>
 <body>
@@ -141,7 +148,7 @@
 
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
-    <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
+    <button id="disableAudioBtn" class="btn" type="button">Disable audio</</button>
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
     <button id="moveBtn" class="btn" type="button">Movement settings</button>
   </div>
@@ -155,40 +162,13 @@
 
     <div class="stateRow">
       <div class="muted">State: <span id="moveStateTxt" class="pill still">STILL</span></div>
-      <div class="muted">Score (EMA): <strong id="moveScoreTxt">0.000</strong></div>
+      <div class="muted">
+        Scores: EMA <strong id="emaScoreTxt">0.000</strong> · INT <strong id="intScoreTxt">0.000</strong> · DRIFT <strong id="driftScoreTxt">0.000</strong>
+      </div>
     </div>
 
-    <div class="row">
-      <label for="ema">EMA α</label>
-      <input id="ema" type="range" min="0.01" max="0.90" step="0.01">
-      <output id="emaOut">0.20</output>
-    </div>
-
-    <div class="row">
-      <label for="onTh">ON threshold</label>
-      <input id="onTh" type="range" min="0.005" max="0.300" step="0.005">
-      <output id="onOut">0.060</output>
-    </div>
-
-    <div class="row">
-      <label for="offTh">OFF threshold</label>
-      <input id="offTh" type="range" min="0.005" max="0.300" step="0.005">
-      <output id="offOut">0.030</output>
-    </div>
-
-    <div class="row">
-      <label for="hold">OFF hold (ms)</label>
-      <input id="hold" type="range" min="0" max="3000" step="50">
-      <output id="holdOut">700 ms</output>
-    </div>
-
-    <div class="row">
-      <label for="minScale">Min scale</label>
-      <input id="minScale" type="range" min="0.000" max="0.200" step="0.005">
-      <output id="scaleOut">0.020</output>
-    </div>
-
-    <!-- NEW: Visibility / presence gates -->
+    <!-- Visibility / presence gates -->
+    <div class="groupTitle">Confidence gates</div>
     <div class="row">
       <label for="visMin">Visibility min</label>
       <input id="visMin" type="range" min="0.00" max="0.99" step="0.01">
@@ -200,8 +180,69 @@
       <output id="presOut">0.00</output>
     </div>
 
+    <!-- EMA -->
+    <div class="groupTitle">Short-term (EMA)</div>
+    <div class="row">
+      <label for="ema">EMA α</label>
+      <input id="ema" type="range" min="0.01" max="0.90" step="0.01">
+      <output id="emaOut">0.20</output>
+    </div>
+    <div class="row">
+      <label for="onTh">EMA ON</label>
+      <input id="onTh" type="range" min="0.005" max="0.300" step="0.005">
+      <output id="onOut">0.060</output>
+    </div>
+    <div class="row">
+      <label for="offTh">EMA OFF</label>
+      <input id="offTh" type="range" min="0.005" max="0.300" step="0.005">
+      <output id="offOut">0.030</output>
+    </div>
+
+    <!-- Integrator -->
+    <div class="groupTitle">Long-term (Integrator)</div>
+    <div class="row">
+      <label for="tau">INT τ (s)</label>
+      <input id="tau" type="range" min="0.5" max="8.0" step="0.1">
+      <output id="tauOut">3.0 s</output>
+    </div>
+    <div class="row">
+      <label for="intOn">INT ON</label>
+      <input id="intOn" type="range" min="0.005" max="0.100" step="0.005">
+      <output id="intOnOut">0.035</output>
+    </div>
+    <div class="row">
+      <label for="intOff">INT OFF</label>
+      <input id="intOff" type="range" min="0.005" max="0.100" step="0.005">
+      <output id="intOffOut">0.020</output>
+    </div>
+
+    <!-- Baseline drift -->
+    <div class="groupTitle">Baseline drift</div>
+    <div class="row">
+      <label for="driftTau">Baseline τ (s)</label>
+      <input id="driftTau" type="range" min="0.5" max="8.0" step="0.1">
+      <output id="driftTauOut">2.5 s</output>
+    </div>
+    <div class="row">
+      <label for="driftOn">DRIFT ON</label>
+      <input id="driftOn" type="range" min="0.010" max="0.200" step="0.005">
+      <output id="driftOnOut">0.080</output>
+    </div>
+    <div class="row">
+      <label for="driftOff">DRIFT OFF</label>
+      <input id="driftOff" type="range" min="0.005" max="0.150" step="0.005">
+      <output id="driftOffOut">0.050</output>
+    </div>
+    <div class="checkRow">
+      <label>
+        <input id="driftTorsoRel" type="checkbox">
+        Torso-relative baseline (reduces camera shake)
+      </label>
+      <button id="driftReset" class="btn small" type="button">Reset baseline</button>
+    </div>
+
     <div class="actions">
-      <button id="moveReset" class="btn small" type="button">Reset defaults</button>
+      <button id="moveReset" class="btn small" type="button">Reset all defaults</button>
       <button id="moveHide"  class="btn small" type="button">Hide</button>
     </div>
   </section>
@@ -226,27 +267,39 @@
 
     // Movement detection config (defaults + persistence)
     const MOVE_DEFAULTS = {
-      EMA_ALPHA: 0.2,
+      // Confidence gates
+      VIS_MIN: 0.50,
+      PRES_MIN: 0.00,
+
+      // Short-term (EMA)
+      EMA_ALPHA: 0.20,
       ON:  0.06,
       OFF: 0.03,
       OFF_HOLD_MS: 700,
-      MIN_SCALE: 0.02,
-      // NEW gates
-      VIS_MIN: 0.50,   // ignore landmarks with visibility below this (if provided)
-      PRES_MIN: 0.00   // optional presence gate (0 = off)
-    };
-    const LS_KEY = 'naptio-move-config-v2';
 
-    // Active config (mutates when user drags sliders)
+      // Normalization
+      MIN_SCALE: 0.02,
+
+      // Long-term (Integrator)
+      INT_TAU: 3.0,   // seconds, decay time-constant
+      INT_ON:  0.035,
+      INT_OFF: 0.020,
+
+      // Baseline drift
+      DRIFT_TAU: 2.5,      // seconds, baseline adapt speed (only when STILL)
+      DRIFT_ON:  0.080,
+      DRIFT_OFF: 0.050,
+      DRIFT_TORSO_REL: true
+    };
+    const LS_KEY = 'naptio-move-config-v3';
     const MOVE = { ...MOVE_DEFAULTS, ...loadMoveConfig() };
 
-    // Mediapipe assets (same version as import)
+    // Mediapipe assets
     const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     const WASM_DIR = TASKS_URL + "/wasm";
     const POSE_MODEL_URL =
       "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
 
-    // Video readyState helpers
     const HAVE_CURRENT_DATA = 2;
 
     /* ---------- DOM ---------- */
@@ -267,16 +320,28 @@
     const moveClose  = document.getElementById('moveClose');
     const moveHide   = document.getElementById('moveHide');
     const moveReset  = document.getElementById('moveReset');
-    const moveStateTxt = document.getElementById('moveStateTxt');
-    const moveScoreTxt = document.getElementById('moveScoreTxt');
 
-    const ema   = document.getElementById('ema');       const emaOut   = document.getElementById('emaOut');
-    const onTh  = document.getElementById('onTh');      const onOut    = document.getElementById('onOut');
-    const offTh = document.getElementById('offTh');     const offOut   = document.getElementById('offOut');
-    const hold  = document.getElementById('hold');      const holdOut  = document.getElementById('holdOut');
-    const minScale = document.getElementById('minScale'); const scaleOut = document.getElementById('scaleOut');
-    const visMin = document.getElementById('visMin');   const visOut   = document.getElementById('visOut');
-    const presMin = document.getElementById('presMin'); const presOut  = document.getElementById('presOut');
+    const moveStateTxt  = document.getElementById('moveStateTxt');
+    const emaScoreTxt   = document.getElementById('emaScoreTxt');
+    const intScoreTxt   = document.getElementById('intScoreTxt');
+    const driftScoreTxt = document.getElementById('driftScoreTxt');
+
+    const visMin = document.getElementById('visMin'); const visOut = document.getElementById('visOut');
+    const presMin = document.getElementById('presMin'); const presOut = document.getElementById('presOut');
+
+    const ema   = document.getElementById('ema');   const emaOut = document.getElementById('emaOut');
+    const onTh  = document.getElementById('onTh');  const onOut  = document.getElementById('onOut');
+    const offTh = document.getElementById('offTh'); const offOut = document.getElementById('offOut');
+
+    const tau     = document.getElementById('tau');     const tauOut     = document.getElementById('tauOut');
+    const intOn   = document.getElementById('intOn');   const intOnOut   = document.getElementById('intOnOut');
+    const intOff  = document.getElementById('intOff');  const intOffOut  = document.getElementById('intOffOut');
+
+    const driftTau    = document.getElementById('driftTau');   const driftTauOut = document.getElementById('driftTauOut');
+    const driftOn     = document.getElementById('driftOn');    const driftOnOut  = document.getElementById('driftOnOut');
+    const driftOff    = document.getElementById('driftOff');   const driftOffOut = document.getElementById('driftOffOut');
+    const driftTorsoRel = document.getElementById('driftTorsoRel');
+    const driftReset  = document.getElementById('driftReset');
 
     /* ---------- State ---------- */
     let hideStatusTimer = null;
@@ -289,12 +354,17 @@
     let poseLoopRunning = false;
 
     // Movement state
-    let prevLm = null;              // previous 33 landmarks
-    let moveEma = 0;                // smoothed score
-    let moving = false;             // state
-    let movingSince = 0;            // ts when entered MOVING
-    let lastAboveOnTs = 0;          // last time raw score >= ON
-    let lastStateChangeTs = 0;      // ts of last state toggle
+    let prevLm = null;           // previous 33 landmarks
+    let baseLm = null;           // baseline landmarks (slowly adapted when STILL)
+    let moveEma = 0;             // short-term EMA score
+    let intScore = 0;            // long-term leaky integrator
+    let driftScore = 0;          // baseline drift score
+    let moving = false;
+    let movingSince = 0;
+    let lastAboveOnTs = 0;       // last time EMA raw >= ON (for EMA hold)
+    let lastIntHitTs = 0;        // last time integrator ≥ INT_ON
+    let lastDriftHitTs = 0;      // last time drift ≥ DRIFT_ON
+    let lastTs = 0;              // ms (local perf clock)
 
     /* ---------- Status overlay ---------- */
     function showStatus(msg) {
@@ -321,13 +391,9 @@
       }
     }
     enableAudioBtn.style.display = 'block';
-
     async function tryStartMuted() {
-      try {
-        remoteVideo.muted = true;
-        remoteVideo.volume = 1.0;
-        await remoteVideo.play();
-      } catch (e) { console.warn('autoplay (muted) blocked:', e); }
+      try { remoteVideo.muted = true; remoteVideo.volume = 1.0; await remoteVideo.play(); }
+      catch (e) { console.warn('autoplay (muted) blocked:', e); }
       updateAudioButtons();
     }
     enableAudioBtn.addEventListener('click', async (e) => {
@@ -343,6 +409,19 @@
     });
 
     /* ---------- Fullscreen ---------- */
+    const beginViewportSettle = (durationMs = 1200) => {
+      let settleRAF = 0, settleUntil = performance.now() + durationMs;
+      const tick = () => {
+        alignCanvasToVideo();
+        if (performance.now() < settleUntil) {
+          settleRAF = requestAnimationFrame(tick);
+        } else {
+          cancelAnimationFrame(settleRAF); settleRAF = 0;
+          alignCanvasToVideo();
+        }
+      };
+      tick();
+    };
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -358,18 +437,11 @@
     });
     document.addEventListener('fullscreenchange', () => {
       fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
-      beginViewportSetle();
+      beginViewportSettle();
     });
 
-    remoteVideo.addEventListener('loadedmetadata', () => {
-      console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
-      beginViewportSettle();
-    });
-    remoteVideo.addEventListener('playing', () => {
-      console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
-      updateAudioButtons();
-      beginViewportSettle();
-    });
+    remoteVideo.addEventListener('loadedmetadata', () => { beginViewportSettle(); });
+    remoteVideo.addEventListener('playing', () => { updateAudioButtons(); beginViewportSettle(); });
     remoteVideo.addEventListener('resize', beginViewportSettle);
 
     /* ---------- Canvas alignment ---------- */
@@ -379,7 +451,6 @@
       const h = Math.round(contentH * scale);
       return { width:w, height:h, left: Math.floor((containerW - w) / 2), top: Math.floor((containerH - h) / 2) };
     }
-
     function alignCanvasToVideo() {
       const stageBox = stage.getBoundingClientRect();
       const videoBox = remoteVideo.getBoundingClientRect();
@@ -387,52 +458,29 @@
       const containerH = Math.round(videoBox.height);
       const vidW = remoteVideo.videoWidth || 1;
       const vidH = remoteVideo.videoHeight || 1;
-
       const fit = containRect(containerW, containerH, vidW, vidH);
       const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
       const topCSS = Math.round((videoBox.top - stageBox.top) + fit.top);
-
       poseCanvas.style.left = leftCSS + 'px';
       poseCanvas.style.top = topCSS + 'px';
       poseCanvas.style.width = fit.width + 'px';
       poseCanvas.style.height = fit.height + 'px';
-
       const dpr = window.devicePixelRatio || 1;
       const needW = Math.max(1, Math.round(fit.width * dpr));
       const needH = Math.max(1, Math.round(fit.height * dpr));
       if (poseCanvas.width !== needW || poseCanvas.height !== needH) {
-        poseCanvas.width = needW;
-        poseCanvas.height = needH;
+        poseCanvas.width = needW; poseCanvas.height = needH;
       }
       poseCtx.setTransform(1,0,0,1,0,0);
     }
-
-    let settleRAF = 0, settleUntil = 0;
-    function beginViewportSettle(durationMs = 1200) {
-      settleUntil = performance.now() + durationMs;
-      if (settleRAF) return;
-      const tick = () => {
-        alignCanvasToVideo();
-        if (performance.now() < settleUntil) {
-          settleRAF = requestAnimationFrame(tick);
-        } else {
-          cancelAnimationFrame(settleRAF); settleRAF = 0;
-          alignCanvasToVideo();
-        }
-      };
-      tick();
-    }
-    const vpAlign = () => beginViewportSettle();
     ['resize','orientationchange','scroll'].forEach(ev =>
-      window.addEventListener(ev, vpAlign, { passive: true })
+      window.addEventListener(ev, () => beginViewportSettle(), { passive: true })
     );
     if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', vpAlign, { passive: true });
-      window.visualViewport.addEventListener('scroll',  vpAlign, { passive: true });
+      window.visualViewport.addEventListener('resize', () => beginViewportSettle(), { passive: true });
+      window.visualViewport.addEventListener('scroll',  () => beginViewportSettle(), { passive: true });
     }
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) beginViewportSettle();
-    });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) beginViewportSettle(); });
 
     /* ---------- Overlay helpers ---------- */
     function setOverlayVisible(v) {
@@ -440,7 +488,6 @@
       if (v) beginViewportSettle();
       else poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
-
     function drawPoseLandmarks(landmarks) {
       if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
       const utils = new DrawingUtils(poseCtx);
@@ -452,17 +499,25 @@
       }
     }
 
-    /* ---------- Movement detection ---------- */
+    /* ---------- Movement math helpers ---------- */
     const L = { L_SHOULDER: 11, R_SHOULDER: 12, L_HIP: 23, R_HIP: 24 };
-
     const lmOk = (p) =>
       p &&
       (p.visibility == null || p.visibility >= MOVE.VIS_MIN) &&
       (p.presence   == null || p.presence   >= MOVE.PRES_MIN);
 
-    function dist2(a, b) {
-      const dx = (a.x - b.x), dy = (a.y - b.y);
-      return Math.hypot(dx, dy);
+    const dist2 = (a, b) => Math.hypot((a.x - b.x), (a.y - b.y));
+
+    function torsoCenter(lm) {
+      const ls = lm[L.L_SHOULDER], rs = lm[L.R_SHOULDER], lh = lm[L.L_HIP], rh = lm[L.R_HIP];
+      const c = { x:0, y:0, n:0 };
+      if (lmOk(ls) && lmOk(rs)) { c.x += (ls.x+rs.x)/2; c.y += (ls.y+rs.y)/2; c.n++; }
+      if (lmOk(lh) && lmOk(rh)) { c.x += (lh.x+rh.x)/2; c.y += (lh.y+rh.y)/2; c.n++; }
+      if (c.n) return { x: c.x/c.n, y: c.y/c.n };
+      // fallback: centroid of all kept
+      let n=0, sx=0, sy=0;
+      for (const p of lm) if (lmOk(p)) { sx+=p.x; sy+=p.y; n++; }
+      return n ? { x:sx/n, y:sy/n } : { x:0.5, y:0.5 };
     }
 
     function scaleFromTorso(lm) {
@@ -472,14 +527,8 @@
       if (lmOk(ls) && lmOk(rs)) s = Math.max(s, dist2(ls, rs));
       if (lmOk(lh) && lmOk(rh)) s = Math.max(s, dist2(lh, rh));
       if (!s) {
-        // bbox diagonal using only good landmarks
         let minx=1, miny=1, maxx=0, maxy=0, any=false;
-        for (const p of lm) {
-          if (!lmOk(p)) continue;
-          any = true;
-          minx=Math.min(minx,p.x); miny=Math.min(miny,p.y);
-          maxx=Math.max(maxx,p.x); maxy=Math.max(maxy,p.y);
-        }
+        for (const p of lm) if (lmOk(p)) { any=true; minx=Math.min(minx,p.x); miny=Math.min(miny,p.y); maxx=Math.max(maxx,p.x); maxy=Math.max(maxy,p.y); }
         if (any) s = Math.hypot(maxx-minx, maxy-miny);
       }
       return Math.max(s, MOVE.MIN_SCALE);
@@ -487,102 +536,159 @@
 
     function rawMovementScore(lm, prev) {
       if (!lm || !prev || lm.length !== prev.length) return 0;
-      const n = lm.length;
-      const scale = scaleFromTorso(lm);
+      const n = lm.length; const scale = scaleFromTorso(lm);
       let sum = 0, cnt = 0;
-      for (let i=0; i<n; i++) {
-        const a = lm[i], b = prev[i];
-        if (!lmOk(a) || !lmOk(b)) continue;
-        sum += dist2(a, b);
-        cnt++;
-      }
-      if (!cnt) return 0;
-      return (sum / cnt) / scale; // average normalized displacement
+      for (let i=0; i<n; i++) { const a = lm[i], b = prev[i]; if (!lmOk(a) || !lmOk(b)) continue; sum += dist2(a, b); cnt++; }
+      return cnt ? (sum / cnt) / scale : 0;
     }
 
-    function drawMovementBadge(movingState, raw, emaVal) {
+    function computeDriftScore(lm, base, torsoRel=true) {
+      if (!lm || !base || lm.length !== base.length) return 0;
+      const n = lm.length; const scale = scaleFromTorso(lm);
+      let sum = 0, cnt = 0;
+
+      let cNow = {x:0,y:0}, cBase = {x:0,y:0};
+      if (torsoRel) { cNow = torsoCenter(lm); cBase = torsoCenter(base); }
+
+      for (let i=0; i<n; i++) {
+        const a = lm[i], b = base[i];
+        if (!lmOk(a) || !lmOk(b)) continue;
+        const ax = a.x - (torsoRel ? cNow.x : 0), ay = a.y - (torsoRel ? cNow.y : 0);
+        const bx = b.x - (torsoRel ? cBase.x : 0), by = b.y - (torsoRel ? cBase.y : 0);
+        sum += Math.hypot(ax - bx, ay - by);
+        cnt++;
+      }
+      return cnt ? (sum / cnt) / scale : 0;
+    }
+
+    function cloneLm(lm) {
+      return lm?.map(p => p ? { x:p.x, y:p.y, z:p.z, visibility:p.visibility, presence:p.presence } : null) || null;
+    }
+    function blendLm(dst, src, a) {
+      // dst := lerp(dst, src, a) for ok points; create if absent
+      if (!src) return dst;
+      if (!dst || dst.length !== src.length) dst = cloneLm(src);
+      for (let i=0; i<src.length; i++) {
+        const s = src[i]; if (!lmOk(s)) continue;
+        if (!dst[i] || !lmOk(dst[i])) { dst[i] = { x:s.x, y:s.y, z:s.z, visibility:s.visibility, presence:s.presence }; continue; }
+        const d = dst[i];
+        d.x += a*(s.x - d.x); d.y += a*(s.y - d.y);
+        if (s.z != null && d.z != null) d.z += a*(s.z - d.z);
+        d.visibility = s.visibility ?? d.visibility;
+        d.presence   = s.presence   ?? d.presence;
+      }
+      return dst;
+    }
+
+    /* ---------- Main per-frame update ---------- */
+    function drawMovementBadge(movingState, emaVal, intVal, driftVal) {
       const ctx = poseCtx;
       const dpr = window.devicePixelRatio || 1;
-      const pad = Math.round(8 * dpr);
-      const x = pad, y = pad;
+      const pad = Math.round(8*dpr), x = pad, y = pad;
+      const txt = `EMA ${emaVal.toFixed(3)}  ·  INT ${intVal.toFixed(3)}  ·  DRIFT ${driftVal.toFixed(3)}   ${movingState ? '• MOVING' : '• STILL'}`;
 
-      const txt = `Movement: ${emaVal.toFixed(3)} ${movingState ? '• MOVING' : '• STILL'}`;
       ctx.save();
       ctx.font = `${Math.round(14*dpr)}px -apple-system,system-ui,Segoe UI,Roboto,sans-serif`;
       const textW = ctx.measureText(txt).width;
-      const boxW = Math.round(textW + pad*2);
-      const boxH = Math.round(26 * dpr);
+      const boxW = Math.round(textW + pad*2), boxH = Math.round(26*dpr);
 
-      ctx.globalAlpha = 0.7;
-      ctx.fillStyle = movingState ? '#4a2a00' : '#111';
-      ctx.fillRect(x, y, boxW, boxH);
-
-      ctx.globalAlpha = 0.9;
-      ctx.strokeStyle = movingState ? '#ffa64d' : 'rgba(255,255,255,0.25)';
-      ctx.lineWidth = Math.max(1, Math.round(1*dpr));
-      ctx.strokeRect(x+0.5, y+0.5, boxW-1, boxH-1);
-
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = movingState ? '#ffcc80' : '#ddd';
-      ctx.fillText(txt, x + pad, y + boxH - Math.round(8*dpr));
+      ctx.globalAlpha = 0.7; ctx.fillStyle = movingState ? '#4a2a00' : '#111'; ctx.fillRect(x,y,boxW,boxH);
+      ctx.globalAlpha = 0.9; ctx.strokeStyle = movingState ? '#ffa64d' : 'rgba(255,255,255,0.25)'; ctx.lineWidth = Math.max(1, Math.round(1*dpr)); ctx.strokeRect(x+0.5,y+0.5,boxW-1,boxH-1);
+      ctx.globalAlpha = 1; ctx.fillStyle = movingState ? '#ffcc80' : '#ddd'; ctx.fillText(txt, x+pad, y+boxH - Math.round(8*dpr));
       ctx.restore();
     }
 
-    function updateMovementFromLandmarks(lm, ts, canSend=true) {
+    function reflectPanel() {
+      emaScoreTxt.textContent   = moveEma.toFixed(3);
+      intScoreTxt.textContent   = intScore.toFixed(3);
+      driftScoreTxt.textContent = driftScore.toFixed(3);
+      moveStateTxt.textContent  = moving ? 'MOVING' : 'STILL';
+      moveStateTxt.classList.toggle('moving', moving);
+      moveStateTxt.classList.toggle('still', !moving);
+    }
+
+    function updateMovementFromLandmarks(lm, canSend=true) {
+      const now = performance.now();
+      if (!lastTs) lastTs = now;
+      const dt = Math.max(1/120, Math.min(0.2, (now - lastTs) / 1000)); // clamp 8.3ms..200ms
+      lastTs = now;
+
+      // --- Short-term: EMA of per-frame normalized displacement ---
       const raw = rawMovementScore(lm, prevLm);
       prevLm = lm;
-
-      // EMA + hysteresis
       moveEma = moveEma + MOVE.EMA_ALPHA * (raw - moveEma);
-      const nowMoving =
-        moving
-          ? (moveEma > MOVE.OFF || (ts - lastAboveOnTs) < MOVE.OFF_HOLD_MS)
-          : (moveEma >= MOVE.ON);
+      if (raw >= MOVE.ON) lastAboveOnTs = now;
+      const shortTrigger = (moveEma >= MOVE.ON);
+      const shortHoldOk  = (moveEma > MOVE.OFF) || ((now - lastAboveOnTs) < MOVE.OFF_HOLD_MS);
 
-      if (raw >= MOVE.ON) lastAboveOnTs = ts;
+      // --- Long-term: Leaky integrator (FPS-independent) ---
+      const decay = Math.exp(-dt / MOVE.INT_TAU);
+      intScore = intScore * decay + raw * dt;
+      const longTrigger = (intScore >= MOVE.INT_ON);
+      if (longTrigger) lastIntHitTs = now;
+      const longHoldOk  = (intScore > MOVE.INT_OFF) || ((now - lastIntHitTs) < MOVE.OFF_HOLD_MS);
 
-      if (nowMoving !== moving) {
-        moving = nowMoving;
-        lastStateChangeTs = ts;
-        if (moving) movingSince = ts;
-        console.log('[MOVE] state:', moving ? 'MOVING' : 'STILL', 'score=', moveEma.toFixed(3));
+      // --- Baseline drift vs slowly-adapting baseline (only adapts when STILL) ---
+      // lazily seed baseline if missing and we have landmarks
+      if (!baseLm) baseLm = cloneLm(lm);
+      driftScore = computeDriftScore(lm, baseLm, MOVE.DRIFT_TORSO_REL);
+
+      const driftTrigger = (driftScore >= MOVE.DRIFT_ON);
+      if (driftTrigger) lastDriftHitTs = now;
+      const driftHoldOk  = (driftScore > MOVE.DRIFT_OFF) || ((now - lastDriftHitTs) < MOVE.OFF_HOLD_MS);
+
+      // Combine: either path can enter; any hold can keep it
+      const wantMoving = moving ? (shortHoldOk || longHoldOk || driftHoldOk)
+                                : (shortTrigger || longTrigger || driftTrigger);
+
+      if (wantMoving !== moving) {
+        moving = wantMoving;
+        if (moving) movingSince = now;
+        console.log('[MOVE] state:', moving ? 'MOVING' : 'STILL',
+          'ema=', moveEma.toFixed(3), 'int=', intScore.toFixed(3), 'drift=', driftScore.toFixed(3));
       }
 
-      // draw + panel mirror
-      drawMovementBadge(moving, raw, moveEma);
-      reflectMovementInPanel();
+      // Baseline adaptation: ONLY when STILL to avoid chasing motion
+      if (!moving && baseLm) {
+        const a = 1 - Math.exp(-dt / MOVE.DRIFT_TAU); // time-constant-based blend
+        baseLm = blendLm(baseLm, lm, a);
+      }
 
-      // optionally send to sender if we did the inference locally (receiver mode)
+      // draw + panel
+      poseCtx.save();
+      drawMovementBadge(moving, moveEma, intScore, driftScore);
+      poseCtx.restore();
+      reflectPanel();
+
+      // optionally send movement packet to sender when we own inference
       if (canSend && poseWhere === 'receiver' && poseDC?.readyState === 'open') {
         poseDC.send(JSON.stringify({
           type: 'movement',
           where: 'receiver',
-          moving, scoreRaw: raw, scoreEma: moveEma, ts
+          moving,
+          scoreEma: moveEma,
+          scoreInt: intScore,
+          scoreDrift: driftScore,
+          ts: now
         }));
       }
     }
 
-    /* ---------- Central canvas clear helper ---------- */
+    /* ---------- Clear / stream end helpers ---------- */
     function clearOverlayDrawing() {
-      try {
-        poseCtx.setTransform(1,0,0,1,0,0);
-        poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
-      } catch {}
+      try { poseCtx.setTransform(1,0,0,1,0,0); poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height); } catch {}
     }
-
-    /* ---------- attach track/stream end handlers ---------- */
     function attachStreamEndHandlers(stream) {
       if (!stream) return;
       stream.getVideoTracks().forEach((t) => {
         t.addEventListener('ended',  clearOverlayDrawing);
         t.addEventListener('mute',   clearOverlayDrawing);
       });
-      stream.addEventListener('removetrack', (e) => {
-        if (e.track?.kind === 'video') clearOverlayDrawing();
-      });
+      stream.addEventListener('removetrack', (e) => { if (e.track?.kind === 'video') clearOverlayDrawing(); });
     }
 
     /* ---------- MediaPipe on RECEIVER ---------- */
+    let useRVFC = false;
     async function ensurePoseTask() {
       if (poseTask) return poseTask;
       const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
@@ -593,104 +699,64 @@
       });
       return poseTask;
     }
-
-    function videoHasFrame(v) {
-      return v &&
-        v.readyState >= HAVE_CURRENT_DATA &&
-        v.videoWidth  > 0 &&
-        v.videoHeight > 0;
-    }
-
+    function videoHasFrame(v) { return v && v.readyState >= HAVE_CURRENT_DATA && v.videoWidth > 0 && v.videoHeight > 0; }
     function waitForVideoFrame(video) {
       if (videoHasFrame(video)) return Promise.resolve();
       return new Promise((resolve) => {
         const check = () => { if (videoHasFrame(video)) { cleanup(); resolve(); } };
-        const cleanup = () => {
-          video.removeEventListener('loadedmetadata', check);
-          video.removeEventListener('playing', check);
-          video.removeEventListener('resize', check);
-        };
+        const cleanup = () => { video.removeEventListener('loadedmetadata', check); video.removeEventListener('playing', check); video.removeEventListener('resize', check); };
         video.addEventListener('loadedmetadata', check);
         video.addEventListener('playing', check);
         video.addEventListener('resize', check);
       });
     }
-
     async function startReceiverPoseLoop() {
       if (poseLoopRunning) return;
-      await ensurePoseTask();
-      await waitForVideoFrame(remoteVideo);
-
+      await ensurePoseTask(); await waitForVideoFrame(remoteVideo);
+      useRVFC = 'requestVideoFrameCallback' in remoteVideo;
       poseLoopRunning = true;
       console.log('[POSE][receiver] inference START (receiver)');
 
-      const useRVFC = 'requestVideoFrameCallback' in remoteVideo;
-
       const onFrame = () => {
-        if (!poseLoopRunning || !poseEnabled || poseWhere !== 'receiver') {
-          console.log('[POSE][receiver] inference STOP (receiver)');
-          return;
-        }
-
-        if (!videoHasFrame(remoteVideo)) {
-          poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
-          scheduleNext();
-          return;
-        }
-
+        if (!poseLoopRunning || !poseEnabled || poseWhere !== 'receiver') { console.log('[POSE] stop'); return; }
+        if (!videoHasFrame(remoteVideo)) { poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height); scheduleNext(); return; }
         try {
           const ts = performance.now();
           const result = poseTask.detectForVideo(remoteVideo, ts);
           if (result?.landmarks?.length) {
             const lm = result.landmarks[0];
-            poseCtx.save();
             poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
             drawPoseLandmarks([lm]);
-
-            // movement
-            updateMovementFromLandmarks(lm, ts, /*canSend=*/true);
-
-            // send landmarks back to sender when running on receiver (existing behavior)
+            updateMovementFromLandmarks(lm, /*canSend=*/true);
             if (poseDC?.readyState === 'open') {
-              poseDC.send(JSON.stringify({ type:'pose', landmarks: [lm], ts }));
+              poseDC.send(JSON.stringify({ type:'pose', landmarks:[lm], ts }));
             }
-            poseCtx.restore();
           } else {
             prevLm = null;
             poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
           }
-        } catch (err) {
-          console.warn('[POSE][receiver] detect error (retrying next frame)', err);
-        } finally {
-          scheduleNext();
-        }
+        } catch (err) { console.warn('[POSE][receiver] detect error', err); }
+        finally { scheduleNext(); }
       };
-
-      const scheduleNext = () => {
-        if (useRVFC) remoteVideo.requestVideoFrameCallback(onFrame);
-        else requestAnimationFrame(onFrame);
-      };
-
+      const scheduleNext = () => { if (useRVFC) remoteVideo.requestVideoFrameCallback(onFrame); else requestAnimationFrame(onFrame); };
       scheduleNext();
     }
-
     function stopReceiverPoseLoop() {
       poseLoopRunning = false;
       prevLm = null;
-      moveEma = 0;
-      moving = false;
+      moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
+      // keep baseline; user can reset
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-      reflectMovementInPanel();
+      reflectPanel();
     }
-
     function applyPoseMode() {
       setOverlayVisible(poseEnabled);
       if (!poseEnabled) { stopReceiverPoseLoop(); return; }
       if (poseWhere === 'receiver') startReceiverPoseLoop();
-      else stopReceiverPoseLoop(); // sender mode: draw/process only what we receive
+      else stopReceiverPoseLoop();
     }
 
-    /* ---------- Shared WebRTC core (signaling + PC) ---------- */
+    /* ---------- WebRTC core ---------- */
     const core = new ReceiverCore({
       wsEndpoint: WS_ENDPOINT,
       room,
@@ -706,20 +772,16 @@
       },
 
       onIceState: (state) => {
-        if (state === 'failed' || state === 'disconnected' || state === 'closed') {
-          clearOverlayDrawing();
-        }
+        if (state === 'failed' || state === 'disconnected' || state === 'closed') clearOverlayDrawing();
       },
 
-      onBye: () => {
-        clearOverlayDrawing();
-      },
+      onBye: () => { clearOverlayDrawing(); },
 
       onCreatePC: (pc) => {
         const ch = pc.createDataChannel('pose');
-        ch.onopen = () => { console.log('[DC][receiver] pose DC open'); };
-        ch.onclose = () => { console.log('[DC][receiver] pose DC close'); };
-        ch.onerror = (e) => { console.warn('[DC][receiver] pose DC error', e); };
+        ch.onopen  = () => console.log('[DC][receiver] pose DC open');
+        ch.onclose = () => console.log('[DC][receiver] pose DC close');
+        ch.onerror = (e) => console.warn('[DC][receiver] pose DC error', e);
         ch.onmessage = (ev) => {
           try {
             const msg = JSON.parse(ev.data);
@@ -731,11 +793,9 @@
             } else if (msg.type === 'pose') {
               if (poseEnabled && poseWhere === 'sender' && msg.landmarks?.length) {
                 const lm = msg.landmarks[0];
-                poseCtx.save();
                 poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
                 drawPoseLandmarks([lm]);
-                updateMovementFromLandmarks(lm, msg.ts ?? performance.now(), /*canSend=*/false);
-                poseCtx.restore();
+                updateMovementFromLandmarks(lm, /*canSend=*/false);
               }
             }
           } catch {}
@@ -747,11 +807,9 @@
         console.log('[DC][receiver] inbound datachannel (leaving open):', e.channel?.label);
       }
     });
-
     core.start().catch(console.warn);
 
-    /* ---------- Movement panel logic ---------- */
-
+    /* ---------- Panel logic ---------- */
     function loadMoveConfig() {
       try {
         const raw = localStorage.getItem(LS_KEY);
@@ -764,117 +822,64 @@
         return cfg;
       } catch { return {}; }
     }
-    function saveMoveConfig() {
-      try { localStorage.setItem(LS_KEY, JSON.stringify(MOVE)); } catch {}
-    }
-    function clamp(val, min, max) { return Math.max(min, Math.min(max, val)); }
-    function fmt(num, digits=3) { return Number(num).toFixed(digits); }
+    function saveMoveConfig() { try { localStorage.setItem(LS_KEY, JSON.stringify(MOVE)); } catch {} }
+    const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+    const fmt = (n,d=3)=>Number(n).toFixed(d);
 
     function initMovePanel() {
-      // seed slider positions from MOVE
-      ema.value      = MOVE.EMA_ALPHA;
-      onTh.value     = MOVE.ON;
-      offTh.value    = MOVE.OFF;
-      hold.value     = MOVE.OFF_HOLD_MS;
-      minScale.value = MOVE.MIN_SCALE;
-      visMin.value   = MOVE.VIS_MIN;
-      presMin.value  = MOVE.PRES_MIN;
+      visMin.value = MOVE.VIS_MIN; visOut.textContent = fmt(MOVE.VIS_MIN,2);
+      presMin.value = MOVE.PRES_MIN; presOut.textContent = fmt(MOVE.PRES_MIN,2);
 
-      // seed outputs
-      emaOut.textContent   = fmt(ema.value, 2);
-      onOut.textContent    = fmt(onTh.value);
-      offOut.textContent   = fmt(offTh.value);
-      holdOut.textContent  = Math.round(hold.value) + ' ms';
-      scaleOut.textContent = fmt(minScale.value, 3);
-      visOut.textContent   = fmt(visMin.value, 2);
-      presOut.textContent  = fmt(presMin.value, 2);
+      ema.value = MOVE.EMA_ALPHA; emaOut.textContent = fmt(MOVE.EMA_ALPHA,2);
+      onTh.value = MOVE.ON; onOut.textContent = fmt(MOVE.ON);
+      offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF);
 
-      reflectMovementInPanel();
+      tau.value = MOVE.INT_TAU; tauOut.textContent = fmt(MOVE.INT_TAU,1)+' s';
+      intOn.value = MOVE.INT_ON; intOnOut.textContent = fmt(MOVE.INT_ON);
+      intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF);
+
+      driftTau.value = MOVE.DRIFT_TAU; driftTauOut.textContent = fmt(MOVE.DRIFT_TAU,1)+' s';
+      driftOn.value = MOVE.DRIFT_ON; driftOnOut.textContent = fmt(MOVE.DRIFT_ON);
+      driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF);
+      driftTorsoRel.checked = !!MOVE.DRIFT_TORSO_REL;
+
+      reflectPanel();
     }
 
-    function reflectMovementInPanel() {
-      moveScoreTxt.textContent = fmt(moveEma);
-      moveStateTxt.textContent = moving ? 'MOVING' : 'STILL';
-      moveStateTxt.classList.toggle('moving', moving);
-      moveStateTxt.classList.toggle('still', !moving);
-    }
+    function openMovePanel(){ movePanel.classList.remove('hidden'); }
+    function closeMovePanel(){ movePanel.classList.add('hidden'); }
+    moveBtn.addEventListener('click', openMovePanel);
+    moveHide.addEventListener('click', closeMovePanel);
+    moveClose.addEventListener('click', closeMovePanel);
+    window.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'm') movePanel.classList.toggle('hidden'); });
 
-    function openMovePanel() { movePanel.classList.remove('hidden'); }
-    function closeMovePanel() { movePanel.classList.add('hidden'); }
+    // sliders
+    visMin.addEventListener('input', ()=>{ MOVE.VIS_MIN = clamp(parseFloat(visMin.value),0,0.99); visOut.textContent = fmt(MOVE.VIS_MIN,2); saveMoveConfig(); });
+    presMin.addEventListener('input', ()=>{ MOVE.PRES_MIN = clamp(parseFloat(presMin.value),0,0.99); presOut.textContent = fmt(MOVE.PRES_MIN,2); saveMoveConfig(); });
 
-    moveBtn.addEventListener('click', () => openMovePanel());
-    moveHide.addEventListener('click', () => closeMovePanel());
-    moveClose.addEventListener('click', () => closeMovePanel());
-    window.addEventListener('keydown', (e) => {
-      if (e.key.toLowerCase() === 'm') {
-        if (movePanel.classList.contains('hidden')) openMovePanel();
-        else closeMovePanel();
-      }
-    });
+    ema.addEventListener('input', ()=>{ MOVE.EMA_ALPHA = clamp(parseFloat(ema.value),0.01,0.90); emaOut.textContent = fmt(MOVE.EMA_ALPHA,2); saveMoveConfig(); });
+    onTh.addEventListener('input', ()=>{ MOVE.ON = clamp(parseFloat(onTh.value),0.005,0.300); if (MOVE.OFF > MOVE.ON){ MOVE.OFF = Math.max(0.005, MOVE.ON - 0.005); offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF); } onOut.textContent = fmt(MOVE.ON); saveMoveConfig(); });
+    offTh.addEventListener('input', ()=>{ MOVE.OFF = clamp(parseFloat(offTh.value),0.005,0.300); if (MOVE.OFF > MOVE.ON){ MOVE.OFF = MOVE.ON; offTh.value = MOVE.OFF; } offOut.textContent = fmt(MOVE.OFF); saveMoveConfig(); });
 
-    // Slider change handlers
-    ema.addEventListener('input', () => {
-      MOVE.EMA_ALPHA = clamp(parseFloat(ema.value), 0.01, 0.90);
-      emaOut.textContent = fmt(MOVE.EMA_ALPHA, 2);
-      saveMoveConfig();
-    });
+    tau.addEventListener('input', ()=>{ MOVE.INT_TAU = clamp(parseFloat(tau.value),0.5,8.0); tauOut.textContent = fmt(MOVE.INT_TAU,1)+' s'; saveMoveConfig(); });
+    intOn.addEventListener('input', ()=>{ MOVE.INT_ON = clamp(parseFloat(intOn.value),0.005,0.100); if (MOVE.INT_OFF > MOVE.INT_ON){ MOVE.INT_OFF = MOVE.INT_ON; intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF); } intOnOut.textContent = fmt(MOVE.INT_ON); saveMoveConfig(); });
+    intOff.addEventListener('input', ()=>{ MOVE.INT_OFF = clamp(parseFloat(intOff.value),0.005,0.100); if (MOVE.INT_OFF > MOVE.INT_ON){ MOVE.INT_OFF = MOVE.INT_ON; intOff.value = MOVE.INT_OFF; } intOffOut.textContent = fmt(MOVE.INT_OFF); saveMoveConfig(); });
 
-    onTh.addEventListener('input', () => {
-      MOVE.ON = clamp(parseFloat(onTh.value), 0.005, 0.300);
-      if (MOVE.OFF > MOVE.ON) {
-        MOVE.OFF = Math.max(0.005, MOVE.ON - 0.005);
-        offTh.value = MOVE.OFF;
-        offOut.textContent = fmt(MOVE.OFF);
-      }
-      onOut.textContent = fmt(MOVE.ON);
-      saveMoveConfig();
-    });
+    driftTau.addEventListener('input', ()=>{ MOVE.DRIFT_TAU = clamp(parseFloat(driftTau.value),0.5,8.0); driftTauOut.textContent = fmt(MOVE.DRIFT_TAU,1)+' s'; saveMoveConfig(); });
+    driftOn.addEventListener('input', ()=>{ MOVE.DRIFT_ON = clamp(parseFloat(driftOn.value),0.010,0.200); if (MOVE.DRIFT_OFF > MOVE.DRIFT_ON){ MOVE.DRIFT_OFF = MOVE.DRIFT_ON; driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF); } driftOnOut.textContent = fmt(MOVE.DRIFT_ON); saveMoveConfig(); });
+    driftOff.addEventListener('input', ()=>{ MOVE.DRIFT_OFF = clamp(parseFloat(driftOff.value),0.005,0.150); if (MOVE.DRIFT_OFF > MOVE.DRIFT_ON){ MOVE.DRIFT_OFF = MOVE.DRIFT_ON; driftOff.value = MOVE.DRIFT_OFF; } driftOffOut.textContent = fmt(MOVE.DRIFT_OFF); saveMoveConfig(); });
+    driftTorsoRel.addEventListener('change', ()=>{ MOVE.DRIFT_TORSO_REL = !!driftTorsoRel.checked; saveMoveConfig(); });
 
-    offTh.addEventListener('input', () => {
-      MOVE.OFF = clamp(parseFloat(offTh.value), 0.005, 0.300);
-      if (MOVE.OFF > MOVE.ON) {
-        MOVE.OFF = MOVE.ON;
-        offTh.value = MOVE.OFF;
-      }
-      offOut.textContent = fmt(MOVE.OFF);
-      saveMoveConfig();
-    });
-
-    hold.addEventListener('input', () => {
-      MOVE.OFF_HOLD_MS = clamp(parseInt(hold.value, 10) || 0, 0, 3000);
-      holdOut.textContent = Math.round(MOVE.OFF_HOLD_MS) + ' ms';
-      saveMoveConfig();
-    });
-
-    minScale.addEventListener('input', () => {
-      MOVE.MIN_SCALE = clamp(parseFloat(minScale.value), 0.000, 0.200);
-      scaleOut.textContent = fmt(MOVE.MIN_SCALE, 3);
-      saveMoveConfig();
-    });
-
-    // NEW: visibility / presence gates
-    visMin.addEventListener('input', () => {
-      MOVE.VIS_MIN = clamp(parseFloat(visMin.value), 0.00, 0.99);
-      visOut.textContent = fmt(MOVE.VIS_MIN, 2);
-      saveMoveConfig();
-    });
-
-    presMin.addEventListener('input', () => {
-      MOVE.PRES_MIN = clamp(parseFloat(presMin.value), 0.00, 0.99);
-      presOut.textContent = fmt(MOVE.PRES_MIN, 2);
-      saveMoveConfig();
-    });
+    driftReset.addEventListener('click', ()=>{ baseLm = null; console.log('[DRIFT] baseline reset'); });
 
     moveReset.addEventListener('click', () => {
       Object.assign(MOVE, MOVE_DEFAULTS);
-      initMovePanel();
-      saveMoveConfig();
+      initMovePanel(); saveMoveConfig();
     });
 
-    // Initialize panel now that DOM references exist
     initMovePanel();
 
-    /* ---------- NEW: clear overlay on video element stop-like states ---------- */
+    /* ---------- Clear overlay on video stop-like states ---------- */
     ['pause','ended','emptied','stalled','suspend','waiting'].forEach((ev) => {
       remoteVideo.addEventListener(ev, clearOverlayDrawing, { passive: true });
     });
@@ -885,7 +890,7 @@
       stopReceiverPoseLoop();
     });
 
-    // tiny typo guard used in logs
+    // tiny typo guard used in logs (legacy)
     function beginViewportSetle(){ beginViewportSettle(); }
   </script>
 </body>
