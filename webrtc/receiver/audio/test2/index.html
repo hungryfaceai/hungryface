@@ -46,16 +46,32 @@
 
     .panel header h1 { margin: 0 0 12px 0; font-size: clamp(18px, 3vw, 22px); }
 
-    /* Small input-level meter (noise bar) */
+    /* Input-level meter + dB label */
     .signal { margin: 0 0 12px 0; }
+    .signal-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center; gap: 10px;
+    }
+    .db {
+      font-size: 12px; color: #cfcfcf; min-width: 56px; text-align: right;
+      opacity: 0.9;
+    }
     .meter {
       width: 100%; height: 10px; border-radius: 8px;
       background: #0a0a0a; border: 1px solid #222; overflow: hidden;
     }
     .meter .fill {
       height: 100%; width: 0%;
-      background: linear-gradient(to right, rgba(96,165,250,0.9), rgba(239,68,68,0.9));
-      transition: width 120ms linear;
+      background: linear-gradient(to right, rgba(96,165,250,0.95), rgba(239,68,68,0.95));
+      transition: width 80ms linear;
+    }
+
+    /* Tiny spectrum strip (iPhone-ish feel) */
+    #specMini {
+      display: block; width: 100%; height: 42px;
+      background: #0a0a0a; border: 1px solid #222; border-radius: 8px;
+      margin-top: 8px;
     }
 
     details.advanced {
@@ -74,23 +90,22 @@
 
     label { display: grid; gap: 6px; font-size: 14px; color: #ddd; }
     label > span { color: #bbb; }
-    input[type="number"], input[type="url"], textarea {
+    input[type="number"], textarea {
       width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222;
       background:#0b0b0b; color:#ddd; font-size: 14px; box-sizing: border-box;
     }
     textarea { min-height: 56px; font-family: inherit; resize: vertical; }
-
     .muted { color: #aaa; }
     .small { font-size: 12px; }
 
-    /* Plots */
+    /* Cry score plot */
     section.plot { margin-top: 14px; }
-    canvas { display: block; width: 100%; height: 160px; background: #0a0a0a; border-radius: 10px; }
+    canvas#chart { display: block; width: 100%; height: 160px; background: #0a0a0a; border-radius: 10px; }
 
     /* Background turns red while alert is active */
     body.alert #stage { background: #1a0000; }
 
-    /* Fixed control bar — exactly like pose */
+    /* Control bar */
     #controls {
       position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
       display: flex; align-items: center; gap: 12px; z-index: 6;
@@ -104,7 +119,7 @@
   </style>
 </head>
 <body>
-  <!-- Inject the shared sidebar markup + behavior (same snippet as pose page) -->
+  <!-- Inject the shared sidebar markup + behavior -->
   <script type="module">
     (async () => {
       try {
@@ -128,7 +143,7 @@
     })();
   </script>
 
-  <!-- Bottom controls (exactly like pose) -->
+  <!-- Controls -->
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
     <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
@@ -142,11 +157,13 @@
       <header>
         <h1>Audio classification</h1>
 
-        <!-- Minimal noise bar (no text) -->
+        <!-- Sensitive level bar + dB label -->
         <div class="signal">
-          <div class="meter" aria-label="Input level">
-            <div id="rmsFill" class="fill"></div>
+          <div class="signal-row">
+            <div class="meter" aria-label="Input level"><div id="rmsFill" class="fill"></div></div>
+            <div id="dbLabel" class="db">–∞ dB</div>
           </div>
+          <canvas id="specMini" height="42"></canvas>
         </div>
       </header>
 
@@ -215,7 +232,7 @@
   <script type="module">
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
 
-    // MediaPipe Tasks Audio
+    /* ---------- MediaPipe Tasks Audio ---------- */
     const AUDIO_PKG_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0";
     const AudioMod = await import(AUDIO_PKG_URL).catch(e => { console.error('[CRY] MP audio import error', e); return null; });
     const AudioClassifier = AudioMod?.AudioClassifier;
@@ -225,16 +242,8 @@
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
 
-    /* ---------- DEBUG LOG SWITCHES ---------- */
-    const LOG = {
-      status: true,
-      dc: true,
-      spectrum: false,
-      rmsEvery: 0,
-      catEvery: 20,
-      seriesEvery: 0,
-      firstResult: true
-    };
+    /* ---------- Debug toggles (console only) ---------- */
+    const LOG = { status: true, dc: true, catEvery: 20, seriesEvery: 0, firstResult: true };
 
     /* ---------- DOM ---------- */
     const stage = document.getElementById('stage');
@@ -246,6 +255,8 @@
     const els = {
       chartCanvas: document.getElementById('chart'),
       rmsFill: document.getElementById('rmsFill'),
+      dbLabel: document.getElementById('dbLabel'),
+      specMini: document.getElementById('specMini'),
       inputs: {
         SR_TARGET:      document.getElementById('SR_TARGET'),
         FRAME_LEN_S:    document.getElementById('FRAME_LEN_S'),
@@ -263,7 +274,7 @@
     /* ---------- Audio mode state ---------- */
     let audioDC = null;
     let audioEnabled = false;
-    let audioWhere = 'sender';
+    let audioWhere = 'sender'; // 'sender' | 'receiver'
 
     /* ---------- App state ---------- */
     const state = {
@@ -273,9 +284,17 @@
       sourceNode: null,
       sinkNode: null,
       processor: null,
-      tdAnalyser: null,
-      levelRaf: 0,
 
+      // Analysers
+      tdAnalyser: null,     // time-domain (RMS)
+      specAnalyser: null,   // frequency (spectrum)
+      visualRaf: 0,
+
+      // MP task
+      audioTask: null,
+      audioTaskPromise: null,
+
+      // Ring buffer + series
       ring16k: new Float32Array(0),
       lastPos: 0,
       timesSec: [],
@@ -286,17 +305,17 @@
 
       alertOn: false,
       alertUntilMs: 0,
-      audioTask: null,
-      audioTaskPromise: null,
 
-      // meter
-      rmsNow: 0
+      // Meters
+      dbEma: -120, // smoothed dBFS
     };
 
-    // Guard to avoid redundant re-initialization
+    const DB_FLOOR = -75; // lower = more sensitive; raise if you want less movement
+    const DB_CEIL  =   0;
+
     let _activeAudio = { enabled: null, where: null };
 
-    /* ---------- Small helpers ---------- */
+    /* ---------- Helpers ---------- */
     const RAW_COLOR = '#60a5fa';
     const SMOOTH_COLOR = '#ef4444';
     const THRESH_ON_COLOR = '#f97316';
@@ -317,8 +336,6 @@
         ALERT_HOLD_MS: Math.max(0, parseInt(els.inputs.ALERT_HOLD_MS?.value, 10) || 3000),
       };
     }
-
-    // score utils
     function categoryLabel(c) { return (c.displayName || c.categoryName || String(c.index) || '').trim(); }
     function classMatch(name, needles) { const L = (name || '').trim().toLowerCase(); return needles.some(n => L.includes(n)); }
     function getCryScoreFromCategories(categories, includeList) {
@@ -333,18 +350,90 @@
     function movingAvgTail(arr, k){ if(!arr.length) return 0; const s=Math.max(0,arr.length-k); let sum=0; for(let i=s;i<arr.length;i++) sum+=arr[i]; return sum/(arr.length-s); }
     function formatClock(ms){ return new Date(ms).toLocaleTimeString(undefined,{hour12:false}); }
 
-    // Update the tiny meter only
-    function setSignalRMS(r) {
-      const x = Math.max(0, Math.min(1, r || 0));
-      state.rmsNow = x;
-      const pct = Math.round(x * 100);
+    /* ---------- Level metering (sensitive, with dB text) ---------- */
+    function setSignalRMS(rmsLinear) {
+      // Convert to dBFS; clamp to floor..ceil and smooth for stable display
+      const db = 20 * Math.log10(Math.max(1e-8, rmsLinear));
+      state.dbEma = 0.2 * db + 0.8 * state.dbEma;
+      const dbClamped = Math.max(DB_FLOOR, Math.min(DB_CEIL, state.dbEma));
+
+      // Map to 0..100% based on dB range (more movement at low levels)
+      const pct = Math.round(((dbClamped - DB_FLOOR) / (DB_CEIL - DB_FLOOR)) * 100);
       els.rmsFill.style.width = pct + '%';
+
+      // Label, rounded
+      const shown = Math.round(dbClamped);
+      els.dbLabel.textContent = (shown <= DB_FLOOR + 1) ? '–∞ dB' : `${shown} dB`;
+    }
+
+    /* ---------- Tiny spectrum (canvas, lightweight) ---------- */
+    function sizeCanvasToDisplay(canvas) {
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+      }
+      return dpr;
+    }
+
+    function startVisualLoop(){
+      cancelAnimationFrame(state.visualRaf);
+      const td = state.tdAnalyser;
+      const an = state.specAnalyser;
+      if (!td || !an) return;
+
+      const tdBuf = new Float32Array(td.fftSize);
+      const specBuf = new Uint8Array(an.frequencyBinCount);
+      const ctx2d = els.specMini.getContext('2d');
+
+      function tick(){
+        if (!state.tdAnalyser || !state.specAnalyser) return;
+
+        // Level (RMS)
+        td.getFloatTimeDomainData(tdBuf);
+        let s = 0; for (let i=0;i<tdBuf.length;i++){ const v = tdBuf[i]; s += v*v; }
+        setSignalRMS(Math.sqrt(s / Math.max(1, tdBuf.length)));
+
+        // Spectrum
+        const dpr = sizeCanvasToDisplay(els.specMini);
+        const W = els.specMini.width, H = els.specMini.height;
+        ctx2d.clearRect(0,0,W,H);
+
+        an.getByteFrequencyData(specBuf); // 0..255 (already smoothed by analyser)
+        // Draw vertical bars across width
+        const bars = Math.min(W, 120);                  // up to 120 thin bars
+        const step = Math.max(1, Math.floor(specBuf.length / bars));
+        const barW = Math.max(1, Math.floor(W / bars));
+
+        for (let b = 0; b < bars; b++) {
+          let sum = 0, n = 0;
+          const start = b * step, end = Math.min(specBuf.length, start + step);
+          for (let i=start;i<end;i++){ sum += specBuf[i]; n++; }
+          const v = n ? (sum / n) : 0;                  // 0..255
+          const mag = v / 255;                          // 0..1
+          const h = Math.max(1, Math.round(mag * (H - 4)));
+          const x = b * barW;
+          const y = H - h;
+
+          // simple gradient-ish fill
+          ctx2d.fillStyle = 'rgba(96,165,250,0.9)';
+          ctx2d.fillRect(x, y, barW - 1, h);
+        }
+
+        state.visualRaf = requestAnimationFrame(tick);
+      }
+      state.visualRaf = requestAnimationFrame(tick);
+    }
+
+    function stopVisualLoop(){
+      cancelAnimationFrame(state.visualRaf);
+      state.visualRaf = 0;
     }
 
     /* ---------- Chart (cry score) ---------- */
     function setupChart(){
       if (state.chart) state.chart.destroy();
-      console.log('[CRY][chart] init');
       const ctx = els.chartCanvas.getContext('2d');
       state.chart = new Chart(ctx, {
         type: 'line',
@@ -356,10 +445,12 @@
         ] },
         options: {
           animation: false,
+          maintainAspectRatio: false,
           plugins: { legend: { display: false } },
           scales: {
             x: { title: { display: true, text: 'Time' } },
-            y: { title: { display: true, text: 'Score' }, suggestedMin: 0, suggestedMax: 1.0 }
+            // FIX: keep y-axis fixed to avoid shrinking/expanding
+            y: { title: { display: true, text: 'Score' }, min: 0, max: 1.5 }
           },
           elements: { line: { fill: false } }
         }
@@ -393,23 +484,13 @@
       state.chart.data.datasets[2].data = thrOn;
       state.chart.data.datasets[3].data = thrOff;
 
-      if (raw.length || sm.length) {
-        const all = raw.concat(sm);
-        const ymin = Math.min(...all, onVal, offVal);
-        const ymax = Math.max(...all, onVal, offVal);
-        const pad = 0.05;
-        state.chart.options.scales.y.min = Math.min(0, ymin - pad);
-        state.chart.options.scales.y.max = Math.min(1.5, ymax + pad);
-      }
+      // IMPORTANT: do NOT adjust y-axis min/max here (fixed in setup)
       state.chart.update();
     }
 
-    /* ---------- MP Audio task (resilient load) ---------- */
+    /* ---------- MP Audio task ---------- */
     async function ensureAudioTask() {
-      if (!AudioClassifier || !FilesetResolver) {
-        console.warn('[CRY][mp] MediaPipe tasks audio not available');
-        return null;
-      }
+      if (!AudioClassifier || !FilesetResolver) return null;
       if (state.audioTask) return state.audioTask;
       if (state.audioTaskPromise) return state.audioTaskPromise;
 
@@ -426,7 +507,6 @@
         const res = await fetch(bust, { cache: 'no-store' });
         if (!res.ok) throw new Error(`yamnet fetch ${res.status}`);
         const buf = new Uint8Array(await res.arrayBuffer());
-        console.log('[CRY][mp] yamnet bytes =', buf.byteLength);
         return AudioClassifier.createFromOptions(resolver, {
           baseOptions: { modelAssetBuffer: buf },
           runningMode: "AUDIO_CLIPS",
@@ -438,23 +518,17 @@
         let lastErr = null;
         for (let attempt = 1; attempt <= 3; attempt++) {
           try {
-            console.log(`[CRY][mp] resolver attempt ${attempt}`);
             const resolver = await FilesetResolver.forAudioTasks(WASM_DIR);
             try {
-              console.log(`[CRY][mp] create (path) attempt ${attempt}`);
               state.audioTask = await createWithPath(resolver);
-              console.log('[CRY][mp] audio task ready (path)');
               return state.audioTask;
             } catch (e1) {
               lastErr = e1;
-              console.warn('[CRY][mp] create (path) failed:', e1?.message || e1);
               state.audioTask = await createWithBuffer(resolver);
-              console.log('[CRY][mp] audio task ready (buffer)');
               return state.audioTask;
             }
           } catch (e) {
             lastErr = e;
-            console.warn('[CRY][mp] resolver/model attempt failed:', e?.message || e);
             await new Promise(r => setTimeout(r, attempt * 600));
           }
         }
@@ -499,10 +573,7 @@
       const alert = shouldAlert(smoothed, nowMs, params);
       state.alertOn = alert; setAlert(alert);
 
-      if (LOG.seriesEvery && (state.timesSec.length % LOG.seriesEvery) === 0) {
-        console.log('[CRY][series] n=', state.timesSec.length, 'last raw=', score.toFixed(3), 'sm=', smoothed.toFixed(3));
-      }
-
+      // Trim old samples beyond window + small buffer
       if (state.timesSec.length % 400 === 0) {
         const keepFrom = Math.max(0, state.timesSec.length - Math.ceil(params.PLOT_WINDOW_S / params.HOP_S) - 10);
         if (keepFrom > 0) {
@@ -529,37 +600,42 @@
       return out;
     }
 
-    /* ---------- Remote-stream tap (level + optional classification) ---------- */
+    /* ---------- Remote stream tap (meter + spectrum; optional classify) ---------- */
     function startRemoteStreamGraph(doClassify) {
       if (!state.streamRemote) { console.log('[CRY][remote] no stream yet'); return; }
 
       stopRemoteStreamGraph(); // clean prior graph
 
-      console.log('[CRY][remote] starting stream graph… classify =', !!doClassify);
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
       state.audioCtx = ctx;
       ctx.resume?.().catch(()=>{});
 
       const src = ctx.createMediaStreamSource(state.streamRemote);
 
-      // Time-domain analyser (RMS meter)
-      const td = ctx.createAnalyser();
+      // Analysers
+      const td = ctx.createAnalyser();   // RMS
       td.fftSize = 1024;
+
+      const an = ctx.createAnalyser();   // spectrum
+      an.fftSize = 1024;
+      an.smoothingTimeConstant = 0.8;    // iPhone-ish smoothness
 
       // Silent sink (avoid feedback)
       const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
 
       src.connect(td);
+      src.connect(an);
       src.connect(sink);
 
       state.sourceNode = src;
       state.tdAnalyser = td;
+      state.specAnalyser = an;
       state.sinkNode   = sink;
 
-      // Optional: classification tap from the remote stream
+      // Optional classification from the tapped remote stream (receiver mode)
       if (doClassify) {
-        let proc;
         (async () => {
+          let proc;
           try {
             const workletURL = URL.createObjectURL(new Blob([`
               class TapProcessor extends AudioWorkletProcessor {
@@ -579,44 +655,22 @@
             });
             proc.port.onmessage = (ev) => onAudioChunkReceiver(ev.data, ctx.sampleRate);
           } catch {
-            // Fallback: ScriptProcessor (works everywhere)
             const sp = ctx.createScriptProcessor(4096, 1, 1);
-            sp.onaudioprocess = (e) => {
-              onAudioChunkReceiver(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate);
-            };
+            sp.onaudioprocess = (e) => onAudioChunkReceiver(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate);
             proc = sp;
           }
           src.connect(proc).connect(sink);
           state.processor = proc;
-          console.log('[CRY][remote] classification tap active @', ctx.sampleRate, 'Hz');
         })();
       } else {
         state.processor = null;
       }
 
-      startLevelLoop();
-    }
-
-    function startLevelLoop(){
-      cancelAnimationFrame(state.levelRaf);
-      const td = state.tdAnalyser;
-      if (!td) return;
-      const tdBuf = new Float32Array(td.fftSize);
-
-      function tick(){
-        if (!state.tdAnalyser) return;
-        td.getFloatTimeDomainData(tdBuf);
-        let s = 0;
-        for (let i=0;i<tdBuf.length;i++){ const v = tdBuf[i]; s += v*v; }
-        const r = Math.sqrt(s / Math.max(1, tdBuf.length));
-        setSignalRMS(r);
-        state.levelRaf = requestAnimationFrame(tick);
-      }
-      state.levelRaf = requestAnimationFrame(tick);
+      startVisualLoop();
     }
 
     function stopRemoteStreamGraph() {
-      cancelAnimationFrame(state.levelRaf); state.levelRaf = 0;
+      stopVisualLoop();
       try { state.processor?.disconnect(); } catch {}
       try { state.sourceNode?.disconnect(); } catch {}
       try { state.sinkNode?.disconnect(); } catch {}
@@ -625,10 +679,11 @@
       state.sourceNode = null;
       state.sinkNode = null;
       state.tdAnalyser = null;
+      state.specAnalyser = null;
       state.audioCtx = null;
     }
 
-    /* ---------- Receiver-mode inference from chunks ---------- */
+    /* ---------- Receiver-mode classification from chunks ---------- */
     function extractCategories(res) {
       if (!res) return [];
       if (Array.isArray(res)) {
@@ -647,11 +702,11 @@
 
     async function onAudioChunkReceiver(chunkFloat32, deviceSr) {
       if (!state.running) return;
-      const task = await ensureAudioTask().catch(e => { console.warn('[CRY][mp] task unavailable on chunk', e); return null; });
+      const task = await ensureAudioTask().catch(() => null);
       if (!task) return;
       const params = getParams();
 
-      // live RMS (from chunks)
+      // Update meter from chunk (works even if visual analysers aren’t ready yet)
       let s = 0; for (let i=0;i<chunkFloat32.length;i++){ const v=chunkFloat32[i]; s += v*v; }
       setSignalRMS(Math.sqrt(s / Math.max(1, chunkFloat32.length)));
 
@@ -679,7 +734,7 @@
           window._dbgCatEvery = (window._dbgCatEvery || 0) + 1;
           if ((window._dbgCatEvery % LOG.catEvery) === 0) {
             const top = categories.slice(0,5).map(c => `${categoryLabel(c)}:${(c.score ?? 0).toFixed(3)}`);
-            console.log('[CRY][rx] categories length =', categories.length, 'top =', top.join(', '));
+            console.log('[CRY][rx] top =', top.join(', '));
           }
         }
         if (LOG.firstResult && !window._dbgFirstMicResult) {
@@ -704,25 +759,23 @@
       if (_activeAudio.enabled === audioEnabled && _activeAudio.where === audioWhere) return;
       _activeAudio = { enabled: audioEnabled, where: audioWhere };
 
-      console.log('[CRY][mode] apply → enabled=', audioEnabled, 'where=', audioWhere);
-
       if (!state.running) return;
 
       if (!audioEnabled) {
         stopRemoteStreamGraph();
-        setSignalRMS(0);
+        els.rmsFill.style.width = '0%';
+        els.dbLabel.textContent = '–∞ dB';
         return;
       }
-
-      // We always tap the remote stream for the meter.
+      // We always tap the remote stream for meter + spectrum.
       if (state.streamRemote) {
-        startRemoteStreamGraph(audioWhere === 'receiver'); // classify on receiver only in that mode
+        startRemoteStreamGraph(audioWhere === 'receiver'); // only classify locally in receiver mode
       } else {
         stopRemoteStreamGraph();
       }
     }
 
-    /* ---------- Enable/Disable audio buttons (same as pose) ---------- */
+    /* ---------- Enable/Disable audio buttons ---------- */
     function updateAudioButtons() {
       if (remoteVideo.muted) {
         enableAudioBtn.style.display = 'block';
@@ -748,7 +801,7 @@
       remoteVideo.muted = true; updateAudioButtons();
     });
 
-    /* ---------- Fullscreen (same as pose) ---------- */
+    /* ---------- Fullscreen ---------- */
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -765,6 +818,7 @@
       fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
     });
 
+    // UI bindings
     function initUI() {
       Object.values(els.inputs).forEach(inp => {
         inp?.addEventListener('change', () => updateChartWindow(getParams()));
@@ -776,19 +830,14 @@
       initUI();
     }
 
-    // WebAudio unlock on user gesture (iOS/Safari safety)
-    ['click','touchstart'].forEach(ev =>
-      stage.addEventListener(ev, () => state.audioCtx?.resume?.(), { passive: true })
-    );
-
-    // Initialize chart before we connect
+    // Initialize chart before we connect (with fixed y-axis)
     setupChart();
 
     /* ---------- WebRTC core ---------- */
     const core = new ReceiverCore({
       wsEndpoint: WS_ENDPOINT,
       room,
-      onStatus: (msg) => { if (LOG.status) console.log('[CRY][status]', msg); },
+      onStatus: (msg) => { if (LOG.status) console.log('[CRY][status]', msg); }, // no on-page logs
       onStream: (stream) => {
         console.log('[CRY][pc] onStream, tracks=', stream.getTracks().map(t=>t.kind));
         if (remoteVideo.srcObject !== stream) {
@@ -826,27 +875,13 @@
             applyAudioMode();
           } else if (msg.type === 'audio') {
             const categories = msg.categories || [];
-            if (LOG.dc) {
-              const top = categories.slice(0, 5).map(c =>
-                `${categoryLabel(c)}:${(c.score ?? 0).toFixed(3)}`
-              );
-              console.log('[CRY][dc] top =', top.join(', '));
-            }
-
-            // If scores arrive before we heard the mode, assume sender-inference and enable it.
             if (!audioEnabled || audioWhere !== 'sender') {
-              audioEnabled = true;
-              audioWhere = 'sender';
-              applyAudioMode();
+              audioEnabled = true; audioWhere = 'sender'; applyAudioMode();
             }
-
             if (state.running) {
               const params = getParams();
               const score = getCryScoreFromCategories(categories, params.INCLUDE_CLASSES);
               pushScore(score);
-              if (LOG.dc && (state.timesSec.length % 20) === 0) {
-                console.log('[CRY][dc] categories n=', categories.length, 'score=', score.toFixed(3));
-              }
             }
           }
         };
@@ -857,21 +892,9 @@
 
     core.start().catch(err => console.warn('[CRY] core start error', err));
 
-    /* ---------- Wire UI & initial boot ---------- */
-    document.addEventListener('DOMContentLoaded', () => {
-      console.log('[CRY] DOM ready');
-      Object.values(els.inputs).forEach(inp => {
-        inp?.addEventListener('change', () => {
-          console.log('[CRY][ui] params changed → update chart window');
-          updateChartWindow(getParams());
-        });
-      });
-    });
-
     window.addEventListener('beforeunload', () => {
       try { core.close(); } catch {}
       stopRemoteStreamGraph();
-      console.log('[CRY] unload cleanup done');
     });
   </script>
 </body>
