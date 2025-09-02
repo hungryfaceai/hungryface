@@ -120,6 +120,13 @@
       gap: 8px; margin-top: 4px;
     }
     #movePanel .checkRow label { display: flex; align-items: center; gap: 8px; }
+
+    /* Calibration bits */
+    #calProgRow { display: none; }
+    #calStatus.ok { color: #b7f0b7; }
+    #calStatus.warn { color: #ffd27a; }
+    #calStatus.err { color: #ff9b9b; }
+    progress { width: 100%; height: 6px; border-radius: 999px; overflow: hidden; }
   </style>
 </head>
 <body>
@@ -148,7 +155,7 @@
 
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
-    <button id="disableAudioBtn" class="btn" type="button">Disable audio</</button>
+    <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
     <button id="moveBtn" class="btn" type="button">Movement settings</button>
   </div>
@@ -239,6 +246,19 @@
         Torso-relative baseline (reduces camera shake)
       </label>
       <button id="driftReset" class="btn small" type="button">Reset baseline</button>
+    </div>
+
+    <!-- Auto-calibration -->
+    <div class="groupTitle">Calibration</div>
+    <div class="row">
+      <label>Auto-calibrate</label>
+      <button id="calStart" class="btn small" type="button">Auto-calibrate (15s)</button>
+      <output id="calStatus" class="muted">Idle</output>
+    </div>
+    <div class="row" id="calProgRow">
+      <label>Progress</label>
+      <progress id="calProg" max="1" value="0"></progress>
+      <output id="calTime">15s</output>
     </div>
 
     <div class="actions">
@@ -343,6 +363,13 @@
     const driftTorsoRel = document.getElementById('driftTorsoRel');
     const driftReset  = document.getElementById('driftReset');
 
+    // Calibration UI
+    const calStartBtn = document.getElementById('calStart');
+    const calStatus   = document.getElementById('calStatus');
+    const calProgRow  = document.getElementById('calProgRow');
+    const calProg     = document.getElementById('calProg');
+    const calTime     = document.getElementById('calTime');
+
     /* ---------- State ---------- */
     let hideStatusTimer = null;
 
@@ -365,6 +392,12 @@
     let lastIntHitTs = 0;        // last time integrator ≥ INT_ON
     let lastDriftHitTs = 0;      // last time drift ≥ DRIFT_ON
     let lastTs = 0;              // ms (local perf clock)
+
+    // Calibration state
+    const CAL_DURATION_MS = 15000;
+    let calActive = false, calStart = 0;
+    let calSamples = [];         // raw per-frame scores
+    let lastGoodLm = null;       // last good frame to seed baseline
 
     /* ---------- Status overlay ---------- */
     function showStatus(msg) {
@@ -629,7 +662,6 @@
       const longHoldOk  = (intScore > MOVE.INT_OFF) || ((now - lastIntHitTs) < MOVE.OFF_HOLD_MS);
 
       // --- Baseline drift vs slowly-adapting baseline (only adapts when STILL) ---
-      // lazily seed baseline if missing and we have landmarks
       if (!baseLm) baseLm = cloneLm(lm);
       driftScore = computeDriftScore(lm, baseLm, MOVE.DRIFT_TORSO_REL);
 
@@ -654,6 +686,16 @@
         baseLm = blendLm(baseLm, lm, a);
       }
 
+      /* ---- Calibration sampling/progress ---- */
+      if (calActive) {
+        calSamples.push(raw);
+        lastGoodLm = cloneLm(lm);
+        const t = now - calStart;
+        calProg.value = Math.min(1, t / CAL_DURATION_MS);
+        calTime.textContent = Math.max(0, Math.ceil((CAL_DURATION_MS - t)/1000)) + 's';
+        if (t >= CAL_DURATION_MS) finishCalibration();
+      }
+
       // draw + panel
       poseCtx.save();
       drawMovementBadge(moving, moveEma, intScore, driftScore);
@@ -672,6 +714,67 @@
           ts: now
         }));
       }
+    }
+
+    /* ---------- Calibration helpers ---------- */
+    function quantile(arr, q) {
+      if (!arr.length) return 0;
+      const a = arr.slice().sort((x,y)=>x-y);
+      const pos = (a.length - 1) * q;
+      const i = Math.floor(pos), j = Math.ceil(pos);
+      if (i === j) return a[i];
+      const w = pos - i;
+      return a[i]*(1-w) + a[j]*w;
+    }
+
+    function startCalibration() {
+      if (calActive) return;
+      calActive = true; calStart = performance.now();
+      calSamples = []; lastGoodLm = null;
+      calStatus.className = 'muted'; calStatus.textContent = 'Calibrating — keep still';
+      calProgRow.style.display = 'grid';
+      calProg.value = 0; calTime.textContent = Math.round(CAL_DURATION_MS/1000) + 's';
+    }
+
+    function finishCalibration() {
+      calActive = false;
+      calProgRow.style.display = 'none';
+
+      // Stats from raw per-frame motion
+      const m = quantile(calSamples, 0.5);
+      const p95 = quantile(calSamples, 0.95);
+
+      // Threshold heuristics derived from stillness stats
+      const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+
+      // EMA thresholds
+      const onBase = Math.max(3.5*m, 1.2*p95, 0.01);
+      MOVE.ON  = clamp(onBase, 0.01, 0.20);
+      MOVE.OFF = Math.max(0.005, Math.min(MOVE.ON, MOVE.ON*0.65));
+
+      // Integrator thresholds (time-aware; scales with τ)
+      const intOn = MOVE.INT_TAU * m * 2.5;
+      MOVE.INT_ON  = clamp(intOn, 0.005, 0.10);
+      MOVE.INT_OFF = Math.min(MOVE.INT_ON, Math.max(0.005, MOVE.INT_ON*0.6));
+
+      // Drift thresholds (posture change vs baseline)
+      const driftOn = Math.max(5.0*m, 1.5*MOVE.ON, 0.02);
+      MOVE.DRIFT_ON  = clamp(driftOn, 0.02, 0.20);
+      MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_ON, Math.max(0.005, MOVE.DRIFT_ON*0.65));
+
+      // Seed baseline from last good frame; clear dynamics so we’re stable
+      if (lastGoodLm) baseLm = cloneLm(lastGoodLm);
+      moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
+
+      // Persist + reflect UI
+      saveMoveConfig();
+      initMovePanel();
+
+      // Result summary
+      const summary = `OK · median=${m.toFixed(4)}, p95=${p95.toFixed(4)} → EMA ON=${MOVE.ON.toFixed(3)}, INT ON=${MOVE.INT_ON.toFixed(3)}, DRIFT ON=${MOVE.DRIFT_ON.toFixed(3)}`;
+      calStatus.className = 'ok';
+      calStatus.textContent = summary;
+      setTimeout(()=>{ calStatus.className = 'muted'; }, 6000);
     }
 
     /* ---------- Clear / stream end helpers ---------- */
@@ -753,10 +856,10 @@
       setOverlayVisible(poseEnabled);
       if (!poseEnabled) { stopReceiverPoseLoop(); return; }
       if (poseWhere === 'receiver') startReceiverPoseLoop();
-      else stopReceiverPoseLoop();
+      else stopReceiverPoseLoop(); // sender mode: draw only what we receive
     }
 
-    /* ---------- WebRTC core ---------- */
+    /* ---------- Shared WebRTC core (signaling + PC) ---------- */
     const core = new ReceiverCore({
       wsEndpoint: WS_ENDPOINT,
       room,
@@ -772,16 +875,21 @@
       },
 
       onIceState: (state) => {
-        if (state === 'failed' || state === 'disconnected' || state === 'closed') clearOverlayDrawing();
+        if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+          clearOverlayDrawing();
+        }
       },
 
-      onBye: () => { clearOverlayDrawing(); },
+      onBye: () => {
+        clearOverlayDrawing();
+      },
 
       onCreatePC: (pc) => {
+        // Pose DC (receiver initiates; bidirectional)
         const ch = pc.createDataChannel('pose');
-        ch.onopen  = () => console.log('[DC][receiver] pose DC open');
-        ch.onclose = () => console.log('[DC][receiver] pose DC close');
-        ch.onerror = (e) => console.warn('[DC][receiver] pose DC error', e);
+        ch.onopen = () => { console.log('[DC][receiver] pose DC open'); };
+        ch.onclose = () => { console.log('[DC][receiver] pose DC close'); };
+        ch.onerror = (e) => { console.warn('[DC][receiver] pose DC error', e); };
         ch.onmessage = (ev) => {
           try {
             const msg = JSON.parse(ev.data);
@@ -804,9 +912,11 @@
       },
 
       onDataChannel: (e) => {
+        // Leave inbound DCs open; log for debugging
         console.log('[DC][receiver] inbound datachannel (leaving open):', e.channel?.label);
       }
     });
+
     core.start().catch(console.warn);
 
     /* ---------- Panel logic ---------- */
@@ -823,7 +933,7 @@
       } catch { return {}; }
     }
     function saveMoveConfig() { try { localStorage.setItem(LS_KEY, JSON.stringify(MOVE)); } catch {} }
-    const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+    const clampUi = (v,min,max)=>Math.max(min,Math.min(max,v));
     const fmt = (n,d=3)=>Number(n).toFixed(d);
 
     function initMovePanel() {
@@ -854,20 +964,20 @@
     window.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'm') movePanel.classList.toggle('hidden'); });
 
     // sliders
-    visMin.addEventListener('input', ()=>{ MOVE.VIS_MIN = clamp(parseFloat(visMin.value),0,0.99); visOut.textContent = fmt(MOVE.VIS_MIN,2); saveMoveConfig(); });
-    presMin.addEventListener('input', ()=>{ MOVE.PRES_MIN = clamp(parseFloat(presMin.value),0,0.99); presOut.textContent = fmt(MOVE.PRES_MIN,2); saveMoveConfig(); });
+    visMin.addEventListener('input', ()=>{ MOVE.VIS_MIN = clampUi(parseFloat(visMin.value),0,0.99); visOut.textContent = fmt(MOVE.VIS_MIN,2); saveMoveConfig(); });
+    presMin.addEventListener('input', ()=>{ MOVE.PRES_MIN = clampUi(parseFloat(presMin.value),0,0.99); presOut.textContent = fmt(MOVE.PRES_MIN,2); saveMoveConfig(); });
 
-    ema.addEventListener('input', ()=>{ MOVE.EMA_ALPHA = clamp(parseFloat(ema.value),0.01,0.90); emaOut.textContent = fmt(MOVE.EMA_ALPHA,2); saveMoveConfig(); });
-    onTh.addEventListener('input', ()=>{ MOVE.ON = clamp(parseFloat(onTh.value),0.005,0.300); if (MOVE.OFF > MOVE.ON){ MOVE.OFF = Math.max(0.005, MOVE.ON - 0.005); offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF); } onOut.textContent = fmt(MOVE.ON); saveMoveConfig(); });
-    offTh.addEventListener('input', ()=>{ MOVE.OFF = clamp(parseFloat(offTh.value),0.005,0.300); if (MOVE.OFF > MOVE.ON){ MOVE.OFF = MOVE.ON; offTh.value = MOVE.OFF; } offOut.textContent = fmt(MOVE.OFF); saveMoveConfig(); });
+    ema.addEventListener('input', ()=>{ MOVE.EMA_ALPHA = clampUi(parseFloat(ema.value),0.01,0.90); emaOut.textContent = fmt(MOVE.EMA_ALPHA,2); saveMoveConfig(); });
+    onTh.addEventListener('input', ()=>{ MOVE.ON = clampUi(parseFloat(onTh.value),0.005,0.300); if (MOVE.OFF > MOVE.ON){ MOVE.OFF = Math.max(0.005, MOVE.ON - 0.005); offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF); } onOut.textContent = fmt(MOVE.ON); saveMoveConfig(); });
+    offTh.addEventListener('input', ()=>{ MOVE.OFF = clampUi(parseFloat(offTh.value),0.005,0.300); if (MOVE.OFF > MOVE.ON){ MOVE.OFF = MOVE.ON; offTh.value = MOVE.OFF; } offOut.textContent = fmt(MOVE.OFF); saveMoveConfig(); });
 
-    tau.addEventListener('input', ()=>{ MOVE.INT_TAU = clamp(parseFloat(tau.value),0.5,8.0); tauOut.textContent = fmt(MOVE.INT_TAU,1)+' s'; saveMoveConfig(); });
-    intOn.addEventListener('input', ()=>{ MOVE.INT_ON = clamp(parseFloat(intOn.value),0.005,0.100); if (MOVE.INT_OFF > MOVE.INT_ON){ MOVE.INT_OFF = MOVE.INT_ON; intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF); } intOnOut.textContent = fmt(MOVE.INT_ON); saveMoveConfig(); });
-    intOff.addEventListener('input', ()=>{ MOVE.INT_OFF = clamp(parseFloat(intOff.value),0.005,0.100); if (MOVE.INT_OFF > MOVE.INT_ON){ MOVE.INT_OFF = MOVE.INT_ON; intOff.value = MOVE.INT_OFF; } intOffOut.textContent = fmt(MOVE.INT_OFF); saveMoveConfig(); });
+    tau.addEventListener('input', ()=>{ MOVE.INT_TAU = clampUi(parseFloat(tau.value),0.5,8.0); tauOut.textContent = fmt(MOVE.INT_TAU,1)+' s'; saveMoveConfig(); });
+    intOn.addEventListener('input', ()=>{ MOVE.INT_ON = clampUi(parseFloat(intOn.value),0.005,0.100); if (MOVE.INT_OFF > MOVE.INT_ON){ MOVE.INT_OFF = MOVE.INT_ON; intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF); } intOnOut.textContent = fmt(MOVE.INT_ON); saveMoveConfig(); });
+    intOff.addEventListener('input', ()=>{ MOVE.INT_OFF = clampUi(parseFloat(intOff.value),0.005,0.100); if (MOVE.INT_OFF > MOVE.INT_ON){ MOVE.INT_OFF = MOVE.INT_ON; intOff.value = MOVE.INT_OFF; } intOffOut.textContent = fmt(MOVE.INT_OFF); saveMoveConfig(); });
 
-    driftTau.addEventListener('input', ()=>{ MOVE.DRIFT_TAU = clamp(parseFloat(driftTau.value),0.5,8.0); driftTauOut.textContent = fmt(MOVE.DRIFT_TAU,1)+' s'; saveMoveConfig(); });
-    driftOn.addEventListener('input', ()=>{ MOVE.DRIFT_ON = clamp(parseFloat(driftOn.value),0.010,0.200); if (MOVE.DRIFT_OFF > MOVE.DRIFT_ON){ MOVE.DRIFT_OFF = MOVE.DRIFT_ON; driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF); } driftOnOut.textContent = fmt(MOVE.DRIFT_ON); saveMoveConfig(); });
-    driftOff.addEventListener('input', ()=>{ MOVE.DRIFT_OFF = clamp(parseFloat(driftOff.value),0.005,0.150); if (MOVE.DRIFT_OFF > MOVE.DRIFT_ON){ MOVE.DRIFT_OFF = MOVE.DRIFT_ON; driftOff.value = MOVE.DRIFT_OFF; } driftOffOut.textContent = fmt(MOVE.DRIFT_OFF); saveMoveConfig(); });
+    driftTau.addEventListener('input', ()=>{ MOVE.DRIFT_TAU = clampUi(parseFloat(driftTau.value),0.5,8.0); driftTauOut.textContent = fmt(MOVE.DRIFT_TAU,1)+' s'; saveMoveConfig(); });
+    driftOn.addEventListener('input', ()=>{ MOVE.DRIFT_ON = clampUi(parseFloat(driftOn.value),0.010,0.200); if (MOVE.DRIFT_OFF > MOVE.DRIFT_ON){ MOVE.DRIFT_OFF = MOVE.DRIFT_ON; driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF); } driftOnOut.textContent = fmt(MOVE.DRIFT_ON); saveMoveConfig(); });
+    driftOff.addEventListener('input', ()=>{ MOVE.DRIFT_OFF = clampUi(parseFloat(driftOff.value),0.005,0.150); if (MOVE.DRIFT_OFF > MOVE.DRIFT_ON){ MOVE.DRIFT_OFF = MOVE.DRIFT_ON; driftOff.value = MOVE.DRIFT_OFF; } driftOffOut.textContent = fmt(MOVE.DRIFT_OFF); saveMoveConfig(); });
     driftTorsoRel.addEventListener('change', ()=>{ MOVE.DRIFT_TORSO_REL = !!driftTorsoRel.checked; saveMoveConfig(); });
 
     driftReset.addEventListener('click', ()=>{ baseLm = null; console.log('[DRIFT] baseline reset'); });
@@ -875,6 +985,12 @@
     moveReset.addEventListener('click', () => {
       Object.assign(MOVE, MOVE_DEFAULTS);
       initMovePanel(); saveMoveConfig();
+    });
+
+    // Calibration button
+    calStartBtn.addEventListener('click', () => {
+      openMovePanel();
+      startCalibration();
     });
 
     initMovePanel();
