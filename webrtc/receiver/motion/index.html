@@ -331,12 +331,12 @@
       DRIFT_OFF: 0.050,
       DRIFT_TORSO_REL: true,
 
-      // NEW: detector toggles
+      // Detector toggles
       USE_EMA: true,
       USE_INT: true,
       USE_DRIFT: true
     };
-    const LS_KEY = 'naptio-move-config-v4';
+    const LS_KEY = 'naptio-move-config-v5';
     const MOVE = { ...MOVE_DEFAULTS, ...loadMoveConfig() };
 
     // Mediapipe assets
@@ -388,7 +388,7 @@
     const driftTorsoRel = document.getElementById('driftTorsoRel');
     const driftReset  = document.getElementById('driftReset');
 
-    // NEW toggles
+    // Toggles
     const useEma   = document.getElementById('useEma');
     const useInt   = document.getElementById('useInt');
     const useDrift = document.getElementById('useDrift');
@@ -432,6 +432,9 @@
     let calActive = false, calStart = 0;
     let calSamples = [];
     let lastGoodLm = null;
+
+    // NEW: OFF follows ON until user touches OFF
+    let offLink = { ema: false, int: false, drift: false };
 
     /* ---------- Status overlay ---------- */
     function showStatus(msg) {
@@ -662,7 +665,6 @@
       const BG      = movingState ? '#4a2a00' : '#111111';
       const BORDER  = movingState ? '#ffa64d' : 'rgba(255,255,255,0.25)';
       const BAR_BG  = 'rgba(255,255,255,0.18)';
-      const TICK    = 'rgba(255,255,255,0.9)';
       const TXT_DIM = movingState ? '#ffcc80' : '#dddddd';
 
       // State pill
@@ -697,9 +699,9 @@
 
       // Metrics → bars
       const metrics = [
-        { label:'EMA', val: emaVal,   on: MOVE.ON,       off: MOVE.OFF,       enabled: !!MOVE.USE_EMA },
-        { label:'INT', val: intVal,   on: MOVE.INT_ON,   off: MOVE.INT_OFF,   enabled: !!MOVE.USE_INT },
-        { label:'DRF', val: driftVal, on: MOVE.DRIFT_ON, off: MOVE.DRIFT_OFF, enabled: !!MOVE.USE_DRIFT },
+        { label:'EMA', val: emaVal,   on: MOVE.ON,       enabled: !!MOVE.USE_EMA },
+        { label:'INT', val: intVal,   on: MOVE.INT_ON,   enabled: !!MOVE.USE_INT },
+        { label:'DRF', val: driftVal, on: MOVE.DRIFT_ON, enabled: !!MOVE.USE_DRIFT },
       ];
 
       ctx.font = `${Math.round(11*dpr)}px -apple-system,system-ui,Segoe UI,Roboto,sans-serif`;
@@ -716,7 +718,7 @@
         // Bar background
         const barX = x + INNER + LABEL_W;
         const barY = rowY - Math.round(BAR_H/2) + Math.round(8*dpr);
-        ctx.fillStyle = BAR_BG;
+        ctx.fillStyle = 'rgba(255,255,255,0.18)';
         ctx.fillRect(barX, barY, BAR_W, BAR_H);
 
         // Fill based on ratio to ON threshold
@@ -733,17 +735,7 @@
         ctx.fillStyle = fillCol;
         ctx.fillRect(barX, barY, fillW, BAR_H);
 
-        // Overflow cap
-        if (ratio > 1.0) {
-          ctx.globalAlpha = metrics[i].enabled ? 0.9 : 0.35;
-          ctx.strokeStyle = '#ff7a7a';
-          ctx.beginPath();
-          ctx.moveTo(barX + BAR_W + 0.5, barY);
-          ctx.lineTo(barX + BAR_W + 0.5, barY + BAR_H);
-          ctx.stroke();
-        }
-
-        // ON threshold tick
+        // ON threshold tick (right edge)
         ctx.globalAlpha = metrics[i].enabled ? 1.0 : 0.35;
         ctx.strokeStyle = 'rgba(255,255,255,0.9)';
         ctx.beginPath();
@@ -874,27 +866,44 @@
       const n   = calSamples.length;
       const floor = (v, min) => Math.max(min, v);
 
-      const onBase = Math.max(3.5*m, 1.2*p95, 0.01);
-      MOVE.ON  = floor(onBase, 0.01);
-      MOVE.OFF = Math.min(MOVE.ON, Math.max(0.005, MOVE.ON*0.65));
+      // Compute ON thresholds (no artificial cap in the math)
+      const emaOn    = Math.max(3.5*m, 1.2*p95, 0.01);
+      const intOn    = MOVE.INT_TAU * m * 2.5;
+      const driftOn  = Math.max(5.0*m, 1.5*emaOn, 0.02);
 
-      const intOnCalc = MOVE.INT_TAU * m * 2.5;
-      MOVE.INT_ON  = floor(intOnCalc, 0.005);
-      MOVE.INT_OFF = Math.min(MOVE.INT_ON, Math.max(0.005, MOVE.INT_ON*0.6));
+      MOVE.ON        = floor(emaOn, 0.005);
+      MOVE.INT_ON    = floor(intOn, 0.005);
+      MOVE.DRIFT_ON  = floor(driftOn, 0.005);
 
-      const driftOnCalc = Math.max(5.0*m, 1.5*MOVE.ON, 0.02);
-      MOVE.DRIFT_ON  = floor(driftOnCalc, 0.02);
-      MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_ON, Math.max(0.005, MOVE.DRIFT_ON*0.65));
+      // OFF = ON by default after calibration; OFF ≤ ON invariant
+      MOVE.OFF       = MOVE.ON;
+      MOVE.INT_OFF   = MOVE.INT_ON;
+      MOVE.DRIFT_OFF = MOVE.DRIFT_ON;
 
+      // Mark OFFs as "linked" until the user changes them
+      offLink = { ema: true, int: true, drift: true };
+
+      // Seed baseline & clear dynamic scores for stability
       if (lastGoodLm) baseLm = cloneLm(lastGoodLm);
       moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
 
+      // Reflect UI values
+      onTh.value       = MOVE.ON;       onOut.textContent       = MOVE.ON.toFixed(3);
+      intOnEl.value    = MOVE.INT_ON;   intOnOut.textContent    = MOVE.INT_ON.toFixed(3);
+      driftOnEl.value  = MOVE.DRIFT_ON; driftOnOut.textContent  = MOVE.DRIFT_ON.toFixed(3);
+
+      offTh.value      = MOVE.OFF;      offOut.textContent      = MOVE.OFF.toFixed(3);
+      intOff.value     = MOVE.INT_OFF;  intOffOut.textContent   = MOVE.INT_OFF.toFixed(3);
+      driftOff.value   = MOVE.DRIFT_OFF;driftOffOut.textContent = MOVE.DRIFT_OFF.toFixed(3);
+
+      // Apply ON caps to sliders (and clamp if calibration exceeded caps)
+      applyOnCaps();
+
+      // Persist + refresh panel text
       saveMoveConfig();
-      ensureSliderRange(onTh,     MOVE.ON);
-      ensureSliderRange(intOnEl,  MOVE.INT_ON);
-      ensureSliderRange(driftOnEl,MOVE.DRIFT_ON);
       initMovePanel();
 
+      // Stats
       calMedian.textContent = m.toFixed(4);
       calP95.textContent    = p95.toFixed(4);
       calN.textContent      = String(n);
@@ -1057,10 +1066,37 @@
     const clampUi = (v,min,max)=>Math.max(min,Math.min(max,v));
     const fmt = (n,d=3)=>Number(n).toFixed(d);
 
-    function ensureSliderRange(inputEl, val, pad=1.5) {
-      const curMax = Number(inputEl.max) || 0.3;
-      const wantMax = Math.max(curMax, val * pad);
-      inputEl.max = wantMax.toFixed(3);
+    // NEW: Cap ON sliders and clamp values if needed
+    function applyOnCaps() {
+      // Static caps
+      onTh.max      = '0.500';   // EMA ON cap
+      driftOnEl.max = '1.000';   // DRIFT ON cap
+
+      // INT ON cap depends on tau
+      const intCap = Math.min(2.0, MOVE.INT_TAU * 0.8);
+      intOnEl.max = intCap.toFixed(3);
+
+      // Clamp current values to caps
+      if (parseFloat(onTh.value) > parseFloat(onTh.max)) {
+        onTh.value = onTh.max; MOVE.ON = parseFloat(onTh.max); onOut.textContent = fmt(MOVE.ON);
+      }
+      if (parseFloat(driftOnEl.value) > parseFloat(driftOnEl.max)) {
+        driftOnEl.value = driftOnEl.max; MOVE.DRIFT_ON = parseFloat(driftOnEl.max); driftOnOut.textContent = fmt(MOVE.DRIFT_ON);
+      }
+      if (parseFloat(intOnEl.value) > parseFloat(intOnEl.max)) {
+        intOnEl.value = intOnEl.max; MOVE.INT_ON = parseFloat(intOnEl.max); intOnOut.textContent = fmt(MOVE.INT_ON);
+      }
+
+      // Enforce OFF ≤ ON (and keep links)
+      if (offLink.ema || MOVE.OFF > MOVE.ON) {
+        MOVE.OFF = Math.min(MOVE.OFF, MOVE.ON); offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF);
+      }
+      if (offLink.int || MOVE.INT_OFF > MOVE.INT_ON) {
+        MOVE.INT_OFF = Math.min(MOVE.INT_OFF, MOVE.INT_ON); intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF);
+      }
+      if (offLink.drift || MOVE.DRIFT_OFF > MOVE.DRIFT_ON) {
+        MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON); driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF);
+      }
     }
 
     function initMovePanel() {
@@ -1071,21 +1107,24 @@
       // EMA
       useEma.checked = !!MOVE.USE_EMA;
       ema.value = MOVE.EMA_ALPHA; emaOut.textContent = fmt(MOVE.EMA_ALPHA,2);
-      onTh.value = MOVE.ON; onOut.textContent = fmt(MOVE.ON); ensureSliderRange(onTh, MOVE.ON);
-      offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF);
+      onTh.value = MOVE.ON; onOut.textContent = fmt(MOVE.ON);
+      offTh.value = Math.min(MOVE.OFF, MOVE.ON); offOut.textContent = fmt(MOVE.OFF = Math.min(MOVE.OFF, MOVE.ON));
 
       // Integrator
       useInt.checked = !!MOVE.USE_INT;
       tau.value = MOVE.INT_TAU; tauOut.textContent = fmt(MOVE.INT_TAU,1)+' s';
-      intOnEl.value = MOVE.INT_ON; intOnOut.textContent = fmt(MOVE.INT_ON); ensureSliderRange(intOnEl, MOVE.INT_ON);
-      intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF);
+      intOnEl.value = MOVE.INT_ON; intOnOut.textContent = fmt(MOVE.INT_ON);
+      intOff.value = Math.min(MOVE.INT_OFF, MOVE.INT_ON); intOffOut.textContent = fmt(MOVE.INT_OFF = Math.min(MOVE.INT_OFF, MOVE.INT_ON));
 
       // Drift
       useDrift.checked = !!MOVE.USE_DRIFT;
       driftTau.value = MOVE.DRIFT_TAU; driftTauOut.textContent = fmt(MOVE.DRIFT_TAU,1)+' s';
-      driftOnEl.value = MOVE.DRIFT_ON; driftOnOut.textContent = fmt(MOVE.DRIFT_ON); ensureSliderRange(driftOnEl, MOVE.DRIFT_ON);
-      driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF);
+      driftOnEl.value = MOVE.DRIFT_ON; driftOnOut.textContent = fmt(MOVE.DRIFT_ON);
+      driftOff.value = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON); driftOffOut.textContent = fmt(MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON));
       driftTorsoRel.checked = !!MOVE.DRIFT_TORSO_REL;
+
+      // Apply caps now that values are set
+      applyOnCaps();
 
       reflectPanel();
     }
@@ -1107,40 +1146,82 @@
     useDrift.addEventListener('change', ()=>{ MOVE.USE_DRIFT = !!useDrift.checked; saveMoveConfig(); });
 
     // EMA sliders
-    ema.addEventListener('input', ()=>{ MOVE.EMA_ALPHA = clampUi(parseFloat(ema.value),0.01,0.90); emaOut.textContent = fmt(MOVE.EMA_ALPHA,2); saveMoveConfig(); });
+    ema.addEventListener('input', ()=>{
+      MOVE.EMA_ALPHA = clampUi(parseFloat(ema.value),0.01,0.90);
+      emaOut.textContent = fmt(MOVE.EMA_ALPHA,2);
+      saveMoveConfig();
+    });
     onTh.addEventListener('input', ()=>{
       MOVE.ON = Math.max(0.005, parseFloat(onTh.value) || 0);
-      if (MOVE.OFF > MOVE.ON){ MOVE.OFF = MOVE.ON; offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF); }
+      // keep OFF ≤ ON; if linked, follow
+      if (offLink.ema || MOVE.OFF > MOVE.ON) {
+        MOVE.OFF = MOVE.ON;
+        offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF);
+      }
       onOut.textContent = fmt(MOVE.ON);
-      ensureSliderRange(onTh, MOVE.ON); saveMoveConfig();
+      applyOnCaps(); saveMoveConfig();
     });
-    offTh.addEventListener('input', ()=>{ MOVE.OFF = clampUi(parseFloat(offTh.value),0.005,Math.max(0.005,MOVE.ON)); if (MOVE.OFF > MOVE.ON){ MOVE.OFF = MOVE.ON; offTh.value = MOVE.OFF; } offOut.textContent = fmt(MOVE.OFF); saveMoveConfig(); });
+    offTh.addEventListener('input', ()=>{
+      offLink.ema = false; // user took control
+      MOVE.OFF = Math.max(0.005, Math.min(parseFloat(offTh.value)||0, MOVE.ON));
+      offTh.value = MOVE.OFF; offOut.textContent = fmt(MOVE.OFF);
+      saveMoveConfig();
+    });
 
     // Integrator sliders
-    tau.addEventListener('input', ()=>{ MOVE.INT_TAU = clampUi(parseFloat(tau.value),0.5,8.0); tauOut.textContent = fmt(MOVE.INT_TAU,1)+' s'; saveMoveConfig(); });
+    tau.addEventListener('input', ()=>{
+      MOVE.INT_TAU = clampUi(parseFloat(tau.value),0.5,8.0);
+      tauOut.textContent = fmt(MOVE.INT_TAU,1)+' s';
+      applyOnCaps(); saveMoveConfig();
+    });
     intOnEl.addEventListener('input', ()=>{
       MOVE.INT_ON = Math.max(0.005, parseFloat(intOnEl.value) || 0);
-      if (MOVE.INT_OFF > MOVE.INT_ON){ MOVE.INT_OFF = MOVE.INT_ON; intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF); }
+      if (offLink.int || MOVE.INT_OFF > MOVE.INT_ON) {
+        MOVE.INT_OFF = MOVE.INT_ON;
+        intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF);
+      }
       intOnOut.textContent = fmt(MOVE.INT_ON);
-      ensureSliderRange(intOnEl, MOVE.INT_ON); saveMoveConfig();
+      applyOnCaps(); saveMoveConfig();
     });
-    intOff.addEventListener('input', ()=>{ MOVE.INT_OFF = clampUi(parseFloat(intOff.value),0.005,Math.max(0.005,MOVE.INT_ON)); if (MOVE.INT_OFF > MOVE.INT_ON){ MOVE.INT_OFF = MOVE.INT_ON; intOff.value = MOVE.INT_OFF; } intOffOut.textContent = fmt(MOVE.INT_OFF); saveMoveConfig(); });
+    intOff.addEventListener('input', ()=>{
+      offLink.int = false;
+      MOVE.INT_OFF = Math.max(0.005, Math.min(parseFloat(intOff.value)||0, MOVE.INT_ON));
+      intOff.value = MOVE.INT_OFF; intOffOut.textContent = fmt(MOVE.INT_OFF);
+      saveMoveConfig();
+    });
 
     // Drift sliders
-    driftTau.addEventListener('input', ()=>{ MOVE.DRIFT_TAU = clampUi(parseFloat(driftTau.value),0.5,8.0); driftTauOut.textContent = fmt(MOVE.DRIFT_TAU,1)+' s'; saveMoveConfig(); });
+    driftTau.addEventListener('input', ()=>{
+      MOVE.DRIFT_TAU = clampUi(parseFloat(driftTau.value),0.5,8.0);
+      driftTauOut.textContent = fmt(MOVE.DRIFT_TAU,1)+' s';
+      saveMoveConfig();
+    });
     driftOnEl.addEventListener('input', ()=>{
       MOVE.DRIFT_ON = Math.max(0.005, parseFloat(driftOnEl.value) || 0);
-      if (MOVE.DRIFT_OFF > MOVE.DRIFT_ON){ MOVE.DRIFT_OFF = MOVE.DRIFT_ON; driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF); }
+      if (offLink.drift || MOVE.DRIFT_OFF > MOVE.DRIFT_ON) {
+        MOVE.DRIFT_OFF = MOVE.DRIFT_ON;
+        driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF);
+      }
       driftOnOut.textContent = fmt(MOVE.DRIFT_ON);
-      ensureSliderRange(driftOnEl, MOVE.DRIFT_ON); saveMoveConfig();
+      applyOnCaps(); saveMoveConfig();
     });
-    driftOff.addEventListener('input', ()=>{ MOVE.DRIFT_OFF = clampUi(parseFloat(driftOff.value),0.005,Math.max(0.005,MOVE.DRIFT_ON)); if (MOVE.DRIFT_OFF > MOVE.DRIFT_ON){ MOVE.DRIFT_OFF = MOVE.DRIFT_ON; driftOff.value = MOVE.DRIFT_OFF; } driftOffOut.textContent = fmt(MOVE.DRIFT_OFF); saveMoveConfig(); });
+    driftOff.addEventListener('input', ()=>{
+      offLink.drift = false;
+      MOVE.DRIFT_OFF = Math.max(0.005, Math.min(parseFloat(driftOff.value)||0, MOVE.DRIFT_ON));
+      driftOff.value = MOVE.DRIFT_OFF; driftOffOut.textContent = fmt(MOVE.DRIFT_OFF);
+      saveMoveConfig();
+    });
     driftTorsoRel.addEventListener('change', ()=>{ MOVE.DRIFT_TORSO_REL = !!driftTorsoRel.checked; saveMoveConfig(); });
 
     driftReset.addEventListener('click', ()=>{ baseLm = null; calStatus.className='muted'; calStatus.textContent='Baseline reset'; });
 
     moveReset.addEventListener('click', () => {
       Object.assign(MOVE, MOVE_DEFAULTS);
+      // When resetting to defaults, OFF should not exceed ON
+      MOVE.OFF       = Math.min(MOVE.OFF, MOVE.ON);
+      MOVE.INT_OFF   = Math.min(MOVE.INT_OFF, MOVE.INT_ON);
+      MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON);
+      offLink = { ema:false, int:false, drift:false };
       initMovePanel(); saveMoveConfig();
       baseLm = null; moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
       calStatus.className='muted'; calStatus.textContent='Defaults restored';
@@ -1166,6 +1247,7 @@
       stopReceiverPoseLoop();
     });
 
+    // tiny typo guard used in logs (legacy)
     function beginViewportSetle(){ beginViewportSettle(); }
   </script>
 </body>
