@@ -120,14 +120,12 @@
   <script type="module">
     (async () => {
       try {
-        // Load & insert the sidebar HTML (hamburger + nav + invite modal)
         const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
         const html = await res.text();
         const wrap = document.createElement('div');
         wrap.innerHTML = html.trim();
         document.body.prepend(...wrap.childNodes);
 
-        // Load the sidebar behavior once markup exists
         await new Promise((resolve, reject) => {
           const s = document.createElement('script');
           s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
@@ -190,6 +188,18 @@
       <output id="scaleOut">0.020</output>
     </div>
 
+    <!-- NEW: Visibility / presence gates -->
+    <div class="row">
+      <label for="visMin">Visibility min</label>
+      <input id="visMin" type="range" min="0.00" max="0.99" step="0.01">
+      <output id="visOut">0.50</output>
+    </div>
+    <div class="row">
+      <label for="presMin">Presence min (opt)</label>
+      <input id="presMin" type="range" min="0.00" max="0.99" step="0.01">
+      <output id="presOut">0.00</output>
+    </div>
+
     <div class="actions">
       <button id="moveReset" class="btn small" type="button">Reset defaults</button>
       <button id="moveHide"  class="btn small" type="button">Hide</button>
@@ -214,15 +224,18 @@
     const room = new URLSearchParams(location.search).get("room") || "Baby";
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
-    // Movement detection config (defaults)
+    // Movement detection config (defaults + persistence)
     const MOVE_DEFAULTS = {
-      EMA_ALPHA: 0.2,          // smoothing factor for score
-      ON:  0.06,               // score threshold to enter MOVING
-      OFF: 0.03,               // score threshold to leave MOVING
-      OFF_HOLD_MS: 700,        // min time to remain MOVING after score dips
-      MIN_SCALE: 0.02          // lower bound on shoulder/hip width (normalized)
+      EMA_ALPHA: 0.2,
+      ON:  0.06,
+      OFF: 0.03,
+      OFF_HOLD_MS: 700,
+      MIN_SCALE: 0.02,
+      // NEW gates
+      VIS_MIN: 0.50,   // ignore landmarks with visibility below this (if provided)
+      PRES_MIN: 0.00   // optional presence gate (0 = off)
     };
-    const LS_KEY = 'naptio-move-config-v1';
+    const LS_KEY = 'naptio-move-config-v2';
 
     // Active config (mutates when user drags sliders)
     const MOVE = { ...MOVE_DEFAULTS, ...loadMoveConfig() };
@@ -256,16 +269,14 @@
     const moveReset  = document.getElementById('moveReset');
     const moveStateTxt = document.getElementById('moveStateTxt');
     const moveScoreTxt = document.getElementById('moveScoreTxt');
-    const ema   = document.getElementById('ema');
-    const emaOut= document.getElementById('emaOut');
-    const onTh  = document.getElementById('onTh');
-    const onOut = document.getElementById('onOut');
-    const offTh = document.getElementById('offTh');
-    const offOut= document.getElementById('offOut');
-    const hold  = document.getElementById('hold');
-    const holdOut = document.getElementById('holdOut');
-    const minScale = document.getElementById('minScale');
-    const scaleOut = document.getElementById('scaleOut');
+
+    const ema   = document.getElementById('ema');       const emaOut   = document.getElementById('emaOut');
+    const onTh  = document.getElementById('onTh');      const onOut    = document.getElementById('onOut');
+    const offTh = document.getElementById('offTh');     const offOut   = document.getElementById('offOut');
+    const hold  = document.getElementById('hold');      const holdOut  = document.getElementById('holdOut');
+    const minScale = document.getElementById('minScale'); const scaleOut = document.getElementById('scaleOut');
+    const visMin = document.getElementById('visMin');   const visOut   = document.getElementById('visOut');
+    const presMin = document.getElementById('presMin'); const presOut  = document.getElementById('presOut');
 
     /* ---------- State ---------- */
     let hideStatusTimer = null;
@@ -359,7 +370,6 @@
       updateAudioButtons();
       beginViewportSettle();
     });
-    // Handle rotation / track size changes from sender
     remoteVideo.addEventListener('resize', beginViewportSettle);
 
     /* ---------- Canvas alignment ---------- */
@@ -367,7 +377,6 @@
       const scale = Math.min(containerW / (contentW||1), containerH / (contentH||1));
       const w = Math.round(contentW * scale);
       const h = Math.round(contentH * scale);
-      const x = Math.floor((containerH - h) / 2); // not used, but left for clarity
       return { width:w, height:h, left: Math.floor((containerW - w) / 2), top: Math.floor((containerH - h) / 2) };
     }
 
@@ -446,6 +455,11 @@
     /* ---------- Movement detection ---------- */
     const L = { L_SHOULDER: 11, R_SHOULDER: 12, L_HIP: 23, R_HIP: 24 };
 
+    const lmOk = (p) =>
+      p &&
+      (p.visibility == null || p.visibility >= MOVE.VIS_MIN) &&
+      (p.presence   == null || p.presence   >= MOVE.PRES_MIN);
+
     function dist2(a, b) {
       const dx = (a.x - b.x), dy = (a.y - b.y);
       return Math.hypot(dx, dy);
@@ -455,13 +469,18 @@
       const ls = lm[L.L_SHOULDER], rs = lm[L.R_SHOULDER];
       const lh = lm[L.L_HIP],      rh = lm[L.R_HIP];
       let s = 0;
-      if (ls && rs) s = Math.max(s, dist2(ls, rs));
-      if (lh && rh) s = Math.max(s, dist2(lh, rh));
+      if (lmOk(ls) && lmOk(rs)) s = Math.max(s, dist2(ls, rs));
+      if (lmOk(lh) && lmOk(rh)) s = Math.max(s, dist2(lh, rh));
       if (!s) {
-        // fallback: bbox diagonal
-        let minx=1, miny=1, maxx=0, maxy=0;
-        for (const p of lm) { if (!p) continue; minx=Math.min(minx,p.x); miny=Math.min(miny,p.y); maxx=Math.max(maxx,p.x); maxy=Math.max(maxy,p.y); }
-        s = Math.hypot(maxx-minx, maxy-miny);
+        // bbox diagonal using only good landmarks
+        let minx=1, miny=1, maxx=0, maxy=0, any=false;
+        for (const p of lm) {
+          if (!lmOk(p)) continue;
+          any = true;
+          minx=Math.min(minx,p.x); miny=Math.min(miny,p.y);
+          maxx=Math.max(maxx,p.x); maxy=Math.max(maxy,p.y);
+        }
+        if (any) s = Math.hypot(maxx-minx, maxy-miny);
       }
       return Math.max(s, MOVE.MIN_SCALE);
     }
@@ -473,7 +492,7 @@
       let sum = 0, cnt = 0;
       for (let i=0; i<n; i++) {
         const a = lm[i], b = prev[i];
-        if (!a || !b) continue;
+        if (!lmOk(a) || !lmOk(b)) continue;
         sum += dist2(a, b);
         cnt++;
       }
@@ -513,7 +532,7 @@
       const raw = rawMovementScore(lm, prevLm);
       prevLm = lm;
 
-      // EMA
+      // EMA + hysteresis
       moveEma = moveEma + MOVE.EMA_ALPHA * (raw - moveEma);
       const nowMoving =
         moving
@@ -529,10 +548,8 @@
         console.log('[MOVE] state:', moving ? 'MOVING' : 'STILL', 'score=', moveEma.toFixed(3));
       }
 
-      // draw badge (after pose drawing)
+      // draw + panel mirror
       drawMovementBadge(moving, raw, moveEma);
-
-      // update panel mirrors
       reflectMovementInPanel();
 
       // optionally send to sender if we did the inference locally (receiver mode)
@@ -556,7 +573,6 @@
     /* ---------- attach track/stream end handlers ---------- */
     function attachStreamEndHandlers(stream) {
       if (!stream) return;
-      // Clear if any video track ends/mutes or is removed
       stream.getVideoTracks().forEach((t) => {
         t.addEventListener('ended',  clearOverlayDrawing);
         t.addEventListener('mute',   clearOverlayDrawing);
@@ -700,7 +716,6 @@
       },
 
       onCreatePC: (pc) => {
-        // Pose DC (receiver initiates; bidirectional)
         const ch = pc.createDataChannel('pose');
         ch.onopen = () => { console.log('[DC][receiver] pose DC open'); };
         ch.onclose = () => { console.log('[DC][receiver] pose DC close'); };
@@ -714,7 +729,6 @@
               console.log('[POSE][receiver] mode:', { poseEnabled, poseWhere });
               applyPoseMode();
             } else if (msg.type === 'pose') {
-              // When inference is on SENDER, we receive landmarks here. Draw + compute movement locally.
               if (poseEnabled && poseWhere === 'sender' && msg.landmarks?.length) {
                 const lm = msg.landmarks[0];
                 poseCtx.save();
@@ -730,7 +744,6 @@
       },
 
       onDataChannel: (e) => {
-        // Leave inbound DCs open; log for debugging
         console.log('[DC][receiver] inbound datachannel (leaving open):', e.channel?.label);
       }
     });
@@ -744,7 +757,6 @@
         const raw = localStorage.getItem(LS_KEY);
         if (!raw) return {};
         const obj = JSON.parse(raw);
-        // only keep known keys
         const cfg = {};
         for (const k of Object.keys(MOVE_DEFAULTS)) {
           if (typeof obj[k] === typeof MOVE_DEFAULTS[k]) cfg[k] = obj[k];
@@ -753,9 +765,7 @@
       } catch { return {}; }
     }
     function saveMoveConfig() {
-      try {
-        localStorage.setItem(LS_KEY, JSON.stringify(MOVE));
-      } catch {}
+      try { localStorage.setItem(LS_KEY, JSON.stringify(MOVE)); } catch {}
     }
     function clamp(val, min, max) { return Math.max(min, Math.min(max, val)); }
     function fmt(num, digits=3) { return Number(num).toFixed(digits); }
@@ -767,6 +777,8 @@
       offTh.value    = MOVE.OFF;
       hold.value     = MOVE.OFF_HOLD_MS;
       minScale.value = MOVE.MIN_SCALE;
+      visMin.value   = MOVE.VIS_MIN;
+      presMin.value  = MOVE.PRES_MIN;
 
       // seed outputs
       emaOut.textContent   = fmt(ema.value, 2);
@@ -774,6 +786,8 @@
       offOut.textContent   = fmt(offTh.value);
       holdOut.textContent  = Math.round(hold.value) + ' ms';
       scaleOut.textContent = fmt(minScale.value, 3);
+      visOut.textContent   = fmt(visMin.value, 2);
+      presOut.textContent  = fmt(presMin.value, 2);
 
       reflectMovementInPanel();
     }
@@ -807,7 +821,6 @@
 
     onTh.addEventListener('input', () => {
       MOVE.ON = clamp(parseFloat(onTh.value), 0.005, 0.300);
-      // keep OFF <= ON (with a small gap)
       if (MOVE.OFF > MOVE.ON) {
         MOVE.OFF = Math.max(0.005, MOVE.ON - 0.005);
         offTh.value = MOVE.OFF;
@@ -819,7 +832,6 @@
 
     offTh.addEventListener('input', () => {
       MOVE.OFF = clamp(parseFloat(offTh.value), 0.005, 0.300);
-      // keep OFF <= ON
       if (MOVE.OFF > MOVE.ON) {
         MOVE.OFF = MOVE.ON;
         offTh.value = MOVE.OFF;
@@ -837,6 +849,19 @@
     minScale.addEventListener('input', () => {
       MOVE.MIN_SCALE = clamp(parseFloat(minScale.value), 0.000, 0.200);
       scaleOut.textContent = fmt(MOVE.MIN_SCALE, 3);
+      saveMoveConfig();
+    });
+
+    // NEW: visibility / presence gates
+    visMin.addEventListener('input', () => {
+      MOVE.VIS_MIN = clamp(parseFloat(visMin.value), 0.00, 0.99);
+      visOut.textContent = fmt(MOVE.VIS_MIN, 2);
+      saveMoveConfig();
+    });
+
+    presMin.addEventListener('input', () => {
+      MOVE.PRES_MIN = clamp(parseFloat(presMin.value), 0.00, 0.99);
+      presOut.textContent = fmt(MOVE.PRES_MIN, 2);
       saveMoveConfig();
     });
 
@@ -859,8 +884,6 @@
       if (hideStatusTimer) clearTimeout(hideStatusTimer);
       stopReceiverPoseLoop();
     });
-
-    // Go! (ReceiverCore started above)
 
     // tiny typo guard used in logs
     function beginViewportSetle(){ beginViewportSettle(); }
