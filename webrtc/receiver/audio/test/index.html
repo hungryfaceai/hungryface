@@ -481,6 +481,42 @@
       });
     }
 
+    // Build spectrum frequency bins + arrays and (re)initialize the spectrum chart.
+    function prepareSpectrumArrays(ctx) {
+      const a = state.analyser;
+      if (!a) return;
+    
+      const N   = a.frequencyBinCount;   // fftSize/2
+      const sr  = ctx.sampleRate;
+      const fft = a.fftSize;
+    
+      // Frequency per bin
+      const freqs = new Float32Array(N);
+      for (let i = 0; i < N; i++) freqs[i] = (i * sr) / fft;
+    
+      // Show 20 Hz .. min(8 kHz, Nyquist)
+      const minHz = 20;
+      const maxHz = Math.min(8000, sr / 2);
+    
+      let start = 0; while (start < N   && freqs[start] <  minHz) start++;
+      let end   = N-1; while (end   > 0 && freqs[end]   >  maxHz) end--;
+    
+      state.specFreqs       = Array.from(freqs);   // Chart.js wants JS arrays
+      state.specStartIdx    = Math.max(0, start);
+      state.specEndIdx      = Math.max(state.specStartIdx, end);
+      state.specBinCountAll = N;
+    
+      // Power arrays (init at -100 dB so the line sits at the bottom until data arrives)
+      state.specRawDb = new Float32Array(N);
+      state.specSmDb  = new Float32Array(N);
+      for (let i = 0; i < N; i++) { state.specRawDb[i] = -100; state.specSmDb[i] = -100; }
+    
+      // Create / reset the chart with the computed x-axis
+      setupSpectrumChart(state.specFreqs);
+      updateSpectrumChartVisibility();
+      updateSpectrumChart();
+    }
+    
     const spectrumOverlay = {
       id: 'spectrumOverlay',
       afterDatasetsDraw(chart) {
