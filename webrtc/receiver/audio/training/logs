@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Naptio – Cry Detector (Weighted Top-K + Logs)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <link rel="icon" href="data:," />
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin:0; height:100%; background:#000; color:#fff; font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
+    #stage { position:fixed; inset:0; display:grid; place-items:center; padding:16px; box-sizing:border-box; }
+    .panel { width:min(100%,1100px); background:#0b0b0b; border:1px solid #141414; border-radius:14px; padding:16px; }
+    h1 { margin:.2rem 0 .1rem; font-size:22px; }
+    .sub { margin:.1rem 0 1rem; color:#bbb; font-size:13px; }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+    @media (max-width: 860px) { .grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    @media (max-width: 560px) { .grid { grid-template-columns:1fr; } }
+    label { display:grid; gap:6px; font-size:13px; color:#ddd; }
+    input[type="number"], input[type="text"] { padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; }
+    input[type="file"] { font-size:13px; }
+    .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .btn { padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.4); background:transparent; color:#fff; font-weight:600; cursor:pointer; }
+    .btn:active { transform:scale(.98); }
+    .muted { color:#aaa; font-size:12px; }
+    .meter { height:10px; border-radius:8px; background:#0a0a0a; border:1px solid #222; overflow:hidden; }
+    .fill { height:100%; width:0%; background:linear-gradient(to right, rgba(96,165,250,.9), rgba(239,68,68,.9)); transition:width 120ms linear; }
+    .pill { display:inline-block; padding:4px 8px; border-radius:999px; border:1px solid #333; font-size:12px; margin-left:6px; }
+    .pill.on { background:#310000; border-color:#a00; color:#ffb3b3; }
+    .section { margin-top:14px; }
+    canvas { display:block; width:100%; height:160px; background:#0a0a0a; border-radius:10px; }
+    .legend { margin-top:6px; display:flex; gap:12px; font-size:12px; color:#ccc; flex-wrap:wrap; }
+    .key { width:14px; height:3px; border-radius:2px; display:inline-block; margin-right:4px; vertical-align:middle; }
+    .blue { background:#60a5fa; } .red { background:#ef4444; } .or { background:#f97316; } .lo { background:#fb923c; }
+    /* Log console */
+    .log-panel { margin-top:12px; background:#0a0a0a; border:1px solid #222; border-radius:12px; }
+    .log-toolbar { display:flex; gap:10px; align-items:center; padding:8px 10px; border-bottom:1px solid #1a1a1a; font-size:12px; color:#ddd; flex-wrap:wrap; }
+    .log-body { max-height:260px; overflow:auto; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; line-height:1.4; padding:10px; }
+    .log-line { white-space:pre-wrap; margin:0; padding:2px 0; border-bottom:1px dotted #111; }
+    .log-time { color:#9ca3af; }
+    .log-kind-info { color:#e5e7eb; }
+    .log-kind-ok   { color:#86efac; }
+    .log-kind-warn { color:#fbbf24; }
+    .log-kind-err  { color:#fca5a5; }
+    .log-kind-inf  { color:#93c5fd; } /* inference */
+    .log-code { display:block; background:#0b0b0b; border:1px solid #1f2937; border-radius:8px; padding:6px; margin-top:4px; overflow:auto; }
+    .chip { display:inline-block; padding:2px 6px; border:1px solid #333; border-radius:999px; margin-left:6px; font-size:11px; color:#bbb; }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <div class="panel">
+      <header>
+        <h1>Weighted Top-K Cry Detector</h1>
+        <div class="sub">Late-fusion of MediaPipe classes with per-class EMA, fused EMA, hysteresis, quiet calibration, on-device training — with live logs.</div>
+      </header>
+
+      <div class="row">
+        <div id="status" class="muted">Booting…</div>
+        <div id="statePill" class="pill">idle</div>
+      </div>
+      <div class="meter" title="Input level (RMS)">
+        <div id="rmsFill" class="fill"></div>
+      </div>
+
+      <!-- Controls -->
+      <div class="section">
+        <div class="grid">
+          <label><span>Sample Rate (target Hz)</span><input id="SR_TARGET" type="number" min="8000" step="1000" value="16000" /></label>
+          <label><span>Frame length (s)</span><input id="FRAME_LEN_S" type="number" min="0.1" step="0.01" value="0.96" /></label>
+          <label><span>Hop (s)</span><input id="HOP_S" type="number" min="0.01" step="0.01" value="0.48" /></label>
+
+          <label><span>Per-class EMA τ (s)</span><input id="CLASS_EMA_TAU_S" type="number" min="0.1" step="0.1" value="0.8" /></label>
+          <label><span>Fused score EMA τ (s)</span><input id="FUSED_EMA_TAU_S" type="number" min="0.1" step="0.1" value="0.8" /></label>
+          <label><span>Min ON hold (ms)</span><input id="ALERT_HOLD_MS" type="number" min="0" step="100" value="3000" /></label>
+
+          <label><span>Quiet calibration (s)</span><input id="CAL_SEC" type="number" min="5" step="1" value="20" /></label>
+          <label><span>OFF delta (below ON)</span><input id="ALERT_OFF_DELTA" type="number" min="0" step="0.01" value="0.10" /></label>
+          <label><span>Top-K classes</span><input id="TOP_K" type="number" min="1" step="1" value="6" /></label>
+
+          <label><span>Hybrid prior (kPrior)</span><input id="K_PRIOR" type="number" min="1" step="1" value="50" /></label>
+          <label><span>Hybrid half-life (s, training EMA)</span><input id="HALF_LIFE_S" type="number" min="30" step="10" value="3600" /></label>
+          <label><span>Max results from MP</span><input id="MAX_RESULTS" type="number" min="5" step="1" value="25" /></label>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <button id="btnStartMic" class="btn">Start Detect (Mic)</button>
+          <button id="btnStop" class="btn">Stop</button>
+          <button id="btnCal" class="btn">Quiet Calibrate</button>
+        </div>
+      </div>
+
+      <!-- Training -->
+      <div class="section">
+        <div class="row">
+          <input id="fileInp" type="file" accept="audio/*" />
+          <button id="btnTrain" class="btn">Train on Clip</button>
+          <button id="btnStopTrain" class="btn">Stop Training</button>
+          <button id="btnRecompute" class="btn">Recompute Weights</button>
+          <button id="btnClear" class="btn">Clear Model</button>
+          <button id="btnExport" class="btn">Export Model</button>
+        </div>
+        <div class="muted" style="margin-top:6px;">Training updates per-class stats while the clip plays. Logs show MediaPipe outputs BEFORE stats are updated.</div>
+      </div>
+
+      <!-- Weights view -->
+      <div class="section">
+        <strong>Active weights (Top-K, normalized)</strong>
+        <div id="weightsView" class="kvs" style="display:grid;grid-template-columns:1fr auto;gap:6px 10px;margin-top:8px;"></div>
+      </div>
+
+      <!-- Chart -->
+      <div class="section">
+        <canvas id="chart" height="160"></canvas>
+        <div class="legend">
+          <span class="key blue"></span> fused (raw)
+          <span class="key red"></span> fused (EMA)
+          <span class="key or"></span> thresh ON
+          <span class="key lo"></span> thresh OFF
+        </div>
+      </div>
+
+      <!-- Log console -->
+      <div class="section log-panel">
+        <div class="log-toolbar">
+          <label><input type="checkbox" id="LOG_ENABLE" checked> Log inference</label>
+          <label><input type="checkbox" id="LOG_ALL" > Log ALL classes</label>
+          <label>Top-N <input id="LOG_TOPN" type="number" min="1" step="1" value="5" style="width:64px;margin-left:6px;"></label>
+          <label><input type="checkbox" id="LOG_AUTOSCROLL" checked> Autoscroll</label>
+          <button id="LOG_CLEAR" class="btn" style="padding:6px 10px;">Clear Logs</button>
+        </div>
+        <div id="logBody" class="log-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden audio element for training -->
+  <audio id="trainAudio" crossorigin="anonymous" style="display:none"></audio>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+  <script type="module">
+    /* =========================
+       LOG CONSOLE
+       ========================= */
+    const LOGS = {
+      body: document.getElementById('logBody'),
+      enable: document.getElementById('LOG_ENABLE'),
+      all: document.getElementById('LOG_ALL'),
+      topn: document.getElementById('LOG_TOPN'),
+      autoscroll: document.getElementById('LOG_AUTOSCROLL'),
+      clearBtn: document.getElementById('LOG_CLEAR'),
+      maxLines: 1200,
+      lines: 0
+    };
+    function ts(){ return new Date().toLocaleTimeString(undefined,{hour12:false}); }
+    function log(kind, msg, extraHtml){
+      const p = document.createElement('div');
+      p.className = `log-line log-kind-${kind}`;
+      p.innerHTML = `<span class="log-time">[${ts()}]</span> ${msg}${extraHtml ? extraHtml : ''}`;
+      LOGS.body.appendChild(p);
+      LOGS.lines++;
+      // Trim
+      while (LOGS.lines > LOGS.maxLines) { LOGS.body.removeChild(LOGS.body.firstChild); LOGS.lines--; }
+      if (LOGS.autoscroll.checked) LOGS.body.scrollTop = LOGS.body.scrollHeight;
+    }
+    LOGS.clearBtn.onclick = () => { LOGS.body.innerHTML = ''; LOGS.lines = 0; };
+
+    /* =========================
+       MediaPipe Audio set-up
+       ========================= */
+    const AUDIO_PKG_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0";
+    let AudioClassifier, FilesetResolver;
+    try {
+      const AudioMod = await import(AUDIO_PKG_URL);
+      AudioClassifier = AudioMod.AudioClassifier;
+      FilesetResolver = AudioMod.FilesetResolver;
+      log('ok', 'MediaPipe Tasks Audio module loaded.');
+    } catch (e) {
+      log('err', 'Failed to import MediaPipe Tasks Audio. See console.');
+      console.error(e);
+    }
+
+    async function ensureAudioTask(maxResults=25) {
+      if (!AudioClassifier || !FilesetResolver) throw new Error('MediaPipe not available');
+      if (ensureAudioTask.task && ensureAudioTask.maxResults === maxResults) return ensureAudioTask.task;
+      const WASM_DIR  = AUDIO_PKG_URL + "/wasm";
+      const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite";
+      log('info','Loading YAMNet model…');
+      const resolver = await FilesetResolver.forAudioTasks(WASM_DIR);
+      const task = await AudioClassifier.createFromOptions(resolver, {
+        baseOptions: { modelAssetPath: MODEL_URL },
+        runningMode: "AUDIO_CLIPS",
+        classifierOptions: { scoreThreshold: 0.0, maxResults: Math.max(5, maxResults|0) }
+      });
+      ensureAudioTask.task = task;
+      ensureAudioTask.maxResults = maxResults;
+      log('ok', `YAMNet ready (maxResults=${maxResults}).`);
+      return task;
+    }
+
+    function extractCategories(result) {
+      if (!result) return [];
+      const cats =
+        result?.classifications?.[0]?.categories ??
+        result?.classificationResult?.classifications?.[0]?.categories ?? [];
+      return cats.map(c => ({ score: c.score ?? 0, categoryName: (c.displayName || c.categoryName || '').trim() }));
+    }
+    function formatCats(cats, topN=5, all=false){
+      const sorted = [...cats].sort((a,b)=> (b.score||0)-(a.score||0));
+      const useList = all ? sorted : sorted.slice(0, topN);
+      const items = useList.map(c => `${c.categoryName || '(unnamed)'}:${(c.score||0).toFixed(3)}`);
+      let html = `<div class="log-code"><strong>${all?'All':'Top '+topN}</strong> of ${sorted.length} classes:\n${items.join('\n')}</div>`;
+      return html;
+    }
+
+    /* =========================
+       Utilities
+       ========================= */
+    const els = (id => Object.fromEntries([
+      'status','statePill','rmsFill','SR_TARGET','FRAME_LEN_S','HOP_S',
+      'CLASS_EMA_TAU_S','FUSED_EMA_TAU_S','ALERT_HOLD_MS',
+      'CAL_SEC','ALERT_OFF_DELTA','TOP_K','K_PRIOR','HALF_LIFE_S','MAX_RESULTS',
+      'btnStartMic','btnStop','btnCal','fileInp','btnTrain','btnStopTrain','btnRecompute','btnClear','btnExport',
+      'trainAudio','weightsView','chart'
+    ].map(x => [x, document.getElementById(x)])) )();
+
+    function setStatus(s){ els.status.textContent = s; log('info', s); }
+    function setPill(s, on=false){ els.statePill.textContent=s; els.statePill.classList.toggle('on', !!on); }
+    function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+    function emaStep(prev, x, a){ return prev + a * (x - prev); }
+    function alphaForTau(dt, tau){ return 1 - Math.exp(-dt / Math.max(1e-3, tau)); }
+    function resampleLinear(x, fromSr, toSr){
+      if (fromSr === toSr) return x;
+      const ratio = toSr / fromSr;
+      const n = Math.max(1, Math.round(x.length * ratio));
+      const out = new Float32Array(n);
+      const dx = (x.length - 1) / (n - 1);
+      for (let i=0;i<n;i++){ const pos=i*dx, i0=Math.floor(pos), i1=Math.min(i0+1,x.length-1), t=pos-i0; out[i]=x[i0]*(1-t)+x[i1]*t; }
+      return out;
+    }
+
+    /* =========================
+       Model (localStorage)
+       ========================= */
+    const MODEL_KEY = 'cryModelV1';
+    const CALIB_KEY = 'cryCalibV1';
+
+    function loadModel() {
+      const m = JSON.parse(localStorage.getItem(MODEL_KEY) || 'null');
+      return m || {
+        version: 1,
+        halfLifeSec: Number(els.HALF_LIFE_S.value),
+        K: Number(els.TOP_K.value),
+        kPrior: Number(els.K_PRIOR.value),
+        classes: {},   // name -> { n, sum, ema, emaPres }
+        weights: { "Baby cry, infant cry": 1.0 },
+        updatedAt: Date.now()
+      };
+    }
+    function saveModel(m){ localStorage.setItem(MODEL_KEY, JSON.stringify(m)); }
+
+    function clearModel(){
+      localStorage.removeItem(MODEL_KEY);
+      localStorage.removeItem(CALIB_KEY);
+      log('warn','Local model + calibration cleared.');
+    }
+
+    function updateStats(model, categories, dtSec) {
+      const a = alphaForTau(dtSec, model.halfLifeSec || 3600);
+      for (const { categoryName: name, score=0 } of categories) {
+        if (!name) continue;
+        const s = model.classes[name] || (model.classes[name] = { n:0, sum:0, ema:0, emaPres:0 });
+        s.n   += 1;
+        s.sum += score;
+        s.ema  = emaStep(s.ema, score, a);
+        s.emaPres = emaStep(s.emaPres, score>0 ? 1 : 0, a);
+      }
+      model.updatedAt = Date.now();
+    }
+
+    function recomputeWeights(model) {
+      const K = model.K || 8;
+      const kPrior = model.kPrior || 50;
+
+      const raw = [];
+      for (const [name, s] of Object.entries(model.classes)) {
+        const mean = s.sum / Math.max(1, s.n);
+        const lambda = 1 / (1 + s.n / Math.max(1, kPrior));
+        const hybrid = (1 - lambda) * mean + lambda * (s.ema ?? 0);
+        const prevalence = clamp01(s.emaPres ?? 0);
+        const score = Math.max(0, hybrid * (0.5 + 0.5 * prevalence));
+        raw.push([name, score, s.n]);
+      }
+
+      if (!raw.length) {
+        model.weights = model.weights && Object.keys(model.weights).length ? model.weights : {"Baby cry, infant cry":1};
+        saveModel(model);
+        log('warn','No training stats yet; keeping default weights.');
+        return model.weights;
+      }
+
+      raw.sort((a,b)=>b[1]-a[1]);
+      const top = raw.slice(0, model.K || 6);
+      const Z = top.reduce((acc,[,v])=>acc+v,0) || 1;
+      model.weights = Object.fromEntries(top.map(([n,v])=>[n, v/Z]));
+      model.updatedAt = Date.now();
+      saveModel(model);
+
+      const lines = top.map(([n,v,c]) => `${n.padEnd(24,' ')}  w=${(v/Z).toFixed(3)}  n=${c}`);
+      log('ok','Recomputed weights (Top-K normalized):', `<div class="log-code">${lines.join('\n')}</div>`);
+      return model.weights;
+    }
+
+    function renderWeights(weights) {
+      const parent = els.weightsView;
+      parent.innerHTML = '';
+      const entries = Object.entries(weights).sort((a,b)=>b[1]-a[1]);
+      for (const [n,w] of entries) {
+        const a = document.createElement('div'); a.textContent = n;
+        const b = document.createElement('div'); b.textContent = (w*100).toFixed(1)+'%';
+        parent.appendChild(a); parent.appendChild(b);
+      }
+      if (!entries.length) parent.innerHTML = '<div class="muted">No weights yet. Train on a clip, then “Recompute Weights”.</div>';
+    }
+
+    /* =========================
+       Detection state
+       ========================= */
+    const state = {
+      running: false,
+      training: false,
+      micCtx: null,
+      srcNode: null,
+      procNode: null,
+      sinkNode: null,
+      ring: new Float32Array(0),
+      lastPos: 0,
+      perClassEma: new Map(),
+      fusedEma: 0,
+      alertOn: false,
+      alertUntil: 0,
+      chart: null,
+      labels: [],
+      fusedRaw: [],
+      fusedSm: [],
+      thrOn: 0.35,
+      thrOff: 0.25,
+      frameCount: 0
+    };
+    function setRMS(x){ els.rmsFill.style.width = Math.round(clamp01(x)*100)+'%'; }
+
+    /* =========================
+       Chart
+       ========================= */
+    function setupChart(){
+      state.chart?.destroy?.();
+      const ctx = els.chart.getContext('2d');
+      state.chart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: [], datasets: [
+          { label:'fused(raw)', data:[], borderColor:'#60a5fa', borderWidth:2, pointRadius:0, tension:0.15 },
+          { label:'fused(EMA)', data:[], borderColor:'#ef4444', borderWidth:2, pointRadius:0, tension:0.15 },
+          { label:'thr ON', data:[], borderColor:'#f97316', borderWidth:1, pointRadius:0, borderDash:[6,4] },
+          { label:'thr OFF', data:[], borderColor:'#fb923c', borderWidth:1, pointRadius:0, borderDash:[2,2] },
+        ]},
+        options: {
+          animation:false, plugins:{ legend:{ display:false } },
+          scales:{ x:{ title:{display:true, text:'t (s)'} }, y:{ title:{display:true, text:'score'}, min:0, max:1.2 } }
+        }
+      });
+    }
+    function pushChart(tSec, raw, sm){
+      const N = 300;
+      state.labels.push(tSec.toFixed(1));
+      state.fusedRaw.push(raw);
+      state.fusedSm.push(sm);
+      if (state.labels.length > N) { state.labels.shift(); state.fusedRaw.shift(); state.fusedSm.shift(); }
+      const thrOn = state.thrOn, thrOff = state.thrOff;
+      state.chart.data.labels = state.labels;
+      state.chart.data.datasets[0].data = state.fusedRaw;
+      state.chart.data.datasets[1].data = state.fusedSm;
+      state.chart.data.datasets[2].data = new Array(state.labels.length).fill(thrOn);
+      state.chart.data.datasets[3].data = new Array(state.labels.length).fill(thrOff);
+      const all = state.fusedRaw.concat(state.fusedSm, [thrOn, thrOff]);
+      const ymax = Math.max(0.6, Math.min(1.5, Math.max(...all)+0.05));
+      state.chart.options.scales.y.max = ymax;
+      state.chart.update();
+    }
+
+    /* =========================
+       Scoring (per-class EMA → weighted sum)
+       ========================= */
+    function ensurePerClassEma(weights) {
+      const names = new Set(Object.keys(weights));
+      for (const n of names) if (!state.perClassEma.has(n)) state.perClassEma.set(n, 0);
+      for (const n of Array.from(state.perClassEma.keys())) if (!names.has(n)) state.perClassEma.delete(n);
+    }
+
+    function fusedScoreFromCategories(categories, weights, dt) {
+      const tauClass = Number(els.CLASS_EMA_TAU_S.value) || 0.8;
+      const a = alphaForTau(dt, tauClass);
+      for (const name of state.perClassEma.keys()) {
+        const s = categories.find(c => c.categoryName === name)?.score ?? 0;
+        const prev = state.perClassEma.get(name) || 0;
+        state.perClassEma.set(name, emaStep(prev, s, a));
+      }
+      let fused = 0;
+      for (const [name, w] of Object.entries(weights)) fused += (w || 0) * (state.perClassEma.get(name) || 0);
+      fused = clamp01(fused);
+      const tauFused = Number(els.FUSED_EMA_TAU_S.value) || 0.8;
+      const af = alphaForTau(dt, tauFused);
+      state.fusedEma = emaStep(state.fusedEma, fused, af);
+      return { raw: fused, sm: state.fusedEma };
+    }
+
+    function applyHysteresis(sm, nowMs){
+      const hold = Number(els.ALERT_HOLD_MS.value) || 0;
+      if (state.alertOn) {
+        if (nowMs < state.alertUntil) return true;
+        return sm >= state.thrOff;
+      } else {
+        if (sm >= state.thrOn) { state.alertUntil = nowMs + hold; return true; }
+        return false;
+      }
+    }
+
+    /* =========================
+       Audio graph + classify loop
+       ========================= */
+    function concatFloat32(a,b){ const out=new Float32Array(a.length+b.length); out.set(a,0); out.set(b,a.length); return out; }
+
+    async function classifyChunk(chunk, deviceSr, params, mode){
+      const { SR_TARGET, FRAME_LEN_S, HOP_S, MAX_RESULTS } = params;
+      const task = await ensureAudioTask(MAX_RESULTS);
+      // RMS meter
+      let s=0; for(let i=0;i<chunk.length;i++){ const v=chunk[i]; s+=v*v; }
+      setRMS(Math.sqrt(s/Math.max(1,chunk.length)));
+
+      // resample → ring
+      const x16 = resampleLinear(chunk, deviceSr, SR_TARGET);
+      state.ring = concatFloat32(state.ring, x16);
+      const hop = Math.round(HOP_S * SR_TARGET);
+      const fram = Math.round(FRAME_LEN_S * SR_TARGET);
+
+      while (state.ring.length - state.lastPos >= hop) {
+        const end = state.lastPos + hop;
+        const start = Math.max(0, end - fram);
+        let w = state.ring.slice(start, end);
+        if (w.length < fram) { const pad = new Float32Array(fram); pad.set(w, fram - w.length); w = pad; }
+
+        const res = await task.classify(w, SR_TARGET);
+        const cats = extractCategories(res);
+
+        // --- LOG INFERENCE (explicit results) BEFORE any stats update ---
+        if (LOGS.enable.checked) {
+          const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
+          const html = formatCats(cats, topN, LOGS.all.checked);
+          log('inf', `Inference#${++state.frameCount} [mode=${mode}] cats=${cats.length}`, html);
+        }
+
+        if (mode === 'train') {
+          // update stats AFTER logging inference results
+          const model = loadModel();
+          model.halfLifeSec = Number(els.HALF_LIFE_S.value) || 3600;
+          model.kPrior = Number(els.K_PRIOR.value) || 50;
+          model.K = Number(els.TOP_K.value) || 6;
+          updateStats(model, cats, HOP_S);
+          saveModel(model);
+        } else if (mode === 'detect') {
+          const model = loadModel();
+          model.K = Number(els.TOP_K.value) || model.K || 6;
+          if (!model.weights || Object.keys(model.weights).length !== model.K) {
+            log('info', 'Weights missing/stale; recomputing…');
+            recomputeWeights(model);
+          }
+          const weights = model.weights || {"Baby cry, infant cry":1};
+          ensurePerClassEma(weights);
+          const { raw, sm } = fusedScoreFromCategories(cats, weights, HOP_S);
+
+          // thresholds from calibration or defaults
+          const calib = JSON.parse(localStorage.getItem(CALIB_KEY) || 'null');
+          if (calib) {
+            state.thrOn = calib.thr_on;
+            state.thrOff = calib.thr_off;
+          } else {
+            state.thrOn = 0.35;
+            state.thrOff = state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1);
+          }
+
+          pushChart(state.labels.length * HOP_S, raw, sm);
+          const on = applyHysteresis(sm, performance.now());
+          if (on && !state.alertOn) { setPill('CRYING', true); log('ok','ALERT ON (cry detected).'); }
+          if (!on && state.alertOn) { setPill('idle', false); log('warn','ALERT OFF.'); }
+          state.alertOn = on;
+        }
+
+        state.lastPos += hop;
+        if (state.lastPos > fram * 4) {
+          const cut = state.lastPos - fram;
+          state.ring = state.ring.slice(cut);
+          state.lastPos -= cut;
+        }
+      }
+    }
+
+    async function startMic(mode) {
+      await stopAll();
+      setStatus(mode==='detect' ? 'Starting microphone (detect)…' : 'Starting microphone (train)…');
+      const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
+      state.micCtx = ctx;
+      await ctx.resume();
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false },
+        video: false
+      });
+      const src = ctx.createMediaStreamSource(stream);
+      const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
+      state.srcNode = src; state.sinkNode = sink;
+
+      try {
+        const url = URL.createObjectURL(new Blob([`
+          class Tap extends AudioWorkletProcessor {
+            process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }
+          } registerProcessor('tap', Tap);
+        `], {type:'application/javascript'}));
+        await ctx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
+        const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
+        node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate, getParams(), mode);
+        src.connect(node).connect(sink);
+        state.procNode = node;
+        setStatus('AudioWorklet active @ '+ctx.sampleRate+' Hz');
+      } catch {
+        const node = ctx.createScriptProcessor(4096,1,1);
+        node.onaudioprocess = (e)=> classifyChunk(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate, getParams(), mode);
+        src.connect(node).connect(sink);
+        state.procNode = node;
+        setStatus('ScriptProcessor active @ '+ctx.sampleRate+' Hz');
+      }
+      state.running = true;
+      setPill(mode==='detect' ? 'idle' : 'training', mode!=='detect');
+      log('ok', `Mic started in ${mode.toUpperCase()} mode.`);
+    }
+
+    async function stopAll(){
+      const wasRunning = state.running || state.training;
+      state.running=false; state.training=false;
+      try { state.procNode?.disconnect(); } catch {}
+      try { state.srcNode?.disconnect(); } catch {}
+      try { state.sinkNode?.disconnect(); } catch {}
+      try { state.micCtx && state.micCtx.state!=='closed' && state.micCtx.close(); } catch {}
+      state.procNode=null; state.srcNode=null; state.sinkNode=null; state.micCtx=null;
+      state.ring=new Float32Array(0); state.lastPos=0; state.perClassEma.clear(); state.fusedEma=0; state.frameCount=0;
+      setPill('idle', false); setRMS(0);
+      if (wasRunning) log('warn','Stopped audio graph.');
+    }
+
+    /* =========================
+       Quiet calibration
+       ========================= */
+    async function quietCalibrate() {
+      setStatus('Quiet calibration…');
+      const dur = Math.max(5, Number(els.CAL_SEC.value)||20);
+      const SR_TARGET = Number(els.SR_TARGET.value)||16000;
+      const FRAME_LEN_S = Number(els.FRAME_LEN_S.value)||0.96;
+      const HOP_S  = Number(els.HOP_S.value)||0.48;
+      const MAX_RESULTS = Number(els.MAX_RESULTS.value)||25;
+      const task = await ensureAudioTask(MAX_RESULTS);
+
+      const ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
+      const stream = await navigator.mediaDevices.getUserMedia({audio:true, video:false});
+      const src = ctx.createMediaStreamSource(stream);
+      const sink = ctx.createGain(); sink.gain.value=0; sink.connect(ctx.destination);
+      const node = ctx.createScriptProcessor(4096,1,1);
+
+      let ring = new Float32Array(0), last=0, t=0;
+      const samples = [];
+      const weights = loadModel().weights || {"Baby cry, infant cry":1};
+      state.perClassEma.clear(); ensurePerClassEma(weights);
+      state.fusedEma = 0;
+
+      node.onaudioprocess = async (e) => {
+        const buf = new Float32Array(e.inputBuffer.getChannelData(0));
+        // RMS UI
+        let s=0; for(let i=0;i<buf.length;i++){ const v=buf[i]; s+=v*v; }
+        setRMS(Math.sqrt(s/Math.max(1,buf.length)));
+
+        const x16 = resampleLinear(buf, ctx.sampleRate, SR_TARGET);
+        ring = concatFloat32(ring, x16);
+        const hop = Math.round(HOP_S * SR_TARGET);
+        const fram = Math.round(FRAME_LEN_S * SR_TARGET);
+
+        while (ring.length - last >= hop) {
+          const end = last + hop, start = Math.max(0, end - fram);
+          let w = ring.slice(start, end); if (w.length < fram){ const pad=new Float32Array(fram); pad.set(w, fram-w.length); w=pad; }
+          const res = await task.classify(w, SR_TARGET);
+          const cats = extractCategories(res);
+
+          if (LOGS.enable.checked) {
+            const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
+            const html = formatCats(cats, topN, LOGS.all.checked);
+            log('inf', `Inference#${++state.frameCount} [mode=calibrate] cats=${cats.length}`, html);
+          }
+
+          ensurePerClassEma(weights);
+          const { sm } = fusedScoreFromCategories(cats, weights, HOP_S);
+          samples.push(sm);
+          last += hop;
+          t += HOP_S;
+          if (t >= dur) break;
+        }
+        if (t >= dur) {
+          try { node.disconnect(); src.disconnect(); sink.disconnect(); } catch {}
+          stream.getTracks().forEach(t=>t.stop());
+          ctx.close();
+          const mu = samples.reduce((a,b)=>a+b,0)/Math.max(1,samples.length);
+          const sd = Math.sqrt(samples.reduce((a,b)=>a+(b-mu)*(b-mu),0)/Math.max(1,samples.length));
+          const thr_on = Math.min(1.2, mu + 3*sd);
+          const thr_off = Math.max(0, thr_on - (Number(els.ALERT_OFF_DELTA.value)||0.1));
+          const calib = { thr_on, thr_off, mu, sd, n:samples.length, at:Date.now() };
+          localStorage.setItem(CALIB_KEY, JSON.stringify(calib));
+          state.thrOn = thr_on; state.thrOff = thr_off;
+          setStatus(`Calibrated ON=${thr_on.toFixed(3)} OFF=${thr_off.toFixed(3)} (μ=${mu.toFixed(3)}, σ=${sd.toFixed(3)}, n=${samples.length})`);
+          log('ok', 'Calibration complete.', `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
+          setPill('idle', false);
+        }
+      };
+      src.connect(node).connect(sink);
+      log('info', `Calibration started for ${dur}s.`);
+    }
+
+    /* =========================
+       Training from audio file
+       ========================= */
+    let trainCtx=null, trainSrc=null, trainNode=null, trainSink=null;
+    async function startTrainingOnFile(file) {
+      await stopTraining();
+      const url = URL.createObjectURL(file);
+      els.trainAudio.src = url;
+      els.trainAudio.loop = false;
+
+      const ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
+      trainCtx = ctx;
+      const src = ctx.createMediaElementSource(els.trainAudio); trainSrc=src;
+      const sink = ctx.createGain(); sink.gain.value=0; sink.connect(ctx.destination); trainSink=sink;
+
+      try {
+        const mod = URL.createObjectURL(new Blob([`
+          class Tap extends AudioWorkletProcessor {
+            process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }
+          } registerProcessor('tap', Tap);
+        `], {type:'application/javascript'}));
+        await ctx.audioWorklet.addModule(mod); URL.revokeObjectURL(mod);
+        const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
+        node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate, getParams(), 'train');
+        src.connect(node).connect(sink);
+        trainNode = node;
+        setStatus('Training graph (Worklet) ready.');
+      } catch {
+        const node = ctx.createScriptProcessor(4096,1,1);
+        node.onaudioprocess = (e)=> classifyChunk(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate, getParams(), 'train');
+        src.connect(node).connect(sink);
+        trainNode = node;
+        setStatus('Training graph (ScriptProcessor) ready.');
+      }
+
+      await els.trainAudio.play().catch(()=>{});
+      state.training = true;
+      setPill('training', true);
+      log('ok', `Training started on file: ${file.name}`, `<span class="chip">${(file.size/1024/1024).toFixed(2)} MB</span>`);
+      els.trainAudio.onended = ()=> { setStatus('Training clip ended. Click “Recompute Weights”.'); setPill('idle', false); };
+    }
+    async function stopTraining(){
+      const was = state.training;
+      state.training=false;
+      try { els.trainAudio.pause(); } catch {}
+      try { trainNode?.disconnect(); } catch {}
+      try { trainSrc?.disconnect(); } catch {}
+      try { trainSink?.disconnect(); } catch {}
+      try { trainCtx && trainCtx.state!=='closed' && trainCtx.close(); } catch {}
+      trainCtx=null; trainSrc=null; trainNode=null; trainSink=null;
+      if (was) log('warn','Stopped training graph.');
+    }
+
+    /* =========================
+       Params + UI wires
+       ========================= */
+    function getParams(){
+      return {
+        SR_TARGET: Number(els.SR_TARGET.value)||16000,
+        FRAME_LEN_S: Number(els.FRAME_LEN_S.value)||0.96,
+        HOP_S: Number(els.HOP_S.value)||0.48,
+        MAX_RESULTS: Number(els.MAX_RESULTS.value)||25
+      };
+    }
+
+    els.btnStartMic.onclick = () => startMic('detect');
+    els.btnStop.onclick = () => stopAll();
+    els.btnCal.onclick = () => quietCalibrate();
+
+    els.btnTrain.onclick = async () => {
+      const f = els.fileInp.files?.[0];
+      if (!f) { setStatus('Pick an audio file first'); return; }
+      await startTrainingOnFile(f);
+    };
+    els.btnStopTrain.onclick = () => stopTraining();
+
+    els.btnRecompute.onclick = () => {
+      const m = loadModel();
+      m.K = Number(els.TOP_K.value)||m.K||6;
+      m.kPrior = Number(els.K_PRIOR.value)||m.kPrior||50;
+      m.halfLifeSec = Number(els.HALF_LIFE_S.value)||m.halfLifeSec||3600;
+      const w = recomputeWeights(m);
+      renderWeights(w);
+    };
+
+    els.btnClear.onclick = () => {
+      clearModel();
+      renderWeights({});
+      setupChart();
+      setStatus('Model cleared.');
+    };
+
+    els.btnExport.onclick = () => {
+      const blob = new Blob([localStorage.getItem(MODEL_KEY) || '{}'], {type:'application/json'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'cryModelV1.json'; a.click();
+      URL.revokeObjectURL(a.href);
+      log('ok','Exported cryModelV1.json');
+    };
+
+    // Live update Top-K / prior / half-life (persist immediately)
+    ['TOP_K','K_PRIOR','HALF_LIFE_S'].forEach(id => {
+      document.getElementById(id).addEventListener('change', () => {
+        const m = loadModel();
+        if (id==='TOP_K') m.K = Number(els.TOP_K.value)||m.K;
+        if (id==='K_PRIOR') m.kPrior = Number(els.K_PRIOR.value)||m.kPrior;
+        if (id==='HALF_LIFE_S') m.halfLifeSec = Number(els.HALF_LIFE_S.value)||m.halfLifeSec;
+        saveModel(m);
+        log('info', `Param updated: ${id} = ${document.getElementById(id).value}`);
+      });
+    });
+
+    /* =========================
+       Boot
+       ========================= */
+    (function boot(){
+      setupChart();
+      const m = loadModel();
+      renderWeights(m.weights||{});
+      const calib = JSON.parse(localStorage.getItem(CALIB_KEY) || 'null');
+      if (calib) { state.thrOn=calib.thr_on; state.thrOff=calib.thr_off; log('ok','Loaded calibration.', `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`); }
+      setStatus('Ready. Train on a clip → Recompute Weights → Quiet Calibrate → Start Detect.');
+    })();
+  </script>
+</body>
+</html>
