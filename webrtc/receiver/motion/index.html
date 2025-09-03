@@ -668,37 +668,59 @@
       return dst;
     }
 
-    /* ---------- On-screen badge: bars ---------- */
+    /* ---------- On-screen badge: bars (explicit labels + % readouts + non-overlapping pill) ---------- */
     function drawMovementBadge(movingState, emaVal, intVal, driftVal) {
       const ctx = poseCtx;
       const dpr = window.devicePixelRatio || 1;
-
-      // Dimensions
-      const pad = Math.round(8*dpr);
-      const x = pad, y = pad;
-      const LABEL_W = Math.round(32*dpr);
-      const BAR_W   = Math.round(190*dpr);
-      const BAR_H   = Math.round(8*dpr);
-      const ROW_H   = Math.round(18*dpr);
-      const INNER   = Math.round(8*dpr);
-
-      // Colors
-      const BG      = movingState ? '#4a2a00' : '#111111';
-      const BORDER  = movingState ? '#ffa64d' : 'rgba(255,255,255,0.25)';
-      const TXT_DIM = movingState ? '#ffcc80' : '#dddddd';
-
-      // State pill
+    
+      // Panel + text colors
+      const BG        = movingState ? '#4a2a00' : '#111111';
+      const BORDER    = movingState ? '#ffa64d' : 'rgba(255,255,255,0.25)';
+      const TXT_DIM   = movingState ? '#ffcc80' : '#dddddd';
+    
+      // Classic bar colors
+      const OK_GREEN  = '#4caf50';
+      const AMBER     = '#ffc107';
+      const ALERT_RED = '#f44336';
+    
+      // Metrics to render
+      const metrics = [
+        { label: 'Short-term motion (EMA)',        val: emaVal,   on: MOVE.ON,       enabled: !!MOVE.USE_EMA },
+        { label: 'Sustained motion (Integrator)',  val: intVal,   on: MOVE.INT_ON,   enabled: !!MOVE.USE_INT },
+        { label: 'Baseline drift vs pose (DRIFT)', val: driftVal, on: MOVE.DRIFT_ON, enabled: !!MOVE.USE_DRIFT },
+      ];
+    
+      // Layout
+      const pad    = Math.round(8*dpr);
+      const x      = pad, y = pad;
+      const INNER  = Math.round(8*dpr);
+      const ROW_H  = Math.round(20*dpr);
+      const BAR_W  = Math.round(190*dpr);
+      const BAR_H  = Math.round(8*dpr);
+    
       ctx.save();
+    
+      // --- Measure pill (state) in header ---
       ctx.font = `${Math.round(12*dpr)}px -apple-system,system-ui,Segoe UI,Roboto,sans-serif`;
       const stateTxt = movingState ? '• MOVING' : '• STILL';
       const pillPadX = Math.round(8*dpr);
-      const pillPadY = Math.round(4*dpr);
-      const pillW = Math.round(ctx.measureText(stateTxt).width + pillPadX*2);
-      const pillH = Math.round(18*dpr);
-
-      const boxW = Math.max(LABEL_W + INNER + BAR_W + INNER, pillW + INNER*2);
-      const boxH = Math.round(ROW_H * 3 + INNER*2);
-
+      const pillW    = Math.round(ctx.measureText(stateTxt).width + pillPadX*2);
+      const pillH    = Math.round(18*dpr);
+    
+      // --- Measure labels & % column for rows ---
+      ctx.font = `${Math.round(11*dpr)}px -apple-system,system-ui,Segoe UI,Roboto,sans-serif`;
+      const maxLabelW = Math.max(...metrics.map(m => ctx.measureText(m.label).width));
+      const LABEL_W   = Math.round(maxLabelW + Math.round(6*dpr));
+      const PCT_W     = Math.round(ctx.measureText('100%+').width + Math.round(12*dpr));
+    
+      // --- Header height (ensures no overlap with bars) ---
+      const HEADER_H  = pillH + Math.round(8*dpr); // pill height + vertical padding
+    
+      // --- Compute box size: header + rows ---
+      const boxW = Math.max(LABEL_W + INNER + BAR_W + INNER + PCT_W, pillW + INNER*2);
+      const boxH = HEADER_H + INNER + (ROW_H * metrics.length) + INNER;
+    
+      // Panel bg + border
       ctx.globalAlpha = 0.7;
       ctx.fillStyle = BG;
       ctx.fillRect(x, y, boxW, boxH);
@@ -706,66 +728,77 @@
       ctx.strokeStyle = BORDER;
       ctx.lineWidth = Math.max(1, Math.round(1*dpr));
       ctx.strokeRect(x+0.5, y+0.5, boxW-1, boxH-1);
-
-      // Pill (top-right)
+    
+      // --- Draw pill centered vertically within header ---
       const pillX = x + boxW - pillW - INNER;
-      const pillY = y + INNER - Math.round(2*dpr);
+      const pillY = y + Math.round((HEADER_H - pillH)/2);
       ctx.fillStyle = movingState ? '#4a2a00' : '#111111';
       ctx.fillRect(pillX, pillY, pillW, pillH);
       ctx.strokeStyle = BORDER;
       ctx.strokeRect(pillX+0.5, pillY+0.5, pillW-1, pillH-1);
       ctx.fillStyle = TXT_DIM;
+      ctx.textBaseline = 'alphabetic';
       ctx.fillText(stateTxt, pillX + pillPadX, pillY + pillH - Math.round(5*dpr));
-
-      // Metrics → bars
-      const metrics = [
-        { label:'EMA', val: emaVal,   on: MOVE.ON,       enabled: !!MOVE.USE_EMA },
-        { label:'INT', val: intVal,   on: MOVE.INT_ON,   enabled: !!MOVE.USE_INT },
-        { label:'DRF', val: driftVal, on: MOVE.DRIFT_ON, enabled: !!MOVE.USE_DRIFT },
-      ];
-
-      ctx.font = `${Math.round(11*dpr)}px -apple-system,system-ui,Segoe UI,Roboto,sans-serif`;
-
-      const baseY = y + INNER + Math.round(6*dpr);
-      for (let i=0; i<metrics.length; i++) {
+    
+      // Optional: a subtle separator line under the header
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.beginPath();
+      ctx.moveTo(x + INNER, y + HEADER_H + 0.5);
+      ctx.lineTo(x + boxW - INNER, y + HEADER_H + 0.5);
+      ctx.stroke();
+    
+      // --- Bars start BELOW the header ---
+      const baseY = y + HEADER_H + INNER;
+    
+      for (let i = 0; i < metrics.length; i++) {
+        const m = metrics[i];
         const rowY = baseY + i*ROW_H;
-
+    
         // Label
-        ctx.globalAlpha = metrics[i].enabled ? 1.0 : 0.35;
+        ctx.globalAlpha = m.enabled ? 1.0 : 0.35;
         ctx.fillStyle = TXT_DIM;
-        ctx.fillText(metrics[i].label, x + INNER, rowY + Math.round(8*dpr));
-
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(m.label, x + INNER, rowY + Math.round(9*dpr));
+    
         // Bar background
         const barX = x + INNER + LABEL_W;
-        const barY = rowY - Math.round(BAR_H/2) + Math.round(8*dpr);
+        const barY = rowY - Math.round(BAR_H/2) + Math.round(9*dpr);
         ctx.fillStyle = 'rgba(255,255,255,0.18)';
         ctx.fillRect(barX, barY, BAR_W, BAR_H);
-
-        // Fill based on ratio to ON threshold
-        const on = Math.max(1e-6, metrics[i].on);
-        const ratio = metrics[i].val / on;
+    
+        // Progress to ON threshold
+        const on = Math.max(1e-6, m.on);
+        const ratio = m.val / on;
         const rClamped = Math.max(0, Math.min(ratio, 1));
         const fillW = Math.round(BAR_W * rClamped);
-
-        let fillCol = '#6ecb8b'; // green < 0.9
-        if (ratio >= 0.9 && ratio < 1.0) fillCol = '#ffcc80'; // amber near threshold
-        if (ratio >= 1.0) fillCol = '#ff7a7a'; // red beyond ON
-
-        ctx.globalAlpha = metrics[i].enabled ? 1.0 : 0.35;
+    
+        // Color by zone
+        let fillCol = OK_GREEN;
+        if (ratio >= 0.9 && ratio < 1.0) fillCol = AMBER;
+        if (ratio >= 1.0)               fillCol = ALERT_RED;
+    
+        // Fill
+        ctx.globalAlpha = m.enabled ? 1.0 : 0.35;
         ctx.fillStyle = fillCol;
         ctx.fillRect(barX, barY, fillW, BAR_H);
-
+    
         // ON threshold tick (right edge)
-        ctx.globalAlpha = metrics[i].enabled ? 1.0 : 0.35;
         ctx.strokeStyle = 'rgba(255,255,255,0.9)';
         ctx.beginPath();
         ctx.moveTo(barX + BAR_W + 0.5, barY - Math.round(2*dpr));
         ctx.lineTo(barX + BAR_W + 0.5, barY + BAR_H + Math.round(2*dpr));
         ctx.stroke();
-
+    
+        // Percentage text at right
+        const pct = Math.round(Math.max(0, ratio) * 100);
+        const pctText = ratio >= 1 ? '100%+' : `${pct}%`;
+        ctx.fillStyle = TXT_DIM;
+        ctx.textBaseline = 'middle';
+        ctx.fillText(pctText, barX + BAR_W + Math.round(8*dpr), barY + Math.round(BAR_H/2));
+    
         ctx.globalAlpha = 1.0;
       }
-
+    
       ctx.restore();
     }
 
