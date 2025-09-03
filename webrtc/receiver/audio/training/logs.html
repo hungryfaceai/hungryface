@@ -192,22 +192,58 @@
       console.error(e);
     }
 
-    async function ensureAudioTask(maxResults=25) {
-      if (!AudioClassifier || !FilesetResolver) throw new Error('MediaPipe not available');
-      if (ensureAudioTask.task && ensureAudioTask.maxResults === maxResults) return ensureAudioTask.task;
-      const WASM_DIR  = AUDIO_PKG_URL + "/wasm";
-      const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite";
-      log('info','Loading YAMNet model…');
-      const resolver = await FilesetResolver.forAudioTasks(WASM_DIR);
-      const task = await AudioClassifier.createFromOptions(resolver, {
-        baseOptions: { modelAssetPath: MODEL_URL },
-        runningMode: "AUDIO_CLIPS",
-        classifierOptions: { scoreThreshold: 0.0, maxResults: Math.max(5, maxResults|0) }
-      });
-      ensureAudioTask.task = task;
-      ensureAudioTask.maxResults = maxResults;
-      log('ok', `YAMNet ready (maxResults=${maxResults}).`);
-      return task;
+    /* ---- Singleton YAMNet loader with in-flight guard ---- */
+    const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite";
+    const WASM_DIR  = AUDIO_PKG_URL + "/wasm";
+    let _yamTask = null;
+    let _yamTaskPromise = null;
+    let _yamMaxResults = null;
+
+    async function ensureYamnetTask(desiredMaxResults = 25) {
+      if (_yamTask) return _yamTask;
+      if (_yamTaskPromise) return _yamTaskPromise;
+
+      // Lock: coalesce concurrent calls
+      const maxResults = Math.max(5, desiredMaxResults | 0);
+      _yamMaxResults = maxResults;
+
+      _yamTaskPromise = (async () => {
+        if (!AudioClassifier || !FilesetResolver) throw new Error('MediaPipe not available');
+        if (!window._yam_load_logged) { log('info','Loading YAMNet model…'); window._yam_load_logged = true; }
+
+        const resolver = await FilesetResolver.forAudioTasks(WASM_DIR);
+
+        // Try path first
+        try {
+          _yamTask = await AudioClassifier.createFromOptions(resolver, {
+            baseOptions: { modelAssetPath: MODEL_URL },
+            runningMode: "AUDIO_CLIPS",
+            classifierOptions: { scoreThreshold: 0.0, maxResults }
+          });
+          log('ok', `YAMNet ready (maxResults=${maxResults}).`);
+          return _yamTask;
+        } catch (e1) {
+          log('warn', `Path load failed (${e1?.message||e1}). Retrying with buffer…`);
+        }
+
+        // Fallback: buffer with cache-bust
+        const resp = await fetch(MODEL_URL + "?cb=" + Date.now(), { cache: "no-store" });
+        if (!resp.ok) throw new Error(`yamnet fetch ${resp.status}`);
+        const buf = new Uint8Array(await resp.arrayBuffer());
+        _yamTask = await AudioClassifier.createFromOptions(resolver, {
+          baseOptions: { modelAssetBuffer: buf },
+          runningMode: "AUDIO_CLIPS",
+          classifierOptions: { scoreThreshold: 0.0, maxResults }
+        });
+        log('ok', `YAMNet ready (buffer, maxResults=${maxResults}).`);
+        return _yamTask;
+      })();
+
+      try {
+        return await _yamTaskPromise;
+      } finally {
+        _yamTaskPromise = null; // allow retries if it failed
+      }
     }
 
     function extractCategories(result) {
@@ -254,7 +290,7 @@
       return out;
     }
 
-    // ---- MediaPipe classify wrapper: supports both signatures
+    // ---- MediaPipe classify wrapper: supports both signatures ----
     async function classifyMP(task, w, sr) {
       try {
         return await task.classify(w, sr); // positional
@@ -460,7 +496,7 @@
 
     async function classifyChunk(chunk, deviceSr, params, mode){
       const { SR_TARGET, FRAME_LEN_S, HOP_S, MAX_RESULTS } = params;
-      const task = await ensureAudioTask(MAX_RESULTS);
+      const task = await ensureYamnetTask(MAX_RESULTS);  // 👈 race-proof singleton
       // RMS meter
       let s=0; for(let i=0;i<chunk.length;i++){ const v=chunk[i]; s+=v*v; }
       setRMS(Math.sqrt(s/Math.max(1,chunk.length)));
@@ -536,45 +572,62 @@
       }
     }
 
+    /* =========================
+       Mic / Calibrate with start locks
+       ========================= */
+    let _startMicLock = false;
+    let _calLock = false;
+    let _startFileLock = false;
+
     async function startMic(mode) {
-      await stopAll();
-      setStatus(mode==='detect' ? 'Starting microphone (detect)…' : 'Starting microphone (train)…');
-      const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
-      state.micCtx = ctx;
-      await ctx.resume();
-      log('info', `Mic AudioContext sampleRate=${ctx.sampleRate} Hz`);
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false },
-        video: false
-      });
-      const src = ctx.createMediaStreamSource(stream);
-      const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
-      state.srcNode = src; state.sinkNode = sink;
-
+      if (_startMicLock) return;
+      _startMicLock = true;
+      els.btnStartDetect.disabled = true;
+      els.btnStartTrainMic.disabled = true;
       try {
-        const url = URL.createObjectURL(new Blob([`
-          class Tap extends AudioWorkletProcessor {
-            process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }
-          } registerProcessor('tap', Tap);
-        `], {type:'application/javascript'}));
-        await ctx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
-        const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
-        node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate, getParams(), mode);
-        src.connect(node).connect(sink);
-        state.procNode = node;
-        setStatus('AudioWorklet active @ '+ctx.sampleRate+' Hz');
-      } catch {
-        const node = ctx.createScriptProcessor(4096,1,1);
-        node.onaudioprocess = (e)=> classifyChunk(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate, getParams(), mode);
-        src.connect(node).connect(sink);
-        state.procNode = node;
-        setStatus('ScriptProcessor active @ '+ctx.sampleRate+' Hz');
+        await stopAll();
+        setStatus(mode==='detect' ? 'Starting microphone (detect)…' : 'Starting microphone (train)…');
+        const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
+        state.micCtx = ctx;
+        await ctx.resume();
+        log('info', `Mic AudioContext sampleRate=${ctx.sampleRate} Hz`);
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false },
+          video: false
+        });
+        const src = ctx.createMediaStreamSource(stream);
+        const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
+        state.srcNode = src; state.sinkNode = sink;
+
+        try {
+          const url = URL.createObjectURL(new Blob([`
+            class Tap extends AudioWorkletProcessor {
+              process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }
+            } registerProcessor('tap', Tap);
+          `], {type:'application/javascript'}));
+          await ctx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
+          const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
+          node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate, getParams(), mode);
+          src.connect(node).connect(sink);
+          state.procNode = node;
+          setStatus('AudioWorklet active @ '+ctx.sampleRate+' Hz');
+        } catch {
+          const node = ctx.createScriptProcessor(4096,1,1);
+          node.onaudioprocess = (e)=> classifyChunk(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate, getParams(), mode);
+          src.connect(node).connect(sink);
+          state.procNode = node;
+          setStatus('ScriptProcessor active @ '+ctx.sampleRate+' Hz');
+        }
+        state.running = true;
+        state.mode = mode;
+        setPill(mode==='detect' ? 'idle' : 'training', mode!=='detect');
+        log('ok', `Mic started in ${mode.toUpperCase()} mode.`);
+      } finally {
+        _startMicLock = false;
+        els.btnStartDetect.disabled = false;
+        els.btnStartTrainMic.disabled = false;
       }
-      state.running = true;
-      state.mode = mode;
-      setPill(mode==='detect' ? 'idle' : 'training', mode!=='detect');
-      log('ok', `Mic started in ${mode.toUpperCase()} mode.`);
     }
 
     async function stopAll(){
@@ -590,129 +643,145 @@
       if (wasRunning) log('warn','Stopped audio graph.');
     }
 
-    /* =========================
-       Quiet calibration
-       ========================= */
     async function quietCalibrate() {
-      await stopAll();
-      setStatus('Quiet calibration…');
-      state.mode = 'calibrate';
-      const dur = Math.max(5, Number(els.CAL_SEC.value)||20);
-      const SR_TARGET = Number(els.SR_TARGET.value)||16000;
-      const FRAME_LEN_S = Number(els.FRAME_LEN_S.value)||0.96;
-      const HOP_S  = Number(els.HOP_S.value)||0.48;
-      const MAX_RESULTS = Number(els.MAX_RESULTS.value)||25;
-      const task = await ensureAudioTask(MAX_RESULTS);
+      if (_calLock) return;
+      _calLock = true;
+      els.btnCal.disabled = true;
+      try {
+        await stopAll();
+        setStatus('Quiet calibration…');
+        state.mode = 'calibrate';
+        const dur = Math.max(5, Number(els.CAL_SEC.value)||20);
+        const SR_TARGET = Number(els.SR_TARGET.value)||16000;
+        const FRAME_LEN_S = Number(els.FRAME_LEN_S.value)||0.96;
+        const HOP_S  = Number(els.HOP_S.value)||0.48;
+        const MAX_RESULTS = Number(els.MAX_RESULTS.value)||25;
+        const task = await ensureYamnetTask(MAX_RESULTS); // 👈 singleton
 
-      const ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
-      const stream = await navigator.mediaDevices.getUserMedia({audio:true, video:false});
-      const src = ctx.createMediaStreamSource(stream);
-      const sink = ctx.createGain(); sink.gain.value=0; sink.connect(ctx.destination);
-      const node = ctx.createScriptProcessor(4096,1,1);
+        const ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
+        const stream = await navigator.mediaDevices.getUserMedia({audio:true, video:false});
+        const src = ctx.createMediaStreamSource(stream);
+        const sink = ctx.createGain(); sink.gain.value=0; sink.connect(ctx.destination);
+        const node = ctx.createScriptProcessor(4096,1,1);
 
-      let ring = new Float32Array(0), last=0, t=0, asmCounter=0;
-      const samples = [];
-      const weights = loadModel().weights || {"Baby cry, infant cry":1};
-      state.perClassEma.clear(); ensurePerClassEma(weights);
-      state.fusedEma = 0; state.frameCount = 0;
+        let ring = new Float32Array(0), last=0, t=0, asmCounter=0;
+        const samples = [];
+        const weights = loadModel().weights || {"Baby cry, infant cry":1};
+        state.perClassEma.clear(); ensurePerClassEma(weights);
+        state.fusedEma = 0; state.frameCount = 0;
 
-      node.onaudioprocess = async (e) => {
-        const buf = new Float32Array(e.inputBuffer.getChannelData(0));
-        let s=0; for(let i=0;i<buf.length;i++){ const v=buf[i]; s+=v*v; }
-        setRMS(Math.sqrt(s/Math.max(1,buf.length)));
+        node.onaudioprocess = async (e) => {
+          const buf = new Float32Array(e.inputBuffer.getChannelData(0));
+          let s=0; for(let i=0;i<buf.length;i++){ const v=buf[i]; s+=v*v; }
+          setRMS(Math.sqrt(s/Math.max(1,buf.length)));
 
-        const x16 = resampleLinear(buf, ctx.sampleRate, SR_TARGET);
-        ring = concatFloat32(ring, x16);
-        const hop = Math.round(HOP_S * SR_TARGET);
-        const fram = Math.round(FRAME_LEN_S * SR_TARGET);
+          const x16 = resampleLinear(buf, ctx.sampleRate, SR_TARGET);
+          ring = concatFloat32(ring, x16);
+          const hop = Math.round(HOP_S * SR_TARGET);
+          const fram = Math.round(FRAME_LEN_S * SR_TARGET);
 
-        asmCounter++;
-        if ((asmCounter % 10) === 0) {
-          log('info', `[cal] Audio buf len=${ring.length}, need≥${last + hop} (hop=${hop}, frame=${fram})`);
-        }
-
-        while (ring.length - last >= hop) {
-          const end = last + hop, start = Math.max(0, end - fram);
-          let w = ring.slice(start, end); if (w.length < fram){ const pad=new Float32Array(fram); pad.set(w, fram-w.length); w=pad; }
-          const res = await classifyMP(task, w, SR_TARGET);
-          const cats = extractCategories(res);
-
-          if (LOGS.enable.checked) {
-            const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
-            const html = formatCats(cats, topN, LOGS.all.checked);
-            log('inf', `Inference#${++state.frameCount} [mode=calibrate] cats=${cats.length}`, html);
-            if (!res) log('warn', 'Inference returned null result (classify failed).');
-            else if (!cats.length) log('warn', 'Inference returned 0 categories.');
+          asmCounter++;
+          if ((asmCounter % 10) === 0) {
+            log('info', `[cal] Audio buf len=${ring.length}, need≥${last + hop} (hop=${hop}, frame=${fram})`);
           }
 
-          ensurePerClassEma(weights);
-          const { sm } = fusedScoreFromCategories(cats, weights, HOP_S);
-          samples.push(sm);
-          last += hop;
-          t += HOP_S;
-          if (t >= dur) break;
-        }
-        if (t >= dur) {
-          try { node.disconnect(); src.disconnect(); sink.disconnect(); } catch {}
-          stream.getTracks().forEach(t=>t.stop());
-          ctx.close();
-          const mu = samples.reduce((a,b)=>a+b,0)/Math.max(1,samples.length);
-          const sd = Math.sqrt(samples.reduce((a,b)=>a+(b-mu)*(b-mu),0)/Math.max(1,samples.length));
-          const thr_on = Math.min(1.2, mu + 3*sd);
-          const thr_off = Math.max(0, thr_on - (Number(els.ALERT_OFF_DELTA.value)||0.1));
-          const calib = { thr_on, thr_off, mu, sd, n:samples.length, at:Date.now() };
-          localStorage.setItem(CALIB_KEY, JSON.stringify(calib));
-          state.thrOn = thr_on; state.thrOff = thr_off;
-          setStatus(`Calibrated ON=${thr_on.toFixed(3)} OFF=${thr_off.toFixed(3)} (μ=${mu.toFixed(3)}, σ=${sd.toFixed(3)}, n=${samples.length})`);
-          log('ok', 'Calibration complete.', `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
-          state.mode = 'idle';
-          setPill('idle', false);
-        }
-      };
-      src.connect(node).connect(sink);
-      log('info', `Calibration started for ${dur}s.`);
+          while (ring.length - last >= hop) {
+            const end = last + hop, start = Math.max(0, end - fram);
+            let w = ring.slice(start, end); if (w.length < fram){ const pad=new Float32Array(fram); pad.set(w, fram-w.length); w=pad; }
+            const res = await classifyMP(task, w, SR_TARGET);
+            const cats = extractCategories(res);
+
+            if (LOGS.enable.checked) {
+              const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
+              const html = formatCats(cats, topN, LOGS.all.checked);
+              log('inf', `Inference#${++state.frameCount} [mode=calibrate] cats=${cats.length}`, html);
+              if (!res) log('warn', 'Inference returned null result (classify failed).');
+              else if (!cats.length) log('warn', 'Inference returned 0 categories.');
+            }
+
+            ensurePerClassEma(weights);
+            const { sm } = fusedScoreFromCategories(cats, weights, HOP_S);
+            samples.push(sm);
+            last += hop;
+            t += HOP_S;
+            if (t >= dur) break;
+          }
+          if (t >= dur) {
+            try { node.disconnect(); src.disconnect(); sink.disconnect(); } catch {}
+            stream.getTracks().forEach(t=>t.stop());
+            ctx.close();
+            const mu = samples.reduce((a,b)=>a+b,0)/Math.max(1,samples.length);
+            const sd = Math.sqrt(samples.reduce((a,b)=>a+(b-mu)*(b-mu),0)/Math.max(1,samples.length));
+            const thr_on = Math.min(1.2, mu + 3*sd);
+            const thr_off = Math.max(0, thr_on - (Number(els.ALERT_OFF_DELTA.value)||0.1));
+            const calib = { thr_on, thr_off, mu, sd, n:samples.length, at:Date.now() };
+            localStorage.setItem(CALIB_KEY, JSON.stringify(calib));
+            state.thrOn = thr_on; state.thrOff = thr_off;
+            setStatus(`Calibrated ON=${thr_on.toFixed(3)} OFF=${thr_off.toFixed(3)} (μ=${mu.toFixed(3)}, σ=${sd.toFixed(3)}, n=${samples.length})`);
+            log('ok', 'Calibration complete.', `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
+            state.mode = 'idle';
+            setPill('idle', false);
+          }
+        };
+        src.connect(node).connect(sink);
+        log('info', `Calibration started for ${dur}s.`);
+      } finally {
+        _calLock = false;
+        els.btnCal.disabled = false;
+      }
     }
 
     /* =========================
        Training from FILE (optional)
        ========================= */
     let trainCtx=null, trainSrc=null, trainNode=null, trainSink=null;
+
     async function startTrainingOnFile(file) {
-      await stopTrainingFile();
-      const url = URL.createObjectURL(file);
-      els.trainAudio.src = url;
-      els.trainAudio.loop = false;
-
-      const ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
-      trainCtx = ctx;
-      const src = ctx.createMediaElementSource(els.trainAudio); trainSrc=src;
-      const sink = ctx.createGain(); sink.gain.value=0; sink.connect(ctx.destination); trainSink=sink;
-
+      if (_startFileLock) return;
+      _startFileLock = true;
+      els.btnTrainFile.disabled = true;
       try {
-        const mod = URL.createObjectURL(new Blob([`
-          class Tap extends AudioWorkletProcessor {
-            process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }
-          } registerProcessor('tap', Tap);
-        `], {type:'application/javascript'}));
-        await ctx.audioWorklet.addModule(mod); URL.revokeObjectURL(mod);
-        const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
-        node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate, getParams(), 'train');
-        src.connect(node).connect(sink);
-        trainNode = node;
-        setStatus('Training graph (Worklet) ready.');
-      } catch {
-        const node = ctx.createScriptProcessor(4096,1,1);
-        node.onaudioprocess = (e)=> classifyChunk(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate, getParams(), 'train');
-        src.connect(node).connect(sink);
-        trainNode = node;
-        setStatus('Training graph (ScriptProcessor) ready.');
-      }
+        await stopTrainingFile();
+        const url = URL.createObjectURL(file);
+        els.trainAudio.src = url;
+        els.trainAudio.loop = false;
 
-      await els.trainAudio.play().catch(()=>{});
-      state.mode = 'train_file';
-      setPill('training', true);
-      log('ok', `Training started on file: ${file.name}`, `<span class="chip">${(file.size/1024/1024).toFixed(2)} MB</span>`);
-      els.trainAudio.onended = ()=> { setStatus('Training clip ended. Click “Recompute Weights”.'); setPill('idle', false); state.mode='idle'; };
+        const ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
+        trainCtx = ctx;
+        const src = ctx.createMediaElementSource(els.trainAudio); trainSrc=src;
+        const sink = ctx.createGain(); sink.gain.value=0; sink.connect(ctx.destination); trainSink=sink;
+
+        try {
+          const mod = URL.createObjectURL(new Blob([`
+            class Tap extends AudioWorkletProcessor {
+              process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }
+            } registerProcessor('tap', Tap);
+          `], {type:'application/javascript'}));
+          await ctx.audioWorklet.addModule(mod); URL.revokeObjectURL(mod);
+          const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
+          node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate, getParams(), 'train');
+          src.connect(node).connect(sink);
+          trainNode = node;
+          setStatus('Training graph (Worklet) ready.');
+        } catch {
+          const node = ctx.createScriptProcessor(4096,1,1);
+          node.onaudioprocess = (e)=> classifyChunk(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate, getParams(), 'train');
+          src.connect(node).connect(sink);
+          trainNode = node;
+          setStatus('Training graph (ScriptProcessor) ready.');
+        }
+
+        await ensureYamnetTask(Number(els.MAX_RESULTS.value)||25); // ensure model ready before play to avoid cold-start spam
+        await els.trainAudio.play().catch(()=>{});
+
+        state.mode = 'train_file';
+        setPill('training', true);
+        log('ok', `Training started on file: ${file.name}`, `<span class="chip">${(file.size/1024/1024).toFixed(2)} MB</span>`);
+        els.trainAudio.onended = ()=> { setStatus('Training clip ended. Click “Recompute Weights”.'); setPill('idle', false); state.mode='idle'; };
+      } finally {
+        _startFileLock = false;
+        els.btnTrainFile.disabled = false;
+      }
     }
     async function stopTrainingFile(){
       const was = state.mode==='train_file';
