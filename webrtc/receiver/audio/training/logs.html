@@ -112,7 +112,7 @@
           <button id="btnStopTrainFile" class="btn">Stop File Training</button>
         </div>
 
-        <!-- Folder training -->
+        <!-- NEW: Folder training -->
         <div class="row" style="gap:8px 10px; margin-top:8px;">
           <input id="folderInp" type="file" webkitdirectory directory multiple style="display:none" />
           <button id="btnChooseFolder" class="btn">Choose Folder…</button>
@@ -163,7 +163,7 @@
         </div>
       </div>
 
-      <!-- Table view -->
+      <!-- Table view of active weights -->
       <div class="section">
         <strong>Active weights (Top-K, normalized)</strong>
         <div id="weightsView" class="kvs" style="display:grid;grid-template-columns:1fr auto;gap:6px 10px;margin-top:8px;"></div>
@@ -195,9 +195,7 @@
     </div>
   </div>
 
-  <!-- Hidden audio element for file/folder training -->
-  <audio id="trainAudio" crossorigin="anonymous" muted style="display:none"></audio>
-
+  <audio id="trainAudio" crossorigin="anonymous" style="display:none"></audio>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 
   <script type="module">
@@ -268,24 +266,18 @@
       return out;
     }
 
-    /* ========= Chart.js % labels plugin (opt-in) ========= */
+    /* ========= Chart.js % labels plugin ========= */
     const pctLabelPlugin = {
       id: 'pctLabel',
-      afterDatasetsDraw(chart){
-        const enabled = chart?.options?.plugins?.pctLabel?.enabled;
-        if (!enabled) return;
-        const ds = chart.data.datasets?.[0];
-        if (!ds) return;
-        const meta = chart.getDatasetMeta(0);
-        const { ctx } = chart;
-        ctx.save();
-        ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-        ctx.fillStyle = '#ddd';
+      afterDatasetsDraw(chart, args, options){
+        const ds = chart.data.datasets?.[0]; if (!ds) return;
+        const { ctx } = chart; const meta = chart.getDatasetMeta(0);
+        ctx.save(); ctx.font = (options?.font) || '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+        ctx.fillStyle = options?.color || '#ddd';
         const data = ds.data || [];
         meta.data.forEach((bar, i) => {
-          const v = Number(data[i]) || 0;
-          const txt = `${Math.round(v * 100)}%`;
-          ctx.fillText(txt, bar.x + 6, bar.y + 4);
+          const v = Number(data[i]) || 0; const txt = `${Math.round(v*100)}%`;
+          const x = bar.x + 6; const y = bar.y + 4; ctx.fillText(txt, x, y);
         });
         ctx.restore();
       }
@@ -503,42 +495,24 @@
         state.barChart = new Chart(els.bars.getContext('2d'), {
           type: 'bar',
           data: { labels: [], datasets: [{ label: 'score', data: [], borderWidth: 1 }] },
-          options: {
-            indexAxis: 'y',
-            animation: false,
-            plugins: {
-              legend: { display:false },
-              pctLabel: { enabled: false }   // no % on live training bars
-            },
-            scales: {
-              x: { min: 0, max: 1, title: { display:true, text:'score' } },
-              y: { ticks: { autoSkip: false } }
-            }
-          }
+          options: { indexAxis: 'y', animation: false, plugins: { legend: { display:false } },
+            scales: { x: { min: 0, max: 1, title: { display:true, text:'score' } }, y: { ticks: { autoSkip: false } } } }
         });
       }
       if (!state.barDynW && els.barsDynW) {
         state.barDynW = new Chart(els.barsDynW.getContext('2d'), {
           type: 'bar',
           data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
-          options: {
-            indexAxis:'y',
-            animation:false,
-            plugins:{ legend:{display:false}, pctLabel:{ enabled: true } }, // % labels on weights
-            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } }
-          }
+          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{} },
+            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
         });
       }
       if (!state.barSavedW && els.barsSavedW) {
         state.barSavedW = new Chart(els.barsSavedW.getContext('2d'), {
           type: 'bar',
           data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
-          options: {
-            indexAxis:'y',
-            animation:false,
-            plugins:{ legend:{display:false}, pctLabel:{ enabled: true } }, // % labels on weights
-            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } }
-          }
+          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{} },
+            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
         });
       }
     }
@@ -667,8 +641,8 @@
     let trainCtx=null, trainSrc=null, trainNode=null, trainSink=null;
 
     async function startMic(mode) {
-      await stopFolderTraining(true);   // ensure folder queue is down
-      await stopTrainingFile();         // ensure file graph is down
+      await stopFolderTraining();         // ensure folder queue is down
+      await stopTrainingFile();           // ensure file graph is down
       await stopAll();
       setStatus(mode==='detect' ? 'Starting microphone (detect)…' : 'Starting microphone (train)…');
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
@@ -724,7 +698,7 @@
     }
 
     async function quietCalibrate() {
-      await stopFolderTraining(true);
+      await stopFolderTraining();
       await stopTrainingFile();
       await stopAll();
       setStatus('Quiet calibration…');
@@ -805,18 +779,14 @@
       log('info', `Calibration started for ${dur}s.`);
     }
 
-    async function startTrainingOnFile(file, opts = {}) {
-      const isPlaylist = !!opts.playlist;
-
-      if (!isPlaylist) await stopFolderTraining(true); // don't kill playlist when called by folder trainer
+    async function startTrainingOnFile(file) {
+      await stopFolderTraining();
       await stopAll();          // stop mic graph
       await stopTrainingFile(); // stop any prior file graph
 
       const url = URL.createObjectURL(file);
       els.trainAudio.src = url;
       els.trainAudio.loop = false;
-      els.trainAudio.muted = true;            // allow autoplay across files
-      els.trainAudio.currentTime = 0;
 
       const ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
       trainCtx = ctx;
@@ -844,27 +814,18 @@
       }
 
       await ensureAudioTask(Number(els.MAX_RESULTS.value)||25);
-
-      if (!isPlaylist) {
-        els.trainAudio.onended = async () => {
-          await stopTrainingFile();
-          setStatus('Training clip ended. Click “Recompute Weights”.');
-          setPill('idle', false);
-          state.mode='idle';
-        };
-      } else {
-        els.trainAudio.onended = null; // folder trainer will attach its own
-      }
-
-      try {
-        await els.trainAudio.play();
-      } catch (e) {
-        log('warn', 'Autoplay was blocked — tap anywhere to continue playback.', `<div class="log-code">${e?.message||e}</div>`);
-      }
-
+      await els.trainAudio.play().catch(()=>{});
       state.mode = 'train_file';
       setPill('training', true);
       log('ok', `Training started on file: ${file.name}`, `<span class="chip">${(file.size/1024/1024).toFixed(2)} MB</span>`);
+
+      // Default single-file end behavior (overridden by folder training when active)
+      els.trainAudio.onended = async () => {
+        await stopTrainingFile();
+        setStatus('Training clip ended. Click “Recompute Weights”.');
+        setPill('idle', false);
+        state.mode='idle';
+      };
     }
     async function stopTrainingFile(){
       try { els.trainAudio.pause(); } catch {}
@@ -923,12 +884,12 @@
         log('ok', 'Folder training complete.');
         return;
       }
-
       const f = folderFiles[folderIdx];
       const label = f.webkitRelativePath || f.name;
       log('info', `Starting file ${folderIdx+1}/${folderFiles.length}: ${label}`);
+      await startTrainingOnFile(f);
 
-      await startTrainingOnFile(f, { playlist: true });   // do NOT install single-file onended
+      // Override single-file end handler to continue playlist
       els.trainAudio.onended = async () => {
         await stopTrainingFile();
         log('info', `Finished ${folderIdx+1}/${folderFiles.length}`);
@@ -941,9 +902,14 @@
       folderActive = false;
       folderIdx = 0;
       await stopTrainingFile();
-      setPill('idle', false);
-      state.mode = 'idle';
-      if (!silent) log('warn','Stopped folder training.');
+      if (!silent){
+        setPill('idle', false);
+        state.mode = 'idle';
+        log('warn','Stopped folder training.');
+      } else {
+        setPill('idle', false);
+        state.mode = 'idle';
+      }
     }
 
     /* ========= Params & UI wiring ========= */
