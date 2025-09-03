@@ -99,7 +99,7 @@
         <div class="row" style="gap:8px 10px;">
           <button id="btnStartTrainMic" class="btn">Start Training (Mic)</button>
           <button id="btnStopTrainMic" class="btn">Stop Training</button>
-          <span class="muted">Mic training updates per-class stats live. Use in segments (e.g., 20–60s of crying), then recompute weights.</span>
+          <span class="muted">Mic training updates per-class stats live. Use 20–60s segments; then recompute weights.</span>
         </div>
         <div class="row" style="gap:8px 10px; margin-top:8px;">
           <input id="fileInp" type="file" accept="audio/*" />
@@ -111,7 +111,7 @@
           <button id="btnClear" class="btn">Clear Model</button>
           <button id="btnExport" class="btn">Export Model</button>
         </div>
-        <div class="muted" style="margin-top:6px;">Logs show MediaPipe outputs BEFORE stats are updated (both mic/file training).</div>
+        <div class="muted" style="margin-top:6px;">Logs show MediaPipe outputs BEFORE stats are updated (mic/file training).</div>
       </div>
 
       <!-- Weights view -->
@@ -226,7 +226,7 @@
     }
 
     /* =========================
-       Utilities
+       Utilities (+ classify wrapper)
        ========================= */
     const els = (id => Object.fromEntries([
       'status','statePill','rmsFill','SR_TARGET','FRAME_LEN_S','HOP_S',
@@ -252,6 +252,20 @@
       const dx = (x.length - 1) / (n - 1);
       for (let i=0;i<n;i++){ const pos=i*dx, i0=Math.floor(pos), i1=Math.min(i0+1,x.length-1), t=pos-i0; out[i]=x[i0]*(1-t)+x[i1]*t; }
       return out;
+    }
+
+    // ---- MediaPipe classify wrapper: supports both signatures
+    async function classifyMP(task, w, sr) {
+      try {
+        return await task.classify(w, sr); // positional
+      } catch (e1) {
+        try {
+          return await task.classify({ audioClip: w, sampleRateHz: sr }); // object
+        } catch (e2) {
+          log('err', `MediaPipe classify failed: ${e1?.message || e1} / ${e2?.message || e2}`);
+          return null;
+        }
+      }
     }
 
     /* =========================
@@ -342,7 +356,7 @@
        ========================= */
     const state = {
       running: false,
-      mode: 'idle', // 'detect' | 'train' | 'calibrate'
+      mode: 'idle', // 'detect' | 'train' | 'calibrate' | 'train_file'
       micCtx: null,
       srcNode: null,
       procNode: null,
@@ -359,7 +373,8 @@
       fusedSm: [],
       thrOn: 0.35,
       thrOff: 0.25,
-      frameCount: 0
+      frameCount: 0,
+      asmLogCounter: 0
     };
     function setRMS(x){ els.rmsFill.style.width = Math.round(clamp01(x)*100)+'%'; }
 
@@ -456,13 +471,19 @@
       const hop = Math.round(HOP_S * SR_TARGET);
       const fram = Math.round(FRAME_LEN_S * SR_TARGET);
 
+      // breadcrumb (every ~10 callbacks) to show frame assembly progress
+      state.asmLogCounter = (state.asmLogCounter || 0) + 1;
+      if ((state.asmLogCounter % 10) === 0) {
+        log('info', `Audio buf len=${state.ring.length}, need≥${state.lastPos + hop} (hop=${hop}, frame=${fram})`);
+      }
+
       while (state.ring.length - state.lastPos >= hop) {
         const end = state.lastPos + hop;
         const start = Math.max(0, end - fram);
         let w = state.ring.slice(start, end);
         if (w.length < fram) { const pad = new Float32Array(fram); pad.set(w, fram - w.length); w = pad; }
 
-        const res = await task.classify(w, SR_TARGET);
+        const res = await classifyMP(task, w, SR_TARGET);
         const cats = extractCategories(res);
 
         // --- LOG INFERENCE BEFORE updates ---
@@ -470,6 +491,11 @@
           const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
           const html = formatCats(cats, topN, LOGS.all.checked);
           log('inf', `Inference#${++state.frameCount} [mode=${mode}] cats=${cats.length}`, html);
+          if (!res) {
+            log('warn', 'Inference returned null result (classify failed).');
+          } else if (!cats.length) {
+            log('warn', 'Inference returned 0 categories.');
+          }
         }
 
         if (mode === 'train') {
@@ -499,7 +525,7 @@
           if (on && !state.alertOn) { setPill('CRYING', true); log('ok','ALERT ON (cry detected).'); }
           if (!on && state.alertOn) { setPill('idle', false); log('warn','ALERT OFF.'); }
           state.alertOn = on;
-        } // calibrate handled elsewhere
+        }
 
         state.lastPos += hop;
         if (state.lastPos > fram * 4) {
@@ -516,6 +542,7 @@
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
       state.micCtx = ctx;
       await ctx.resume();
+      log('info', `Mic AudioContext sampleRate=${ctx.sampleRate} Hz`);
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false },
@@ -558,7 +585,7 @@
       try { state.sinkNode?.disconnect(); } catch {}
       try { state.micCtx && state.micCtx.state!=='closed' && state.micCtx.close(); } catch {}
       state.procNode=null; state.srcNode=null; state.sinkNode=null; state.micCtx=null;
-      state.ring=new Float32Array(0); state.lastPos=0; state.perClassEma.clear(); state.fusedEma=0; state.frameCount=0;
+      state.ring=new Float32Array(0); state.lastPos=0; state.perClassEma.clear(); state.fusedEma=0; state.frameCount=0; state.asmLogCounter=0;
       setPill('idle', false); setRMS(0);
       if (wasRunning) log('warn','Stopped audio graph.');
     }
@@ -583,7 +610,7 @@
       const sink = ctx.createGain(); sink.gain.value=0; sink.connect(ctx.destination);
       const node = ctx.createScriptProcessor(4096,1,1);
 
-      let ring = new Float32Array(0), last=0, t=0;
+      let ring = new Float32Array(0), last=0, t=0, asmCounter=0;
       const samples = [];
       const weights = loadModel().weights || {"Baby cry, infant cry":1};
       state.perClassEma.clear(); ensurePerClassEma(weights);
@@ -599,16 +626,23 @@
         const hop = Math.round(HOP_S * SR_TARGET);
         const fram = Math.round(FRAME_LEN_S * SR_TARGET);
 
+        asmCounter++;
+        if ((asmCounter % 10) === 0) {
+          log('info', `[cal] Audio buf len=${ring.length}, need≥${last + hop} (hop=${hop}, frame=${fram})`);
+        }
+
         while (ring.length - last >= hop) {
           const end = last + hop, start = Math.max(0, end - fram);
           let w = ring.slice(start, end); if (w.length < fram){ const pad=new Float32Array(fram); pad.set(w, fram-w.length); w=pad; }
-          const res = await task.classify(w, SR_TARGET);
+          const res = await classifyMP(task, w, SR_TARGET);
           const cats = extractCategories(res);
 
           if (LOGS.enable.checked) {
             const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
             const html = formatCats(cats, topN, LOGS.all.checked);
             log('inf', `Inference#${++state.frameCount} [mode=calibrate] cats=${cats.length}`, html);
+            if (!res) log('warn', 'Inference returned null result (classify failed).');
+            else if (!cats.length) log('warn', 'Inference returned 0 categories.');
           }
 
           ensurePerClassEma(weights);
