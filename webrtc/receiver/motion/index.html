@@ -668,7 +668,7 @@
       return dst;
     }
 
-    /* ---------- On-screen badge: bars (explicit labels + % readouts + non-overlapping pill) ---------- */
+    /* ---------- On-screen badge: bars (pill header + explicit labels + % readouts) ---------- */
     function drawMovementBadge(movingState, emaVal, intVal, driftVal) {
       const ctx = poseCtx;
       const dpr = window.devicePixelRatio || 1;
@@ -698,14 +698,26 @@
       const BAR_W  = Math.round(190*dpr);
       const BAR_H  = Math.round(8*dpr);
     
+      // Helper: rounded rect path (for pill)
+      function roundRectPath(ctx, x, y, w, h, r) {
+        const rr = Math.min(r, w/2, h/2);
+        ctx.beginPath();
+        ctx.moveTo(x + rr, y);
+        ctx.arcTo(x + w, y,     x + w, y + h, rr);
+        ctx.arcTo(x + w, y + h, x,     y + h, rr);
+        ctx.arcTo(x,     y + h, x,     y,     rr);
+        ctx.arcTo(x,     y,     x + w, y,     rr);
+        ctx.closePath();
+      }
+    
       ctx.save();
     
       // --- Measure pill (state) in header ---
       ctx.font = `${Math.round(12*dpr)}px -apple-system,system-ui,Segoe UI,Roboto,sans-serif`;
       const stateTxt = movingState ? '• MOVING' : '• STILL';
-      const pillPadX = Math.round(8*dpr);
+      const pillPadX = Math.round(10*dpr);
       const pillW    = Math.round(ctx.measureText(stateTxt).width + pillPadX*2);
-      const pillH    = Math.round(18*dpr);
+      const pillH    = Math.round(20*dpr);
     
       // --- Measure labels & % column for rows ---
       ctx.font = `${Math.round(11*dpr)}px -apple-system,system-ui,Segoe UI,Roboto,sans-serif`;
@@ -714,7 +726,7 @@
       const PCT_W     = Math.round(ctx.measureText('100%+').width + Math.round(12*dpr));
     
       // --- Header height (ensures no overlap with bars) ---
-      const HEADER_H  = pillH + Math.round(8*dpr); // pill height + vertical padding
+      const HEADER_H  = pillH + Math.round(10*dpr); // pill height + padding
     
       // --- Compute box size: header + rows ---
       const boxW = Math.max(LABEL_W + INNER + BAR_W + INNER + PCT_W, pillW + INNER*2);
@@ -732,13 +744,18 @@
       // --- Draw pill centered vertically within header ---
       const pillX = x + boxW - pillW - INNER;
       const pillY = y + Math.round((HEADER_H - pillH)/2);
-      ctx.fillStyle = movingState ? '#4a2a00' : '#111111';
-      ctx.fillRect(pillX, pillY, pillW, pillH);
-      ctx.strokeStyle = BORDER;
-      ctx.strokeRect(pillX+0.5, pillY+0.5, pillW-1, pillH-1);
-      ctx.fillStyle = TXT_DIM;
+    
+      const pillFill   = movingState ? ALERT_RED : '#1a1a1a';
+      const pillBorder = movingState ? '#ff8a80' : 'rgba(255,255,255,0.25)';
+      const pillText   = movingState ? '#ffffff' : TXT_DIM;
+    
+      roundRectPath(ctx, pillX, pillY, pillW, pillH, pillH/2);
+      ctx.fillStyle = pillFill;   ctx.fill();
+      ctx.strokeStyle = pillBorder; ctx.stroke();
+    
+      ctx.fillStyle = pillText;
       ctx.textBaseline = 'alphabetic';
-      ctx.fillText(stateTxt, pillX + pillPadX, pillY + pillH - Math.round(5*dpr));
+      ctx.fillText(stateTxt, pillX + pillPadX, pillY + pillH - Math.round(6*dpr));
     
       // Optional: a subtle separator line under the header
       ctx.strokeStyle = 'rgba(255,255,255,0.15)';
