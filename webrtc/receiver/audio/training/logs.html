@@ -2,13 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Naptio – Cry Detector (Weighted Top-K + Logs)</title>
+  <title>Naptio – Cry Detector (Weighted Top-K + Logs + Mic Training)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
   <link rel="icon" href="data:," />
   <style>
     :root { color-scheme: dark; }
-    html, body { margin:0; height:100%; background:#000; color:#fff; font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
-    #stage { position:fixed; inset:0; display:grid; place-items:center; padding:16px; box-sizing:border-box; }
+    html, body { margin:0; background:#000; color:#fff; font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
+    /* panel & layout */
+    #stage { padding:16px; box-sizing:border-box; display:flex; justify-content:center; }
     .panel { width:min(100%,1100px); background:#0b0b0b; border:1px solid #141414; border-radius:14px; padding:16px; }
     h1 { margin:.2rem 0 .1rem; font-size:22px; }
     .sub { margin:.1rem 0 1rem; color:#bbb; font-size:13px; }
@@ -34,7 +35,7 @@
     /* Log console */
     .log-panel { margin-top:12px; background:#0a0a0a; border:1px solid #222; border-radius:12px; }
     .log-toolbar { display:flex; gap:10px; align-items:center; padding:8px 10px; border-bottom:1px solid #1a1a1a; font-size:12px; color:#ddd; flex-wrap:wrap; }
-    .log-body { max-height:260px; overflow:auto; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; line-height:1.4; padding:10px; }
+    .log-body { max-height:300px; overflow:auto; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; line-height:1.4; padding:10px; }
     .log-line { white-space:pre-wrap; margin:0; padding:2px 0; border-bottom:1px dotted #111; }
     .log-time { color:#9ca3af; }
     .log-kind-info { color:#e5e7eb; }
@@ -44,26 +45,10 @@
     .log-kind-inf  { color:#93c5fd; } /* inference */
     .log-code { display:block; background:#0b0b0b; border:1px solid #1f2937; border-radius:8px; padding:6px; margin-top:4px; overflow:auto; }
     .chip { display:inline-block; padding:2px 6px; border:1px solid #333; border-radius:999px; margin-left:6px; font-size:11px; color:#bbb; }
-
     /* --- scrollable page overrides --- */
-    html, body {
-      height: auto;            /* let content define height */
-      min-height: 100%;        /* still fill when short */
-      overflow-y: auto;        /* enable page scrolling */
-    }
-    
-    #stage {
-      position: static;        /* no longer fixed to viewport */
-      min-height: 100vh;       /* at least full height */
-      padding: 16px;
-      display: block;          /* allow natural flow/scroll */
-    }
-    
-    .panel {
-      margin: 0 auto 24px;     /* keep centered, add bottom space */
-      max-width: 1100px;       /* optional: same as before */
-    }
-
+    html, body { height: auto; min-height: 100%; overflow-y: auto; }
+    #stage { position: static; min-height: 100vh; }
+    .panel { margin: 0 auto 24px; }
   </style>
 </head>
 <body>
@@ -71,7 +56,7 @@
     <div class="panel">
       <header>
         <h1>Weighted Top-K Cry Detector</h1>
-        <div class="sub">Late-fusion of MediaPipe classes with per-class EMA, fused EMA, hysteresis, quiet calibration, on-device training — with live logs.</div>
+        <div class="sub">Late-fusion of MediaPipe classes with per-class EMA, fused EMA, hysteresis, quiet calibration, on-device training — with live logs & mic training.</div>
       </header>
 
       <div class="row">
@@ -103,7 +88,7 @@
         </div>
 
         <div class="row" style="margin-top:10px;">
-          <button id="btnStartMic" class="btn">Start Detect (Mic)</button>
+          <button id="btnStartDetect" class="btn">Start Detect (Mic)</button>
           <button id="btnStop" class="btn">Stop</button>
           <button id="btnCal" class="btn">Quiet Calibrate</button>
         </div>
@@ -111,15 +96,22 @@
 
       <!-- Training -->
       <div class="section">
-        <div class="row">
+        <div class="row" style="gap:8px 10px;">
+          <button id="btnStartTrainMic" class="btn">Start Training (Mic)</button>
+          <button id="btnStopTrainMic" class="btn">Stop Training</button>
+          <span class="muted">Mic training updates per-class stats live. Use in segments (e.g., 20–60s of crying), then recompute weights.</span>
+        </div>
+        <div class="row" style="gap:8px 10px; margin-top:8px;">
           <input id="fileInp" type="file" accept="audio/*" />
-          <button id="btnTrain" class="btn">Train on Clip</button>
-          <button id="btnStopTrain" class="btn">Stop Training</button>
+          <button id="btnTrainFile" class="btn">Train on File</button>
+          <button id="btnStopTrainFile" class="btn">Stop File Training</button>
+        </div>
+        <div class="row" style="gap:8px 10px; margin-top:8px;">
           <button id="btnRecompute" class="btn">Recompute Weights</button>
           <button id="btnClear" class="btn">Clear Model</button>
           <button id="btnExport" class="btn">Export Model</button>
         </div>
-        <div class="muted" style="margin-top:6px;">Training updates per-class stats while the clip plays. Logs show MediaPipe outputs BEFORE stats are updated.</div>
+        <div class="muted" style="margin-top:6px;">Logs show MediaPipe outputs BEFORE stats are updated (both mic/file training).</div>
       </div>
 
       <!-- Weights view -->
@@ -153,7 +145,7 @@
     </div>
   </div>
 
-  <!-- Hidden audio element for training -->
+  <!-- Hidden audio element for file training -->
   <audio id="trainAudio" crossorigin="anonymous" style="display:none"></audio>
 
   <!-- Chart.js -->
@@ -180,7 +172,6 @@
       p.innerHTML = `<span class="log-time">[${ts()}]</span> ${msg}${extraHtml ? extraHtml : ''}`;
       LOGS.body.appendChild(p);
       LOGS.lines++;
-      // Trim
       while (LOGS.lines > LOGS.maxLines) { LOGS.body.removeChild(LOGS.body.firstChild); LOGS.lines--; }
       if (LOGS.autoscroll.checked) LOGS.body.scrollTop = LOGS.body.scrollHeight;
     }
@@ -241,7 +232,10 @@
       'status','statePill','rmsFill','SR_TARGET','FRAME_LEN_S','HOP_S',
       'CLASS_EMA_TAU_S','FUSED_EMA_TAU_S','ALERT_HOLD_MS',
       'CAL_SEC','ALERT_OFF_DELTA','TOP_K','K_PRIOR','HALF_LIFE_S','MAX_RESULTS',
-      'btnStartMic','btnStop','btnCal','fileInp','btnTrain','btnStopTrain','btnRecompute','btnClear','btnExport',
+      'btnStartDetect','btnStop','btnCal',
+      'btnStartTrainMic','btnStopTrainMic',
+      'fileInp','btnTrainFile','btnStopTrainFile',
+      'btnRecompute','btnClear','btnExport',
       'trainAudio','weightsView','chart'
     ].map(x => [x, document.getElementById(x)])) )();
 
@@ -279,7 +273,6 @@
       };
     }
     function saveModel(m){ localStorage.setItem(MODEL_KEY, JSON.stringify(m)); }
-
     function clearModel(){
       localStorage.removeItem(MODEL_KEY);
       localStorage.removeItem(CALIB_KEY);
@@ -341,15 +334,15 @@
         const b = document.createElement('div'); b.textContent = (w*100).toFixed(1)+'%';
         parent.appendChild(a); parent.appendChild(b);
       }
-      if (!entries.length) parent.innerHTML = '<div class="muted">No weights yet. Train on a clip, then “Recompute Weights”.</div>';
+      if (!entries.length) parent.innerHTML = '<div class="muted">No weights yet. Train (mic/file), then “Recompute Weights”.</div>';
     }
 
     /* =========================
-       Detection state
+       Detection/training state
        ========================= */
     const state = {
       running: false,
-      training: false,
+      mode: 'idle', // 'detect' | 'train' | 'calibrate'
       micCtx: null,
       srcNode: null,
       procNode: null,
@@ -472,7 +465,7 @@
         const res = await task.classify(w, SR_TARGET);
         const cats = extractCategories(res);
 
-        // --- LOG INFERENCE (explicit results) BEFORE any stats update ---
+        // --- LOG INFERENCE BEFORE updates ---
         if (LOGS.enable.checked) {
           const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
           const html = formatCats(cats, topN, LOGS.all.checked);
@@ -480,7 +473,6 @@
         }
 
         if (mode === 'train') {
-          // update stats AFTER logging inference results
           const model = loadModel();
           model.halfLifeSec = Number(els.HALF_LIFE_S.value) || 3600;
           model.kPrior = Number(els.K_PRIOR.value) || 50;
@@ -498,22 +490,16 @@
           ensurePerClassEma(weights);
           const { raw, sm } = fusedScoreFromCategories(cats, weights, HOP_S);
 
-          // thresholds from calibration or defaults
           const calib = JSON.parse(localStorage.getItem(CALIB_KEY) || 'null');
-          if (calib) {
-            state.thrOn = calib.thr_on;
-            state.thrOff = calib.thr_off;
-          } else {
-            state.thrOn = 0.35;
-            state.thrOff = state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1);
-          }
+          if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; }
+          else { state.thrOn = 0.35; state.thrOff = state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1); }
 
           pushChart(state.labels.length * HOP_S, raw, sm);
           const on = applyHysteresis(sm, performance.now());
           if (on && !state.alertOn) { setPill('CRYING', true); log('ok','ALERT ON (cry detected).'); }
           if (!on && state.alertOn) { setPill('idle', false); log('warn','ALERT OFF.'); }
           state.alertOn = on;
-        }
+        } // calibrate handled elsewhere
 
         state.lastPos += hop;
         if (state.lastPos > fram * 4) {
@@ -559,13 +545,14 @@
         setStatus('ScriptProcessor active @ '+ctx.sampleRate+' Hz');
       }
       state.running = true;
+      state.mode = mode;
       setPill(mode==='detect' ? 'idle' : 'training', mode!=='detect');
       log('ok', `Mic started in ${mode.toUpperCase()} mode.`);
     }
 
     async function stopAll(){
-      const wasRunning = state.running || state.training;
-      state.running=false; state.training=false;
+      const wasRunning = state.running || state.mode!=='idle';
+      state.running=false; state.mode='idle';
       try { state.procNode?.disconnect(); } catch {}
       try { state.srcNode?.disconnect(); } catch {}
       try { state.sinkNode?.disconnect(); } catch {}
@@ -580,7 +567,9 @@
        Quiet calibration
        ========================= */
     async function quietCalibrate() {
+      await stopAll();
       setStatus('Quiet calibration…');
+      state.mode = 'calibrate';
       const dur = Math.max(5, Number(els.CAL_SEC.value)||20);
       const SR_TARGET = Number(els.SR_TARGET.value)||16000;
       const FRAME_LEN_S = Number(els.FRAME_LEN_S.value)||0.96;
@@ -598,11 +587,10 @@
       const samples = [];
       const weights = loadModel().weights || {"Baby cry, infant cry":1};
       state.perClassEma.clear(); ensurePerClassEma(weights);
-      state.fusedEma = 0;
+      state.fusedEma = 0; state.frameCount = 0;
 
       node.onaudioprocess = async (e) => {
         const buf = new Float32Array(e.inputBuffer.getChannelData(0));
-        // RMS UI
         let s=0; for(let i=0;i<buf.length;i++){ const v=buf[i]; s+=v*v; }
         setRMS(Math.sqrt(s/Math.max(1,buf.length)));
 
@@ -643,6 +631,7 @@
           state.thrOn = thr_on; state.thrOff = thr_off;
           setStatus(`Calibrated ON=${thr_on.toFixed(3)} OFF=${thr_off.toFixed(3)} (μ=${mu.toFixed(3)}, σ=${sd.toFixed(3)}, n=${samples.length})`);
           log('ok', 'Calibration complete.', `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
+          state.mode = 'idle';
           setPill('idle', false);
         }
       };
@@ -651,11 +640,11 @@
     }
 
     /* =========================
-       Training from audio file
+       Training from FILE (optional)
        ========================= */
     let trainCtx=null, trainSrc=null, trainNode=null, trainSink=null;
     async function startTrainingOnFile(file) {
-      await stopTraining();
+      await stopTrainingFile();
       const url = URL.createObjectURL(file);
       els.trainAudio.src = url;
       els.trainAudio.loop = false;
@@ -686,21 +675,20 @@
       }
 
       await els.trainAudio.play().catch(()=>{});
-      state.training = true;
+      state.mode = 'train_file';
       setPill('training', true);
       log('ok', `Training started on file: ${file.name}`, `<span class="chip">${(file.size/1024/1024).toFixed(2)} MB</span>`);
-      els.trainAudio.onended = ()=> { setStatus('Training clip ended. Click “Recompute Weights”.'); setPill('idle', false); };
+      els.trainAudio.onended = ()=> { setStatus('Training clip ended. Click “Recompute Weights”.'); setPill('idle', false); state.mode='idle'; };
     }
-    async function stopTraining(){
-      const was = state.training;
-      state.training=false;
+    async function stopTrainingFile(){
+      const was = state.mode==='train_file';
       try { els.trainAudio.pause(); } catch {}
       try { trainNode?.disconnect(); } catch {}
       try { trainSrc?.disconnect(); } catch {}
       try { trainSink?.disconnect(); } catch {}
       try { trainCtx && trainCtx.state!=='closed' && trainCtx.close(); } catch {}
       trainCtx=null; trainSrc=null; trainNode=null; trainSink=null;
-      if (was) log('warn','Stopped training graph.');
+      if (was) { state.mode='idle'; log('warn','Stopped file training graph.'); setPill('idle', false); }
     }
 
     /* =========================
@@ -715,17 +703,24 @@
       };
     }
 
-    els.btnStartMic.onclick = () => startMic('detect');
+    // Detect / Calibrate
+    els.btnStartDetect.onclick = () => startMic('detect');
     els.btnStop.onclick = () => stopAll();
     els.btnCal.onclick = () => quietCalibrate();
 
-    els.btnTrain.onclick = async () => {
+    // Training via MIC
+    els.btnStartTrainMic.onclick = () => startMic('train');
+    els.btnStopTrainMic.onclick = () => stopAll();
+
+    // Training via FILE (optional)
+    els.btnTrainFile.onclick = async () => {
       const f = els.fileInp.files?.[0];
       if (!f) { setStatus('Pick an audio file first'); return; }
       await startTrainingOnFile(f);
     };
-    els.btnStopTrain.onclick = () => stopTraining();
+    els.btnStopTrainFile.onclick = () => stopTrainingFile();
 
+    // Recompute / Clear / Export
     els.btnRecompute.onclick = () => {
       const m = loadModel();
       m.K = Number(els.TOP_K.value)||m.K||6;
@@ -749,7 +744,7 @@
       log('ok','Exported cryModelV1.json');
     };
 
-    // Live update Top-K / prior / half-life (persist immediately)
+    // Persist Top-K / prior / half-life immediately on change
     ['TOP_K','K_PRIOR','HALF_LIFE_S'].forEach(id => {
       document.getElementById(id).addEventListener('change', () => {
         const m = loadModel();
@@ -770,7 +765,7 @@
       renderWeights(m.weights||{});
       const calib = JSON.parse(localStorage.getItem(CALIB_KEY) || 'null');
       if (calib) { state.thrOn=calib.thr_on; state.thrOff=calib.thr_off; log('ok','Loaded calibration.', `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`); }
-      setStatus('Ready. Train on a clip → Recompute Weights → Quiet Calibrate → Start Detect.');
+      setStatus('Ready. Train (mic/file) → Recompute Weights → Quiet Calibrate → Start Detect.');
     })();
   </script>
 </body>
