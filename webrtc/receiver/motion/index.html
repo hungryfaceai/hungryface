@@ -681,8 +681,8 @@
       // Classic bar colors (unchanged)
       const OK_GREEN     = '#4caf50';
       const AMBER        = '#ffc107';
-      const ALERT_RED    = '#a71d2a'; // standard alert red (Bootstrap "danger")
-      const ALERT_RED_DK = '#66121a'; // deeper red for pill border      
+      const ALERT_RED    = '#550f16'; // standard alert red (Bootstrap "danger")
+      const ALERT_RED_DK = '#3f0b10'; // deeper red for pill border      
     
       // Metrics to render
       const metrics = [
@@ -1165,29 +1165,30 @@
 
     // Cap ON sliders + enforce OFF≤ON + sync OFF scales to ON
     function applyOnCaps() {
-      const MAX_SAFE = 10.0;
+      const HEADROOM = 1.2;   // 20% above calibrated value
+      const MAX_SAFE = 10.0;  // absolute hard ceiling to avoid runaway UI
     
-      const setMaxAtLeast = (inputEl, minCap) => {
-        const currentMax = parseFloat(inputEl.max || '0') || 0;
-        const want = Math.min(MAX_SAFE, Math.max(currentMax, minCap));
-        if (!Number.isFinite(want)) return;
-        inputEl.max = want.toFixed(3);
+      const setMaxWithHeadroom = (inputEl, baseCap, calibratedVal) => {
+        const need = Math.min(MAX_SAFE, Math.max(baseCap, calibratedVal * HEADROOM));
+        inputEl.max = Number.isFinite(need) ? need.toFixed(3) : (baseCap.toFixed ? baseCap.toFixed(3) : String(baseCap));
       };
     
-      // --- EMA: base cap was 0.500; raise to include calibrated MOVE.ON
-      setMaxAtLeast(onTh, MOVE.ON);
+      // --- EMA: base cap (was 0.500) -> ensure ≥ 1.2× calibrated MOVE.ON
+      const baseEmaCap = 0.500;
+      setMaxWithHeadroom(onTh, baseEmaCap, MOVE.ON);
       offTh.max = onTh.max;
     
-      // --- DRIFT: base cap was 1.000; raise to include calibrated MOVE.DRIFT_ON
-      setMaxAtLeast(driftOnEl, MOVE.DRIFT_ON);
+      // --- DRIFT: base cap (was 1.000) -> ensure ≥ 1.2× calibrated MOVE.DRIFT_ON
+      const baseDriftCap = 1.000;
+      setMaxWithHeadroom(driftOnEl, baseDriftCap, MOVE.DRIFT_ON);
       driftOff.max = driftOnEl.max;
     
-      // --- INT: keep the dynamic baseline cap, but never below calibrated MOVE.INT_ON
+      // --- INT: dynamic base cap -> ensure ≥ 1.2× calibrated MOVE.INT_ON
       const baseIntCap = Math.min(2.0, MOVE.INT_TAU * 0.8);
-      setMaxAtLeast(intOnEl, Math.max(baseIntCap, MOVE.INT_ON));
+      setMaxWithHeadroom(intOnEl, baseIntCap, MOVE.INT_ON);
       intOff.max = intOnEl.max;
     
-      // ---- Clamp UI values within caps (won’t reduce if caps were raised above values)
+      // ---- Keep current values within (raised) caps
       if (parseFloat(onTh.value) > parseFloat(onTh.max)) onTh.value = onTh.max;
       MOVE.ON = parseFloat(onTh.value) || MOVE.ON; onOut.textContent = fmt(MOVE.ON);
     
@@ -1198,20 +1199,14 @@
       MOVE.INT_ON = parseFloat(intOnEl.value) || MOVE.INT_ON; intOnOut.textContent = fmt(MOVE.INT_ON);
     
       // ---- OFF ≤ ON (and obey link flags)
-      if (offLink.ema || MOVE.OFF > MOVE.ON) {
-        MOVE.OFF = Math.min(MOVE.OFF, MOVE.ON);
-      }
-      if (offLink.int || MOVE.INT_OFF > MOVE.INT_ON) {
-        MOVE.INT_OFF = Math.min(MOVE.INT_OFF, MOVE.INT_ON);
-      }
-      if (offLink.drift || MOVE.DRIFT_OFF > MOVE.DRIFT_ON) {
-        MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON);
-      }
+      if (offLink.ema || MOVE.OFF > MOVE.ON)        MOVE.OFF = Math.min(MOVE.OFF, MOVE.ON);
+      if (offLink.int || MOVE.INT_OFF > MOVE.INT_ON) MOVE.INT_OFF = Math.min(MOVE.INT_OFF, MOVE.INT_ON);
+      if (offLink.drift || MOVE.DRIFT_OFF > MOVE.DRIFT_ON) MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON);
     
       // ---- Reflect OFFs into UI (also clamped to their maxes)
-      offTh.value    = Math.min(parseFloat(offTh.max),    MOVE.OFF);       offOut.textContent    = fmt(MOVE.OFF);
-      intOff.value   = Math.min(parseFloat(intOff.max),   MOVE.INT_OFF);   intOffOut.textContent = fmt(MOVE.INT_OFF);
-      driftOff.value = Math.min(parseFloat(driftOff.max), MOVE.DRIFT_OFF); driftOffOut.textContent = fmt(MOVE.DRIFT_OFF);
+      offTh.value     = Math.min(parseFloat(offTh.max), MOVE.OFF);           offOut.textContent     = fmt(MOVE.OFF);
+      intOff.value    = Math.min(parseFloat(intOff.max), MOVE.INT_OFF);      intOffOut.textContent  = fmt(MOVE.INT_OFF);
+      driftOff.value  = Math.min(parseFloat(driftOff.max), MOVE.DRIFT_OFF);  driftOffOut.textContent = fmt(MOVE.DRIFT_OFF);
     }
 
     function initMovePanel() {
