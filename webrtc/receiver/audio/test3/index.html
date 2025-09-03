@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Baby Monitor – Cry Detector</title>
+  <link rel="icon" href="data:," />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+
+  <!-- Shared sidebar stylesheet (same as pose receiver) -->
+  <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
+
+  <style>
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; height: 100%;
+      background: #000; color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+      overflow: hidden;
+    }
+
+    /* Fullscreen wrapper (matches pose receiver) */
+    #stage {
+      position: fixed; inset: 0;
+      width: 100vw; height: 100vh;   /* fallback */
+      width: 100dvw; height: 100dvh; /* dynamic viewport */
+      width: 100svw; height: 100svh; /* small viewport (iOS URL bar safe) */
+      z-index: 1; background: #000;
+      display: grid; place-items: center;
+      padding: 16px; box-sizing: border-box;
+    }
+
+    /* Hidden video just to host the remote stream’s audio track */
+    #remote {
+      position: absolute; width: 1px; height: 1px; left: -99999px; top: -99999px;
+    }
+
+    .panel {
+      width: min(100%, 980px);
+      background: #0b0b0b;
+      border: 1px solid #141414;
+      border-radius: 14px;
+      padding: 16px;
+      box-sizing: border-box;
+      z-index: 2;
+    }
+
+    .panel header h1 { margin: 0 0 12px 0; font-size: clamp(18px, 3vw, 22px); }
+
+    /* Input-level meter + dB label */
+    .signal { margin: 0 0 12px 0; }
+    .signal-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center; gap: 10px;
+    }
+    .db {
+      font-size: 12px; color: #cfcfcf; min-width: 56px; text-align: right;
+      opacity: 0.9;
+    }
+    .meter {
+      width: 100%; height: 10px; border-radius: 8px;
+      background: #0a0a0a; border: 1px solid #222; overflow: hidden;
+    }
+    .meter .fill {
+      height: 100%; width: 0%;
+      background: linear-gradient(to right, rgba(96,165,250,0.95), rgba(239,68,68,0.95));
+      transition: width 80ms linear;
+    }
+
+    /* Tiny spectrum strip (iPhone-ish feel) */
+    #specMini {
+      display: block; width: 100%; height: 42px;
+      background: #0a0a0a; border: 1px solid #222; border-radius: 8px;
+      margin-top: 8px;
+    }
+
+    details.advanced {
+      border: 1px solid #222; border-radius: 12px; padding: 8px 12px; margin-top: 10px;
+    }
+    details.advanced summary { cursor: pointer; font-weight: 600; }
+
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; margin-top: 10px; }
+    .grid-adv { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; margin-top: 10px; }
+    @media (max-width: 720px) {
+      .grid, .grid-adv { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    }
+    @media (max-width: 500px) {
+      .grid, .grid-adv { grid-template-columns: 1fr; }
+    }
+
+    label { display: grid; gap: 6px; font-size: 14px; color: #ddd; }
+    label > span { color: #bbb; }
+    input[type="number"], textarea {
+      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222;
+      background:#0b0b0b; color:#ddd; font-size: 14px; box-sizing: border-box;
+    }
+    textarea { min-height: 56px; font-family: inherit; resize: vertical; }
+    .muted { color: #aaa; }
+    .small { font-size: 12px; }
+
+    /* Cry score plot */
+    section.plot { margin-top: 14px; }
+    canvas#chart { display: block; width: 100%; height: 160px; background: #0a0a0a; border-radius: 10px; }
+
+    /* Background turns red while alert is active */
+    body.alert #stage { background: #1a0000; }
+
+    /* Control bar */
+    #controls {
+      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 12px; z-index: 6;
+    }
+    .btn {
+      padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
+      background: transparent; color: #fff; font-size: 16px; font-weight: 600;
+      cursor: pointer; box-shadow: none; text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+    .btn:active { transform: scale(0.99); }
+  </style>
+</head>
+<body>
+  <!-- Inject the shared sidebar markup + behavior -->
+  <script type="module">
+    (async () => {
+      try {
+        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
+        const html = await res.text();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html.trim();
+        document.body.prepend(...wrap.childNodes);
+
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+        console.log('[CRY][sidebar] loaded');
+      } catch (err) {
+        console.error('[CRY][sidebar] failed to load shared assets:', err);
+      }
+    })();
+  </script>
+
+  <!-- Controls -->
+  <div id="controls">
+    <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
+    <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
+    <button id="fsBtn" class="btn" type="button">Fullscreen</button>
+  </div>
+
+  <div id="stage">
+    <video id="remote" autoplay playsinline></video>
+
+    <div class="panel">
+      <header>
+        <h1>Audio classification</h1>
+
+        <!-- Sensitive level bar + dB label -->
+        <div class="signal">
+          <div class="signal-row">
+            <div class="meter" aria-label="Input level"><div id="rmsFill" class="fill"></div></div>
+            <div id="dbLabel" class="db">–∞ dB</div>
+          </div>
+          <canvas id="specMini" height="42"></canvas>
+        </div>
+      </header>
+
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <div class="grid">
+          <label>
+            <span>SR_TARGET (Hz)</span>
+            <input id="SR_TARGET" type="number" min="8000" step="1000" value="16000" />
+          </label>
+          <label>
+            <span>FRAME_LEN_S</span>
+            <input id="FRAME_LEN_S" type="number" min="0.1" step="0.01" value="0.96" />
+          </label>
+          <label>
+            <span>HOP_S</span>
+            <input id="HOP_S" type="number" min="0.01" step="0.01" value="0.48" />
+          </label>
+          <label>
+            <span>SMOOTH_WIN</span>
+            <input id="SMOOTH_WIN" type="number" min="1" step="1" value="5" />
+          </label>
+          <label>
+            <span>THRESH</span>
+            <input id="THRESH" type="number" min="0" max="1.5" step="0.01" value="0.15" />
+          </label>
+          <label>
+            <span>PLOT_WINDOW_S</span>
+            <input id="PLOT_WINDOW_S" type="number" min="5" step="1" value="60" />
+          </label>
+        </div>
+
+        <label class="wide" style="display:block; margin-top:10px;">
+          <span>Include classes</span>
+          <textarea id="INCLUDE_CLASSES" rows="2" spellcheck="false">Baby cry, infant cry</textarea>
+        </label>
+        <p class="muted small">Separate multiple classes with semicolons (;) or new lines.</p>
+
+        <div class="grid-adv">
+          <label>
+            <span>ON extra (adds to THRESH)</span>
+            <input id="ALERT_ON_EXTRA" type="number" step="0.01" value="0.00" />
+          </label>
+          <label>
+            <span>OFF delta (below ON)</span>
+            <input id="ALERT_OFF_DELTA" type="number" min="0" step="0.01" value="0.10" />
+          </label>
+          <label>
+            <span>HOLD time (ms)</span>
+            <input id="ALERT_HOLD_MS" type="number" min="0" step="100" value="3000" />
+          </label>
+        </div>
+      </details>
+
+      <!-- Cry score chart -->
+      <section class="plot">
+        <canvas id="chart" height="160"></canvas>
+      </section>
+    </div>
+  </div>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+  <!-- App (ReceiverCore + MediaPipe Tasks Audio) -->
+  <script type="module">
+    import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
+
+    /* ---------- MediaPipe Tasks Audio ---------- */
+    const AUDIO_PKG_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0";
+    const AudioMod = await import(AUDIO_PKG_URL).catch(e => { console.error('[CRY] MP audio import error', e); return null; });
+    const AudioClassifier = AudioMod?.AudioClassifier;
+    const FilesetResolver = AudioMod?.FilesetResolver;
+
+    /* ---------- Constants ---------- */
+    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const room = new URLSearchParams(location.search).get("room") || "Baby";
+
+    /* ---------- Debug toggles (console only) ---------- */
+    const LOG = { status: true, dc: true, catEvery: 20, seriesEvery: 0, firstResult: true };
+
+    /* ---------- DOM ---------- */
+    const stage = document.getElementById('stage');
+    const remoteVideo = document.getElementById('remote');
+    const enableAudioBtn = document.getElementById('enableAudioBtn');
+    const disableAudioBtn = document.getElementById('disableAudioBtn');
+    const fsBtn = document.getElementById('fsBtn');
+
+    const els = {
+      chartCanvas: document.getElementById('chart'),
+      rmsFill: document.getElementById('rmsFill'),
+      dbLabel: document.getElementById('dbLabel'),
+      specMini: document.getElementById('specMini'),
+      inputs: {
+        SR_TARGET:      document.getElementById('SR_TARGET'),
+        FRAME_LEN_S:    document.getElementById('FRAME_LEN_S'),
+        HOP_S:          document.getElementById('HOP_S'),
+        SMOOTH_WIN:     document.getElementById('SMOOTH_WIN'),
+        THRESH:         document.getElementById('THRESH'),
+        PLOT_WINDOW_S:  document.getElementById('PLOT_WINDOW_S'),
+        INCLUDE_CLASSES:document.getElementById('INCLUDE_CLASSES'),
+        ALERT_ON_EXTRA: document.getElementById('ALERT_ON_EXTRA'),
+        ALERT_OFF_DELTA:document.getElementById('ALERT_OFF_DELTA'),
+        ALERT_HOLD_MS:  document.getElementById('ALERT_HOLD_MS'),
+      }
+    };
+
+    /* ---------- Audio mode state ---------- */
+    let audioDC = null;
+    let audioEnabled = false;
+    let audioWhere = 'sender'; // 'sender' | 'receiver'
+
+    /* ---------- App state ---------- */
+    const state = {
+      running: true,
+      audioCtx: null,
+      streamRemote: null,
+      sourceNode: null,
+      sinkNode: null,
+      processor: null,
+
+      // Analysers
+      tdAnalyser: null,     // time-domain (RMS)
+      specAnalyser: null,   // frequency (spectrum)
+      visualRaf: 0,
+
+      // MP task
+      audioTask: null,
+      audioTaskPromise: null,
+
+      // Ring buffer + series
+      ring16k: new Float32Array(0),
+      lastPos: 0,
+      timesSec: [],
+      timesMs: [],
+      cryRaw: [],
+      crySm: [],
+      chart: null,
+
+      alertOn: false,
+      alertUntilMs: 0,
+
+      // Meters
+      dbEma: -120, // smoothed dBFS
+    };
+
+    const DB_FLOOR = -75; // lower = more sensitive; raise if you want less movement
+    const DB_CEIL  =   0;
+
+    let _activeAudio = { enabled: null, where: null };
+
+    /* ---------- Helpers ---------- */
+    const RAW_COLOR = '#60a5fa';
+    const SMOOTH_COLOR = '#ef4444';
+    const THRESH_ON_COLOR = '#f97316';
+    const THRESH_OFF_COLOR = '#fb923c';
+
+    function splitClasses(text){ return String(text||'').split(/[;\n\r]+/).map(s=>s.trim()).filter(Boolean); }
+    function getParams() {
+      return {
+        SR_TARGET: parseInt(els.inputs.SR_TARGET?.value, 10) || 16000,
+        FRAME_LEN_S: parseFloat(els.inputs.FRAME_LEN_S?.value) || 0.96,
+        HOP_S: parseFloat(els.inputs.HOP_S?.value) || 0.48,
+        SMOOTH_WIN: Math.max(1, parseInt(els.inputs.SMOOTH_WIN?.value, 10) || 5),
+        THRESH: parseFloat(els.inputs.THRESH?.value) || 0.15,
+        PLOT_WINDOW_S: Math.max(5, parseFloat(els.inputs.PLOT_WINDOW_S?.value) || 60),
+        INCLUDE_CLASSES: splitClasses(els.inputs.INCLUDE_CLASSES?.value || "Baby cry, infant cry"),
+        ALERT_ON_EXTRA: parseFloat(els.inputs.ALERT_ON_EXTRA?.value ?? '0') || 0,
+        ALERT_OFF_DELTA: Math.max(0, parseFloat(els.inputs.ALERT_OFF_DELTA?.value ?? '0.1') || 0.1),
+        ALERT_HOLD_MS: Math.max(0, parseInt(els.inputs.ALERT_HOLD_MS?.value, 10) || 3000),
+      };
+    }
+    function categoryLabel(c) { return (c.displayName || c.categoryName || String(c.index) || '').trim(); }
+    function classMatch(name, needles) { const L = (name || '').trim().toLowerCase(); return needles.some(n => L.includes(n)); }
+    function getCryScoreFromCategories(categories, includeList) {
+      const needles = includeList.map(s=>s.trim().toLowerCase()).filter(Boolean);
+      let sum = 0;
+      for (const c of (categories || [])) {
+        const disp = categoryLabel(c);
+        if (classMatch(disp, needles)) sum += (c.score || 0);
+      }
+      return sum;
+    }
+    function movingAvgTail(arr, k){ if(!arr.length) return 0; const s=Math.max(0,arr.length-k); let sum=0; for(let i=s;i<arr.length;i++) sum+=arr[i]; return sum/(arr.length-s); }
+    function formatClock(ms){ return new Date(ms).toLocaleTimeString(undefined,{hour12:false}); }
+
+    /* ---------- Level metering (sensitive, with dB text) ---------- */
+    function setSignalRMS(rmsLinear) {
+      // Convert to dBFS; clamp to floor..ceil and smooth for stable display
+      const db = 20 * Math.log10(Math.max(1e-8, rmsLinear));
+      state.dbEma = 0.2 * db + 0.8 * state.dbEma;
+      const dbClamped = Math.max(DB_FLOOR, Math.min(DB_CEIL, state.dbEma));
+
+      // Map to 0..100% based on dB range (more movement at low levels)
+      const pct = Math.round(((dbClamped - DB_FLOOR) / (DB_CEIL - DB_FLOOR)) * 100);
+      els.rmsFill.style.width = pct + '%';
+
+      // Label, rounded
+      const shown = Math.round(dbClamped);
+      els.dbLabel.textContent = (shown <= DB_FLOOR + 1) ? '–∞ dB' : `${shown} dB`;
+    }
+
+    /* ---------- Tiny spectrum (canvas, lightweight) ---------- */
+    function sizeCanvasToDisplay(canvas) {
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+      }
+      return dpr;
+    }
+
+    function startVisualLoop(){
+      cancelAnimationFrame(state.visualRaf);
+      const td = state.tdAnalyser;
+      const an = state.specAnalyser;
+      if (!td || !an) return;
+
+      const tdBuf = new Float32Array(td.fftSize);
+      const specBuf = new Uint8Array(an.frequencyBinCount);
+      const ctx2d = els.specMini.getContext('2d');
+
+      function tick(){
+        if (!state.tdAnalyser || !state.specAnalyser) return;
+
+        // Level (RMS)
+        td.getFloatTimeDomainData(tdBuf);
+        let s = 0; for (let i=0;i<tdBuf.length;i++){ const v = tdBuf[i]; s += v*v; }
+        setSignalRMS(Math.sqrt(s / Math.max(1, tdBuf.length)));
+
+        // Spectrum
+        const dpr = sizeCanvasToDisplay(els.specMini);
+        const W = els.specMini.width, H = els.specMini.height;
+        ctx2d.clearRect(0,0,W,H);
+
+        an.getByteFrequencyData(specBuf); // 0..255 (already smoothed by analyser)
+        // Draw vertical bars across width
+        const bars = Math.min(W, 120);                  // up to 120 thin bars
+        const step = Math.max(1, Math.floor(specBuf.length / bars));
+        const barW = Math.max(1, Math.floor(W / bars));
+
+        for (let b = 0; b < bars; b++) {
+          let sum = 0, n = 0;
+          const start = b * step, end = Math.min(specBuf.length, start + step);
+          for (let i=start;i<end;i++){ sum += specBuf[i]; n++; }
+          const v = n ? (sum / n) : 0;                  // 0..255
+          const mag = v / 255;                          // 0..1
+          const h = Math.max(1, Math.round(mag * (H - 4)));
+          const x = b * barW;
+          const y = H - h;
+
+          // simple gradient-ish fill
+          ctx2d.fillStyle = 'rgba(96,165,250,0.9)';
+          ctx2d.fillRect(x, y, barW - 1, h);
+        }
+
+        state.visualRaf = requestAnimationFrame(tick);
+      }
+      state.visualRaf = requestAnimationFrame(tick);
+    }
+
+    function stopVisualLoop(){
+      cancelAnimationFrame(state.visualRaf);
+      state.visualRaf = 0;
+    }
+
+    /* ---------- Chart (cry score) ---------- */
+    function setupChart(){
+      if (state.chart) state.chart.destroy();
+      const ctx = els.chartCanvas.getContext('2d');
+      state.chart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: [], datasets: [
+          { label: 'cry_score (raw)', data: [], borderColor: RAW_COLOR, borderWidth: 2, pointRadius: 0, tension: 0.15 },
+          { label: 'cry_score (smoothed)', data: [], borderColor: SMOOTH_COLOR, borderWidth: 2, pointRadius: 0, tension: 0.15 },
+          { label: 'threshold (ON)', data: [], borderColor: THRESH_ON_COLOR, borderWidth: 1, pointRadius: 0, borderDash: [6,4] },
+          { label: 'threshold (OFF)', data: [], borderColor: THRESH_OFF_COLOR, borderWidth: 1, pointRadius: 0, borderDash: [2,2] }
+        ] },
+        options: {
+          animation: false,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { title: { display: true, text: 'Time' } },
+            // FIX: keep y-axis fixed to avoid shrinking/expanding
+            y: { title: { display: true, text: 'Score' }, min: 0, max: 1.5 }
+          },
+          elements: { line: { fill: false } }
+        }
+      });
+    }
+
+    function updateChartWindow(params) {
+      if (!state.chart) return;
+      const { PLOT_WINDOW_S } = params;
+      const tMs = state.timesMs, r = state.cryRaw, s = state.crySm;
+
+      let cut = 0;
+      if (tMs.length) {
+        const last = tMs[tMs.length - 1];
+        const startMs = last - (PLOT_WINDOW_S * 1000);
+        const idx = tMs.findIndex(v => v >= startMs);
+        cut = idx >= 0 ? idx : 0;
+      }
+      const labels = tMs.slice(cut).map(formatClock);
+      const raw = r.slice(cut);
+      const sm  = s.slice(cut);
+
+      const onVal  = Math.max(0, (params.THRESH||0) + (params.ALERT_ON_EXTRA||0));
+      const offVal = Math.max(0, onVal - (params.ALERT_OFF_DELTA||0));
+      const thrOn  = new Array(labels.length).fill(onVal);
+      const thrOff = new Array(labels.length).fill(offVal);
+
+      state.chart.data.labels = labels;
+      state.chart.data.datasets[0].data = raw;
+      state.chart.data.datasets[1].data = sm;
+      state.chart.data.datasets[2].data = thrOn;
+      state.chart.data.datasets[3].data = thrOff;
+
+      // IMPORTANT: do NOT adjust y-axis min/max here (fixed in setup)
+      state.chart.update();
+    }
+
+    /* ---------- MP Audio task ---------- */
+    async function ensureAudioTask() {
+      if (!AudioClassifier || !FilesetResolver) return null;
+      if (state.audioTask) return state.audioTask;
+      if (state.audioTaskPromise) return state.audioTaskPromise;
+
+      const WASM_DIR  = AUDIO_PKG_URL + "/wasm";
+      const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite";
+
+      const createWithPath = async (resolver) => AudioClassifier.createFromOptions(resolver, {
+        baseOptions: { modelAssetPath: MODEL_URL },
+        runningMode: "AUDIO_CLIPS",
+        classifierOptions: { scoreThreshold: 0.0, maxResults: 20 }
+      });
+      const createWithBuffer = async (resolver) => {
+        const bust = MODEL_URL + (MODEL_URL.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+        const res = await fetch(bust, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`yamnet fetch ${res.status}`);
+        const buf = new Uint8Array(await res.arrayBuffer());
+        return AudioClassifier.createFromOptions(resolver, {
+          baseOptions: { modelAssetBuffer: buf },
+          runningMode: "AUDIO_CLIPS",
+          classifierOptions: { scoreThreshold: 0.0, maxResults: 20 }
+        });
+      };
+
+      state.audioTaskPromise = (async () => {
+        let lastErr = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            const resolver = await FilesetResolver.forAudioTasks(WASM_DIR);
+            try {
+              state.audioTask = await createWithPath(resolver);
+              return state.audioTask;
+            } catch (e1) {
+              lastErr = e1;
+              state.audioTask = await createWithBuffer(resolver);
+              return state.audioTask;
+            }
+          } catch (e) {
+            lastErr = e;
+            await new Promise(r => setTimeout(r, attempt * 600));
+          }
+        }
+        state.audioTaskPromise = null;
+        throw lastErr || new Error('audio task init failed');
+      })();
+
+      return state.audioTaskPromise;
+    }
+
+    /* ---------- Alert logic ---------- */
+    function shouldAlert(smoothed, nowMs, params) {
+      const onThresh  = (params.THRESH||0) + (params.ALERT_ON_EXTRA||0);
+      const offThresh = Math.max(0, onThresh - (params.ALERT_OFF_DELTA||0));
+      if (state.alertOn) {
+        if (nowMs < state.alertUntilMs) return true;
+        return smoothed >= offThresh;
+      } else {
+        if (smoothed >= onThresh) {
+          state.alertUntilMs = nowMs + (params.ALERT_HOLD_MS||0);
+          return true;
+        }
+        return false;
+      }
+    }
+    function setAlert(on){ document.body.classList.toggle('alert', !!on); }
+
+    /* ---------- Push a score into series ---------- */
+    function pushScore(score) {
+      const params = getParams();
+      const hopMs = Math.round(params.HOP_S * 1000);
+      state.cryRaw.push(score);
+      state.crySm.push(movingAvgTail(state.cryRaw, params.SMOOTH_WIN));
+      state.timesSec.push(state.timesSec.length * params.HOP_S);
+      const nextMs = state.timesMs.length ? (state.timesMs[state.timesMs.length - 1] + hopMs) : Date.now();
+      state.timesMs.push(nextMs);
+
+      updateChartWindow(params);
+
+      const smoothed = state.crySm[state.crySm.length - 1];
+      const nowMs = Date.now();
+      const alert = shouldAlert(smoothed, nowMs, params);
+      state.alertOn = alert; setAlert(alert);
+
+      // Trim old samples beyond window + small buffer
+      if (state.timesSec.length % 400 === 0) {
+        const keepFrom = Math.max(0, state.timesSec.length - Math.ceil(params.PLOT_WINDOW_S / params.HOP_S) - 10);
+        if (keepFrom > 0) {
+          state.timesSec = state.timesSec.slice(keepFrom);
+          state.timesMs  = state.timesMs.slice(keepFrom);
+          state.cryRaw   = state.cryRaw.slice(keepFrom);
+          state.crySm    = state.crySm.slice(keepFrom);
+        }
+      }
+    }
+
+    // concat/resample (shared)
+    function concatFloat32(a,b){const out=new Float32Array(a.length+b.length);out.set(a,0);out.set(b,a.length);return out;}
+    function resampleLinear(x, fromSr, toSr){
+      if (fromSr === toSr) return x;
+      const ratio = toSr / fromSr;
+      const n = Math.max(1, Math.round(x.length * ratio));
+      const out = new Float32Array(n);
+      const dx = (x.length - 1) / (n - 1);
+      for (let i = 0; i < n; i++) {
+        const pos = i * dx, i0 = Math.floor(pos), i1 = Math.min(i0+1, x.length-1), frac = pos - i0;
+        out[i] = x[i0]*(1-frac) + x[i1]*frac;
+      }
+      return out;
+    }
+
+    /* ---------- Remote stream tap (meter + spectrum; optional classify) ---------- */
+    function startRemoteStreamGraph(doClassify) {
+      if (!state.streamRemote) { console.log('[CRY][remote] no stream yet'); return; }
+
+      stopRemoteStreamGraph(); // clean prior graph
+
+      const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
+      state.audioCtx = ctx;
+      ctx.resume?.().catch(()=>{});
+
+      const src = ctx.createMediaStreamSource(state.streamRemote);
+
+      // Analysers
+      const td = ctx.createAnalyser();   // RMS
+      td.fftSize = 1024;
+
+      const an = ctx.createAnalyser();   // spectrum
+      an.fftSize = 1024;
+      an.smoothingTimeConstant = 0.8;    // iPhone-ish smoothness
+
+      // Silent sink (avoid feedback)
+      const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
+
+      src.connect(td);
+      src.connect(an);
+      src.connect(sink);
+
+      state.sourceNode = src;
+      state.tdAnalyser = td;
+      state.specAnalyser = an;
+      state.sinkNode   = sink;
+
+      // Optional classification from the tapped remote stream (receiver mode)
+      if (doClassify) {
+        (async () => {
+          let proc;
+          try {
+            const workletURL = URL.createObjectURL(new Blob([`
+              class TapProcessor extends AudioWorkletProcessor {
+                process(inputs) {
+                  const input = inputs[0];
+                  if (input && input[0]) this.port.postMessage(input[0].slice(0));
+                  return true;
+                }
+              }
+              registerProcessor('tap-processor', TapProcessor);
+            `], { type: 'application/javascript' }));
+            await ctx.audioWorklet.addModule(workletURL);
+            URL.revokeObjectURL(workletURL);
+
+            proc = new AudioWorkletNode(ctx, 'tap-processor', {
+              numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1
+            });
+            proc.port.onmessage = (ev) => onAudioChunkReceiver(ev.data, ctx.sampleRate);
+          } catch {
+            const sp = ctx.createScriptProcessor(4096, 1, 1);
+            sp.onaudioprocess = (e) => onAudioChunkReceiver(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate);
+            proc = sp;
+          }
+          src.connect(proc).connect(sink);
+          state.processor = proc;
+        })();
+      } else {
+        state.processor = null;
+      }
+
+      startVisualLoop();
+    }
+
+    function stopRemoteStreamGraph() {
+      stopVisualLoop();
+      try { state.processor?.disconnect(); } catch {}
+      try { state.sourceNode?.disconnect(); } catch {}
+      try { state.sinkNode?.disconnect(); } catch {}
+      try { state.audioCtx && state.audioCtx.state !== 'closed' && state.audioCtx.close(); } catch {}
+      state.processor = null;
+      state.sourceNode = null;
+      state.sinkNode = null;
+      state.tdAnalyser = null;
+      state.specAnalyser = null;
+      state.audioCtx = null;
+    }
+
+    /* ---------- Receiver-mode classification from chunks ---------- */
+    function extractCategories(res) {
+      if (!res) return [];
+      if (Array.isArray(res)) {
+        return (
+          res[0]?.classifications?.[0]?.categories ??
+          res[0]?.classificationResult?.classifications?.[0]?.categories ??
+          []
+        );
+      }
+      return (
+        res.classifications?.[0]?.categories ??
+        res.classificationResult?.classifications?.[0]?.categories ??
+        []
+      );
+    }
+
+    async function onAudioChunkReceiver(chunkFloat32, deviceSr) {
+      if (!state.running) return;
+      const task = await ensureAudioTask().catch(() => null);
+      if (!task) return;
+      const params = getParams();
+
+      // Update meter from chunk (works even if visual analysers aren’t ready yet)
+      let s = 0; for (let i=0;i<chunkFloat32.length;i++){ const v=chunkFloat32[i]; s += v*v; }
+      setSignalRMS(Math.sqrt(s / Math.max(1, chunkFloat32.length)));
+
+      const x16 = resampleLinear(chunkFloat32, deviceSr, params.SR_TARGET);
+      for (let i=0;i<x16.length;i++) x16[i] = Math.max(-1, Math.min(1, x16[i]));
+      state.ring16k = concatFloat32(state.ring16k, x16);
+
+      const frameHop = Math.round(params.HOP_S * params.SR_TARGET);
+      const frameLen = Math.round(params.FRAME_LEN_S * params.SR_TARGET);
+
+      while (state.ring16k.length - state.lastPos >= frameHop) {
+        const end = state.lastPos + frameHop;
+        const start = Math.max(0, end - frameLen);
+        let w = state.ring16k.slice(start, end);
+        if (w.length < frameLen) {
+          const pad = new Float32Array(frameLen);
+          pad.set(w, frameLen - w.length);
+          w = pad;
+        }
+
+        const result = await task.classify(w, params.SR_TARGET);
+        const categories = extractCategories(result);
+
+        if (LOG.catEvery) {
+          window._dbgCatEvery = (window._dbgCatEvery || 0) + 1;
+          if ((window._dbgCatEvery % LOG.catEvery) === 0) {
+            const top = categories.slice(0,5).map(c => `${categoryLabel(c)}:${(c.score ?? 0).toFixed(3)}`);
+            console.log('[CRY][rx] top =', top.join(', '));
+          }
+        }
+        if (LOG.firstResult && !window._dbgFirstMicResult) {
+          window._dbgFirstMicResult = true;
+          console.log('[CRY][rx] FIRST result =', result);
+        }
+
+        const score = getCryScoreFromCategories(categories, params.INCLUDE_CLASSES);
+        pushScore(score);
+
+        state.lastPos += frameHop;
+        if (state.lastPos > frameLen * 4) {
+          const cut = state.lastPos - frameLen;
+          state.ring16k = state.ring16k.slice(cut);
+          state.lastPos -= cut;
+        }
+      }
+    }
+
+    /* ---------- Mode switching ---------- */
+    async function applyAudioMode() {
+      if (_activeAudio.enabled === audioEnabled && _activeAudio.where === audioWhere) return;
+      _activeAudio = { enabled: audioEnabled, where: audioWhere };
+
+      if (!state.running) return;
+
+      if (!audioEnabled) {
+        stopRemoteStreamGraph();
+        els.rmsFill.style.width = '0%';
+        els.dbLabel.textContent = '–∞ dB';
+        return;
+      }
+      // We always tap the remote stream for meter + spectrum.
+      if (state.streamRemote) {
+        startRemoteStreamGraph(audioWhere === 'receiver'); // only classify locally in receiver mode
+      } else {
+        stopRemoteStreamGraph();
+      }
+    }
+
+    /* ---------- Enable/Disable audio buttons ---------- */
+    function updateAudioButtons() {
+      if (remoteVideo.muted) {
+        enableAudioBtn.style.display = 'block';
+        disableAudioBtn.style.display = 'none';
+      } else {
+        enableAudioBtn.style.display = 'none';
+        disableAudioBtn.style.display = 'block';
+      }
+    }
+    async function tryStartMuted() {
+      try { remoteVideo.muted = true; remoteVideo.volume = 1.0; await remoteVideo.play(); }
+      catch (e) { console.warn('[CRY] autoplay (muted) blocked:', e); }
+      updateAudioButtons();
+    }
+    enableAudioBtn.addEventListener('click', async (e) => {
+      e?.stopPropagation?.(); e?.preventDefault?.();
+      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); }
+      catch (err) { console.warn('[CRY] unmute play blocked:', err); }
+      updateAudioButtons();
+    });
+    disableAudioBtn.addEventListener('click', (e) => {
+      e?.stopPropagation?.(); e?.preventDefault?.();
+      remoteVideo.muted = true; updateAudioButtons();
+    });
+
+    /* ---------- Fullscreen ---------- */
+    fsBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        if (!document.fullscreenElement) {
+          await (stage.requestFullscreen?.call(stage) || document.documentElement.requestFullscreen());
+          fsBtn.textContent = 'Exit fullscreen';
+        } else {
+          await document.exitFullscreen();
+          fsBtn.textContent = 'Fullscreen';
+        }
+      } catch (err) { console.warn('[CRY] fullscreen error', err); }
+    });
+    document.addEventListener('fullscreenchange', () => {
+      fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+    });
+
+    // UI bindings
+    function initUI() {
+      Object.values(els.inputs).forEach(inp => {
+        inp?.addEventListener('change', () => updateChartWindow(getParams()));
+      });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initUI);
+    } else {
+      initUI();
+    }
+
+    // Initialize chart before we connect (with fixed y-axis)
+    setupChart();
+
+    /* ---------- WebRTC core ---------- */
+    const core = new ReceiverCore({
+      wsEndpoint: WS_ENDPOINT,
+      room,
+      onStatus: (msg) => { if (LOG.status) console.log('[CRY][status]', msg); }, // no on-page logs
+      onStream: (stream) => {
+        console.log('[CRY][pc] onStream, tracks=', stream.getTracks().map(t=>t.kind));
+        if (remoteVideo.srcObject !== stream) {
+          remoteVideo.srcObject = stream;
+          state.streamRemote = stream;
+          tryStartMuted();
+          if (state.running && audioEnabled) {
+            startRemoteStreamGraph(audioWhere === 'receiver'); // classify only in receiver mode
+          }
+        }
+      },
+      onIceState: (s) => { console.log('[CRY][pc] ICE:', s); },
+      onBye: () => { console.log('[CRY][pc] bye'); },
+      onCreatePC: (pc) => {
+        const ch = pc.createDataChannel('pose');
+        ch.onopen  = () => {
+          console.log('[CRY][dc] open');
+          state.audioCtx?.resume?.().catch(()=>{});
+          try { ch.send(JSON.stringify({ type: 'need-modes' })); } catch {}
+        };
+        ch.onclose = () => { console.log('[CRY][dc] close'); };
+        ch.onerror = (e) => { console.warn('[CRY][dc] error', e); };
+        ch.onmessage = (ev) => {
+          let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+          if (!msg || !msg.type) return;
+          if (LOG.dc && msg.type !== 'pose') console.log('[CRY][dc] msg:', msg.type);
+
+          if (msg.type === 'audio-mode') {
+            audioEnabled = !!msg.enabled;
+            audioWhere   = msg.where || 'sender';
+            applyAudioMode();
+          } else if (msg.type === 'ai-modes' && msg.audio) {
+            audioEnabled = !!msg.audio.enabled;
+            audioWhere   = msg.audio.where || 'sender';
+            applyAudioMode();
+          } else if (msg.type === 'audio') {
+            const categories = msg.categories || [];
+            if (!audioEnabled || audioWhere !== 'sender') {
+              audioEnabled = true; audioWhere = 'sender'; applyAudioMode();
+            }
+            if (state.running) {
+              const params = getParams();
+              const score = getCryScoreFromCategories(categories, params.INCLUDE_CLASSES);
+              pushScore(score);
+            }
+          }
+        };
+        audioDC = ch;
+      },
+      onDataChannel: (e) => { console.log('[CRY][pc] inbound DC:', e.channel?.label); }
+    });
+
+    core.start().catch(err => console.warn('[CRY] core start error', err));
+
+    window.addEventListener('beforeunload', () => {
+      try { core.close(); } catch {}
+      stopRemoteStreamGraph();
+    });
+  </script>
+</body>
+</html>
