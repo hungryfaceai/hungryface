@@ -44,18 +44,22 @@
       z-index: 2;
     }
 
-    .panel header h1 { margin: 0 0 12px 0; font-size: clamp(18px, 3vw, 22px); }
+    .panel header h1 { margin: 0 0 2px 0; font-size: clamp(18px, 3vw, 22px); }
+    .panel header .sub { margin: 0 0 12px 0; color: #bbb; font-size: 14px; }
 
-    /* Input-level meter + dB label */
-    .signal { margin: 0 0 12px 0; }
-    .signal-row {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      align-items: center; gap: 10px;
+    .status { color: #ddd; font-size: 14px; padding: 4px 0; white-space: pre-line; }
+
+    /* NEW: signal health row + meter */
+    .signal { margin: 8px 0 12px 0; }
+    .health {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 13px; color: #ccc; margin-bottom: 6px;
+      flex-wrap: wrap;
     }
-    .db {
-      font-size: 12px; color: #cfcfcf; min-width: 56px; text-align: right;
-      opacity: 0.9;
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      display: inline-block; background: #9ca3af; /* gray */
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.15) inset;
     }
     .meter {
       width: 100%; height: 10px; border-radius: 8px;
@@ -63,15 +67,8 @@
     }
     .meter .fill {
       height: 100%; width: 0%;
-      background: linear-gradient(to right, rgba(96,165,250,0.95), rgba(239,68,68,0.95));
-      transition: width 80ms linear;
-    }
-
-    /* Tiny spectrum strip (iPhone-ish feel) */
-    #specMini {
-      display: block; width: 100%; height: 42px;
-      background: #0a0a0a; border: 1px solid #222; border-radius: 8px;
-      margin-top: 8px;
+      background: linear-gradient(to right, rgba(96,165,250,0.9), rgba(239,68,68,0.9));
+      transition: width 120ms linear;
     }
 
     details.advanced {
@@ -90,22 +87,45 @@
 
     label { display: grid; gap: 6px; font-size: 14px; color: #ddd; }
     label > span { color: #bbb; }
-    input[type="number"], textarea {
+    input[type="number"], input[type="url"], textarea {
       width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222;
       background:#0b0b0b; color:#ddd; font-size: 14px; box-sizing: border-box;
     }
     textarea { min-height: 56px; font-family: inherit; resize: vertical; }
+
     .muted { color: #aaa; }
     .small { font-size: 12px; }
 
-    /* Cry score plot */
+    /* Plots */
     section.plot { margin-top: 14px; }
-    canvas#chart { display: block; width: 100%; height: 160px; background: #0a0a0a; border-radius: 10px; }
+    canvas { display: block; width: 100%; height: 160px; background: #0a0a0a; border-radius: 10px; }
+    .legend { margin-top: 6px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; color:#ccc; }
+    .key { display:inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+    .key.raw     { background: #60a5fa; }   /* blue */
+    .key.sm      { background: #ef4444; }   /* red */
+    .key.thr-on  { background: #f97316; }   /* orange */
+    .key.thr-off { background: #fb923c; }   /* light orange */
+
+    .toggles { margin-top: 8px; display: flex; gap: 12px; align-items: center; font-size: 13px; color:#ddd; }
+    .peak { margin-top: 6px; font-size: 13px; color:#ddd; }
+
+    /* Overlay status (like pose page) */
+    .overlay {
+      position: fixed; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      pointer-events: none; z-index: 5;
+    }
+    .overlay.hidden { display: none; }
+    .overlay .status {
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
+      text-align: center; white-space: pre-line; max-width: 90vw;
+    }
 
     /* Background turns red while alert is active */
     body.alert #stage { background: #1a0000; }
 
-    /* Control bar */
+    /* Fixed control bar — exactly like pose */
     #controls {
       position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
       display: flex; align-items: center; gap: 12px; z-index: 6;
@@ -116,10 +136,11 @@
       cursor: pointer; box-shadow: none; text-shadow: 0 1px 2px rgba(0,0,0,0.6);
     }
     .btn:active { transform: scale(0.99); }
+    #enableAudioBtn, #disableAudioBtn { display: none; }
   </style>
 </head>
 <body>
-  <!-- Inject the shared sidebar markup + behavior -->
+  <!-- Inject the shared sidebar markup + behavior (same snippet as pose page) -->
   <script type="module">
     (async () => {
       try {
@@ -143,10 +164,12 @@
     })();
   </script>
 
-  <!-- Controls -->
+  <!-- Bottom controls (exactly like pose) -->
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
     <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
+    <!-- Mic-enable button for receiver-side inference (user gesture) -->
+    <button id="enableMicBtn" class="btn" type="button" style="display:none">Enable mic</button>
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
   </div>
 
@@ -155,15 +178,20 @@
 
     <div class="panel">
       <header>
-        <h1>Audio classification</h1>
+        <h1>Live Baby Cry Detector</h1>
+        <p class="sub">Inference on <strong id="whereLbl">—</strong></p>
+        <div id="status" class="status">Booting…</div>
 
-        <!-- Sensitive level bar + dB label -->
+        <!-- NEW: signal health + RMS meter -->
         <div class="signal">
-          <div class="signal-row">
-            <div class="meter" aria-label="Input level"><div id="rmsFill" class="fill"></div></div>
-            <div id="dbLabel" class="db">–∞ dB</div>
+          <div class="health">
+            <span class="dot" id="tapDot" title="Tap health dot"></span>
+            <span id="tapText">Tap: —</span>
+            <span id="rmsText" style="opacity:.9">RMS: —</span>
           </div>
-          <canvas id="specMini" height="42"></canvas>
+          <div class="meter" aria-label="Input level">
+            <div id="rmsFill" class="fill"></div>
+          </div>
         </div>
       </header>
 
@@ -221,9 +249,32 @@
       <!-- Cry score chart -->
       <section class="plot">
         <canvas id="chart" height="160"></canvas>
+        <div class="legend">
+          <span class="key raw"></span> score
+          <span class="key sm"></span> smoothed
+          <span class="key thr-on"></span> thresh (ON)
+          <span class="key thr-off"></span> thresh (OFF)
+        </div>
+      </section>
+
+      <!-- Power spectrum chart -->
+      <section class="plot">
+        <canvas id="chartSpectrum" height="160"></canvas>
+        <div class="legend">
+          <span class="key raw"></span> spectrum (raw)
+          <span class="key sm"></span> spectrum (smoothed)
+        </div>
+        <div class="toggles">
+          <label><input type="checkbox" id="showRawSpec" checked> Show raw spectrum</label>
+          <label><input type="checkbox" id="showSmSpec" checked> Show smoothed spectrum</label>
+        </div>
+        <div id="peakReadout" class="peak">Peak: —</div>
       </section>
     </div>
   </div>
+
+  <!-- Overlay status (same feel as pose page) -->
+  <div id="overlay" class="overlay"><div id="overlayStatus" class="status">Idle</div></div>
 
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
@@ -232,7 +283,7 @@
   <script type="module">
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
 
-    /* ---------- MediaPipe Tasks Audio ---------- */
+    // MediaPipe Tasks Audio
     const AUDIO_PKG_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0";
     const AudioMod = await import(AUDIO_PKG_URL).catch(e => { console.error('[CRY] MP audio import error', e); return null; });
     const AudioClassifier = AudioMod?.AudioClassifier;
@@ -241,22 +292,41 @@
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
+    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
-    /* ---------- Debug toggles (console only) ---------- */
-    const LOG = { status: true, dc: true, catEvery: 20, seriesEvery: 0, firstResult: true };
+    /* ---------- DEBUG LOG SWITCHES ---------- */
+    const LOG = {
+      status: true,
+      dc: true,
+      spectrum: false,
+      rmsEvery: 0,
+      catEvery: 20,
+      seriesEvery: 0,
+      firstResult: true
+    };
 
     /* ---------- DOM ---------- */
     const stage = document.getElementById('stage');
     const remoteVideo = document.getElementById('remote');
     const enableAudioBtn = document.getElementById('enableAudioBtn');
     const disableAudioBtn = document.getElementById('disableAudioBtn');
+    const enableMicBtn = document.getElementById('enableMicBtn');
     const fsBtn = document.getElementById('fsBtn');
 
     const els = {
+      status:   document.getElementById('status'),
+      overlay:  document.getElementById('overlay'),
+      overlayStatus: document.getElementById('overlayStatus'),
+      whereLbl: document.getElementById('whereLbl'),
       chartCanvas: document.getElementById('chart'),
+      chartSpectrumCanvas: document.getElementById('chartSpectrum'),
+      showRawSpec: document.getElementById('showRawSpec'),
+      showSmSpec:  document.getElementById('showSmSpec'),
+      peakReadout: document.getElementById('peakReadout'),
       rmsFill: document.getElementById('rmsFill'),
-      dbLabel: document.getElementById('dbLabel'),
-      specMini: document.getElementById('specMini'),
+      rmsText: document.getElementById('rmsText'),
+      tapDot: document.getElementById('tapDot'),
+      tapText: document.getElementById('tapText'),
       inputs: {
         SR_TARGET:      document.getElementById('SR_TARGET'),
         FRAME_LEN_S:    document.getElementById('FRAME_LEN_S'),
@@ -271,30 +341,35 @@
       }
     };
 
+    function setStatus(msg) {
+      els.status.textContent = msg;
+      els.overlayStatus.textContent = msg;
+      if (LOG.status) console.log('[CRY][status]', msg);
+    }
+    function showOverlay(show) { els.overlay.classList.toggle('hidden', !show); }
+    function setWhereLabel(where) {
+      const label = where === 'receiver' ? 'RECEIVER' : (where === 'sender' ? 'SENDER' : '—');
+      els.whereLbl.textContent = label;
+      console.log('[CRY] where =', label);
+    }
+
     /* ---------- Audio mode state ---------- */
     let audioDC = null;
     let audioEnabled = false;
-    let audioWhere = 'sender'; // 'sender' | 'receiver'
+    let audioWhere = 'sender';
 
     /* ---------- App state ---------- */
     const state = {
       running: true,
+      usingMic: false,
       audioCtx: null,
+      streamLocalMic: null,
       streamRemote: null,
       sourceNode: null,
       sinkNode: null,
       processor: null,
-
-      // Analysers
-      tdAnalyser: null,     // time-domain (RMS)
-      specAnalyser: null,   // frequency (spectrum)
-      visualRaf: 0,
-
-      // MP task
-      audioTask: null,
-      audioTaskPromise: null,
-
-      // Ring buffer + series
+      analyser: null,
+      tdAnalyser: null,       // NEW: time-domain analyser for RMS
       ring16k: new Float32Array(0),
       lastPos: 0,
       timesSec: [],
@@ -302,20 +377,32 @@
       cryRaw: [],
       crySm: [],
       chart: null,
-
+      spectrumChart: null,
+      specFreqs: [],
+      specRawDb: [],
+      specSmDb: [],
+      specStartIdx: 0,
+      specEndIdx: 0,
+      specBinCountAll: 0,
+      specLastUpdate: 0,
+      peakFreq: null,
+      peakDb: null,
       alertOn: false,
       alertUntilMs: 0,
+      audioTask: null,
+      audioTaskPromise: null,
+      spectrumRaf: 0,
 
-      // Meters
-      dbEma: -120, // smoothed dBFS
+      // NEW: signal health
+      rmsNow: 0,
+      rmsDb: -120,
+      lastNonSilent: 0
     };
 
-    const DB_FLOOR = -75; // lower = more sensitive; raise if you want less movement
-    const DB_CEIL  =   0;
-
+    // Guard to avoid redundant re-initialization
     let _activeAudio = { enabled: null, where: null };
 
-    /* ---------- Helpers ---------- */
+    /* ---------- Small helpers ---------- */
     const RAW_COLOR = '#60a5fa';
     const SMOOTH_COLOR = '#ef4444';
     const THRESH_ON_COLOR = '#f97316';
@@ -336,6 +423,8 @@
         ALERT_HOLD_MS: Math.max(0, parseInt(els.inputs.ALERT_HOLD_MS?.value, 10) || 3000),
       };
     }
+
+    // score utils
     function categoryLabel(c) { return (c.displayName || c.categoryName || String(c.index) || '').trim(); }
     function classMatch(name, needles) { const L = (name || '').trim().toLowerCase(); return needles.some(n => L.includes(n)); }
     function getCryScoreFromCategories(categories, includeList) {
@@ -350,90 +439,27 @@
     function movingAvgTail(arr, k){ if(!arr.length) return 0; const s=Math.max(0,arr.length-k); let sum=0; for(let i=s;i<arr.length;i++) sum+=arr[i]; return sum/(arr.length-s); }
     function formatClock(ms){ return new Date(ms).toLocaleTimeString(undefined,{hour12:false}); }
 
-    /* ---------- Level metering (sensitive, with dB text) ---------- */
-    function setSignalRMS(rmsLinear) {
-      // Convert to dBFS; clamp to floor..ceil and smooth for stable display
-      const db = 20 * Math.log10(Math.max(1e-8, rmsLinear));
-      state.dbEma = 0.2 * db + 0.8 * state.dbEma;
-      const dbClamped = Math.max(DB_FLOOR, Math.min(DB_CEIL, state.dbEma));
-
-      // Map to 0..100% based on dB range (more movement at low levels)
-      const pct = Math.round(((dbClamped - DB_FLOOR) / (DB_CEIL - DB_FLOOR)) * 100);
+    // NEW: signal UI updater
+    function setSignalRMS(r) {
+      // clamp 0..1
+      const x = Math.max(0, Math.min(1, r || 0));
+      state.rmsNow = x;
+      state.rmsDb = x > 0 ? (20*Math.log10(x)) : -120;
+      const pct = Math.round(x * 100);
       els.rmsFill.style.width = pct + '%';
+      els.rmsText.textContent = `RMS: ${pct}% (${Math.round(state.rmsDb)} dB)`;
 
-      // Label, rounded
-      const shown = Math.round(dbClamped);
-      els.dbLabel.textContent = (shown <= DB_FLOOR + 1) ? '–∞ dB' : `${shown} dB`;
+      const now = performance.now();
+      if (x > 0.01) state.lastNonSilent = now;
+      const silent = (now - (state.lastNonSilent || 0)) > 1500; // >1.5s
+      els.tapText.textContent = silent ? 'Tap: silent' : 'Tap: OK';
+      els.tapDot.style.background = silent ? '#b91c1c' : '#16a34a'; // red / green
     }
 
-    /* ---------- Tiny spectrum (canvas, lightweight) ---------- */
-    function sizeCanvasToDisplay(canvas) {
-      const dpr = Math.max(1, window.devicePixelRatio || 1);
-      const w = canvas.clientWidth, h = canvas.clientHeight;
-      if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
-        canvas.width = Math.round(w * dpr);
-        canvas.height = Math.round(h * dpr);
-      }
-      return dpr;
-    }
-
-    function startVisualLoop(){
-      cancelAnimationFrame(state.visualRaf);
-      const td = state.tdAnalyser;
-      const an = state.specAnalyser;
-      if (!td || !an) return;
-
-      const tdBuf = new Float32Array(td.fftSize);
-      const specBuf = new Uint8Array(an.frequencyBinCount);
-      const ctx2d = els.specMini.getContext('2d');
-
-      function tick(){
-        if (!state.tdAnalyser || !state.specAnalyser) return;
-
-        // Level (RMS)
-        td.getFloatTimeDomainData(tdBuf);
-        let s = 0; for (let i=0;i<tdBuf.length;i++){ const v = tdBuf[i]; s += v*v; }
-        setSignalRMS(Math.sqrt(s / Math.max(1, tdBuf.length)));
-
-        // Spectrum
-        const dpr = sizeCanvasToDisplay(els.specMini);
-        const W = els.specMini.width, H = els.specMini.height;
-        ctx2d.clearRect(0,0,W,H);
-
-        an.getByteFrequencyData(specBuf); // 0..255 (already smoothed by analyser)
-        // Draw vertical bars across width
-        const bars = Math.min(W, 120);                  // up to 120 thin bars
-        const step = Math.max(1, Math.floor(specBuf.length / bars));
-        const barW = Math.max(1, Math.floor(W / bars));
-
-        for (let b = 0; b < bars; b++) {
-          let sum = 0, n = 0;
-          const start = b * step, end = Math.min(specBuf.length, start + step);
-          for (let i=start;i<end;i++){ sum += specBuf[i]; n++; }
-          const v = n ? (sum / n) : 0;                  // 0..255
-          const mag = v / 255;                          // 0..1
-          const h = Math.max(1, Math.round(mag * (H - 4)));
-          const x = b * barW;
-          const y = H - h;
-
-          // simple gradient-ish fill
-          ctx2d.fillStyle = 'rgba(96,165,250,0.9)';
-          ctx2d.fillRect(x, y, barW - 1, h);
-        }
-
-        state.visualRaf = requestAnimationFrame(tick);
-      }
-      state.visualRaf = requestAnimationFrame(tick);
-    }
-
-    function stopVisualLoop(){
-      cancelAnimationFrame(state.visualRaf);
-      state.visualRaf = 0;
-    }
-
-    /* ---------- Chart (cry score) ---------- */
+    /* ---------- Charts ---------- */
     function setupChart(){
       if (state.chart) state.chart.destroy();
+      console.log('[CRY][chart] init');
       const ctx = els.chartCanvas.getContext('2d');
       state.chart = new Chart(ctx, {
         type: 'line',
@@ -445,16 +471,151 @@
         ] },
         options: {
           animation: false,
-          maintainAspectRatio: false,
           plugins: { legend: { display: false } },
           scales: {
             x: { title: { display: true, text: 'Time' } },
-            // FIX: keep y-axis fixed to avoid shrinking/expanding
-            y: { title: { display: true, text: 'Score' }, min: 0, max: 1.5 }
+            y: { title: { display: true, text: 'Score' }, suggestedMin: 0, suggestedMax: 1.0 }
           },
           elements: { line: { fill: false } }
         }
       });
+    }
+
+    // Build spectrum frequency bins + arrays and (re)initialize the spectrum chart.
+    function prepareSpectrumArrays(ctx) {
+      const a = state.analyser;
+      if (!a) return;
+    
+      const N   = a.frequencyBinCount;   // fftSize/2
+      const sr  = ctx.sampleRate;
+      const fft = a.fftSize;
+    
+      // Frequency per bin
+      const freqs = new Float32Array(N);
+      for (let i = 0; i < N; i++) freqs[i] = (i * sr) / fft;
+    
+      // Show 20 Hz .. min(8 kHz, Nyquist)
+      const minHz = 20;
+      const maxHz = Math.min(8000, sr / 2);
+    
+      let start = 0; while (start < N   && freqs[start] <  minHz) start++;
+      let end   = N-1; while (end   > 0 && freqs[end]   >  maxHz) end--;
+    
+      state.specFreqs       = Array.from(freqs);   // Chart.js wants JS arrays
+      state.specStartIdx    = Math.max(0, start);
+      state.specEndIdx      = Math.max(state.specStartIdx, end);
+      state.specBinCountAll = N;
+    
+      // Power arrays (init at -100 dB so the line sits at the bottom until data arrives)
+      state.specRawDb = new Float32Array(N);
+      state.specSmDb  = new Float32Array(N);
+      for (let i = 0; i < N; i++) { state.specRawDb[i] = -100; state.specSmDb[i] = -100; }
+    
+      // Create / reset the chart with the computed x-axis
+      setupSpectrumChart(state.specFreqs);
+      updateSpectrumChartVisibility();
+      updateSpectrumChart();
+    }
+    
+    const spectrumOverlay = {
+      id: 'spectrumOverlay',
+      afterDatasetsDraw(chart) {
+        const { ctx, chartArea, scales } = chart;
+        if (!chart.$peakFreq) return;
+        const x1 = scales.x.getPixelForValue(300);
+        const x2 = scales.x.getPixelForValue(3000);
+        ctx.save();
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
+        const left = Math.min(x1, x2);
+        const width = Math.abs(x2 - x1);
+        ctx.fillRect(left, chartArea.top, width, chartArea.bottom - chartArea.top);
+
+        const xp = scales.x.getPixelForValue(chart.$peakFreq);
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4,2]);
+        ctx.beginPath();
+        ctx.moveTo(xp, chartArea.top);
+        ctx.lineTo(xp, chartArea.bottom);
+        ctx.stroke();
+        ctx.restore();
+      }
+    };
+
+    function setupSpectrumChart(freqs){
+      if (state.spectrumChart) state.spectrumChart.destroy();
+      if (LOG.spectrum) console.log('[CRY][spectrum] init axis with', freqs?.length, 'bins');
+      const ctx = els.chartSpectrumCanvas.getContext('2d');
+      state.spectrumChart = new Chart(ctx, {
+        type: 'line',
+        data: { datasets: [
+          { label: 'spectrum (raw)', data: [], borderColor: RAW_COLOR, borderWidth: 2, pointRadius: 0, tension: 0 },
+          { label: 'spectrum (smoothed)', data: [], borderColor: SMOOTH_COLOR, borderWidth: 2, pointRadius: 0, tension: 0 }
+        ] },
+        options: {
+          animation: false,
+          plugins: { legend: { display: false } },
+          parsing: false,
+          scales: {
+            x: {
+              type: 'logarithmic',
+              min: 20,
+              max: Math.max(200, Math.round((freqs?.[freqs.length-1]||8000))),
+              title: { display: true, text: 'Frequency (Hz, log)' },
+              ticks: {
+                callback: (val) => {
+                  const nice = [20,50,100,200,500,1000,2000,5000,8000];
+                  const v = Math.round(val);
+                  if (nice.includes(v)) return v >= 1000 ? (v/1000)+'k' : v;
+                  return '';
+                }
+              }
+            },
+            y: { min: -100, max: 0, title: { display: true, text: 'Power (dBFS)' } }
+          },
+          elements: { line: { fill: false } }
+        },
+        plugins: [spectrumOverlay]
+      });
+    }
+
+    function updateSpectrumChartVisibility() {
+      if (!state.spectrumChart) return;
+      const showRaw = !!els.showRawSpec?.checked;
+      const showSm  = !!els.showSmSpec?.checked;
+      state.spectrumChart.data.datasets[0].hidden = !showRaw;
+      state.spectrumChart.data.datasets[1].hidden = !showSm;
+      state.spectrumChart.update();
+      if (LOG.spectrum) console.log('[CRY][spectrum] vis raw=', showRaw, 'sm=', showSm);
+    }
+
+    function updateSpectrumChart() {
+      if (!state.spectrumChart) return;
+      const raw = [], sm = [];
+      for (let i = state.specStartIdx; i <= state.specEndIdx; i++) {
+        const f = state.specFreqs[i];
+        raw.push({ x: f, y: state.specRawDb[i] });
+        sm.push({ x: f, y: state.specSmDb[i] });
+      }
+      state.spectrumChart.data.datasets[0].data = raw;
+      state.spectrumChart.data.datasets[1].data = sm;
+
+      let maxDb = -Infinity, maxIdx = -1;
+      for (let i = state.specStartIdx; i <= state.specEndIdx; i++) {
+        const v = state.specSmDb[i];
+        if (v > maxDb) { maxDb = v; maxIdx = i; }
+      }
+      if (maxIdx >= 0) {
+        state.peakFreq = state.specFreqs[maxIdx];
+        state.peakDb = maxDb;
+        state.spectrumChart.$peakFreq = state.peakFreq;
+        const f = state.peakFreq >= 1000 ? (state.peakFreq/1000).toFixed(2)+' kHz' : Math.round(state.peakFreq)+' Hz';
+        els.peakReadout.textContent = `Peak: ${Math.round(state.peakDb)} dB @ ${f}`;
+      } else {
+        state.spectrumChart.$peakFreq = null;
+        els.peakReadout.textContent = 'Peak: —';
+      }
+      state.spectrumChart.update();
     }
 
     function updateChartWindow(params) {
@@ -484,13 +645,23 @@
       state.chart.data.datasets[2].data = thrOn;
       state.chart.data.datasets[3].data = thrOff;
 
-      // IMPORTANT: do NOT adjust y-axis min/max here (fixed in setup)
+      if (raw.length || sm.length) {
+        const all = raw.concat(sm);
+        const ymin = Math.min(...all, onVal, offVal);
+        const ymax = Math.max(...all, onVal, offVal);
+        const pad = 0.05;
+        state.chart.options.scales.y.min = Math.min(0, ymin - pad);
+        state.chart.options.scales.y.max = Math.min(1.5, ymax + pad);
+      }
       state.chart.update();
     }
 
-    /* ---------- MP Audio task ---------- */
+    /* ---------- MP Audio task (resilient load) ---------- */
     async function ensureAudioTask() {
-      if (!AudioClassifier || !FilesetResolver) return null;
+      if (!AudioClassifier || !FilesetResolver) {
+        console.warn('[CRY][mp] MediaPipe tasks audio not available');
+        return null;
+      }
       if (state.audioTask) return state.audioTask;
       if (state.audioTaskPromise) return state.audioTaskPromise;
 
@@ -507,6 +678,7 @@
         const res = await fetch(bust, { cache: 'no-store' });
         if (!res.ok) throw new Error(`yamnet fetch ${res.status}`);
         const buf = new Uint8Array(await res.arrayBuffer());
+        console.log('[CRY][mp] yamnet bytes =', buf.byteLength);
         return AudioClassifier.createFromOptions(resolver, {
           baseOptions: { modelAssetBuffer: buf },
           runningMode: "AUDIO_CLIPS",
@@ -518,20 +690,30 @@
         let lastErr = null;
         for (let attempt = 1; attempt <= 3; attempt++) {
           try {
+            setStatus('Loading audio model…');
+            console.log(`[CRY][mp] resolver attempt ${attempt}`);
             const resolver = await FilesetResolver.forAudioTasks(WASM_DIR);
             try {
+              console.log(`[CRY][mp] create (path) attempt ${attempt}`);
               state.audioTask = await createWithPath(resolver);
+              console.log('[CRY][mp] audio task ready (path)');
+              setStatus('Ready');
               return state.audioTask;
             } catch (e1) {
               lastErr = e1;
+              console.warn('[CRY][mp] create (path) failed:', e1?.message || e1);
               state.audioTask = await createWithBuffer(resolver);
+              console.log('[CRY][mp] audio task ready (buffer)');
+              setStatus('Ready');
               return state.audioTask;
             }
           } catch (e) {
             lastErr = e;
+            console.warn('[CRY][mp] resolver/model attempt failed:', e?.message || e);
             await new Promise(r => setTimeout(r, attempt * 600));
           }
         }
+        setStatus('Audio model load failed');
         state.audioTaskPromise = null;
         throw lastErr || new Error('audio task init failed');
       })();
@@ -573,7 +755,10 @@
       const alert = shouldAlert(smoothed, nowMs, params);
       state.alertOn = alert; setAlert(alert);
 
-      // Trim old samples beyond window + small buffer
+      if (LOG.seriesEvery && (state.timesSec.length % LOG.seriesEvery) === 0) {
+        console.log('[CRY][series] n=', state.timesSec.length, 'last raw=', score.toFixed(3), 'sm=', smoothed.toFixed(3));
+      }
+
       if (state.timesSec.length % 400 === 0) {
         const keepFrom = Math.max(0, state.timesSec.length - Math.ceil(params.PLOT_WINDOW_S / params.HOP_S) - 10);
         if (keepFrom > 0) {
@@ -581,6 +766,166 @@
           state.timesMs  = state.timesMs.slice(keepFrom);
           state.cryRaw   = state.cryRaw.slice(keepFrom);
           state.crySm    = state.crySm.slice(keepFrom);
+        }
+      }
+    }
+
+    /* ---------- Receiver-mode (mic) ---------- */
+    // (retained but unused; we now classify from remote stream)
+    function makeScriptProcessor(ctx, onAudio) {
+      const sp = ctx.createScriptProcessor(4096, 1, 1);
+      sp.onaudioprocess = (e) => onAudio(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate);
+      return sp;
+    }
+
+    async function startReceiverMicGraph() {
+      console.log('[CRY][mic] starting mic graph…');
+      const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
+      state.audioCtx = ctx;
+      await ctx.resume();
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, noiseSuppression: false, echoCancellation: false, autoGainControl: false },
+        video: false
+      });
+      state.streamLocalMic = stream;
+
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.0;
+      state.analyser = analyser;
+      src.connect(analyser);
+
+      // NEW: time-domain analyser for RMS
+      const td = ctx.createAnalyser();
+      td.fftSize = 1024;
+      state.tdAnalyser = td;
+      src.connect(td);
+
+      const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
+      let processor;
+      try {
+        const workletURL = URL.createObjectURL(new Blob([`
+          class MicProcessor extends AudioWorkletProcessor {
+            process(inputs) {
+              const input = inputs[0];
+              if (input && input[0]) this.port.postMessage(input[0].slice(0));
+              return true;
+            }
+          }
+          registerProcessor('mic-processor', MicProcessor);
+        `], { type: 'application/javascript' }));
+        await ctx.audioWorklet.addModule(workletURL);
+        processor = new AudioWorkletNode(ctx, 'mic-processor', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
+        processor.port.onmessage = (ev) => onAudioChunkReceiver(ev.data, ctx.sampleRate);
+        src.connect(processor).connect(sink);
+        console.log('[CRY][mic] using AudioWorklet @', ctx.sampleRate, 'Hz');
+      } catch {
+        processor = makeScriptProcessor(ctx, onAudioChunkReceiver);
+        src.connect(processor).connect(sink);
+        console.log('[CRY][mic] using ScriptProcessor @', ctx.sampleRate, 'Hz');
+      }
+      state.sourceNode = src;
+      state.sinkNode = sink;
+      state.processor = processor;
+
+      prepareSpectrumArrays(ctx);
+      startSpectrumLoop();
+      state.usingMic = true;
+    }
+
+    function stopReceiverMicGraph() {
+      if (!state.usingMic) return;
+      console.log('[CRY][mic] stopping mic graph');
+      try { state.processor?.disconnect(); } catch {}
+      try { state.sourceNode?.disconnect(); } catch {}
+      try { state.sinkNode?.disconnect(); } catch {}
+      try { state.streamLocalMic?.getTracks().forEach(t => t.stop()); } catch {}
+      try { state.audioCtx && state.audioCtx.state !== 'closed' && state.audioCtx.close(); } catch {}
+      state.processor = null; state.sourceNode = null; state.sinkNode = null;
+      state.streamLocalMic = null; state.audioCtx = null;
+      state.usingMic = false;
+    }
+
+    function extractCategories(res) {
+      if (!res) return [];
+      if (Array.isArray(res)) {
+        return (
+          res[0]?.classifications?.[0]?.categories ??
+          res[0]?.classificationResult?.classifications?.[0]?.categories ??
+          []
+        );
+      }
+      return (
+        res.classifications?.[0]?.categories ??
+        res.classificationResult?.classifications?.[0]?.categories ??
+        []
+      );
+    }
+
+    async function onAudioChunkReceiver(chunkFloat32, deviceSr) {
+      if (!state.running /* no mic flag check; we also use this for remote */) return;
+      const task = await ensureAudioTask().catch(e => { console.warn('[CRY][mp] task unavailable on chunk', e); return null; });
+      if (!task) return;
+      const params = getParams();
+
+      // live RMS (mic/remote)
+      let s = 0; for (let i=0;i<chunkFloat32.length;i++){ const v=chunkFloat32[i]; s += v*v; }
+      const r = Math.sqrt(s / Math.max(1, chunkFloat32.length));
+      setSignalRMS(r);
+      if (LOG.rmsEvery) {
+        window._dbgMicCount = (window._dbgMicCount || 0) + 1;
+        if ((window._dbgMicCount % LOG.rmsEvery) === 0) {
+          console.log('[CRY][rx] rms(device) =', r.toFixed(4));
+        }
+      }
+
+      const x16 = resampleLinear(chunkFloat32, deviceSr, params.SR_TARGET);
+      for (let i=0;i<x16.length;i++) x16[i] = Math.max(-1, Math.min(1, x16[i]));
+      state.ring16k = concatFloat32(state.ring16k, x16);
+
+      const frameHop = Math.round(params.HOP_S * params.SR_TARGET);
+      const frameLen = Math.round(params.FRAME_LEN_S * params.SR_TARGET);
+
+      while (state.ring16k.length - state.lastPos >= frameHop) {
+        const end = state.lastPos + frameHop;
+        const start = Math.max(0, end - frameLen);
+        let w = state.ring16k.slice(start, end);
+        if (w.length < frameLen) {
+          const pad = new Float32Array(frameLen);
+          pad.set(w, frameLen - w.length);
+          w = pad;
+        }
+
+        //const result = await task.classify({ audioClip: w, sampleRateHz: params.SR_TARGET });
+        const result = await task.classify(w, params.SR_TARGET);
+        const categories = extractCategories(result);
+
+        if (LOG.catEvery) {
+          window._dbgCatEvery = (window._dbgCatEvery || 0) + 1;
+          if ((window._dbgCatEvery % LOG.catEvery) === 0) {
+            const top = categories.slice(0,5).map(c => `${categoryLabel(c)}:${(c.score ?? 0).toFixed(3)}`);
+            console.log('[CRY][rx] categories length =', categories.length, 'top =', top.join(', '));
+          }
+        }
+        if (LOG.firstResult && !window._dbgFirstMicResult) {
+          window._dbgFirstMicResult = true;
+          console.log('[CRY][rx] FIRST result =', result);
+        }
+        window._dbgEmptyCount = (window._dbgEmptyCount || 0) + 1;
+        if (!categories.length && (window._dbgEmptyCount % 10 === 0)) {
+          console.warn('[CRY][rx] categories EMPTY (len=0). result.classifications =', result?.classifications);
+        }
+
+        const score = getCryScoreFromCategories(categories, params.INCLUDE_CLASSES);
+        pushScore(score);
+
+        state.lastPos += frameHop;
+        if (state.lastPos > frameLen * 4) {
+          const cut = state.lastPos - frameLen;
+          state.ring16k = state.ring16k.slice(cut);
+          state.lastPos -= cut;
         }
       }
     }
@@ -600,42 +945,51 @@
       return out;
     }
 
-    /* ---------- Remote stream tap (meter + spectrum; optional classify) ---------- */
+    /* ---------- Remote-stream tap (spectrum + optional classification) ---------- */
     function startRemoteStreamGraph(doClassify) {
       if (!state.streamRemote) { console.log('[CRY][remote] no stream yet'); return; }
 
+      // If graph already running in the requested mode, keep it.
+      if (state.analyser && !!state.processor === !!doClassify && !state.usingMic) {
+        console.log('[CRY][remote] stream graph already running (classify=', !!doClassify, ')');
+        return;
+      }
+
       stopRemoteStreamGraph(); // clean prior graph
 
+      console.log('[CRY][remote] starting stream graph… classify =', !!doClassify);
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
       state.audioCtx = ctx;
       ctx.resume?.().catch(()=>{});
 
       const src = ctx.createMediaStreamSource(state.streamRemote);
 
-      // Analysers
-      const td = ctx.createAnalyser();   // RMS
-      td.fftSize = 1024;
+      // FFT analyser (for spectrum chart)
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.0;
 
-      const an = ctx.createAnalyser();   // spectrum
-      an.fftSize = 1024;
-      an.smoothingTimeConstant = 0.8;    // iPhone-ish smoothness
+      // Time-domain analyser (RMS meter)
+      const td = ctx.createAnalyser();
+      td.fftSize = 1024;
 
       // Silent sink (avoid feedback)
       const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
 
+      src.connect(analyser);
       src.connect(td);
-      src.connect(an);
       src.connect(sink);
 
       state.sourceNode = src;
+      state.analyser   = analyser;
       state.tdAnalyser = td;
-      state.specAnalyser = an;
       state.sinkNode   = sink;
+      state.usingMic   = false; // we are not using the local mic
 
-      // Optional classification from the tapped remote stream (receiver mode)
+      // Optional: classification tap from the remote stream
       if (doClassify) {
+        let proc;
         (async () => {
-          let proc;
           try {
             const workletURL = URL.createObjectURL(new Blob([`
               class TapProcessor extends AudioWorkletProcessor {
@@ -655,22 +1009,28 @@
             });
             proc.port.onmessage = (ev) => onAudioChunkReceiver(ev.data, ctx.sampleRate);
           } catch {
-            const sp = ctx.createScriptProcessor(4096, 1, 1);
-            sp.onaudioprocess = (e) => onAudioChunkReceiver(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate);
-            proc = sp;
+            // Fallback: ScriptProcessor (works everywhere)
+            proc = ctx.createScriptProcessor(4096, 1, 1);
+            proc.onaudioprocess = (e) => {
+              onAudioChunkReceiver(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate);
+            };
           }
           src.connect(proc).connect(sink);
           state.processor = proc;
+          console.log('[CRY][remote] classification tap active @', ctx.sampleRate, 'Hz');
         })();
       } else {
         state.processor = null;
       }
 
-      startVisualLoop();
+      // Charts + RMS loop
+      prepareSpectrumArrays(ctx);
+      startSpectrumLoop();
     }
 
     function stopRemoteStreamGraph() {
-      stopVisualLoop();
+      if (!state.analyser && !state.processor && state.usingMic === false) return;
+      console.log('[CRY][remote] stopping stream graph');
       try { state.processor?.disconnect(); } catch {}
       try { state.sourceNode?.disconnect(); } catch {}
       try { state.sinkNode?.disconnect(); } catch {}
@@ -678,104 +1038,137 @@
       state.processor = null;
       state.sourceNode = null;
       state.sinkNode = null;
+      state.analyser = null;
       state.tdAnalyser = null;
-      state.specAnalyser = null;
       state.audioCtx = null;
     }
 
-    /* ---------- Receiver-mode classification from chunks ---------- */
-    function extractCategories(res) {
-      if (!res) return [];
-      if (Array.isArray(res)) {
-        return (
-          res[0]?.classifications?.[0]?.categories ??
-          res[0]?.classificationResult?.classifications?.[0]?.categories ??
-          []
-        );
-      }
-      return (
-        res.classifications?.[0]?.categories ??
-        res.classificationResult?.classifications?.[0]?.categories ??
-        []
-      );
-    }
+    function startSpectrumLoop() {
+      cancelAnimationFrame(state.spectrumRaf);
+      if (!state.analyser) return;
+      const analyser = state.analyser;
+      const binCount = analyser.frequencyBinCount;
+      state.specLastUpdate = 0;
+      if (LOG.spectrum) console.log('[CRY][spectrum] loop start');
 
-    async function onAudioChunkReceiver(chunkFloat32, deviceSr) {
-      if (!state.running) return;
-      const task = await ensureAudioTask().catch(() => null);
-      if (!task) return;
-      const params = getParams();
+      const td = state.tdAnalyser;
+      const tdBuf = td ? new Float32Array(td.fftSize) : null;
 
-      // Update meter from chunk (works even if visual analysers aren’t ready yet)
-      let s = 0; for (let i=0;i<chunkFloat32.length;i++){ const v=chunkFloat32[i]; s += v*v; }
-      setSignalRMS(Math.sqrt(s / Math.max(1, chunkFloat32.length)));
-
-      const x16 = resampleLinear(chunkFloat32, deviceSr, params.SR_TARGET);
-      for (let i=0;i<x16.length;i++) x16[i] = Math.max(-1, Math.min(1, x16[i]));
-      state.ring16k = concatFloat32(state.ring16k, x16);
-
-      const frameHop = Math.round(params.HOP_S * params.SR_TARGET);
-      const frameLen = Math.round(params.FRAME_LEN_S * params.SR_TARGET);
-
-      while (state.ring16k.length - state.lastPos >= frameHop) {
-        const end = state.lastPos + frameHop;
-        const start = Math.max(0, end - frameLen);
-        let w = state.ring16k.slice(start, end);
-        if (w.length < frameLen) {
-          const pad = new Float32Array(frameLen);
-          pad.set(w, frameLen - w.length);
-          w = pad;
-        }
-
-        const result = await task.classify(w, params.SR_TARGET);
-        const categories = extractCategories(result);
-
-        if (LOG.catEvery) {
-          window._dbgCatEvery = (window._dbgCatEvery || 0) + 1;
-          if ((window._dbgCatEvery % LOG.catEvery) === 0) {
-            const top = categories.slice(0,5).map(c => `${categoryLabel(c)}:${(c.score ?? 0).toFixed(3)}`);
-            console.log('[CRY][rx] top =', top.join(', '));
+      function spectrumTick(ts) {
+        if (!state.running || !state.analyser) return;
+        if (ts - state.specLastUpdate > 100) {
+          const buf = new Float32Array(binCount);
+          state.analyser.getFloatFrequencyData(buf);
+          for (let i = state.specStartIdx; i <= state.specEndIdx; i++) {
+            const db = Math.max(-100, Math.min(0, buf[i]));
+            state.specRawDb[i] = db;
+            state.specSmDb[i] = 0.8 * state.specSmDb[i] + 0.2 * db;
           }
-        }
-        if (LOG.firstResult && !window._dbgFirstMicResult) {
-          window._dbgFirstMicResult = true;
-          console.log('[CRY][rx] FIRST result =', result);
-        }
+          updateSpectrumChart();
 
-        const score = getCryScoreFromCategories(categories, params.INCLUDE_CLASSES);
-        pushScore(score);
+          // NEW: update RMS from time-domain analyser
+          if (td && tdBuf) {
+            td.getFloatTimeDomainData(tdBuf);
+            let s = 0;
+            for (let i=0;i<tdBuf.length;i++){ const v = tdBuf[i]; s += v*v; }
+            const r = Math.sqrt(s / Math.max(1, tdBuf.length));
+            setSignalRMS(r);
+          }
 
-        state.lastPos += frameHop;
-        if (state.lastPos > frameLen * 4) {
-          const cut = state.lastPos - frameLen;
-          state.ring16k = state.ring16k.slice(cut);
-          state.lastPos -= cut;
+          state.specLastUpdate = ts;
         }
+        state.spectrumRaf = requestAnimationFrame(spectrumTick);
       }
+      state.spectrumRaf = requestAnimationFrame(spectrumTick);
     }
+
+    function stopSpectrumLoop() {
+      if (state.spectrumRaf && LOG.spectrum) console.log('[CRY][spectrum] loop stop');
+      cancelAnimationFrame(state.spectrumRaf);
+      state.spectrumRaf = 0;
+    }
+
+    /* ---------- Mic enable UI (user gesture) ---------- */
+    function updateMicButton() {
+      // We classify from the remote stream; hide mic button entirely.
+      enableMicBtn.style.display = 'none';
+    }
+
+    enableMicBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        await ensureAudioTask();
+        await startReceiverMicGraph();
+        setStatus('Mic inference (receiver)');
+      } catch (err) {
+        console.warn('[CRY] enable mic failed', err);
+        setStatus('Mic error – see console');
+      } finally {
+        updateMicButton();
+      }
+    });
 
     /* ---------- Mode switching ---------- */
     async function applyAudioMode() {
+      setWhereLabel(audioWhere);
+
       if (_activeAudio.enabled === audioEnabled && _activeAudio.where === audioWhere) return;
       _activeAudio = { enabled: audioEnabled, where: audioWhere };
+
+      console.log('[CRY][mode] apply → enabled=', audioEnabled, 'where=', audioWhere);
 
       if (!state.running) return;
 
       if (!audioEnabled) {
+        setStatus('Audio AI disabled');
+        stopSpectrumLoop();
+        stopReceiverMicGraph();
         stopRemoteStreamGraph();
-        els.rmsFill.style.width = '0%';
-        els.dbLabel.textContent = '–∞ dB';
+        updateMicButton();
+        // zero the meter
+        setSignalRMS(0);
         return;
       }
-      // We always tap the remote stream for meter + spectrum.
-      if (state.streamRemote) {
-        startRemoteStreamGraph(audioWhere === 'receiver'); // only classify locally in receiver mode
-      } else {
-        stopRemoteStreamGraph();
+
+      if (audioWhere === 'receiver') {
+        // Classify from REMOTE stream on the receiver
+        stopReceiverMicGraph();
+        updateMicButton(); // keep hidden
+        if (state.streamRemote) {
+          startRemoteStreamGraph(true); // classify = true
+          setStatus('Inference on receiver (tapped remote stream)');
+        } else {
+          setStatus('Receiver inference – waiting for remote stream…');
+        }
+      } else { // 'sender'
+        // No local classification; keep spectrum/RMS from remote for health
+        stopReceiverMicGraph();
+        updateMicButton();
+        if (state.streamRemote) {
+          startRemoteStreamGraph(false); // spectrum only, scores come via DC
+          setStatus('Remote inference (sender) – waiting for scores…');
+        } else {
+          stopRemoteStreamGraph();
+          setStatus('Remote inference (sender) – waiting for stream…');
+        }
       }
     }
 
-    /* ---------- Enable/Disable audio buttons ---------- */
+    /* ---------- Status overlay helpers ---------- */
+    let hideStatusTimer = null;
+    function showStatus(msg) {
+      setStatus(msg);
+      els.overlay.classList.remove('hidden');
+      if (msg === 'Connected') {
+        if (hideStatusTimer) clearTimeout(hideStatusTimer);
+        hideStatusTimer = setTimeout(() => els.overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
+      } else {
+        if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
+        els.overlay.classList.remove('hidden');
+      }
+    }
+
+    /* ---------- Enable/Disable audio buttons (same as pose) ---------- */
     function updateAudioButtons() {
       if (remoteVideo.muted) {
         enableAudioBtn.style.display = 'block';
@@ -801,7 +1194,7 @@
       remoteVideo.muted = true; updateAudioButtons();
     });
 
-    /* ---------- Fullscreen ---------- */
+    /* ---------- Fullscreen (same as pose) ---------- */
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -818,11 +1211,13 @@
       fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
     });
 
-    // UI bindings
     function initUI() {
       Object.values(els.inputs).forEach(inp => {
         inp?.addEventListener('change', () => updateChartWindow(getParams()));
       });
+      els.showRawSpec?.addEventListener('change', updateSpectrumChartVisibility);
+      els.showSmSpec?.addEventListener('change', updateSpectrumChartVisibility);
+      updateMicButton();
     }
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initUI);
@@ -830,14 +1225,21 @@
       initUI();
     }
 
-    // Initialize chart before we connect (with fixed y-axis)
+    // WebAudio unlock on user gesture (iOS/Safari safety)
+    ['click','touchstart'].forEach(ev =>
+      stage.addEventListener(ev, () => state.audioCtx?.resume?.(), { passive: true })
+    );
+
+    // Initialize charts/labels before we connect
     setupChart();
+    setWhereLabel(audioWhere);
+    setStatus('Waiting for mode from sender…');
 
     /* ---------- WebRTC core ---------- */
     const core = new ReceiverCore({
       wsEndpoint: WS_ENDPOINT,
       room,
-      onStatus: (msg) => { if (LOG.status) console.log('[CRY][status]', msg); }, // no on-page logs
+      onStatus: showStatus,
       onStream: (stream) => {
         console.log('[CRY][pc] onStream, tracks=', stream.getTracks().map(t=>t.kind));
         if (remoteVideo.srcObject !== stream) {
@@ -846,6 +1248,9 @@
           tryStartMuted();
           if (state.running && audioEnabled) {
             startRemoteStreamGraph(audioWhere === 'receiver'); // classify only in receiver mode
+            setStatus(audioWhere === 'receiver'
+              ? 'Inference on receiver (tapped remote stream)'
+              : 'Remote inference (sender) – waiting for scores…');
           }
         }
       },
@@ -856,6 +1261,7 @@
         ch.onopen  = () => {
           console.log('[CRY][dc] open');
           state.audioCtx?.resume?.().catch(()=>{});
+          // politely ask the sender to (re)announce modes, in case our page loaded late
           try { ch.send(JSON.stringify({ type: 'need-modes' })); } catch {}
         };
         ch.onclose = () => { console.log('[CRY][dc] close'); };
@@ -875,13 +1281,27 @@
             applyAudioMode();
           } else if (msg.type === 'audio') {
             const categories = msg.categories || [];
-            if (!audioEnabled || audioWhere !== 'sender') {
-              audioEnabled = true; audioWhere = 'sender'; applyAudioMode();
+            if (LOG.dc) {
+              const top = categories.slice(0, 5).map(c =>
+                `${categoryLabel(c)}:${(c.score ?? 0).toFixed(3)}`
+              );
+              console.log('[CRY][dc] top =', top.join(', '));
             }
+
+            // If scores arrive before we heard the mode, assume sender-inference and enable it.
+            if (!audioEnabled || audioWhere !== 'sender') {
+              audioEnabled = true;
+              audioWhere = 'sender';
+              applyAudioMode();
+            }
+
             if (state.running) {
               const params = getParams();
               const score = getCryScoreFromCategories(categories, params.INCLUDE_CLASSES);
               pushScore(score);
+              if (LOG.dc && (state.timesSec.length % 20) === 0) {
+                console.log('[CRY][dc] categories n=', categories.length, 'score=', score.toFixed(3));
+              }
             }
           }
         };
@@ -892,9 +1312,26 @@
 
     core.start().catch(err => console.warn('[CRY] core start error', err));
 
+    /* ---------- Wire UI & initial boot ---------- */
+    document.addEventListener('DOMContentLoaded', () => {
+      console.log('[CRY] DOM ready');
+      Object.values(els.inputs).forEach(inp => {
+        inp?.addEventListener('change', () => {
+          console.log('[CRY][ui] params changed → update chart window');
+          updateChartWindow(getParams());
+        });
+      });
+      els.showRawSpec?.addEventListener('change', updateSpectrumChartVisibility);
+      els.showSmSpec?.addEventListener('change', updateSpectrumChartVisibility);
+      updateMicButton();
+    });
+
     window.addEventListener('beforeunload', () => {
       try { core.close(); } catch {}
-      stopRemoteStreamGraph();
+      stopSpectrumLoop();
+      stopReceiverMicGraph();
+      stopRemoteStreamGraph(); // (renamed)
+      console.log('[CRY] unload cleanup done');
     });
   </script>
 </body>
