@@ -1165,31 +1165,39 @@
 
     // Cap ON sliders + enforce OFF≤ON + sync OFF scales to ON
     function applyOnCaps() {
-      // EMA caps + sync OFF scale
-      onTh.max      = '0.500';
-      offTh.max     = onTh.max;
-
-      // DRIFT caps + sync OFF scale
-      driftOnEl.max = '1.000';
-      driftOff.max  = driftOnEl.max;
-
-      // INT caps are dynamic by tau; sync OFF scale to the same
-      const intCap = Math.min(2.0, MOVE.INT_TAU * 0.8);
-      intOnEl.max = intCap.toFixed(3);
-      intOff.max  = intOnEl.max;
-
-      // Clamp values to caps
-      if (parseFloat(onTh.value) > parseFloat(onTh.max)) {
-        onTh.value = onTh.max; MOVE.ON = parseFloat(onTh.max); onOut.textContent = fmt(MOVE.ON);
-      }
-      if (parseFloat(driftOnEl.value) > parseFloat(driftOnEl.max)) {
-        driftOnEl.value = driftOnEl.max; MOVE.DRIFT_ON = parseFloat(driftOnEl.max); driftOnOut.textContent = fmt(MOVE.DRIFT_ON);
-      }
-      if (parseFloat(intOnEl.value) > parseFloat(intOnEl.max)) {
-        intOnEl.value = intOnEl.max; MOVE.INT_ON = parseFloat(intOnEl.max); intOnOut.textContent = fmt(MOVE.INT_ON);
-      }
-
-      // OFF ≤ ON (and keep links honored)
+      const MAX_SAFE = 10.0;
+    
+      const setMaxAtLeast = (inputEl, minCap) => {
+        const currentMax = parseFloat(inputEl.max || '0') || 0;
+        const want = Math.min(MAX_SAFE, Math.max(currentMax, minCap));
+        if (!Number.isFinite(want)) return;
+        inputEl.max = want.toFixed(3);
+      };
+    
+      // --- EMA: base cap was 0.500; raise to include calibrated MOVE.ON
+      setMaxAtLeast(onTh, MOVE.ON);
+      offTh.max = onTh.max;
+    
+      // --- DRIFT: base cap was 1.000; raise to include calibrated MOVE.DRIFT_ON
+      setMaxAtLeast(driftOnEl, MOVE.DRIFT_ON);
+      driftOff.max = driftOnEl.max;
+    
+      // --- INT: keep the dynamic baseline cap, but never below calibrated MOVE.INT_ON
+      const baseIntCap = Math.min(2.0, MOVE.INT_TAU * 0.8);
+      setMaxAtLeast(intOnEl, Math.max(baseIntCap, MOVE.INT_ON));
+      intOff.max = intOnEl.max;
+    
+      // ---- Clamp UI values within caps (won’t reduce if caps were raised above values)
+      if (parseFloat(onTh.value) > parseFloat(onTh.max)) onTh.value = onTh.max;
+      MOVE.ON = parseFloat(onTh.value) || MOVE.ON; onOut.textContent = fmt(MOVE.ON);
+    
+      if (parseFloat(driftOnEl.value) > parseFloat(driftOnEl.max)) driftOnEl.value = driftOnEl.max;
+      MOVE.DRIFT_ON = parseFloat(driftOnEl.value) || MOVE.DRIFT_ON; driftOnOut.textContent = fmt(MOVE.DRIFT_ON);
+    
+      if (parseFloat(intOnEl.value) > parseFloat(intOnEl.max)) intOnEl.value = intOnEl.max;
+      MOVE.INT_ON = parseFloat(intOnEl.value) || MOVE.INT_ON; intOnOut.textContent = fmt(MOVE.INT_ON);
+    
+      // ---- OFF ≤ ON (and obey link flags)
       if (offLink.ema || MOVE.OFF > MOVE.ON) {
         MOVE.OFF = Math.min(MOVE.OFF, MOVE.ON);
       }
@@ -1199,11 +1207,11 @@
       if (offLink.drift || MOVE.DRIFT_OFF > MOVE.DRIFT_ON) {
         MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON);
       }
-
-      // Also clamp OFF against their scale caps
-      offTh.value     = Math.min(parseFloat(offTh.max), MOVE.OFF); offOut.textContent = fmt(MOVE.OFF);
-      intOff.value    = Math.min(parseFloat(intOff.max), MOVE.INT_OFF); intOffOut.textContent = fmt(MOVE.INT_OFF);
-      driftOff.value  = Math.min(parseFloat(driftOff.max), MOVE.DRIFT_OFF); driftOffOut.textContent = fmt(MOVE.DRIFT_OFF);
+    
+      // ---- Reflect OFFs into UI (also clamped to their maxes)
+      offTh.value    = Math.min(parseFloat(offTh.max),    MOVE.OFF);       offOut.textContent    = fmt(MOVE.OFF);
+      intOff.value   = Math.min(parseFloat(intOff.max),   MOVE.INT_OFF);   intOffOut.textContent = fmt(MOVE.INT_OFF);
+      driftOff.value = Math.min(parseFloat(driftOff.max), MOVE.DRIFT_OFF); driftOffOut.textContent = fmt(MOVE.DRIFT_OFF);
     }
 
     function initMovePanel() {
