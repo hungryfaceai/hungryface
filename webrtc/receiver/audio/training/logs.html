@@ -332,20 +332,30 @@
       return a[lo] * (1 - t) + a[hi] * t;
     }
 
-    /* ========= Chart.js % labels plugin ========= */
+    /* ========= Chart.js % labels plugin ========= *//* ========= Chart.js % labels plugin (opt-in per chart) ========= */
     const pctLabelPlugin = {
       id: 'pctLabel',
-      afterDatasetsDraw(chart, args, options){
-        // Only draw when the chart opts-in with plugins.pctLabel
-        if (!options) return;
-        const ds = chart.data.datasets?.[0]; if (!ds) return;
-        const { ctx } = chart; const meta = chart.getDatasetMeta(0);
-        ctx.save(); ctx.font = (options?.font) || '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      afterDatasetsDraw(chart, args, options) {
+        // Only run when explicitly enabled on this chart AND the chart is a bar chart
+        if (!options || options.enabled !== true) return;
+        if (chart.config.type !== 'bar') return;
+    
+        const ds = chart.data.datasets?.[0];
+        if (!ds) return;
+    
+        const { ctx } = chart;
+        const meta = chart.getDatasetMeta(0);
+        ctx.save();
+        ctx.font = (options?.font) || '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
         ctx.fillStyle = options?.color || '#ddd';
+    
         const data = ds.data || [];
         meta.data.forEach((bar, i) => {
-          const v = Number(data[i]) || 0; const txt = `${Math.round(v*100)}%`;
-          const x = bar.x + 6; const y = bar.y + 4; ctx.fillText(txt, x, y);
+          const v = Number(data[i]) || 0;
+          const txt = `${Math.round(v * 100)}%`;
+          const x = bar.x + 6;
+          const y = bar.y + 4;
+          ctx.fillText(txt, x, y);
         });
         ctx.restore();
       }
@@ -644,7 +654,7 @@
         state.barDynW = new Chart(els.barsDynW.getContext('2d'), {
           type: 'bar',
           data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
-          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{} },
+          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{enabled: true} },
             scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
         });
       }
@@ -652,7 +662,7 @@
         state.barSavedW = new Chart(els.barsSavedW.getContext('2d'), {
           type: 'bar',
           data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
-          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{} },
+          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{enabled: true} },
             scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
         });
       }
