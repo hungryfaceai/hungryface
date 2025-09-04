@@ -90,7 +90,7 @@
           <label><span>Hybrid half-life (s, training EMA)</span><input id="HALF_LIFE_S" type="number" min="30" step="10" value="3600" /></label>
           <label><span>Max results from MP</span><input id="MAX_RESULTS" type="number" min="5" step="1" value="25" /></label>
 
-          <!-- NEW: ignore/penalty controls -->
+          <!-- Ignore/penalty controls -->
           <label><span>Ignore classes (training)</span>
             <input id="IGNORE_CLASSES" type="text" placeholder="Silence, Background noise, White noise">
           </label>
@@ -152,7 +152,7 @@
       <div class="section">
         <strong>Live top classes (Training)</strong>
         <canvas id="bars" height="180"></canvas>
-        <div class="muted" style="margin-top:6px;">Uses the <b>Top-K</b> setting above. Updates while training (mic, file, or folder).</div>
+        <div class="muted" style="margin-top:6px;">Uses the <b>Top-K</b> setting above. Updates while training (mic, file, or folder). Excluded classes are grey; we extend to show Top-K non-excluded.</div>
       </div>
 
       <!-- Weights – preview vs saved -->
@@ -257,7 +257,8 @@
       'btnRecompute','btnClear','btnExport',
       'trainAudio','weightsView','chart','bars','barsDynW','barsSavedW',
       'MODEL_NAME','btnModelUse','btnModelLoad',
-      'folderInp','btnChooseFolder','btnTrainFolder','btnStopTrainFolder','folderInfo'
+      'folderInp','btnChooseFolder','btnTrainFolder','btnStopTrainFolder','folderInfo',
+      'IGNORE_CLASSES','PENALTY_MAP'
     ].map(x => [x, document.getElementById(x)])) )();
 
     function setStatus(s){ els.status.textContent = s; log('info', s); }
@@ -377,6 +378,8 @@
 
     function MODEL_KEY(){ return `cryModelV1_${getModelName()}`; }
     function CALIB_KEY(){ return `cryCalibV1_${getModelName()}`; }
+    function IGNORE_KEY(){ return `cryIgnore_${getModelName()}`; }
+    function PENALTY_KEY(){ return `cryPenalty_${getModelName()}`; }
 
     function loadModel() {
       const raw = localStorage.getItem(MODEL_KEY());
@@ -404,13 +407,9 @@
       log('warn',`Cleared model “${getModelName()}” + its calibration & ignore/penalty settings.`);
     }
 
-    /* ========= Ignore / Penalty (per model) ========= */
-    function IGNORE_KEY(){ return `cryIgnore_${getModelName()}`; }
-    function PENALTY_KEY(){ return `cryPenalty_${getModelName()}`; }
-
+    /* ========= Ignore / Penalty ========= */
     function getIgnoreTokens(){
-      const el = document.getElementById('IGNORE_CLASSES');
-      const s = (el?.value ?? localStorage.getItem(IGNORE_KEY()) ?? '').trim();
+      const s = (els.IGNORE_CLASSES?.value ?? localStorage.getItem(IGNORE_KEY()) ?? '').trim();
       return s ? s.split(',').map(t=>t.trim().toLowerCase()).filter(Boolean) : [];
     }
     function shouldIgnore(name){
@@ -419,8 +418,7 @@
       return getIgnoreTokens().some(tok => n.includes(tok));
     }
     function getPenaltyMap(){
-      const el = document.getElementById('PENALTY_MAP');
-      const s = (el?.value ?? localStorage.getItem(PENALTY_KEY()) ?? '').trim();
+      const s = (els.PENALTY_MAP?.value ?? localStorage.getItem(PENALTY_KEY()) ?? '').trim();
       const map = {};
       if (!s) return map;
       s.split(',').forEach(pair=>{
@@ -436,7 +434,7 @@
     function updateStats(model, categories, dtSec) {
       const a = alphaForTau(dtSec, model.halfLifeSec || 3600);
       for (const { categoryName: name, score=0 } of categories) {
-        if (!name || shouldIgnore(name)) continue;   // ignore during training
+        if (!name || shouldIgnore(name)) continue;
         const s = model.classes[name] || (model.classes[name] = { n:0, sum:0, ema:0, emaPres:0 });
         s.n   += 1; s.sum += score; s.ema  = emaStep(s.ema, score, a); s.emaPres = emaStep(s.emaPres, score>0 ? 1 : 0, a);
       }
@@ -446,7 +444,7 @@
       const K = model.K || 6, kPrior = model.kPrior || 50;
       const raw = [];
       for (const [name, s] of Object.entries(model.classes || {})) {
-        if (shouldIgnore(name)) continue;           // skip blacklisted classes
+        if (shouldIgnore(name)) continue;
         const mean = s.sum / Math.max(1, s.n);
         const lambda = kPrior / (kPrior + (s.n || 0));
         const hybrid = (1 - lambda) * mean + lambda * (s.ema ?? 0);
@@ -464,7 +462,7 @@
       const preview = computeWeightsPreview(model);
       model.weights = preview;
       model.updatedAt = Date.now();
-      saveModel(model);  // persisted under current model name
+      saveModel(model);
       const lines = Object.entries(preview)
         .sort((a,b)=>b[1]-a[1])
         .map(([n,v]) => `${n.padEnd(24,' ')}  w=${(v).toFixed(3)}  n=${model.classes?.[n]?.n ?? 0}`);
@@ -533,7 +531,7 @@
       if (!state.barChart && els.bars) {
         state.barChart = new Chart(els.bars.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{ label: 'score', data: [], borderWidth: 1 }] },
+          data: { labels: [], datasets: [{ label: 'score', data: [], borderWidth: 1, backgroundColor: [], borderColor: [] }] },
           options: { indexAxis: 'y', animation: false, plugins: { legend: { display:false } },
             scales: { x: { min: 0, max: 1, title: { display:true, text:'score' } }, y: { ticks: { autoSkip: false } } } }
         });
@@ -555,15 +553,46 @@
         });
       }
     }
+
+    // NEW: clear the live Top-Classes chart
+    function clearTopBars(){
+      if (!state.barChart) return;
+      state.barChart.data.labels = [];
+      state.barChart.data.datasets[0].data = [];
+      state.barChart.data.datasets[0].backgroundColor = [];
+      state.barChart.data.datasets[0].borderColor = [];
+      state.barChart.update();
+    }
+
+    // UPDATED: show excluded in grey + extend to keep Top-K non-excluded visible
     function updateTopBars(cats){
       if (!els.bars) return;
       setupBars();
       const K = Math.max(1, Number(els.TOP_K.value) || 6);
-      const sorted = [...cats].sort((a,b)=> (b.score||0)-(a.score||0)).slice(0, K);
-      state.barChart.data.labels = sorted.map(c => c.categoryName || '(unnamed)');
-      state.barChart.data.datasets[0].data = sorted.map(c => c.score || 0);
+      const sorted = [...cats].sort((a,b)=> (b.score||0)-(a.score||0));
+
+      const display = [];
+      let kept = 0;
+      for (let i = 0; i < sorted.length && kept < K; i++) {
+        const c = sorted[i];
+        const excluded = shouldIgnore(c.categoryName);
+        display.push({ name: c.categoryName || '(unnamed)', v: c.score || 0, excluded });
+        if (!excluded) kept++;
+      }
+      // If we still didn't reach K non-excluded (rare: not enough classes), we just stop; display contains all we could.
+
+      const labels = display.map(d => d.name);
+      const values = display.map(d => d.v);
+      const bg = display.map(d => d.excluded ? 'rgba(107,114,128,0.85)' : 'rgba(96,165,250,0.85)');  // grey vs blue
+      const bd = display.map(d => d.excluded ? 'rgba(75,85,99,1)' : 'rgba(59,130,246,1)');
+
+      state.barChart.data.labels = labels;
+      state.barChart.data.datasets[0].data = values;
+      state.barChart.data.datasets[0].backgroundColor = bg;
+      state.barChart.data.datasets[0].borderColor = bd;
       state.barChart.update();
     }
+
     function setWeightsChart(chart, weightsDict){
       if (!chart) return;
       const entries = Object.entries(weightsDict || {}).sort((a,b)=>b[1]-a[1]);
@@ -574,32 +603,38 @@
 
     /* ========= Fusion scoring ========= */
     function ensurePerClassEma(weights) {
-      // Ensure tracked EMAs exist for positive weight classes; keep others (used by penalties).
       for (const n of Object.keys(weights || {})) {
         if (!state.perClassEma.has(n)) state.perClassEma.set(n, 0);
       }
-      // Do NOT delete extra keys; penalties may rely on them.
+    }
+    function getPenaltyMap(){
+      const s = (els.PENALTY_MAP?.value ?? localStorage.getItem(PENALTY_KEY()) ?? '').trim();
+      const map = {};
+      if (!s) return map;
+      s.split(',').forEach(pair=>{
+        const [k,v] = pair.split(':');
+        if (!k) return;
+        const w = Math.max(-1, Math.min(0, parseFloat(v)));
+        map[k.trim().toLowerCase()] = Number.isFinite(w) ? w : -0.3;
+      });
+      return map;
     }
     function fusedScoreFromCategories(categories, weights, dt) {
       const a = alphaForTau(dt, Number(els.CLASS_EMA_TAU_S.value) || 0.8);
 
-      // Update EMAs for all seen classes (ensures penalty classes get an EMA even if not in weights)
       for (const c of categories) {
         const name = c.categoryName; if (!name) continue;
         const prev = state.perClassEma.get(name) || 0;
         state.perClassEma.set(name, emaStep(prev, c.score || 0, a));
       }
-      // Also keep weight classes from decaying to undefined
       ensurePerClassEma(weights);
 
-      // Positive late fusion
       let fused = 0;
       for (const [name, w] of Object.entries(weights || {})) {
         fused += (w || 0) * (state.perClassEma.get(name) || 0);
       }
 
-      // Negative evidence (penalties by substring)
-      const pmap = getPenaltyMap();                    // { 'silence': -0.4, ... }
+      const pmap = getPenaltyMap();
       if (Object.keys(pmap).length) {
         for (const [tok, pen] of Object.entries(pmap)) {
           const token = String(tok || '').toLowerCase();
@@ -703,8 +738,8 @@
     let trainCtx=null, trainSrc=null, trainNode=null, trainSink=null;
 
     async function startMic(mode) {
-      await stopFolderTraining();         // ensure folder queue is down
-      await stopTrainingFile();           // ensure file graph is down
+      await stopFolderTraining();
+      await stopTrainingFile();
       await stopAll();
       setStatus(mode==='detect' ? 'Starting microphone (detect)…' : 'Starting microphone (train)…');
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
@@ -756,6 +791,7 @@
       state.ring=new Float32Array(0); state.lastPos=0; state.perClassEma.clear(); state.fusedEma=0; state.frameCount=0;
       state.asmLastLogTs = 0;
       setPill('idle', false); setRMS(0);
+      clearTopBars();                       /* A: clear live chart */
       if (wasRunning) log('warn','Stopped audio graph.');
     }
 
@@ -834,6 +870,7 @@
           log('ok', 'Calibration complete.', `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
           state.mode = 'idle';
           setPill('idle', false);
+          clearTopBars();                   /* A: clear live chart after calibration run */
         }
       };
       src.connect(node).connect(sink);
@@ -842,8 +879,8 @@
 
     async function startTrainingOnFile(file) {
       await stopFolderTraining();
-      await stopAll();          // stop mic graph
-      await stopTrainingFile(); // stop any prior file graph
+      await stopAll();
+      await stopTrainingFile();
 
       const url = URL.createObjectURL(file);
       els.trainAudio.src = url;
@@ -885,6 +922,7 @@
         setStatus('Training clip ended. Click “Recompute Weights”.');
         setPill('idle', false);
         state.mode='idle';
+        clearTopBars();                   /* A: clear when single-file training ends */
       };
     }
     async function stopTrainingFile(){
@@ -894,9 +932,10 @@
       try { trainSink?.disconnect(); } catch {}
       try { trainCtx && trainCtx.state!=='closed' && trainCtx.close(); } catch {}
       trainCtx=null; trainSrc=null; trainNode=null; trainSink=null;
+      clearTopBars();                     /* A: clear on manual stop */
     }
 
-    /* ========= Folder training (recursive via directory picker) ========= */
+    /* ========= Folder training ========= */
     let folderFiles = [];
     let folderIdx = 0;
     let folderActive = false;
@@ -909,7 +948,6 @@
       let i=0; while (i<minLen && split.every(a => a[i]===split[0][i])) i++;
       return split[0].slice(0, Math.max(0, i-1)).join('/') || '(root)';
     }
-
     function pickAudioFilesFromList(list){
       const arr = Array.from(list || []);
       return arr.filter(f => {
@@ -942,6 +980,7 @@
       if (folderIdx >= folderFiles.length) {
         await stopFolderTraining(true);
         log('ok', 'Folder training complete.');
+        clearTopBars();                   /* A: clear when folder sequence completes */
         return;
       }
       const f = folderFiles[folderIdx];
@@ -963,6 +1002,7 @@
       await stopTrainingFile();
       setPill('idle', false);
       state.mode = 'idle';
+      clearTopBars();                     /* A: clear on manual stop */
       if (!silent) log('warn','Stopped folder training.');
     }
 
@@ -1012,7 +1052,7 @@
       m.K = Number(els.TOP_K.value)||m.K||6;
       m.kPrior = Number(els.K_PRIOR.value)||m.kPrior||50;
       m.halfLifeSec = Number(els.HALF_LIFE_S.value)||m.halfLifeSec||3600;
-      const w = recomputeWeights(m);      // persists under current name
+      const w = recomputeWeights(m);
       renderWeights(w);
       setWeightsChart(state.barSavedW, w);
     };
@@ -1023,6 +1063,7 @@
       setWeightsChart(state.barDynW, {});
       setWeightsChart(state.barSavedW, {});
       setupChart();
+      clearTopBars();                     /* A: also clear after clear */
       setStatus(`Model “${name}” cleared.`);
     };
     els.btnExport.onclick = () => {
@@ -1036,13 +1077,13 @@
     // Model name controls
     els.btnModelUse.onclick = () => {
       const name = els.MODEL_NAME.value.trim() || 'default';
+      localStorage.setItem('cryActiveModelName', name);
       setModelName(name);
       setStatus(`Active model name set to “${name}”. New training/recompute will persist there.`);
-      // Refresh ignore/penalty fields for this name if saved
       const ignoreSaved = localStorage.getItem(IGNORE_KEY());
-      if (ignoreSaved && document.getElementById('IGNORE_CLASSES')) document.getElementById('IGNORE_CLASSES').value = ignoreSaved;
+      if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
       const penaltySaved = localStorage.getItem(PENALTY_KEY());
-      if (penaltySaved && document.getElementById('PENALTY_MAP')) document.getElementById('PENALTY_MAP').value = penaltySaved;
+      if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
     };
     els.btnModelLoad.onclick = () => {
       const name = els.MODEL_NAME.value.trim() || 'default';
@@ -1054,11 +1095,10 @@
       setWeightsChart(state.barDynW, preview);
       const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
       if (calib) log('ok', `Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
-      // Load ignore/penalty UI for this model
       const ignoreSaved = localStorage.getItem(IGNORE_KEY());
-      if (ignoreSaved && document.getElementById('IGNORE_CLASSES')) document.getElementById('IGNORE_CLASSES').value = ignoreSaved;
+      if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
       const penaltySaved = localStorage.getItem(PENALTY_KEY());
-      if (penaltySaved && document.getElementById('PENALTY_MAP')) document.getElementById('PENALTY_MAP').value = penaltySaved;
+      if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
       setStatus(`Loaded model “${name}”.`);
     };
 
@@ -1085,6 +1125,8 @@
         const key = (id==='IGNORE_CLASSES') ? IGNORE_KEY() : PENALTY_KEY();
         localStorage.setItem(key, el.value);
         log('info', `${id==='IGNORE_CLASSES'?'Ignore classes':'Penalty map'} updated for “${getModelName()}”.`);
+        // Refresh live bars instantly (they will adapt next inference); also clear if not training.
+        if (state.mode==='idle') clearTopBars();
       };
       el.addEventListener('change', save);
       el.addEventListener('blur', save);
@@ -1092,14 +1134,12 @@
 
     /* ========= Boot ========= */
     (function boot(){
-      const name = localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default';
+      const name = localStorage.getItem('cryActiveModelName') || 'default';
       setModelName(name);
 
-      // Charts
       setupBars();
       const ctx = els.chart.getContext('2d'); ctx && setupChart();
 
-      // Load current model & calibration
       const m = loadModel();
       renderWeights(m.weights||{});
       setWeightsChart(state.barSavedW, m.weights || {});
@@ -1109,11 +1149,10 @@
       const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
       if (calib) { state.thrOn=calib.thr_on; state.thrOff=calib.thr_off; log('ok',`Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`); }
 
-      // Hydrate ignore/penalty fields if saved
       const ignoreSaved = localStorage.getItem(IGNORE_KEY());
-      if (ignoreSaved && document.getElementById('IGNORE_CLASSES')) document.getElementById('IGNORE_CLASSES').value = ignoreSaved;
+      if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
       const penaltySaved = localStorage.getItem(PENALTY_KEY());
-      if (penaltySaved && document.getElementById('PENALTY_MAP')) document.getElementById('PENALTY_MAP').value = penaltySaved;
+      if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
 
       setStatus('Ready. Train (mic/file/folder) → Recompute Weights → Quiet Calibrate → Start Detect.');
     })();
