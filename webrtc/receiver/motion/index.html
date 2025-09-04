@@ -648,7 +648,7 @@
 
       ctx.strokeStyle = 'rgba(255,255,255,0.15)';
       ctx.beginPath(); ctx.moveTo(x + INNER, y + HEADER_H + 0.5);
-      ctx.lineTo(x + BOXW - INNER, y + HEADER_H + 0.5); // <-- typo fixed below if needed
+      ctx.lineTo(x + boxW - INNER, y + HEADER_H + 0.5); 
       ctx.stroke();
 
       const baseY = y + HEADER_H + INNER;
@@ -803,9 +803,15 @@
       }
 
       poseCtx.save();
-      drawMovementBadge(moving, moveEma, intScore, driftScore);
-      poseCtx.restore();
+      try {
+        drawMovementBadge(moving, moveEma, intScore, driftScore);
+      } catch (e) {
+        console.error('[drawMovementBadge]', e);
+      } finally {
+        try { poseCtx.restore(); } catch {}
+      }
       reflectPanel();
+
 
       if (canSend && poseWhere === 'receiver' && poseDC?.readyState === 'open') {
         poseDC.send(JSON.stringify({ type: 'movement', where: 'receiver', moving, scoreEma: moveEma, scoreInt: intScore, scoreDrift: driftScore, ts: now }));
