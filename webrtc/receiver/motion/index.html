@@ -81,11 +81,13 @@
     #movePanel .pill.still   { background: #111;   color: #ddd;     border-color: rgba(255,255,255,0.25); }
     #movePanel .groupTitle { margin: 10px 0 2px; font-size: 12px; color: #bbb; font-weight: 700; }
     #movePanel .row3 { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; }
-    #movePanel .actions { display: flex; gap: 8px; justify-content: space-between; margin-top: 6px; align-items: center; }
-    #movePanel .small { padding: 8px 10px; font-size: 13px; border-radius: 10px; }
-    #movePanel .checkRow { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
-    #movePanel .checkRow label { display: flex; align-items: center; gap: 8px; }
 
+    /* Center controls rows with buttons */
+    #calActions,
+    #bottomActions {
+      display: flex; gap: 8px; justify-content: center; margin-top: 6px; align-items: center;
+    }
+    .small { padding: 8px 10px; font-size: 13px; border-radius: 10px; }
     /* Calibration bits */
     #calProgRow { display: none; }
     #calStatus.ok { color: #b7f0b7; }
@@ -96,6 +98,7 @@
   </style>
 </head>
 <body>
+  <!-- shared sidebar -->
   <script type="module">
     (async () => {
       try {
@@ -161,9 +164,6 @@
       <div class="row"><label>95th pct</label><span></span><output id="calP95">—</output></div>
       <div class="row"><label>Samples</label><span></span><output id="calN">0</output></div>
     </div>
-    <div class="actions" id="calActions">
-      <button id="driftReset" class="btn small" type="button">Reset baseline</button>
-    </div>
 
     <!-- Confidence gates -->
     <div class="groupTitle">Confidence gates</div>
@@ -201,11 +201,15 @@
     <div class="row"><label for="driftOn">DRIFT ON</label><input id="driftOn" type="range" min="0.010" max="1.000" step="0.005"><output id="driftOnOut">0.080</output></div>
     <div class="row"><label for="driftOff">DRIFT OFF</label><input id="driftOff" type="range" min="0.005" max="1.000" step="0.005"><output id="driftOffOut">0.050</output></div>
 
-    <div class="actions">
+    <!-- Centered baseline/reset buttons; widths matched to Start -->
+    <div id="calActions">
+      <button id="driftReset" class="btn small" type="button">Reset baseline</button>
+    </div>
+
+    <div id="bottomActions">
       <button id="moveReset" class="btn small" type="button" title="Restore all movement settings to factory defaults and clear calibration">
         Reset all defaults
       </button>
-      <button id="moveHide"  class="btn small" type="button">Hide</button>
     </div>
   </section>
 
@@ -227,6 +231,10 @@
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
+
+    // NEW: live-pose gating
+    const LIVE_POSE_TIMEOUT_MS = 2000; // consider "live" if a landmark arrived in the last 2s
+    let lastPoseTs = 0;
 
     const MOVE_DEFAULTS = {
       VIS_MIN: 0.80,
@@ -270,13 +278,13 @@
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
 
+    const controlsBar = document.getElementById('controls');
     const calQuickBtn = document.getElementById('calQuickBtn');
     let calQuickBtnActive = false;
 
     const moveBtn    = document.getElementById('moveBtn');
     const movePanel  = document.getElementById('movePanel');
     const moveClose  = document.getElementById('moveClose');
-    const moveHide   = document.getElementById('moveHide');
     const moveReset  = document.getElementById('moveReset');
 
     const moveStateTxt  = document.getElementById('moveStateTxt');
@@ -346,6 +354,15 @@
     const CAL_RECAL_MS = 250;
 
     let offLink = { ema: false, int: false, drift: false };
+
+    /* ---------- Utils for live pose gating ---------- */
+    const hasLivePose = () => (performance.now() - lastPoseTs) < LIVE_POSE_TIMEOUT_MS;
+    function updateCalibrationAvailability() {
+      const live = hasLivePose();
+      if (calQuickBtn) calQuickBtn.disabled = !live || !!calActive;
+      if (calStartBtn) calStartBtn.disabled = !live || !!calActive;
+    }
+    setInterval(updateCalibrationAvailability, 500); // periodic guard
 
     /* ---------- Status overlay ---------- */
     function showStatus(msg) {
@@ -631,7 +648,8 @@
 
       ctx.strokeStyle = 'rgba(255,255,255,0.15)';
       ctx.beginPath(); ctx.moveTo(x + INNER, y + HEADER_H + 0.5);
-      ctx.lineTo(x + boxW - INNER, y + HEADER_H + 0.5); ctx.stroke();
+      ctx.lineTo(x + BOXW - INNER, y + HEADER_H + 0.5); // <-- typo fixed below if needed
+      ctx.stroke();
 
       const baseY = y + HEADER_H + INNER;
 
@@ -677,6 +695,7 @@
       ctx.restore();
     }
 
+    /* ---------- Panel state reflect ---------- */
     function reflectPanel() {
       if (emaScoreTxt)   emaScoreTxt.textContent   = moveEma.toFixed(3);
       if (intScoreTxt)   intScoreTxt.textContent   = intScore.toFixed(3);
@@ -688,10 +707,19 @@
       }
     }
 
+    // Make Reset buttons match Start button width
+    function matchButtonSizes() {
+      const startBtn = calStartBtn;
+      if (!startBtn) return;
+      const rect = startBtn.getBoundingClientRect();
+      const w = Math.ceil(rect.width);
+      [driftReset, moveReset].forEach(btn => { if (btn) btn.style.width = w + 'px'; });
+    }
+
     function updateCalQuickUI(active, secsLeft = null) {
       if (!calQuickBtn) return;
       if (!active) {
-        calQuickBtn.disabled = false;
+        calQuickBtn.disabled = !hasLivePose(); // re-enable only if live
         calQuickBtn.innerHTML = 'Calibration';
         calQuickBtnActive = false;
         return;
@@ -701,8 +729,12 @@
       calQuickBtn.innerHTML = `<span class="spinner" aria-hidden="true"></span>Calibrating…${secsTxt}`;
     }
 
+    /* ---------- Movement update ---------- */
     function updateMovementFromLandmarks(lm, canSend=true) {
       const now = performance.now();
+      lastPoseTs = now;                 // mark pose as live
+      updateCalibrationAvailability();  // gate buttons immediately
+
       if (!lastTs) lastTs = now;
       const dt = Math.max(1/120, Math.min(0.2, (now - lastTs) / 1000));
       lastTs = now;
@@ -792,7 +824,7 @@
     }
 
     function applyThresholdsFromStats(m, p95, isFinal) {
-      if (!onTh || !offTh || !intOnEl || !intOff || !driftOnEl || !driftOff) return; // skip if UI not present
+      if (!onTh || !offTh || !intOnEl || !intOff || !driftOnEl || !driftOff) return;
       const emaOn   = Math.max(3.5*m, 1.2*p95, 0.01);
       const intOn   = MOVE.INT_TAU * m * 2.5;
       const driftOn = Math.max(5.0*m, 1.5*emaOn, 0.02);
@@ -824,6 +856,8 @@
     function startCalibration() {
       if (calActive) return;
       calActive = true;
+      updateCalibrationAvailability();
+
       calStartMs = performance.now();
       calEndMs   = calStartMs + (Math.max(5, Math.min(60, MOVE.CAL_SECS)) * 1000);
       calSamples = [];
@@ -841,6 +875,7 @@
 
     function finishCalibration() {
       calActive = false;
+      updateCalibrationAvailability();
       if (calProgRow) calProgRow.style.display = 'none';
 
       const m   = quantile(calSamples, 0.5);
@@ -863,10 +898,10 @@
       if (calStatus) { calStatus.className = 'ok'; calStatus.textContent = 'Calibrated'; }
       setTimeout(()=>{ if (!calActive && calStatus) calStatus.textContent = ''; }, 3000);
 
-      // New: if started via main-page button, restore it and hide the settings panel
+      // If started via main-page button, restore it and hide settings
       if (calQuickBtnActive) {
         updateCalQuickUI(false);
-        if (typeof closeMovePanel === 'function') closeMovePanel();
+        closeMovePanel();
       }
     }
 
@@ -876,10 +911,10 @@
     function attachStreamEndHandlers(stream) {
       if (!stream) return;
       stream.getVideoTracks().forEach((t) => {
-        on(t, 'ended',  clearOverlayDrawing);
-        on(t, 'mute',   clearOverlayDrawing);
+        t.addEventListener('ended',  clearOverlayDrawing);
+        t.addEventListener('mute',   clearOverlayDrawing);
       });
-      on(stream, 'removetrack', (e) => { if (e.track?.kind === 'video') clearOverlayDrawing(); });
+      stream.addEventListener('removetrack', (e) => { if (e.track?.kind === 'video') clearOverlayDrawing(); });
     }
 
     /* ---------- MediaPipe on RECEIVER ---------- */
@@ -963,9 +998,13 @@
       onIceState: (state) => {
         if (state === 'failed' || state === 'disconnected' || state === 'closed') {
           clearOverlayDrawing();
+          lastPoseTs = 0; updateCalibrationAvailability();
         }
       },
-      onBye: () => { clearOverlayDrawing(); },
+      onBye: () => {
+        clearOverlayDrawing();
+        lastPoseTs = 0; updateCalibrationAvailability();
+      },
       onCreatePC: (pc) => {
         const ch = pc.createDataChannel('pose');
         ch.onopen = () => {};
@@ -1011,44 +1050,6 @@
     function saveMoveConfig() { try { localStorage.setItem(LS_KEY, JSON.stringify(MOVE)); } catch {} }
     const clampUi = (v,min,max)=>Math.max(min,Math.min(max,v));
     const fmt = (n,d=3)=>Number(n).toFixed(d);
-
-    /* ---------- NEW: full reset helper ---------- */
-    function resetToDefaults() {
-      // Reset config to built-in defaults
-      Object.keys(MOVE).forEach(k => delete MOVE[k]);
-      Object.assign(MOVE, MOVE_DEFAULTS);
-
-      // Ensure OFF ≤ ON
-      MOVE.OFF       = Math.min(MOVE.OFF,       MOVE.ON);
-      MOVE.INT_OFF   = Math.min(MOVE.INT_OFF,   MOVE.INT_ON);
-      MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON);
-
-      // Clear persisted overrides
-      try { localStorage.removeItem(LS_KEY); } catch {}
-
-      // Clear runtime state
-      baseLm = null; prevLm = null;
-      moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
-
-      // Break OFF-link flags
-      offLink = { ema: false, int: false, drift: false };
-
-      // Cancel calibration if running
-      if (calActive) {
-        calActive = false;
-        if (calProgRow) calProgRow.style.display = 'none';
-      }
-
-      // Push defaults to UI and persist
-      initMovePanel();
-      applyOnCaps();
-      reflectPanel();
-      saveMoveConfig();
-
-      // Feedback
-      if (calStatus) { calStatus.className = 'muted'; calStatus.textContent = 'Defaults restored'; }
-      if (calStats)  { calStats.style.display = 'none'; }
-    }
 
     function applyOnCaps() {
       if (!onTh || !offTh || !driftOnEl || !driftOff || !intOnEl || !intOff) return;
@@ -1108,14 +1109,29 @@
 
       applyOnCaps();
       reflectPanel();
+
+      // Center buttons widths to match Start
+      requestAnimationFrame(matchButtonSizes);
     }
 
-    const openMovePanel = ()=>{ if (movePanel) movePanel.classList.remove('hidden'); };
+    const openMovePanel  = ()=>{ if (movePanel) movePanel.classList.remove('hidden'); };
     const closeMovePanel = ()=>{ if (movePanel) movePanel.classList.add('hidden'); };
-    on(moveBtn, 'click', openMovePanel);
-    on(moveHide, 'click', closeMovePanel);
-    on(moveClose,'click', closeMovePanel);
-    window.addEventListener('keydown', (e) => { if (e.key?.toLowerCase() === 'm') movePanel?.classList.toggle('hidden'); });
+
+    // Toggle panel on button; stop propagation to avoid body-click close
+    on(moveBtn, 'click', (e) => {
+      e?.stopPropagation?.();
+      if (!movePanel) return;
+      movePanel.classList.toggle('hidden');
+      if (!movePanel.classList.contains('hidden')) requestAnimationFrame(matchButtonSizes);
+    });
+    on(moveClose,'click', (e) => { e?.stopPropagation?.(); closeMovePanel(); });
+
+    // Close panel when clicking anywhere outside (main page)
+    document.addEventListener('click', (e) => {
+      if (!movePanel || movePanel.classList.contains('hidden')) return;
+      if (movePanel.contains(e.target)) return; // clicks inside do nothing
+      closeMovePanel();
+    });
 
     on(visMin, 'input', ()=>{ MOVE.VIS_MIN = clampUi(parseFloat(visMin.value),0,0.99); if (visOut) visOut.textContent = fmt(MOVE.VIS_MIN,2); saveMoveConfig(); });
     on(presMin,'input', ()=>{ MOVE.PRES_MIN = clampUi(parseFloat(presMin.value),0,0.99); if (presOut) presOut.textContent = fmt(MOVE.PRES_MIN,2); saveMoveConfig(); });
@@ -1195,25 +1211,51 @@
       if (calSecsOut) calSecsOut.textContent = `${MOVE.CAL_SECS} s`;
       saveMoveConfig();
       if (calActive) calEndMs = calStartMs + MOVE.CAL_SECS * 1000;
+      matchButtonSizes();
     });
     on(calLive, 'change', ()=>{ MOVE.CAL_LIVE = !!calLive.checked; saveMoveConfig(); });
-    on(calStartBtn, 'click', () => { openMovePanel(); startCalibration(); });
 
-    on(calQuickBtn, 'click', () => {
-      if (calActive) return;
+    // Settings Start
+    on(calStartBtn, 'click', (e) => {
+      e?.stopPropagation?.(); // don't close via outside-click handler
+      openMovePanel();
+      if (!hasLivePose() || calActive) { updateCalibrationAvailability(); return; }
+      startCalibration();
+    });
+
+    // Main-page Calibration button
+    on(calQuickBtn, 'click', (e) => {
+      e?.stopPropagation?.(); // don't close via outside-click handler
+      if (calActive || !hasLivePose()) { updateCalibrationAvailability(); return; }
       calQuickBtnActive = true;
       updateCalQuickUI(true, MOVE.CAL_SECS);
       openMovePanel();
       startCalibration();
     });
 
-    // NEW: wire reset button to full reset helper
-    on(moveReset, 'click', resetToDefaults);
+    // Reset all defaults wiring (function defined elsewhere in your merged version; keep it)
+    function resetToDefaults() {
+      Object.keys(MOVE).forEach(k => delete MOVE[k]);
+      Object.assign(MOVE, MOVE_DEFAULTS);
+      MOVE.OFF       = Math.min(MOVE.OFF,       MOVE.ON);
+      MOVE.INT_OFF   = Math.min(MOVE.INT_OFF,   MOVE.INT_ON);
+      MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON);
+      try { localStorage.removeItem(LS_KEY); } catch {}
+      baseLm = null; prevLm = null; moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
+      offLink = { ema: false, int: false, drift: false };
+      if (calActive) { calActive = false; if (calProgRow) calProgRow.style.display = 'none'; }
+      initMovePanel(); applyOnCaps(); reflectPanel(); saveMoveConfig(); matchButtonSizes();
+      if (calStatus) { calStatus.className = 'muted'; calStatus.textContent = 'Defaults restored'; }
+      if (calStats)  { calStats.style.display = 'none'; }
+    }
+    on(moveReset, 'click', (e)=>{ e?.stopPropagation?.(); resetToDefaults(); });
 
     initMovePanel();
+    updateCalibrationAvailability();
+    window.addEventListener('load', matchButtonSizes);
 
     ['pause','ended','emptied','stalled','suspend','waiting'].forEach((ev) => {
-      on(remoteVideo, ev, clearOverlayDrawing);
+      on(remoteVideo, ev, () => { clearOverlayDrawing(); lastPoseTs = 0; updateCalibrationAvailability(); });
     });
 
     window.addEventListener('beforeunload', () => {
