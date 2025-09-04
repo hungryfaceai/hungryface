@@ -800,12 +800,22 @@
 
     // Make Reset buttons match Start button width
     function matchButtonSizes() {
-      const startBtn = calStartBtn;
-      if (!startBtn) return;
-      const rect = startBtn.getBoundingClientRect();
+      // Only measure when the panel is visible (not .hidden)
+      if (!movePanel || movePanel.classList.contains('hidden') || !calStartBtn) return;
+    
+      const rect = calStartBtn.getBoundingClientRect();
       const w = Math.ceil(rect.width);
-      [driftReset, moveReset].forEach(btn => { if (btn) btn.style.width = w + 'px'; });
+    
+      // Guard: don't write bad widths
+      if (!w || w < 10) return;
+    
+      [driftReset, moveReset].forEach(btn => {
+        if (!btn) return;
+        btn.style.minWidth = w + 'px';
+        btn.style.width = w + 'px';
+      });
     }
+
 
     function updateCalQuickUI(active, secsLeft = null) {
       if (!calQuickBtn) return;
@@ -1228,7 +1238,13 @@
       requestAnimationFrame(matchButtonSizes);
     }
 
-    const openMovePanel  = ()=>{ if (movePanel) movePanel.classList.remove('hidden'); };
+    //const openMovePanel  = ()=>{ if (movePanel) movePanel.classList.remove('hidden'); };
+    function openMovePanel(){
+      if (!movePanel) return;
+      movePanel.classList.remove('hidden');
+      // Double RAF to ensure layout/metrics are ready
+      requestAnimationFrame(() => requestAnimationFrame(matchButtonSizes));
+    }
     const closeMovePanel = ()=>{ if (movePanel) movePanel.classList.add('hidden'); };
 
     on(moveBtn, 'click', (e) => {
@@ -1367,6 +1383,11 @@
     initMovePanel();
     updateCalibrationAvailability();
     window.addEventListener('load', matchButtonSizes);
+
+    // Re-run sizing on resize (only when the panel is visible)
+    window.addEventListener('resize', () => {
+      if (!movePanel?.classList.contains('hidden')) matchButtonSizes();
+    });
 
     ['pause','ended','emptied','stalled','suspend','waiting'].forEach((ev) => {
       on(remoteVideo, ev, () => { clearOverlayDrawing(); lastPoseTs = 0; updateCalibrationAvailability(); });
