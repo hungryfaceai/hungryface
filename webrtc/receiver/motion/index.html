@@ -88,6 +88,7 @@
       display: flex; gap: 8px; justify-content: center; margin-top: 6px; align-items: center;
     }
     .small { padding: 8px 10px; font-size: 13px; border-radius: 10px; }
+
     /* Calibration bits */
     #calProgRow { display: none; }
     #calStatus.ok { color: #b7f0b7; }
@@ -197,6 +198,10 @@
     <div class="checkRow">
       <label><input id="driftTorsoRel" type="checkbox"> Torso-relative baseline (reduces camera shake)</label>
     </div>
+    <!-- Baseline overlay toggle -->
+    <div class="checkRow">
+      <label><input id="showBaseline" type="checkbox"> Show baseline overlay (ghost + vectors)</label>
+    </div>
     <div class="row"><label for="driftTau">Baseline τ (s)</label><input id="driftTau" type="range" min="0.5" max="8.0" step="0.1"><output id="driftTauOut">2.5 s</output></div>
     <div class="row"><label for="driftOn">DRIFT ON</label><input id="driftOn" type="range" min="0.010" max="1.000" step="0.005"><output id="driftOnOut">0.080</output></div>
     <div class="row"><label for="driftOff">DRIFT OFF</label><input id="driftOff" type="range" min="0.005" max="1.000" step="0.005"><output id="driftOffOut">0.050</output></div>
@@ -232,7 +237,7 @@
     const room = new URLSearchParams(location.search).get("room") || "Baby";
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
-    // NEW: live-pose gating
+    // live-pose gating
     const LIVE_POSE_TIMEOUT_MS = 2000; // consider "live" if a landmark arrived in the last 2s
     let lastPoseTs = 0;
 
@@ -255,7 +260,8 @@
       USE_INT: true,
       USE_DRIFT: true,
       CAL_SECS: 15,
-      CAL_LIVE: true
+      CAL_LIVE: true,
+      SHOW_BASELINE: false
     };
     const LS_KEY = 'naptio-move-config-v6';
     const MOVE = { ...MOVE_DEFAULTS, ...loadMoveConfig() };
@@ -278,7 +284,6 @@
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
 
-    const controlsBar = document.getElementById('controls');
     const calQuickBtn = document.getElementById('calQuickBtn');
     let calQuickBtnActive = false;
 
@@ -312,6 +317,8 @@
     const useEma   = document.getElementById('useEma');
     const useInt   = document.getElementById('useInt');
     const useDrift = document.getElementById('useDrift');
+
+    const showBaseline = document.getElementById('showBaseline');
 
     const calSecs     = document.getElementById('calSecs');
     const calSecsOut  = document.getElementById('calSecsOut');
@@ -488,14 +495,6 @@
       if (v) beginViewportSettle();
       else poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
-    function drawPoseLandmarks(landmarks) {
-      if (!landmarks?.length || !poseCanvas?.width || !poseCanvas?.height) return;
-      const utils = new DrawingUtils(poseCtx);
-      for (const lm of landmarks) {
-        utils.drawLandmarks(lm, { radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1) });
-        utils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
-      }
-    }
 
     /* ---------- Movement math helpers ---------- */
     const L = { L_SHOULDER: 11, R_SHOULDER: 12, L_HIP: 23, R_HIP: 24 };
@@ -575,6 +574,102 @@
       return dst;
     }
 
+    /* ---------- Baseline overlay (ghost + vectors) ---------- */
+    function lmToPx(p) {
+      return { x: p.x * poseCanvas.width, y: p.y * poseCanvas.height };
+    }
+    function alignedBaseline(base, curr, torsoRel = true, scaleMatch = true) {
+      if (!base || !curr || base.length !== curr.length) return null;
+      if (!torsoRel) return base.map(p => p && ({ x:p.x, y:p.y, z:p.z, visibility:p.visibility, presence:p.presence })) || null;
+
+      const cNow  = torsoCenter(curr);
+      const cBase = torsoCenter(base);
+      const sNow  = scaleFromTorso(curr);
+      const sBase = Math.max(1e-6, scaleFromTorso(base));
+      const r     = scaleMatch ? (sNow / sBase) : 1.0;
+
+      return base.map((p) => {
+        if (!p) return null;
+        const x = cNow.x + r * (p.x - cBase.x);
+        const y = cNow.y + r * (p.y - cBase.y);
+        return { x, y, z: p.z, visibility: p.visibility, presence: p.presence };
+      });
+    }
+    function drawBaselineGhostAndVectors(currLm) {
+      if (!MOVE.SHOW_BASELINE || !baseLm || !currLm || currLm.length !== baseLm.length) return;
+
+      const baseAligned = alignedBaseline(baseLm, currLm, MOVE.DRIFT_TORSO_REL, true);
+      if (!baseAligned) return;
+
+      const ctx = poseCtx;
+      const dpr = window.devicePixelRatio || 1;
+
+      // Ghost skeleton (dashed cyan)
+      ctx.save();
+      ctx.globalAlpha = 0.75;
+      ctx.strokeStyle = 'rgba(80,200,255,0.95)';
+      ctx.fillStyle   = 'rgba(80,200,255,0.70)';
+      ctx.lineWidth   = Math.max(1, 1.5 * dpr);
+      ctx.setLineDash([6 * dpr, 4 * dpr]);
+
+      const conns = PoseLandmarker.POSE_CONNECTIONS;
+      ctx.beginPath();
+      for (const [a, b] of conns) {
+        const pa = baseAligned[a], pb = baseAligned[b];
+        if (!lmOk(pa) || !lmOk(pb)) continue;
+        const A = lmToPx(pa), B = lmToPx(pb);
+        ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y);
+      }
+      ctx.stroke();
+
+      // Ghost joints
+      ctx.setLineDash([]);
+      const JOINT_R = 2 * dpr;
+      for (let i = 0; i < baseAligned.length; i++) {
+        const p = baseAligned[i];
+        if (!lmOk(p)) continue;
+        const P = lmToPx(p);
+        ctx.beginPath(); ctx.arc(P.x, P.y, JOINT_R, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+
+      // Delta vectors baseline→current (fade small)
+      const scaleNow = scaleFromTorso(currLm);
+      const fadeFrac = 0.25;
+      const onThresh = Math.max(1e-6, MOVE.DRIFT_ON);
+
+      for (let i = 0; i < currLm.length; i++) {
+        const c = currLm[i], b = baseAligned[i];
+        if (!lmOk(c) || !lmOk(b)) continue;
+
+        const dx = c.x - b.x, dy = c.y - b.y;
+        const dNorm = Math.hypot(dx, dy) / scaleNow;
+
+        if (dNorm < fadeFrac * onThresh) continue;
+
+        const t0 = fadeFrac * onThresh;
+        const alpha = Math.max(0, Math.min(1, (dNorm - t0) / (onThresh - t0)));
+
+        let stroke = 'rgba(180,180,180,1)';
+        if (dNorm >= 0.9 * onThresh && dNorm < onThresh) stroke = 'rgba(255,193,7,1)';  // amber
+        if (dNorm >= onThresh)                            stroke = 'rgba(203,36,49,1)';   // red
+
+        const B = lmToPx(b), C = lmToPx(c);
+
+        ctx.save();
+        ctx.globalAlpha = 0.35 + 0.65 * alpha;
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth   = Math.max(1, 1.5 * dpr);
+
+        ctx.beginPath();
+        ctx.moveTo(B.x, B.y);
+        ctx.lineTo(C.x, C.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    /* ---------- Badge drawing ---------- */
     function drawMovementBadge(movingState, emaVal, intVal, driftVal) {
       if (!poseCtx) return;
       const ctx = poseCtx;
@@ -647,8 +742,9 @@
       ctx.fillText(stateTxt, pillX + pillPadX, pillY + pillH - Math.round(6*dpr));
 
       ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-      ctx.beginPath(); ctx.moveTo(x + INNER, y + HEADER_H + 0.5);
-      ctx.lineTo(x + boxW - INNER, y + HEADER_H + 0.5); 
+      ctx.beginPath();
+      ctx.moveTo(x + INNER, y + HEADER_H + 0.5);
+      ctx.lineTo(x + boxW - INNER, y + HEADER_H + 0.5);
       ctx.stroke();
 
       const baseY = y + HEADER_H + INNER;
@@ -729,11 +825,28 @@
       calQuickBtn.innerHTML = `<span class="spinner" aria-hidden="true"></span>Calibrating…${secsTxt}`;
     }
 
+    /* ---------- Main draw for live pose ---------- */
+    function drawPoseLandmarks(landmarks) {
+      if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
+      const utils = new DrawingUtils(poseCtx);
+
+      for (const lm of landmarks) {
+        // Baseline overlay first (under the live skeleton)
+        try { drawBaselineGhostAndVectors(lm); } catch (e) { console.warn('[baseline overlay]', e); }
+
+        // Live pose
+        utils.drawLandmarks(lm, {
+          radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
+        });
+        utils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+      }
+    }
+
     /* ---------- Movement update ---------- */
     function updateMovementFromLandmarks(lm, canSend=true) {
       const now = performance.now();
-      lastPoseTs = now;                 // mark pose as live
-      updateCalibrationAvailability();  // gate buttons immediately
+      lastPoseTs = now;
+      updateCalibrationAvailability();
 
       if (!lastTs) lastTs = now;
       const dt = Math.max(1/120, Math.min(0.2, (now - lastTs) / 1000));
@@ -811,7 +924,6 @@
         try { poseCtx.restore(); } catch {}
       }
       reflectPanel();
-
 
       if (canSend && poseWhere === 'receiver' && poseDC?.readyState === 'open') {
         poseDC.send(JSON.stringify({ type: 'movement', where: 'receiver', moving, scoreEma: moveEma, scoreInt: intScore, scoreDrift: driftScore, ts: now }));
@@ -1110,20 +1222,20 @@
       if (driftOff && driftOffOut) { driftOff.value = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON); driftOffOut.textContent = fmt(MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON)); }
       if (driftTorsoRel) driftTorsoRel.checked = !!MOVE.DRIFT_TORSO_REL;
 
+      if (showBaseline) showBaseline.checked = !!MOVE.SHOW_BASELINE;
+
       if (calSecs && calSecsOut) { calSecs.value = clampUi(MOVE.CAL_SECS, 5, 60); calSecsOut.textContent = `${calSecs.value} s`; MOVE.CAL_SECS = parseInt(calSecs.value,10); }
       if (calLive) calLive.checked = !!MOVE.CAL_LIVE;
 
       applyOnCaps();
       reflectPanel();
 
-      // Center buttons widths to match Start
       requestAnimationFrame(matchButtonSizes);
     }
 
     const openMovePanel  = ()=>{ if (movePanel) movePanel.classList.remove('hidden'); };
     const closeMovePanel = ()=>{ if (movePanel) movePanel.classList.add('hidden'); };
 
-    // Toggle panel on button; stop propagation to avoid body-click close
     on(moveBtn, 'click', (e) => {
       e?.stopPropagation?.();
       if (!movePanel) return;
@@ -1135,7 +1247,7 @@
     // Close panel when clicking anywhere outside (main page)
     document.addEventListener('click', (e) => {
       if (!movePanel || movePanel.classList.contains('hidden')) return;
-      if (movePanel.contains(e.target)) return; // clicks inside do nothing
+      if (movePanel.contains(e.target)) return;
       closeMovePanel();
     });
 
@@ -1145,6 +1257,8 @@
     on(useEma,   'change', ()=>{ MOVE.USE_EMA = !!useEma.checked; saveMoveConfig(); });
     on(useInt,   'change', ()=>{ MOVE.USE_INT = !!useInt.checked; saveMoveConfig(); });
     on(useDrift, 'change', ()=>{ MOVE.USE_DRIFT = !!useDrift.checked; saveMoveConfig(); });
+
+    on(showBaseline, 'change', ()=>{ MOVE.SHOW_BASELINE = !!showBaseline.checked; saveMoveConfig(); });
 
     on(ema, 'input', ()=>{
       MOVE.EMA_ALPHA = clampUi(parseFloat(ema.value),0.01,0.90);
@@ -1223,7 +1337,7 @@
 
     // Settings Start
     on(calStartBtn, 'click', (e) => {
-      e?.stopPropagation?.(); // don't close via outside-click handler
+      e?.stopPropagation?.();
       openMovePanel();
       if (!hasLivePose() || calActive) { updateCalibrationAvailability(); return; }
       startCalibration();
@@ -1231,7 +1345,7 @@
 
     // Main-page Calibration button
     on(calQuickBtn, 'click', (e) => {
-      e?.stopPropagation?.(); // don't close via outside-click handler
+      e?.stopPropagation?.();
       if (calActive || !hasLivePose()) { updateCalibrationAvailability(); return; }
       calQuickBtnActive = true;
       updateCalQuickUI(true, MOVE.CAL_SECS);
@@ -1239,7 +1353,6 @@
       startCalibration();
     });
 
-    // Reset all defaults wiring (function defined elsewhere in your merged version; keep it)
     function resetToDefaults() {
       Object.keys(MOVE).forEach(k => delete MOVE[k]);
       Object.assign(MOVE, MOVE_DEFAULTS);
@@ -1270,7 +1383,6 @@
       stopReceiverPoseLoop();
     });
 
-    // typo guard used in logs (legacy)
     function beginViewportSetle(){ beginViewportSettle(); }
   </script>
 </body>
