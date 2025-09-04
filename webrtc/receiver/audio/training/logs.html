@@ -240,58 +240,21 @@
     const EL = id => document.getElementById(id);
     const ASM_LOG_MS = 2000;
 
-    /* ========= UI Preferences (persist remaining knobs) ========= */
-    const PREFS_KEY = 'cryPrefsV1';
-    const _loadPrefs = () => { try { return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'); } catch { return {}; } };
-    const _savePrefs = (p) => localStorage.setItem(PREFS_KEY, JSON.stringify(p));
-    const setPref = (k,v)=>{ const p=_loadPrefs(); p[k]=v; _savePrefs(p); };
-    const getPref = (k,d)=>{ const p=_loadPrefs(); return (k in p)? p[k] : d; };
-    function bindPersistedInput(id){
-      const el = EL(id); if (!el) return;
-      const val = getPref(id);
-      if (val !== undefined){
-        if (el.type === 'checkbox') el.checked = !!val;
-        else el.value = String(val);
-      }
-      el.addEventListener('change', () => {
-        setPref(id, el.type==='checkbox' ? el.checked
-                                         : (el.type==='number' ? Number(el.value) : el.value));
-      });
-    }
-    // Persist these inputs (that weren't already saved per-model)
-    [
-      'SR_TARGET','FRAME_LEN_S','HOP_S',
-      'CLASS_EMA_TAU_S','FUSED_EMA_TAU_S',
-      'ALERT_HOLD_MS','CAL_SEC','ALERT_OFF_DELTA',
-      'MAX_RESULTS',
-      'LOG_ENABLE','LOG_ALL','LOG_TOPN','LOG_AUTOSCROLL'
-    ].forEach(bindPersistedInput);
-
     /* Settings modal wiring */
     const _modal = EL('settingsModal');
     const _open = EL('btnOpenSettings');
     const _close = EL('btnSettingsClose');
-    // Restore saved open/closed state
-    if (getPref('__settingsOpen', false)) { _modal.classList.add('show'); _modal.setAttribute('aria-hidden','false'); }
-    _open.onclick = () => { _modal.classList.add('show'); _modal.setAttribute('aria-hidden','false'); setPref('__settingsOpen', true); };
-    _close.onclick = () => { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); setPref('__settingsOpen', false); };
-    _modal.addEventListener('click', (e) => {
-      if (e.target === _modal) { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); setPref('__settingsOpen', false); }
-    });
+    _open.onclick = () => { _modal.classList.add('show'); _modal.setAttribute('aria-hidden','false'); };
+    _close.onclick = () => { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); };
+    _modal.addEventListener('click', (e) => { if (e.target === _modal) { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); }});
 
     /* Logs toggle wiring */
     const btnToggleLogs = EL('btnToggleLogs');
     const logsContainer = EL('logsContainer');
-    // Restore logs visibility state (default hidden)
-    const logsVisible = getPref('__logsVisible', false);
-    logsContainer.style.display = logsVisible ? '' : 'none';
-    btnToggleLogs.textContent = logsVisible ? 'Hide logs' : 'Display logs';
     btnToggleLogs.onclick = () => {
       const visible = logsContainer.style.display !== 'none';
-      const next = !visible;
-      logsContainer.style.display = next ? '' : 'none';
-      btnToggleLogs.textContent = next ? 'Hide logs' : 'Display logs';
-      setPref('__logsVisible', next);
+      logsContainer.style.display = visible ? 'none' : '';
+      btnToggleLogs.textContent = visible ? 'Display logs' : 'Hide logs';
     };
 
     const LOGS = {
@@ -358,11 +321,23 @@
       for (let i=0;i<n;i++){ const pos=i*dx, i0=Math.floor(pos), i1=Math.min(i0+1,x.length-1), t=pos-i0; out[i]=x[i0]*(1-t)+x[i1]*t; }
       return out;
     }
+    // === helper used by calibration ===
+    function quantile(arr, q){
+      if (!arr?.length) return 0;
+      const a = [...arr].sort((x,y)=>x-y);
+      const idx = (a.length - 1) * q;
+      const lo = Math.floor(idx), hi = Math.ceil(idx);
+      if (lo === hi) return a[lo];
+      const t = idx - lo;
+      return a[lo] * (1 - t) + a[hi] * t;
+    }
 
     /* ========= Chart.js % labels plugin ========= */
     const pctLabelPlugin = {
       id: 'pctLabel',
       afterDatasetsDraw(chart, args, options){
+        // Only draw when the chart opts-in with plugins.pctLabel
+        if (!options) return;
         const ds = chart.data.datasets?.[0]; if (!ds) return;
         const { ctx } = chart; const meta = chart.getDatasetMeta(0);
         ctx.save(); ctx.font = (options?.font) || '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
@@ -514,9 +489,6 @@
     }
 
     function resetDefaults(){
-      // Clear UI prefs store
-      localStorage.removeItem(PREFS_KEY);
-
       // Core numeric defaults
       els.SR_TARGET.value        = 16000;
       els.FRAME_LEN_S.value      = 0.975;
@@ -530,14 +502,6 @@
       els.K_PRIOR.value          = 50;
       els.HALF_LIFE_S.value      = 3600;
       els.MAX_RESULTS.value      = 25;
-
-      // Log UI defaults (checkboxes & inputs)
-      const ids = ['LOG_ENABLE','LOG_ALL','LOG_AUTOSCROLL','LOG_TOPN'];
-      ids.forEach(id=>{
-        const el = EL(id); if (!el) return;
-        if (el.type === 'checkbox') el.checked = el.defaultChecked;
-        else el.value = el.defaultValue || el.value;
-      });
 
       // Text defaults
       els.IGNORE_CLASSES.value   = 'Silence, Inside, Outside, Vehicle, Noise';
@@ -560,14 +524,9 @@
       setWeightsChart(state.barSavedW, m.weights || {});
       if (state.mode === 'idle') clearTopBars();
 
-      // Reset logs visibility (default hidden) and settings open state (keep open since we're inside it)
-      logsContainer.style.display = 'none';
-      EL('btnToggleLogs').textContent = 'Display logs';
-      setPref('__logsVisible', false);
-      setPref('__settingsOpen', true);
-
       log('ok', 'Settings reset to defaults.');
     }
+
     // Wire up button
     els.btnResetDefaults && (els.btnResetDefaults.onclick = resetDefaults);
 
@@ -633,7 +592,11 @@
       chart: null, barChart: null, barDynW: null, barSavedW: null,
       labels: [], fusedRaw: [], fusedSm: [],
       thrOn: 0.35, thrOff: 0.25,
-      frameCount: 0, asmLastLogTs: 0
+      frameCount: 0, asmLastLogTs: 0,
+      // calibration
+      calActive: false,
+      calVals: [],
+      calTimerId: null,
     };
 
     function setupChart(){
@@ -779,6 +742,65 @@
       else { if (sm >= state.thrOn) { state.alertUntil = nowMs + hold; return true; } return false; }
     }
 
+    /* ========= Quiet calibration ========= */
+    async function quietCalibrate(){
+      if (state.calActive) return;
+
+      const durSec  = Math.max(5, Number(els.CAL_SEC.value) || 20);
+      const offDelta = Number(els.ALERT_OFF_DELTA.value) || 0.10;
+
+      // Prep collection
+      state.calActive = true;
+      state.calVals = [];
+      setStatus(`Quiet calibration for ${durSec}s… Please keep things quiet.`);
+
+      // Start mic (detect mode) so classifyChunk flows; then mark UI
+      await startMic('detect');
+      setPill('calibrating', true);
+
+      // Stop after duration, compute thresholds, persist, and clean up
+      state.calTimerId = setTimeout(async () => {
+        const vals = state.calVals.slice();
+        state.calActive = false;
+        state.calTimerId = null;
+
+        if (!vals.length) {
+          const thr_on = 0.35;
+          const thr_off = Math.max(0, thr_on - offDelta);
+          localStorage.setItem(CALIB_KEY(), JSON.stringify({
+            version: 1, thr_on, thr_off, n: 0, at: new Date().toISOString()
+          }));
+          state.thrOn = thr_on; state.thrOff = thr_off;
+          await stopAll();
+          setPill('idle', false);
+          log('warn', 'Calibration captured 0 frames; using defaults.');
+          return;
+        }
+
+        const p99 = quantile(vals, 0.995);
+        const thr_off = Math.min(0.95, p99 + 0.02);
+        const thr_on  = Math.min(0.99, thr_off + offDelta);
+
+        const payload = {
+          version: 1,
+          thr_on, thr_off,
+          n: vals.length, p99,
+          off_delta: offDelta,
+          dur_s: durSec,
+          at: new Date().toISOString()
+        };
+        localStorage.setItem(CALIB_KEY(), JSON.stringify(payload));
+        state.thrOn = thr_on; state.thrOff = thr_off;
+
+        log('ok', 'Quiet calibration complete.',
+          `<div class="log-code">${JSON.stringify(payload, null, 2)}</div>`);
+
+        await stopAll();
+        setPill('idle', false);
+        setStatus('Calibration done. Start Detect to use the new thresholds.');
+      }, durSec * 1000);
+    }
+
     /* ========= Classify loop & modes ========= */
     function concatFloat32(a,b){ const out=new Float32Array(a.length+b.length); out.set(a,0); out.set(b,a.length); return out; }
 
@@ -810,6 +832,11 @@
 
         const res = await classifyMP(task, w, SR_TARGET);
         const cats = extractCategories(res);
+
+        // During quiet calibration, show live top classes in the bars
+        if (state.calActive) {
+          updateTopBars(cats);
+        }
 
         if (LOGS.enable.checked) {
           const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
@@ -845,6 +872,12 @@
           else { state.thrOn = 0.35; state.thrOff = state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1); }
 
           pushChart(state.labels.length * HOP_S, raw, sm);
+
+          // While calibrating, collect fused(EMA) samples
+          if (state.calActive) {
+            state.calVals.push(sm);
+          }
+
           const on = applyHysteresis(sm, performance.now());
           if (on && !state.alertOn) { setPill('CRYING', true); log('ok','ALERT ON (cry detected).'); }
           if (!on && state.alertOn) { setPill('idle', false); log('warn','ALERT OFF.'); }
