@@ -409,7 +409,7 @@
     /* ========= Ignore / Penalty ========= */
     function getIgnoreTokens(){
       const s = (els.IGNORE_CLASSES?.value ?? localStorage.getItem(IGNORE_KEY()) ?? '').trim();
-      return s ? s.split(',').map(t=>t.trim().toLowerCase()).filter(Boolean) : [];
+      return s ? s.split(',').map	t=>t.trim().toLowerCase()).filter(Boolean) : [];
     }
     function shouldIgnore(name){
       if (!name) return false;
@@ -641,6 +641,9 @@
     function concatFloat32(a,b){ const out=new Float32Array(a.length+b.length); out.set(a,0); out.set(b,a.length); return out; }
 
     async function classifyChunk(chunk, deviceSr, params, mode){
+      // ---- Gate: ignore stray callbacks from non-active graphs
+      if (state.mode !== mode) return;
+
       const SR_TARGET = Number(els.SR_TARGET.value)||16000;
       const HOP_S = Number(els.HOP_S.value)||0.48;
       const MAX_RESULTS = Number(els.MAX_RESULTS.value)||25;
@@ -719,7 +722,7 @@
     /* ========= Mic control ========= */
     async function startMic(mode) {
       await stopFolderTraining();
-      await stopFilePlayback(); // pause training audio if playing
+      await stopFilePlayback(); // pause & suspend training audio if playing
       await stopAll();
       setStatus(mode==='detect' ? 'Starting microphone (detect)…' : 'Starting microphone (train)…');
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
@@ -779,11 +782,12 @@
     let trainCtx=null, trainSrc=null, trainNode=null, trainSink=null, trainBlobUrl=null;
     let trainUsingWorklet = false;
 
-    async function ensureTrainGraph(){
+    async function ensureTrainGraph(modeLabel){
       if (!trainCtx) {
         trainCtx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
-        await trainCtx.resume();
       }
+      if (trainCtx.state === 'suspended') await trainCtx.resume();
+
       if (!trainSink) { trainSink = trainCtx.createGain(); trainSink.gain.value = 0; trainSink.connect(trainCtx.destination); }
       if (!trainNode) {
         try {
@@ -794,20 +798,24 @@
           `], {type:'application/javascript'}));
           await trainCtx.audioWorklet.addModule(mod); URL.revokeObjectURL(mod);
           trainNode = new AudioWorkletNode(trainCtx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
-          trainNode.port.onmessage = (ev)=> classifyChunk(ev.data, trainCtx.sampleRate, getParams(), state.mode);
           trainUsingWorklet = true;
         } catch {
           const node = trainCtx.createScriptProcessor(4096,1,1);
-          node.onaudioprocess = (e)=> classifyChunk(new Float32Array(e.inputBuffer.getChannelData(0)), trainCtx.sampleRate, getParams(), state.mode);
           trainNode = node;
           trainUsingWorklet = false;
         }
       }
+
+      // (Re)wire the handler with a fixed mode label so gating works
+      if (trainUsingWorklet) {
+        trainNode.port.onmessage = (ev)=> classifyChunk(ev.data, trainCtx.sampleRate, getParams(), modeLabel);
+      } else {
+        trainNode.onaudioprocess = (e)=> classifyChunk(new Float32Array(e.inputBuffer.getChannelData(0)), trainCtx.sampleRate, getParams(), modeLabel);
+      }
+
       if (!trainSrc) {
-        // Create once per page lifetime
         trainSrc = trainCtx.createMediaElementSource(els.trainAudio);
       }
-      // Ensure connections (safe to reconnect after disconnect)
       try { trainSrc.disconnect(); } catch {}
       try { trainNode.disconnect(); } catch {}
       trainSrc.connect(trainNode).connect(trainSink);
@@ -823,7 +831,7 @@
     async function startTrainingOnFile(file) {
       await stopFolderTraining(true);   // stop folder queue if active
       await stopAll();                  // stop mic graph
-      await ensureTrainGraph();
+      await ensureTrainGraph('train_file');
 
       setTrainAudioSrcFromFile(file);
       await ensureAudioTask(Number(els.MAX_RESULTS.value)||25);
@@ -833,7 +841,7 @@
       log('ok', `Training started on file: ${file.name}`, `<span class="chip">${(file.size/1024/1024).toFixed(2)} MB</span>`);
 
       els.trainAudio.onended = async () => {
-        await stopFilePlayback(); // pause only; keep graph
+        await stopFilePlayback(); // pause + suspend; keep graph objects
         setStatus('Training clip ended. Click “Recompute Weights”.');
         setPill('idle', false);
         state.mode='idle';
@@ -846,7 +854,8 @@
     async function stopFilePlayback(){
       try { els.trainAudio.pause(); } catch {}
       els.trainAudio.onended = null;
-      // keep trainCtx/trainSrc/trainNode alive; just stop playback
+      // Suspend so the worklet/script processor stops pulling silent buffers
+      try { if (trainCtx && trainCtx.state !== 'suspended') await trainCtx.suspend(); } catch {}
       clearTopBars();
     }
 
@@ -878,7 +887,7 @@
     async function startFolderTraining(){
       if (!folderFiles.length) { els.btnChooseFolder.click(); return; }
       await stopAll();
-      await ensureTrainGraph();
+      await ensureTrainGraph('train_folder');
       await ensureAudioTask(Number(els.MAX_RESULTS.value)||25);
 
       folderActive = true;
@@ -901,7 +910,6 @@
       const label = f.webkitRelativePath || f.name;
       log('info', `Starting file ${folderIdx+1}/${folderFiles.length}: ${label}`);
 
-      // Prepare next file without tearing the graph down
       setTrainAudioSrcFromFile(f);
       els.trainAudio.onended = async () => {
         log('info', `Finished ${folderIdx+1}/${folderFiles.length}`);
@@ -915,7 +923,7 @@
     async function stopFolderTraining(silent=false){
       folderActive = false;
       folderIdx = 0;
-      await stopFilePlayback();   // pause only; keep graph
+      await stopFilePlayback();   // pause + suspend
       setPill('idle', false);
       state.mode = 'idle';
       clearTopBars();
