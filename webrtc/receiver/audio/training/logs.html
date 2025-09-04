@@ -53,14 +53,20 @@
     html, body { height:auto; min-height:100%; overflow-y:auto; }
     #stage { position:static; min-height:100vh; }
     .panel { margin:0 auto 24px; }
+
+    /* Settings modal */
+    .modal { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.6); z-index:50; }
+    .modal.show { display:flex; }
+    .modal-card { width:min(96%,1000px); max-height:90vh; overflow-y:auto; background:#0b0b0b; border:1px solid #242424; border-radius:14px; }
+    .modal-head { position:sticky; top:0; display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 12px; border-bottom:1px solid #1a1a1a; background:#0d0d0d; border-top-left-radius:14px; border-top-right-radius:14px; }
+    .modal-body { padding:12px; }
   </style>
 </head>
 <body>
   <div id="stage">
     <div class="panel">
       <header>
-        <h1>Weighted Top-K Cry Detector</h1>
-        <div class="sub">Late-fusion of MediaPipe classes with per-class EMA, fused EMA, hysteresis, quiet calibration, on-device training — with live logs & mic/file/folder training.</div>
+        <h1>Weighted Top-K Audio Detector (Late-fusion)</h1>
       </header>
 
       <div class="row">
@@ -73,29 +79,8 @@
 
       <!-- Settings -->
       <div class="section">
-        <div class="grid">
-          <label><span>Sample Rate (target Hz)</span><input id="SR_TARGET" type="number" min="8000" step="1000" value="16000" /></label>
-          <label><span>Frame length (s)</span><input id="FRAME_LEN_S" type="number" min="0.1" step="0.005" value="0.975" /></label>
-          <label><span>Hop (s)</span><input id="HOP_S" type="number" min="0.01" step="0.01" value="0.48" /></label>
-
-          <label><span>Per-class EMA τ (s)</span><input id="CLASS_EMA_TAU_S" type="number" min="0.1" step="0.1" value="0.8" /></label>
-          <label><span>Fused score EMA τ (s)</span><input id="FUSED_EMA_TAU_S" type="number" min="0.1" step="0.1" value="0.8" /></label>
-          <label><span>Min ON hold (ms)</span><input id="ALERT_HOLD_MS" type="number" min="0" step="100" value="3000" /></label>
-
-          <label><span>Quiet calibration (s)</span><input id="CAL_SEC" type="number" min="5" step="1" value="20" /></label>
-          <label><span>OFF delta (below ON)</span><input id="ALERT_OFF_DELTA" type="number" min="0" step="0.01" value="0.10" /></label>
-          <label><span>Top-K classes</span><input id="TOP_K" type="number" min="1" step="1" value="6" /></label>
-
-          <label><span>Hybrid prior (kPrior)</span><input id="K_PRIOR" type="number" min="1" step="1" value="50" /></label>
-          <label><span>Hybrid half-life (s, training EMA)</span><input id="HALF_LIFE_S" type="number" min="30" step="10" value="3600" /></label>
-          <label><span>Max results from MP</span><input id="MAX_RESULTS" type="number" min="5" step="1" value="25" /></label>
-
-          <label><span>Ignore classes (training)</span>
-            <input id="IGNORE_CLASSES" type="text" placeholder="Silence, Background noise, White noise">
-          </label>
-          <label><span>Penalty map (inference)</span>
-            <input id="PENALTY_MAP" type="text" placeholder="Silence:-0.4, White noise:-0.2">
-          </label>
+        <div class="row">
+          <button id="btnOpenSettings" class="btn">Settings</button>
         </div>
 
         <div class="row" style="margin-top:10px;">
@@ -202,6 +187,42 @@
     </div>
   </div>
 
+  <!-- Settings modal -->
+  <div id="settingsModal" class="modal" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <strong>Settings</strong>
+        <button id="btnSettingsClose" class="btn">Close</button>
+      </div>
+      <div class="modal-body">
+        <div class="grid">
+          <label><span>Sample Rate (target Hz)</span><input id="SR_TARGET" type="number" min="8000" step="1000" value="16000" /></label>
+          <label><span>Frame length (s)</span><input id="FRAME_LEN_S" type="number" min="0.1" step="0.005" value="0.975" /></label>
+          <label><span>Hop (s)</span><input id="HOP_S" type="number" min="0.01" step="0.01" value="0.48" /></label>
+
+          <label><span>Per-class EMA τ (s)</span><input id="CLASS_EMA_TAU_S" type="number" min="0.1" step="0.1" value="0.8" /></label>
+          <label><span>Fused score EMA τ (s)</span><input id="FUSED_EMA_TAU_S" type="number" min="0.1" step="0.1" value="0.8" /></label>
+          <label><span>Min ON hold (ms)</span><input id="ALERT_HOLD_MS" type="number" min="0" step="100" value="3000" /></label>
+
+          <label><span>Quiet calibration (s)</span><input id="CAL_SEC" type="number" min="5" step="1" value="20" /></label>
+          <label><span>OFF delta (below ON)</span><input id="ALERT_OFF_DELTA" type="number" min="0" step="0.01" value="0.10" /></label>
+          <label><span>Top-K classes</span><input id="TOP_K" type="number" min="1" step="1" value="6" /></label>
+
+          <label><span>Hybrid prior (kPrior)</span><input id="K_PRIOR" type="number" min="1" step="1" value="50" /></label>
+          <label><span>Hybrid half-life (s, training EMA)</span><input id="HALF_LIFE_S" type="number" min="30" step="10" value="3600" /></label>
+          <label><span>Max results from MP</span><input id="MAX_RESULTS" type="number" min="5" step="1" value="25" /></label>
+
+          <label><span>Ignore classes (training)</span>
+            <input id="IGNORE_CLASSES" type="text" placeholder="Silence, Background noise, White noise">
+          </label>
+          <label><span>Penalty map (inference)</span>
+            <input id="PENALTY_MAP" type="text" placeholder="Silence:-0.4, White noise:-0.2">
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <audio id="trainAudio" crossorigin="anonymous" style="display:none"></audio>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 
@@ -209,6 +230,14 @@
     /* ========= Helpers & UI ========= */
     const EL = id => document.getElementById(id);
     const ASM_LOG_MS = 2000;
+
+    /* Settings modal wiring */
+    const _modal = EL('settingsModal');
+    const _open = EL('btnOpenSettings');
+    const _close = EL('btnSettingsClose');
+    _open.onclick = () => { _modal.classList.add('show'); _modal.setAttribute('aria-hidden','false'); };
+    _close.onclick = () => { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); };
+    _modal.addEventListener('click', (e) => { if (e.target === _modal) { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); }});
 
     const LOGS = {
       body: EL('logBody'),
@@ -408,11 +437,9 @@
 
     /* ========= Ignore / Penalty ========= */
     function getIgnoreTokens(){
-      // Use the input if present, otherwise fall back to saved value
-      const raw = (els.IGNORE_CLASSES?.value ?? '').trim() || (localStorage.getItem(IGNORE_KEY()) ?? '').trim();
-      return raw ? raw.split(',').map(t => t.trim().toLowerCase()).filter(Boolean) : [];
+      const s = (els.IGNORE_CLASSES?.value ?? localStorage.getItem(IGNORE_KEY()) ?? '').trim();
+      return s ? s.split(',').map(t=>t.trim().toLowerCase()).filter(Boolean) : [];
     }
-
     function shouldIgnore(name){
       if (!name) return false;
       const n = name.toLowerCase();
