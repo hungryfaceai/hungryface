@@ -605,23 +605,20 @@
       const dpr = window.devicePixelRatio || 1;
 
       // Ghost skeleton (dashed cyan)
+      const ctx = poseCtx;
+      const dpr = window.devicePixelRatio || 1;
+      
       ctx.save();
       ctx.globalAlpha = 0.75;
       ctx.strokeStyle = 'rgba(80,200,255,0.95)';
       ctx.fillStyle   = 'rgba(80,200,255,0.70)';
       ctx.lineWidth   = Math.max(1, 1.5 * dpr);
       ctx.setLineDash([6 * dpr, 4 * dpr]);
-
-      const conns = PoseLandmarker.POSE_CONNECTIONS;
-      ctx.beginPath();
-      for (const [a, b] of conns) {
-        const pa = baseAligned[a], pb = baseAligned[b];
-        if (!lmOk(pa) || !lmOk(pb)) continue;
-        const A = lmToPx(pa), B = lmToPx(pb);
-        ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y);
-      }
-      ctx.stroke();
-
+      
+      // Use DrawingUtils so POSE_CONNECTIONS works even if not iterable
+      const utilsGhost = new DrawingUtils(ctx);
+      utilsGhost.drawConnectors(baseAligned, PoseLandmarker.POSE_CONNECTIONS);
+      
       // Ghost joints
       ctx.setLineDash([]);
       const JOINT_R = 2 * dpr;
