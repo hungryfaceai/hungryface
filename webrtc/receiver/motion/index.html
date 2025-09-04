@@ -595,31 +595,30 @@
         return { x, y, z: p.z, visibility: p.visibility, presence: p.presence };
       });
     }
+
     function drawBaselineGhostAndVectors(currLm) {
       if (!MOVE.SHOW_BASELINE || !baseLm || !currLm || currLm.length !== baseLm.length) return;
-
-      const baseAligned = alignedBaseline(baseLm, currLm, MOVE.DRIFT_TORSO_REL, false);
+    
+      // Align baseline by torso center; DO NOT scale-match to current
+      const baseAligned = alignedBaseline(baseLm, currLm, MOVE.DRIFT_TORSO_REL, /*scaleMatch*/false);
       if (!baseAligned) return;
-
+    
       const ctx = poseCtx;
       const dpr = window.devicePixelRatio || 1;
-
-      // Ghost skeleton (dashed cyan)
-      const ctx = poseCtx;
-      const dpr = window.devicePixelRatio || 1;
-      
+    
+      // --- Ghost baseline skeleton (dashed cyan) ---
       ctx.save();
       ctx.globalAlpha = 0.75;
       ctx.strokeStyle = 'rgba(80,200,255,0.95)';
       ctx.fillStyle   = 'rgba(80,200,255,0.70)';
       ctx.lineWidth   = Math.max(1, 1.5 * dpr);
       ctx.setLineDash([6 * dpr, 4 * dpr]);
-      
+    
       // Use DrawingUtils so POSE_CONNECTIONS works even if not iterable
       const utilsGhost = new DrawingUtils(ctx);
       utilsGhost.drawConnectors(baseAligned, PoseLandmarker.POSE_CONNECTIONS);
-      
-      // Ghost joints
+    
+      // Baseline joints
       ctx.setLineDash([]);
       const JOINT_R = 2 * dpr;
       for (let i = 0; i < baseAligned.length; i++) {
@@ -629,30 +628,29 @@
         ctx.beginPath(); ctx.arc(P.x, P.y, JOINT_R, 0, Math.PI * 2); ctx.fill();
       }
       ctx.restore();
-
-      // Delta vectors baseline→current (always draw; fade small)
+    
+      // --- Per-joint vectors: baseline → current (always draw; fade small) ---
       const scaleNow = scaleFromTorso(currLm);
       const onThresh = Math.max(1e-6, MOVE.DRIFT_ON);
       const minAlpha = 0.18;   // visible even when tiny
       const maxAlpha = 1.00;
-      
+    
       for (let i = 0; i < currLm.length; i++) {
         const c = currLm[i], b = baseAligned[i];
         if (!lmOk(c) || !lmOk(b)) continue;
-      
+    
         const dx = c.x - b.x, dy = c.y - b.y;
         const dNorm = Math.hypot(dx, dy) / scaleNow;   // normalized by torso scale
         const ratio = dNorm / onThresh;                // 1.0 == at threshold
         const alpha = Math.max(minAlpha, Math.min(maxAlpha, ratio));
-      
+    
         // Color by severity
-        let stroke = 'rgba(180,180,180,1)';                      // small
+        let stroke = 'rgba(180,180,180,1)';                      // small deltas
         if (ratio >= 0.9 && ratio < 1.0) stroke = 'rgba(255,193,7,1)'; // amber
         if (ratio >= 1.0)                 stroke = 'rgba(203,36,49,1)'; // red
-      
+    
         const B = lmToPx(b), C = lmToPx(c);
-        const dpr = window.devicePixelRatio || 1;
-      
+    
         ctx.save();
         ctx.globalAlpha = alpha;
         ctx.strokeStyle = stroke;
@@ -664,6 +662,7 @@
         ctx.restore();
       }
     }
+
 
     /* ---------- Badge drawing ---------- */
     function drawMovementBadge(movingState, emaVal, intVal, driftVal) {
