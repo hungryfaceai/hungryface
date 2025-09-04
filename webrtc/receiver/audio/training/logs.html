@@ -554,7 +554,6 @@
       }
     }
 
-    // NEW: clear the live Top-Classes chart
     function clearTopBars(){
       if (!state.barChart) return;
       state.barChart.data.labels = [];
@@ -564,7 +563,6 @@
       state.barChart.update();
     }
 
-    // UPDATED: show excluded in grey + extend to keep Top-K non-excluded visible
     function updateTopBars(cats){
       if (!els.bars) return;
       setupBars();
@@ -579,11 +577,10 @@
         display.push({ name: c.categoryName || '(unnamed)', v: c.score || 0, excluded });
         if (!excluded) kept++;
       }
-      // If we still didn't reach K non-excluded (rare: not enough classes), we just stop; display contains all we could.
 
       const labels = display.map(d => d.name);
       const values = display.map(d => d.v);
-      const bg = display.map(d => d.excluded ? 'rgba(107,114,128,0.85)' : 'rgba(96,165,250,0.85)');  // grey vs blue
+      const bg = display.map(d => d.excluded ? 'rgba(107,114,128,0.85)' : 'rgba(96,165,250,0.85)');
       const bd = display.map(d => d.excluded ? 'rgba(75,85,99,1)' : 'rgba(59,130,246,1)');
 
       state.barChart.data.labels = labels;
@@ -606,18 +603,6 @@
       for (const n of Object.keys(weights || {})) {
         if (!state.perClassEma.has(n)) state.perClassEma.set(n, 0);
       }
-    }
-    function getPenaltyMap(){
-      const s = (els.PENALTY_MAP?.value ?? localStorage.getItem(PENALTY_KEY()) ?? '').trim();
-      const map = {};
-      if (!s) return map;
-      s.split(',').forEach(pair=>{
-        const [k,v] = pair.split(':');
-        if (!k) return;
-        const w = Math.max(-1, Math.min(0, parseFloat(v)));
-        map[k.trim().toLowerCase()] = Number.isFinite(w) ? w : -0.3;
-      });
-      return map;
     }
     function fusedScoreFromCategories(categories, weights, dt) {
       const a = alphaForTau(dt, Number(els.CLASS_EMA_TAU_S.value) || 0.8);
@@ -791,7 +776,7 @@
       state.ring=new Float32Array(0); state.lastPos=0; state.perClassEma.clear(); state.fusedEma=0; state.frameCount=0;
       state.asmLastLogTs = 0;
       setPill('idle', false); setRMS(0);
-      clearTopBars();                       /* A: clear live chart */
+      clearTopBars();
       if (wasRunning) log('warn','Stopped audio graph.');
     }
 
@@ -870,7 +855,7 @@
           log('ok', 'Calibration complete.', `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
           state.mode = 'idle';
           setPill('idle', false);
-          clearTopBars();                   /* A: clear live chart after calibration run */
+          clearTopBars();
         }
       };
       src.connect(node).connect(sink);
@@ -922,7 +907,7 @@
         setStatus('Training clip ended. Click “Recompute Weights”.');
         setPill('idle', false);
         state.mode='idle';
-        clearTopBars();                   /* A: clear when single-file training ends */
+        clearTopBars();
       };
     }
     async function stopTrainingFile(){
@@ -932,7 +917,7 @@
       try { trainSink?.disconnect(); } catch {}
       try { trainCtx && trainCtx.state!=='closed' && trainCtx.close(); } catch {}
       trainCtx=null; trainSrc=null; trainNode=null; trainSink=null;
-      clearTopBars();                     /* A: clear on manual stop */
+      clearTopBars();
     }
 
     /* ========= Folder training ========= */
@@ -980,7 +965,7 @@
       if (folderIdx >= folderFiles.length) {
         await stopFolderTraining(true);
         log('ok', 'Folder training complete.');
-        clearTopBars();                   /* A: clear when folder sequence completes */
+        clearTopBars();
         return;
       }
       const f = folderFiles[folderIdx];
@@ -1002,7 +987,7 @@
       await stopTrainingFile();
       setPill('idle', false);
       state.mode = 'idle';
-      clearTopBars();                     /* A: clear on manual stop */
+      clearTopBars();
       if (!silent) log('warn','Stopped folder training.');
     }
 
@@ -1063,7 +1048,7 @@
       setWeightsChart(state.barDynW, {});
       setWeightsChart(state.barSavedW, {});
       setupChart();
-      clearTopBars();                     /* A: also clear after clear */
+      clearTopBars();
       setStatus(`Model “${name}” cleared.`);
     };
     els.btnExport.onclick = () => {
@@ -1125,7 +1110,6 @@
         const key = (id==='IGNORE_CLASSES') ? IGNORE_KEY() : PENALTY_KEY();
         localStorage.setItem(key, el.value);
         log('info', `${id==='IGNORE_CLASSES'?'Ignore classes':'Penalty map'} updated for “${getModelName()}”.`);
-        // Refresh live bars instantly (they will adapt next inference); also clear if not training.
         if (state.mode==='idle') clearTopBars();
       };
       el.addEventListener('change', save);
