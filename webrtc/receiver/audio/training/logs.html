@@ -224,6 +224,10 @@
             <input id="PENALTY_MAP" type="text" value="Silence:-0.45, White noise:-0.2" placeholder="Silence:-0.4, White noise:-0.2">
           </label>
         </div>
+        <div class="row" style="margin-top:12px; justify-content:flex-end;">
+          <button id="btnResetDefaults" class="btn">Reset all defaults</button>
+        </div>
+
       </div>
     </div>
   </div>
@@ -300,7 +304,8 @@
       'trainAudio','weightsView','chart','bars','barsDynW','barsSavedW',
       'MODEL_NAME','btnModelUse','btnModelLoad',
       'folderInp','btnChooseFolder','btnTrainFolder','btnStopTrainFolder','folderInfo',
-      'IGNORE_CLASSES','PENALTY_MAP'
+      'IGNORE_CLASSES','PENALTY_MAP',
+      'btnResetDefaults'
     ].map(x => [x, document.getElementById(x)])) )();
 
     function setStatus(s){ els.status.textContent = s; log('info', s); }
@@ -470,6 +475,49 @@
       });
       return map;
     }
+
+    function resetDefaults(){
+      // Core numeric defaults
+      els.SR_TARGET.value        = 16000;
+      els.FRAME_LEN_S.value      = 0.975;
+      els.HOP_S.value            = 0.48;
+      els.CLASS_EMA_TAU_S.value  = 0.8;
+      els.FUSED_EMA_TAU_S.value  = 0.8;
+      els.ALERT_HOLD_MS.value    = 3000;
+      els.CAL_SEC.value          = 20;
+      els.ALERT_OFF_DELTA.value  = 0.10;
+      els.TOP_K.value            = 6;
+      els.K_PRIOR.value          = 50;
+      els.HALF_LIFE_S.value      = 3600;
+      els.MAX_RESULTS.value      = 25;
+    
+      // Text defaults
+      els.IGNORE_CLASSES.value   = 'Silence, Inside, Outside, Vehicle, Noise';
+      els.PENALTY_MAP.value      = 'Silence:-0.45, White noise:-0.2';
+    
+      // Persist per-model fields immediately
+      localStorage.setItem(IGNORE_KEY(), els.IGNORE_CLASSES.value);
+      localStorage.setItem(PENALTY_KEY(), els.PENALTY_MAP.value);
+    
+      // Trigger the same change handlers your code already uses
+      ['TOP_K','K_PRIOR','HALF_LIFE_S'].forEach(id => {
+        const el = document.getElementById(id);
+        el && el.dispatchEvent(new Event('change'));
+      });
+    
+      // Update preview/saved charts to reflect new knobs
+      const m = loadModel();
+      const preview = computeWeightsPreview(m);
+      setWeightsChart(state.barDynW, preview);
+      setWeightsChart(state.barSavedW, m.weights || {});
+      if (state.mode === 'idle') clearTopBars();
+    
+      log('ok', 'Settings reset to defaults.');
+    }
+
+// Wire up button
+els.btnResetDefaults && (els.btnResetDefaults.onclick = resetDefaults);
+    
 
     /* ========= Stats → weights ========= */
     function updateStats(model, categories, dtSec) {
