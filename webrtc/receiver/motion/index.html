@@ -42,10 +42,23 @@
       text-shadow: 0 1px 2px rgba(0,0,0,0.6);
     }
     .btn:active { transform: scale(0.99); }
+    .btn[disabled] { opacity: 0.6; cursor: default; }
+
+    /* tiny inline spinner for the quick Calibration button */
+    .spinner {
+      display: inline-block; width: 12px; height: 12px;
+      border: 2px solid rgba(255,255,255,0.35);
+      border-top-color: #fff; border-radius: 50%;
+      margin-right: 8px;
+      animation: spin 1s linear infinite;
+      vertical-align: -1px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     #controls {
       position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
       display: flex; align-items: center; gap: 12px; z-index: 6;
+      flex-wrap: wrap; justify-content: center;
     }
     #enableAudioBtn, #disableAudioBtn { display: none; }
 
@@ -66,8 +79,8 @@
     #movePanel {
       position: fixed; right: 16px; bottom: 80px; z-index: 7;
       width: min(380px, 92vw);
-      max-height: 80vh;              /* NEW: allow scrolling */
-      overflow-y: auto;              /* NEW */
+      max-height: 80vh;
+      overflow-y: auto;
       -webkit-overflow-scrolling: touch;
       overscroll-behavior: contain;
 
@@ -131,6 +144,7 @@
     #calStatus.ok { color: #b7f0b7; }
     #calStatus.warn { color: #ffd27a; }
     #calStatus.err { color: #ff9b9b; }
+    #calStatus.running { color: #ff4d4f; font-weight: 700; } /* RED while calibrating */
     progress { width: 100%; height: 6px; border-radius: 999px; overflow: hidden; }
   </style>
 </head>
@@ -162,6 +176,8 @@
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
     <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
+    <!-- NEW: Quick Calibration button -->
+    <button id="calQuickBtn" class="btn" type="button">Calibration</button>
     <button id="moveBtn" class="btn" type="button">Movement settings</button>
   </div>
 
@@ -179,17 +195,54 @@
       </div>
     </div>
 
-    <!-- Confidence gates -->
+    <!-- ⬆️⬆️ Moved: CALIBRATION to the TOP -->
+    <div class="groupTitle">Calibration</div>
+    <div class="row">
+      <label for="calSecs">Duration</label>
+      <input id="calSecs" type="range" min="5" max="60" step="1">
+      <output id="calSecsOut">15 s</output>
+    </div>
+    <div class="checkRow">
+      <label><input id="calLive" type="checkbox"> Apply thresholds while running</label>
+    </div>
+    <div class="row">
+      <label>Auto-calibrate</label>
+      <button id="calStart" class="btn small" type="button">Start</button>
+      <output id="calStatus" class="muted">Idle</output>
+    </div>
+    <div class="row" id="calProgRow">
+      <label>Progress</label>
+      <progress id="calProg" max="1" value="0"></progress>
+      <output id="calTime">15s</output>
+    </div>
+    <!-- Calibration stats (visible during & after) -->
+    <div id="calStats" style="display:none">
+      <div class="row">
+        <label>Median</label><span></span><output id="calMedian">—</output>
+      </div>
+      <div class="row">
+        <label>95th pct</label><span></span><output id="calP95">—</output>
+      </div>
+      <div class="row">
+        <label>Samples</label><span></span><output id="calN">0</output>
+      </div>
+    </div>
+    <!-- NEW: Reset baseline moved just below Calibration -->
+    <div class="actions" id="calActions">
+      <button id="driftReset" class="btn small" type="button">Reset baseline</button>
+    </div>
+
+    <!-- Confidence gates (now below Calibration) -->
     <div class="groupTitle">Confidence gates</div>
     <div class="row">
       <label for="visMin">Visibility min</label>
       <input id="visMin" type="range" min="0.00" max="0.99" step="0.01">
-      <output id="visOut">0.50</output>
+      <output id="visOut">0.80</output>
     </div>
     <div class="row">
       <label for="presMin">Presence min</label>
       <input id="presMin" type="range" min="0.00" max="0.99" step="0.01">
-      <output id="presOut">0.00</output>
+      <output id="presOut">0.90</output>
     </div>
 
     <!-- EMA -->
@@ -237,7 +290,11 @@
     <!-- Baseline drift -->
     <div class="groupTitle">Baseline drift</div>
     <div class="checkRow">
-      <label><input id="useDrift" type="checkbox"> Enable Drift detector</label>
+      <label>
+        <input id="driftTorsoRel" type="checkbox">
+        Torso-relative baseline (reduces camera shake)
+      </label>
+      <!-- Reset baseline moved above under Calibration -->
     </div>
     <div class="row">
       <label for="driftTau">Baseline τ (s)</label>
@@ -253,46 +310,6 @@
       <label for="driftOff">DRIFT OFF</label>
       <input id="driftOff" type="range" min="0.005" max="1.000" step="0.005"><!-- SAME SCALE AS ON -->
       <output id="driftOffOut">0.050</output>
-    </div>
-    <div class="checkRow">
-      <label>
-        <input id="driftTorsoRel" type="checkbox">
-        Torso-relative baseline (reduces camera shake)
-      </label>
-      <button id="driftReset" class="btn small" type="button">Reset baseline</button>
-    </div>
-
-    <!-- Calibration -->
-    <div class="groupTitle">Calibration</div>
-    <div class="row">
-      <label for="calSecs">Duration</label>
-      <input id="calSecs" type="range" min="5" max="60" step="1">
-      <output id="calSecsOut">15 s</output>
-    </div>
-    <div class="checkRow">
-      <label><input id="calLive" type="checkbox"> Apply thresholds while running</label>
-    </div>
-    <div class="row">
-      <label>Auto-calibrate</label>
-      <button id="calStart" class="btn small" type="button">Start</button>
-      <output id="calStatus" class="muted">Idle</output>
-    </div>
-    <div class="row" id="calProgRow">
-      <label>Progress</label>
-      <progress id="calProg" max="1" value="0"></progress>
-      <output id="calTime">15s</output>
-    </div>
-    <!-- Calibration stats (visible during & after) -->
-    <div id="calStats" style="display:none">
-      <div class="row">
-        <label>Median</label><span></span><output id="calMedian">—</output>
-      </div>
-      <div class="row">
-        <label>95th pct</label><span></span><output id="calP95">—</output>
-      </div>
-      <div class="row">
-        <label>Samples</label><span></span><output id="calN">0</output>
-      </div>
     </div>
 
     <div class="actions">
@@ -321,8 +338,8 @@
 
     // Movement detection config (defaults + persistence)
     const MOVE_DEFAULTS = {
-      VIS_MIN: 0.50,
-      PRES_MIN: 0.00,
+      VIS_MIN: 0.80,   // A. default Visibility
+      PRES_MIN: 0.90,  // B. default Presence
 
       // Short-term (EMA)
       EMA_ALPHA: 0.20,
@@ -375,6 +392,10 @@
     const disableAudioBtn = document.getElementById('disableAudioBtn');
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
+
+    // NEW: quick calibration button
+    const calQuickBtn = document.getElementById('calQuickBtn');
+    let calQuickBtnActive = false;
 
     // Movement UI refs
     const moveBtn    = document.getElementById('moveBtn');
@@ -672,25 +693,25 @@
     function drawMovementBadge(movingState, emaVal, intVal, driftVal) {
       const ctx = poseCtx;
       const dpr = window.devicePixelRatio || 1;
-    
+
       // Panel + text colors
       const BG        = movingState ? '#4a2a00' : '#111111';
       const BORDER    = movingState ? '#ffa64d' : 'rgba(255,255,255,0.25)';
       const TXT_DIM   = movingState ? '#ffcc80' : '#dddddd';
-    
+
       // Classic bar colors (unchanged)
       const OK_GREEN     = '#4caf50';
       const AMBER        = '#ffc107';
       const ALERT_RED    = '#801721'; // standard alert red (Bootstrap "danger")
-      const ALERT_RED_DK = '#3f0b10'; // deeper red for pill border      
-    
+      const ALERT_RED_DK = '#3f0b10'; // deeper red for pill border
+
       // Metrics to render
       const metrics = [
         { label: 'Short-term motion (EMA)',        val: emaVal,   on: MOVE.ON,       enabled: !!MOVE.USE_EMA },
         { label: 'Sustained motion (Integrator)',  val: intVal,   on: MOVE.INT_ON,   enabled: !!MOVE.USE_INT },
         { label: 'Baseline drift vs pose (DRIFT)', val: driftVal, on: MOVE.DRIFT_ON, enabled: !!MOVE.USE_DRIFT },
       ];
-    
+
       // Layout
       const pad    = Math.round(8*dpr);
       const x      = pad, y = pad;
@@ -698,7 +719,7 @@
       const ROW_H  = Math.round(20*dpr);
       const BAR_W  = Math.round(190*dpr);
       const BAR_H  = Math.round(8*dpr);
-    
+
       // Helper: rounded rect path (for pill)
       function roundRectPath(ctx, x, y, w, h, r) {
         const rr = Math.min(r, w/2, h/2);
@@ -710,29 +731,29 @@
         ctx.arcTo(x,     y,     x + w, y,     rr);
         ctx.closePath();
       }
-    
+
       ctx.save();
-    
+
       // --- Measure pill (state) in header ---
       ctx.font = `${Math.round(12*dpr)}px -apple-system,system-ui,Segoe UI,Roboto,sans-serif`;
       const stateTxt = movingState ? '• MOVING' : '• STILL';
       const pillPadX = Math.round(10*dpr);
       const pillW    = Math.round(ctx.measureText(stateTxt).width + pillPadX*2);
       const pillH    = Math.round(20*dpr);
-    
+
       // --- Measure labels & % column for rows ---
       ctx.font = `${Math.round(11*dpr)}px -apple-system,system-ui,Segoe UI,Roboto,sans-serif`;
       const maxLabelW = Math.max(...metrics.map(m => ctx.measureText(m.label).width));
       const LABEL_W   = Math.round(maxLabelW + Math.round(6*dpr));
       const PCT_W     = Math.round(ctx.measureText('100%+').width + Math.round(12*dpr));
-    
+
       // --- Header height (ensures no overlap with bars) ---
       const HEADER_H  = pillH + Math.round(10*dpr); // pill height + padding
-    
+
       // --- Compute box size: header + rows ---
       const boxW = Math.max(LABEL_W + INNER + BAR_W + INNER + PCT_W, pillW + INNER*2);
       const boxH = HEADER_H + INNER + (ROW_H * metrics.length) + INNER;
-    
+
       // Panel bg + border
       ctx.globalAlpha = 0.7;
       ctx.fillStyle = BG;
@@ -741,82 +762,82 @@
       ctx.strokeStyle = BORDER;
       ctx.lineWidth = Math.max(1, Math.round(1*dpr));
       ctx.strokeRect(x+0.5, y+0.5, boxW-1, boxH-1);
-    
+
       // --- Draw pill centered vertically within header ---
       const pillX = x + boxW - pillW - INNER;
       const pillY = y + Math.round((HEADER_H - pillH)/2);
-    
+
       const pillFill   = movingState ? ALERT_RED    : '#1a1a1a';
       const pillBorder = movingState ? ALERT_RED_DK : 'rgba(255,255,255,0.25)';
       const pillText   = '#ffffff';
-    
+
       roundRectPath(ctx, pillX, pillY, pillW, pillH, pillH/2);
       ctx.fillStyle = pillFill;     ctx.fill();
       ctx.strokeStyle = pillBorder; ctx.stroke();
-    
+
       ctx.fillStyle = pillText;
       ctx.textBaseline = 'alphabetic';
       ctx.fillText(stateTxt, pillX + pillPadX, pillY + pillH - Math.round(6*dpr));
-    
+
       // Separator under header
       ctx.strokeStyle = 'rgba(255,255,255,0.15)';
       ctx.beginPath();
       ctx.moveTo(x + INNER, y + HEADER_H + 0.5);
       ctx.lineTo(x + boxW - INNER, y + HEADER_H + 0.5);
       ctx.stroke();
-    
+
       // --- Bars start BELOW the header ---
       const baseY = y + HEADER_H + INNER;
-    
+
       for (let i = 0; i < metrics.length; i++) {
         const m = metrics[i];
         const rowY = baseY + i*ROW_H;
-    
+
         // Label
         ctx.globalAlpha = m.enabled ? 1.0 : 0.35;
         ctx.fillStyle = TXT_DIM;
         ctx.textBaseline = 'alphabetic';
         ctx.fillText(m.label, x + INNER, rowY + Math.round(9*dpr));
-    
+
         // Bar background
         const barX = x + INNER + LABEL_W;
         const barY = rowY - Math.round(BAR_H/2) + Math.round(9*dpr);
         ctx.fillStyle = 'rgba(255,255,255,0.18)';
         ctx.fillRect(barX, barY, BAR_W, BAR_H);
-    
+
         // Progress to ON threshold
         const on = Math.max(1e-6, m.on);
         const ratio = m.val / on;
         const rClamped = Math.max(0, Math.min(ratio, 1));
         const fillW = Math.round(BAR_W * rClamped);
-    
+
         // Color by zone
         let fillCol = OK_GREEN;
         if (ratio >= 0.9 && ratio < 1.0) fillCol = AMBER;
         if (ratio >= 1.0)               fillCol = ALERT_RED;
-    
+
         // Fill
         ctx.globalAlpha = m.enabled ? 1.0 : 0.35;
         ctx.fillStyle = fillCol;
         ctx.fillRect(barX, barY, fillW, BAR_H);
-    
+
         // ON threshold tick (right edge)
         ctx.strokeStyle = 'rgba(255,255,255,0.9)';
         ctx.beginPath();
         ctx.moveTo(barX + BAR_W + 0.5, barY - Math.round(2*dpr));
         ctx.lineTo(barX + BAR_W + 0.5, barY + BAR_H + Math.round(2*dpr));
         ctx.stroke();
-    
+
         // Percentage text at right
         const pct = Math.round(Math.max(0, ratio) * 100);
         const pctText = ratio >= 1 ? '100%+' : `${pct}%`;
         ctx.fillStyle = TXT_DIM;
         ctx.textBaseline = 'middle';
         ctx.fillText(pctText, barX + BAR_W + Math.round(8*dpr), barY + Math.round(BAR_H/2));
-    
+
         ctx.globalAlpha = 1.0;
       }
-    
+
       ctx.restore();
     }
 
@@ -828,6 +849,20 @@
       moveStateTxt.textContent  = moving ? 'MOVING' : 'STILL';
       moveStateTxt.classList.toggle('moving', moving);
       moveStateTxt.classList.toggle('still', !moving);
+    }
+
+    // Update the quick calibration button UI when active
+    function updateCalQuickUI(active, secsLeft = null) {
+      if (!calQuickBtn) return;
+      if (!active) {
+        calQuickBtn.disabled = false;
+        calQuickBtn.innerHTML = 'Calibration';
+        calQuickBtnActive = false;
+        return;
+      }
+      calQuickBtn.disabled = true;
+      const secsTxt = (secsLeft == null) ? '' : ` ${secsLeft}s`;
+      calQuickBtn.innerHTML = `<span class="spinner" aria-hidden="true"></span>Calibrating…${secsTxt}`;
     }
 
     function updateMovementFromLandmarks(lm, canSend=true) {
@@ -882,7 +917,9 @@
         const t = now - calStartMs;
         const durMs = Math.max(1000, Math.round((calEndMs - calStartMs)));
         calProg.value = Math.min(1, t / durMs);
-        calTime.textContent = Math.max(0, Math.ceil((calEndMs - now)/1000)) + 's';
+        const secsLeft = Math.max(0, Math.ceil((calEndMs - now)/1000));
+        calTime.textContent = secsLeft + 's';
+        if (calQuickBtnActive) updateCalQuickUI(true, secsLeft);
 
         if ((now - lastCalUIRedraw) >= CAL_RECAL_MS) {
           lastCalUIRedraw = now;
@@ -973,8 +1010,8 @@
       lastCalUIRedraw = 0;
 
       calStats.style.display = 'none';
-      calStatus.className = 'muted';
-      calStatus.textContent = 'Calibrating... keep still';
+      calStatus.className = 'running'; // D. red
+      calStatus.textContent = 'Calibrating… keep still';
       calProgRow.style.display = 'grid';
       calProg.value = 0; calTime.textContent = Math.round((calEndMs - calStartMs)/1000) + 's';
 
@@ -1009,6 +1046,9 @@
       calStatus.className = 'ok';
       calStatus.textContent = 'Calibrated';
       setTimeout(()=>{ if (!calActive) calStatus.textContent = ''; }, 3000);
+
+      // Restore quick button UI if it launched calibration
+      if (calQuickBtnActive) updateCalQuickUI(false);
     }
 
     /* ---------- Clear / stream end helpers ---------- */
@@ -1167,45 +1207,45 @@
     function applyOnCaps() {
       const HEADROOM = 1.2;   // 20% above calibrated value
       const MAX_SAFE = 10.0;  // absolute hard ceiling to avoid runaway UI
-    
+
       const setMaxWithHeadroom = (inputEl, baseCap, calibratedVal) => {
         const need = Math.min(MAX_SAFE, Math.max(baseCap, calibratedVal * HEADROOM));
         inputEl.max = Number.isFinite(need) ? need.toFixed(3) : (baseCap.toFixed ? baseCap.toFixed(3) : String(baseCap));
       };
-    
+
       // --- EMA: base cap (was 0.500) -> ensure ≥ 1.2× calibrated MOVE.ON
       const baseEmaCap = 0.500;
       setMaxWithHeadroom(onTh, baseEmaCap, MOVE.ON);
       offTh.max = onTh.max;
-    
+
       // --- DRIFT: base cap (was 1.000) -> ensure ≥ 1.2× calibrated MOVE.DRIFT_ON
       const baseDriftCap = 1.000;
       setMaxWithHeadroom(driftOnEl, baseDriftCap, MOVE.DRIFT_ON);
       driftOff.max = driftOnEl.max;
-    
+
       // --- INT: dynamic base cap -> ensure ≥ 1.2× calibrated MOVE.INT_ON
       const baseIntCap = Math.min(2.0, MOVE.INT_TAU * 0.8);
       setMaxWithHeadroom(intOnEl, baseIntCap, MOVE.INT_ON);
       intOff.max = intOnEl.max;
-    
+
       // ---- Keep current values within (raised) caps
       if (parseFloat(onTh.value) > parseFloat(onTh.max)) onTh.value = onTh.max;
       MOVE.ON = parseFloat(onTh.value) || MOVE.ON; onOut.textContent = fmt(MOVE.ON);
-    
+
       if (parseFloat(driftOnEl.value) > parseFloat(driftOnEl.max)) driftOnEl.value = driftOnEl.max;
       MOVE.DRIFT_ON = parseFloat(driftOnEl.value) || MOVE.DRIFT_ON; driftOnOut.textContent = fmt(MOVE.DRIFT_ON);
-    
+
       if (parseFloat(intOnEl.value) > parseFloat(intOnEl.max)) intOnEl.value = intOnEl.max;
       MOVE.INT_ON = parseFloat(intOnEl.value) || MOVE.INT_ON; intOnOut.textContent = fmt(MOVE.INT_ON);
-    
+
       // ---- OFF ≤ ON (and obey link flags)
-      if (offLink.ema || MOVE.OFF > MOVE.ON)        MOVE.OFF = Math.min(MOVE.OFF, MOVE.ON);
+      if (offLink.ema || MOVE.OFF > MOVE.ON)         MOVE.OFF = Math.min(MOVE.OFF, MOVE.ON);
       if (offLink.int || MOVE.INT_OFF > MOVE.INT_ON) MOVE.INT_OFF = Math.min(MOVE.INT_OFF, MOVE.INT_ON);
       if (offLink.drift || MOVE.DRIFT_OFF > MOVE.DRIFT_ON) MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON);
-    
+
       // ---- Reflect OFFs into UI (also clamped to their maxes)
-      offTh.value     = Math.min(parseFloat(offTh.max), MOVE.OFF);           offOut.textContent     = fmt(MOVE.OFF);
-      intOff.value    = Math.min(parseFloat(intOff.max), MOVE.INT_OFF);      intOffOut.textContent  = fmt(MOVE.INT_OFF);
+      offTh.value     = Math.min(parseFloat(offTh.max), MOVE.OFF);           offOut.textContent      = fmt(MOVE.OFF);
+      intOff.value    = Math.min(parseFloat(intOff.max), MOVE.INT_OFF);      intOffOut.textContent   = fmt(MOVE.INT_OFF);
       driftOff.value  = Math.min(parseFloat(driftOff.max), MOVE.DRIFT_OFF);  driftOffOut.textContent = fmt(MOVE.DRIFT_OFF);
     }
 
@@ -1341,6 +1381,15 @@
     });
     calStartBtn.addEventListener('click', () => {
       openMovePanel();
+      startCalibration();
+    });
+
+    // NEW: Quick Calibration button behavior
+    calQuickBtn.addEventListener('click', () => {
+      if (calActive) return;
+      calQuickBtnActive = true;
+      updateCalQuickUI(true, MOVE.CAL_SECS);
+      openMovePanel();   // show panel while it runs
       startCalibration();
     });
 
