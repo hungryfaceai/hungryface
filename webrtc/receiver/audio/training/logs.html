@@ -240,21 +240,58 @@
     const EL = id => document.getElementById(id);
     const ASM_LOG_MS = 2000;
 
+    /* ========= UI Preferences (persist remaining knobs) ========= */
+    const PREFS_KEY = 'cryPrefsV1';
+    const _loadPrefs = () => { try { return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'); } catch { return {}; } };
+    const _savePrefs = (p) => localStorage.setItem(PREFS_KEY, JSON.stringify(p));
+    const setPref = (k,v)=>{ const p=_loadPrefs(); p[k]=v; _savePrefs(p); };
+    const getPref = (k,d)=>{ const p=_loadPrefs(); return (k in p)? p[k] : d; };
+    function bindPersistedInput(id){
+      const el = EL(id); if (!el) return;
+      const val = getPref(id);
+      if (val !== undefined){
+        if (el.type === 'checkbox') el.checked = !!val;
+        else el.value = String(val);
+      }
+      el.addEventListener('change', () => {
+        setPref(id, el.type==='checkbox' ? el.checked
+                                         : (el.type==='number' ? Number(el.value) : el.value));
+      });
+    }
+    // Persist these inputs (that weren't already saved per-model)
+    [
+      'SR_TARGET','FRAME_LEN_S','HOP_S',
+      'CLASS_EMA_TAU_S','FUSED_EMA_TAU_S',
+      'ALERT_HOLD_MS','CAL_SEC','ALERT_OFF_DELTA',
+      'MAX_RESULTS',
+      'LOG_ENABLE','LOG_ALL','LOG_TOPN','LOG_AUTOSCROLL'
+    ].forEach(bindPersistedInput);
+
     /* Settings modal wiring */
     const _modal = EL('settingsModal');
     const _open = EL('btnOpenSettings');
     const _close = EL('btnSettingsClose');
-    _open.onclick = () => { _modal.classList.add('show'); _modal.setAttribute('aria-hidden','false'); };
-    _close.onclick = () => { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); };
-    _modal.addEventListener('click', (e) => { if (e.target === _modal) { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); }});
+    // Restore saved open/closed state
+    if (getPref('__settingsOpen', false)) { _modal.classList.add('show'); _modal.setAttribute('aria-hidden','false'); }
+    _open.onclick = () => { _modal.classList.add('show'); _modal.setAttribute('aria-hidden','false'); setPref('__settingsOpen', true); };
+    _close.onclick = () => { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); setPref('__settingsOpen', false); };
+    _modal.addEventListener('click', (e) => {
+      if (e.target === _modal) { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); setPref('__settingsOpen', false); }
+    });
 
     /* Logs toggle wiring */
     const btnToggleLogs = EL('btnToggleLogs');
     const logsContainer = EL('logsContainer');
+    // Restore logs visibility state (default hidden)
+    const logsVisible = getPref('__logsVisible', false);
+    logsContainer.style.display = logsVisible ? '' : 'none';
+    btnToggleLogs.textContent = logsVisible ? 'Hide logs' : 'Display logs';
     btnToggleLogs.onclick = () => {
       const visible = logsContainer.style.display !== 'none';
-      logsContainer.style.display = visible ? 'none' : '';
-      btnToggleLogs.textContent = visible ? 'Display logs' : 'Hide logs';
+      const next = !visible;
+      logsContainer.style.display = next ? '' : 'none';
+      btnToggleLogs.textContent = next ? 'Hide logs' : 'Display logs';
+      setPref('__logsVisible', next);
     };
 
     const LOGS = {
@@ -477,6 +514,9 @@
     }
 
     function resetDefaults(){
+      // Clear UI prefs store
+      localStorage.removeItem(PREFS_KEY);
+
       // Core numeric defaults
       els.SR_TARGET.value        = 16000;
       els.FRAME_LEN_S.value      = 0.975;
@@ -490,34 +530,46 @@
       els.K_PRIOR.value          = 50;
       els.HALF_LIFE_S.value      = 3600;
       els.MAX_RESULTS.value      = 25;
-    
+
+      // Log UI defaults (checkboxes & inputs)
+      const ids = ['LOG_ENABLE','LOG_ALL','LOG_AUTOSCROLL','LOG_TOPN'];
+      ids.forEach(id=>{
+        const el = EL(id); if (!el) return;
+        if (el.type === 'checkbox') el.checked = el.defaultChecked;
+        else el.value = el.defaultValue || el.value;
+      });
+
       // Text defaults
       els.IGNORE_CLASSES.value   = 'Silence, Inside, Outside, Vehicle, Noise';
       els.PENALTY_MAP.value      = 'Silence:-0.45, White noise:-0.2';
-    
+
       // Persist per-model fields immediately
       localStorage.setItem(IGNORE_KEY(), els.IGNORE_CLASSES.value);
       localStorage.setItem(PENALTY_KEY(), els.PENALTY_MAP.value);
-    
+
       // Trigger the same change handlers your code already uses
       ['TOP_K','K_PRIOR','HALF_LIFE_S'].forEach(id => {
         const el = document.getElementById(id);
         el && el.dispatchEvent(new Event('change'));
       });
-    
+
       // Update preview/saved charts to reflect new knobs
       const m = loadModel();
       const preview = computeWeightsPreview(m);
       setWeightsChart(state.barDynW, preview);
       setWeightsChart(state.barSavedW, m.weights || {});
       if (state.mode === 'idle') clearTopBars();
-    
+
+      // Reset logs visibility (default hidden) and settings open state (keep open since we're inside it)
+      logsContainer.style.display = 'none';
+      EL('btnToggleLogs').textContent = 'Display logs';
+      setPref('__logsVisible', false);
+      setPref('__settingsOpen', true);
+
       log('ok', 'Settings reset to defaults.');
     }
-
-// Wire up button
-els.btnResetDefaults && (els.btnResetDefaults.onclick = resetDefaults);
-    
+    // Wire up button
+    els.btnResetDefaults && (els.btnResetDefaults.onclick = resetDefaults);
 
     /* ========= Stats → weights ========= */
     function updateStats(model, categories, dtSec) {
