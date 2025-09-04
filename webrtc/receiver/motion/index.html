@@ -598,7 +598,7 @@
     function drawBaselineGhostAndVectors(currLm) {
       if (!MOVE.SHOW_BASELINE || !baseLm || !currLm || currLm.length !== baseLm.length) return;
 
-      const baseAligned = alignedBaseline(baseLm, currLm, MOVE.DRIFT_TORSO_REL, true);
+      const baseAligned = alignedBaseline(baseLm, currLm, MOVE.DRIFT_TORSO_REL, false);
       if (!baseAligned) return;
 
       const ctx = poseCtx;
@@ -633,39 +633,38 @@
       }
       ctx.restore();
 
-      // Delta vectors baseline→current (fade small)
+      // Delta vectors baseline→current (always draw; fade small)
       const scaleNow = scaleFromTorso(currLm);
-      const fadeFrac = 0.25;
       const onThresh = Math.max(1e-6, MOVE.DRIFT_ON);
-
+      const minAlpha = 0.18;   // visible even when tiny
+      const maxAlpha = 1.00;
+      
       for (let i = 0; i < currLm.length; i++) {
         const c = currLm[i], b = baseAligned[i];
         if (!lmOk(c) || !lmOk(b)) continue;
-
+      
         const dx = c.x - b.x, dy = c.y - b.y;
         const dNorm = Math.hypot(dx, dy) / scaleNow;
-
-        if (dNorm < fadeFrac * onThresh) continue;
-
-        const t0 = fadeFrac * onThresh;
-        const alpha = Math.max(0, Math.min(1, (dNorm - t0) / (onThresh - t0)));
-
-        let stroke = 'rgba(180,180,180,1)';
-        if (dNorm >= 0.9 * onThresh && dNorm < onThresh) stroke = 'rgba(255,193,7,1)';  // amber
-        if (dNorm >= onThresh)                            stroke = 'rgba(203,36,49,1)';   // red
-
+        const ratio = dNorm / onThresh;
+        const alpha = Math.max(minAlpha, Math.min(maxAlpha, ratio));
+      
+        // Color by severity
+        let stroke = 'rgba(180,180,180,1)';                    // small
+        if (ratio >= 0.9 && ratio < 1.0) stroke = 'rgba(255,193,7,1)'; // amber
+        if (ratio >= 1.0)                 stroke = 'rgba(203,36,49,1)'; // red
+      
         const B = lmToPx(b), C = lmToPx(c);
-
-        ctx.save();
-        ctx.globalAlpha = 0.35 + 0.65 * alpha;
-        ctx.strokeStyle = stroke;
-        ctx.lineWidth   = Math.max(1, 1.5 * dpr);
-
-        ctx.beginPath();
-        ctx.moveTo(B.x, B.y);
-        ctx.lineTo(C.x, C.y);
-        ctx.stroke();
-        ctx.restore();
+        const dpr = window.devicePixelRatio || 1;
+      
+        poseCtx.save();
+        poseCtx.globalAlpha = alpha;
+        poseCtx.strokeStyle = stroke;
+        poseCtx.lineWidth   = Math.max(1, 1.5 * dpr);
+        poseCtx.beginPath();
+        poseCtx.moveTo(B.x, B.y);
+        poseCtx.lineTo(C.x, C.y);
+        poseCtx.stroke();
+        poseCtx.restore();
       }
     }
 
