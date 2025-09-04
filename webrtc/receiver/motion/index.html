@@ -202,7 +202,9 @@
     <div class="row"><label for="driftOff">DRIFT OFF</label><input id="driftOff" type="range" min="0.005" max="1.000" step="0.005"><output id="driftOffOut">0.050</output></div>
 
     <div class="actions">
-      <button id="moveReset" class="btn small" type="button">Reset all defaults</button>
+      <button id="moveReset" class="btn small" type="button" title="Restore all movement settings to factory defaults and clear calibration">
+        Reset all defaults
+      </button>
       <button id="moveHide"  class="btn small" type="button">Hide</button>
     </div>
   </section>
@@ -861,7 +863,11 @@
       if (calStatus) { calStatus.className = 'ok'; calStatus.textContent = 'Calibrated'; }
       setTimeout(()=>{ if (!calActive && calStatus) calStatus.textContent = ''; }, 3000);
 
-      if (calQuickBtnActive) updateCalQuickUI(false);
+      // New: if started via main-page button, restore it and hide the settings panel
+      if (calQuickBtnActive) {
+        updateCalQuickUI(false);
+        if (typeof closeMovePanel === 'function') closeMovePanel();
+      }
     }
 
     function clearOverlayDrawing() {
@@ -1006,6 +1012,44 @@
     const clampUi = (v,min,max)=>Math.max(min,Math.min(max,v));
     const fmt = (n,d=3)=>Number(n).toFixed(d);
 
+    /* ---------- NEW: full reset helper ---------- */
+    function resetToDefaults() {
+      // Reset config to built-in defaults
+      Object.keys(MOVE).forEach(k => delete MOVE[k]);
+      Object.assign(MOVE, MOVE_DEFAULTS);
+
+      // Ensure OFF ≤ ON
+      MOVE.OFF       = Math.min(MOVE.OFF,       MOVE.ON);
+      MOVE.INT_OFF   = Math.min(MOVE.INT_OFF,   MOVE.INT_ON);
+      MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON);
+
+      // Clear persisted overrides
+      try { localStorage.removeItem(LS_KEY); } catch {}
+
+      // Clear runtime state
+      baseLm = null; prevLm = null;
+      moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
+
+      // Break OFF-link flags
+      offLink = { ema: false, int: false, drift: false };
+
+      // Cancel calibration if running
+      if (calActive) {
+        calActive = false;
+        if (calProgRow) calProgRow.style.display = 'none';
+      }
+
+      // Push defaults to UI and persist
+      initMovePanel();
+      applyOnCaps();
+      reflectPanel();
+      saveMoveConfig();
+
+      // Feedback
+      if (calStatus) { calStatus.className = 'muted'; calStatus.textContent = 'Defaults restored'; }
+      if (calStats)  { calStats.style.display = 'none'; }
+    }
+
     function applyOnCaps() {
       if (!onTh || !offTh || !driftOnEl || !driftOff || !intOnEl || !intOff) return;
       const HEADROOM = 1.2, MAX_SAFE = 10.0;
@@ -1015,7 +1059,7 @@
         inputEl.max = Number.isFinite(need) ? need.toFixed(3) : (baseCap.toFixed ? baseCap.toFixed(3) : String(baseCap));
       };
 
-      setMaxWithHeadroom(onTh,      0.500, MOVE.ON);    offTh.max = onTh.max;
+      setMaxWithHeadroom(onTh,      0.500, MOVE.ON);       offTh.max = onTh.max;
       setMaxWithHeadroom(driftOnEl, 1.000, MOVE.DRIFT_ON); driftOff.max = driftOnEl.max;
       setMaxWithHeadroom(intOnEl,   Math.min(2.0, MOVE.INT_TAU * 0.8), MOVE.INT_ON); intOff.max = intOnEl.max;
 
@@ -1028,9 +1072,9 @@
       if (parseFloat(intOnEl.value) > parseFloat(intOnEl.max)) intOnEl.value = intOnEl.max;
       MOVE.INT_ON = parseFloat(intOnEl.value) || MOVE.INT_ON; if (intOnOut) intOnOut.textContent = fmt(MOVE.INT_ON);
 
-      if (offLink.ema || MOVE.OFF > MOVE.ON)             MOVE.OFF = Math.min(MOVE.OFF, MOVE.ON);
-      if (offLink.int || MOVE.INT_OFF > MOVE.INT_ON)     MOVE.INT_OFF = Math.min(MOVE.INT_OFF, MOVE.INT_ON);
-      if (offLink.drift || MOVE.DRIFT_OFF > MOVE.DRIFT_ON) MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON);
+      if (offLink.ema || MOVE.OFF > MOVE.ON)                 MOVE.OFF = Math.min(MOVE.OFF, MOVE.ON);
+      if (offLink.int || MOVE.INT_OFF > MOVE.INT_ON)         MOVE.INT_OFF = Math.min(MOVE.INT_OFF, MOVE.INT_ON);
+      if (offLink.drift || MOVE.DRIFT_OFF > MOVE.DRIFT_ON)   MOVE.DRIFT_OFF = Math.min(MOVE.DRIFT_OFF, MOVE.DRIFT_ON);
 
       offTh.value     = Math.min(parseFloat(offTh.max), MOVE.OFF);           if (offOut)     offOut.textContent     = fmt(MOVE.OFF);
       intOff.value    = Math.min(parseFloat(intOff.max), MOVE.INT_OFF);      if (intOffOut)  intOffOut.textContent  = fmt(MOVE.INT_OFF);
@@ -1163,6 +1207,9 @@
       startCalibration();
     });
 
+    // NEW: wire reset button to full reset helper
+    on(moveReset, 'click', resetToDefaults);
+
     initMovePanel();
 
     ['pause','ended','emptied','stalled','suspend','waiting'].forEach((ev) => {
@@ -1175,6 +1222,7 @@
       stopReceiverPoseLoop();
     });
 
+    // typo guard used in logs (legacy)
     function beginViewportSetle(){ beginViewportSettle(); }
   </script>
 </body>
