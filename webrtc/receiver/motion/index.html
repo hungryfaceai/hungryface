@@ -103,7 +103,6 @@
       z-index: 15; opacity: 0; pointer-events: none; transition: opacity .2s ease;
     }
     .help-backdrop.show { opacity: 1; pointer-events: auto; }
-    
     .help-sheet {
       position: fixed; right: 0; top: 0; height: 100svh; width: min(92vw, 420px);
       background: #121212; color: #f3f3f3; border-left: 1px solid rgba(255,255,255,0.12);
@@ -112,51 +111,30 @@
       display: flex; flex-direction: column;
     }
     .help-sheet.show { transform: translateX(0); }
-    
-    .help-header {
-      position: sticky; top: 0; z-index: 1; background: rgba(18,18,18,0.96);
-      backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: space-between;
-      padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08);
-    }
+    .help-header { position: sticky; top: 0; z-index: 1; background: rgba(18,18,18,0.96); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: space-between; padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }
     .help-header h3 { margin: 0; font-size: 16px; font-weight: 700; color: #fff; }
     .help-header .close { appearance: none; border: none; background: transparent; color: #aaa; font-size: 22px; cursor: pointer; padding: 2px 6px; }
-    
     .help-body { padding: 10px 12px 16px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-    
-    .help-toc {
-      display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; padding-bottom: 8px;
-      border-bottom: 1px dashed rgba(255,255,255,0.15);
-    }
-    .help-toc a {
-      font-size: 12px; color: #ddd; text-decoration: none; border: 1px solid rgba(255,255,255,0.18);
-      padding: 6px 8px; border-radius: 999px;
-    }
+    .help-toc { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; padding-bottom: 8px; border-bottom: 1px dashed rgba(255,255,255,0.15); }
+    .help-toc a { font-size: 12px; color: #ddd; text-decoration: none; border: 1px solid rgba(255,255,255,0.18); padding: 6px 8px; border-radius: 999px; }
     .help-toc a:active { transform: scale(0.98); }
     .help-section { margin: 14px 0; }
     .help-section h4 { margin: 0 0 6px; font-size: 14px; color: #fff; }
     .help-section p, .help-section li, .help-section td, .help-section th { font-size: 13px; color: #ddd; line-height: 1.45; }
-    
     .help-kv { width: 100%; border-collapse: collapse; margin-top: 6px; }
     .help-kv th, .help-kv td { border: 1px solid rgba(255,255,255,0.12); padding: 8px; vertical-align: top; }
     .help-kv th { background: rgba(255,255,255,0.06); font-weight: 700; color: #eee; white-space: nowrap; }
     .help-kv td { color: #ddd; }
     .help-callout { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 10px; }
-    
     details.learn-more { border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 10px; background: rgba(255,255,255,0.04); }
     details.learn-more > summary { cursor: pointer; list-style: none; font-weight: 700; color: #fff; }
     details.learn-more > summary::-webkit-details-marker { display: none; }
     details.learn-more[open] { background: rgba(255,255,255,0.06); }
-    
-    .codeblock {
-      background: #0e0e0e; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
-      padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      color: #d7eaff; font-size: 12px; overflow-x: auto;
-    }
-    
+    .codeblock { background: #0e0e0e; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #d7eaff; font-size: 12px; overflow-x: auto; }
+
     /* header actions container in settings */
     #movePanel header { gap: 8px; }
     #movePanel header .headerActions { display: flex; gap: 8px; align-items: center; }
-    
   </style>
 </head>
 <body>
@@ -179,6 +157,9 @@
       } catch (err) { console.error('[Sidebar] failed to load shared assets:', err); }
     })();
   </script>
+
+  <!-- NEW: inject the Help side-sheet HTML -->
+  <script type="module" src="/hungryface/webrtc/receiver/shared/help-sheet.js"></script>
 
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
@@ -285,143 +266,7 @@
     </div>
   </section>
 
-  <!-- Help side sheet -->
-  <div id="helpBackdrop" class="help-backdrop"></div>
-  <aside id="helpSheet" class="help-sheet" aria-labelledby="helpTitle" aria-modal="true" role="dialog">
-    <div class="help-header">
-      <h3 id="helpTitle">Movement detection – Help</h3>
-      <button id="helpClose" class="close" title="Close">×</button>
-    </div>
-  
-    <div class="help-body" id="helpBody">
-      <!-- Mini table of contents -->
-      <nav class="help-toc" aria-label="Contents">
-        <a href="#tldr">Summary</a>
-        <a href="#quickstart">Quick start</a>
-        <a href="#cheatsheet">Key controls</a>
-        <a href="#troubleshoot">Troubleshooting</a>
-        <a href="#learnmore">Learn more</a>
-      </nav>
-  
-      <!-- Summary -->
-      <section id="tldr" class="help-section">
-        <h4>Summary</h4>
-        <p class="help-callout">
-          The app detects movement using three lenses: quick motion, sustained motion, and drift from a “still” reference pose.<br>
-          Use <strong>Calibration</strong> when the scene is calm to auto-tune sensitivity for your setup. Keep all three detectors on for best results.
-        </p>
-      </section>
-  
-      <!-- Quick start -->
-      <section id="quickstart" class="help-section">
-        <h4>Quick start</h4>
-        <ol>
-          <li>Frame the crib; wait until the baby is calm.</li>
-          <li>Open <em>Movement settings</em> → tap <strong>Start</strong> under <em>Calibration</em> (or use the main <strong>Calibration</strong> button).</li>
-          <li>Keep still until the timer finishes; thresholds and baseline are set automatically.</li>
-          <li>Leave <em>EMA</em>, <em>Integrator</em>, and <em>Baseline drift</em> enabled. Keep <em>Torso-relative baseline</em> on.</li>
-          <li>Only tweak gates/thresholds if you see false alerts or missed movement.</li>
-        </ol>
-      </section>
-  
-      <!-- Key controls cheat sheet -->
-      <section id="cheatsheet" class="help-section">
-        <h4>Key controls (cheat sheet)</h4>
-        <table class="help-kv">
-          <tr><th>Visibility min</th><td>Ignore body points the model isn’t confident about. Higher = stricter, less noise.</td></tr>
-          <tr><th>Presence min</th><td>Ignore points that may not actually be present. Higher = stricter.</td></tr>
-          <tr><th>EMA α</th><td>Snappiness of quick-motion detector. Higher reacts faster.</td></tr>
-          <tr><th>EMA ON / OFF</th><td>Trip level to call movement, and the level to settle back to still (OFF a bit lower to avoid flicker).</td></tr>
-          <tr><th>INT τ (s)</th><td>How long sustained motion is remembered. Bigger = longer memory.</td></tr>
-          <tr><th>INT ON / OFF</th><td>How much gentle, continuous motion is needed to trip / clear.</td></tr>
-          <tr><th>Baseline τ (s)</th><td>How quickly the reference “still” pose adapts while you’re still.</td></tr>
-          <tr><th>DRIFT ON / OFF</th><td>How far from the reference pose counts as moving / still.</td></tr>
-          <tr><th>Torso-relative baseline</th><td>Compare relative to the torso to reduce camera-shake false alerts.</td></tr>
-          <tr><th>Show baseline overlay</th><td>Show dashed “ghost” of the baseline and per-joint drift vectors.</td></tr>
-          <tr><th>Reset baseline</th><td>Forget the current reference; next calm period becomes the new baseline.</td></tr>
-          <tr><th>Reset all defaults</th><td>Restore factory settings and clear calibration/baseline.</td></tr>
-          <tr><th>Calibration (Start)</th><td>Auto-tunes thresholds from a calm window and seeds the baseline.</td></tr>
-          <tr><th>Duration</th><td>How long to sample during Calibration. 10–20s is a good default.</td></tr>
-          <tr><th>Apply thresholds while running</th><td>Update sliders live during Calibration (or only at the end if off).</td></tr>
-        </table>
-      </section>
-  
-      <!-- Troubleshooting -->
-      <section id="troubleshoot" class="help-section">
-        <h4>Troubleshooting</h4>
-        <ul>
-          <li><strong>Bars stuck or show 0; pill looks wrong:</strong> Ensure live pose landmarks are arriving (overlay bars should move). Run <em>Calibration</em>. If still flat, lower the <em>Visibility/Presence</em> gates slightly.</li>
-          <li><strong>False alerts from tiny camera bumps:</strong> Keep <em>Torso-relative baseline</em> on, increase <em>Baseline τ</em>, and re-calibrate.</li>
-          <li><strong>Calibration button disabled:</strong> It only enables when live pose landmarks are received. Check the video feed, ensure <em>Pose overlay</em> is enabled by the sender, then try again.</li>
-        </ul>
-      </section>
-  
-      <!-- Learn more (collapsed) -->
-      <section id="learnmore" class="help-section">
-        <details class="learn-more">
-          <summary>Learn more</summary>
-          <div style="margin-top:8px">
-            <p><strong>Raw movement:</strong> average per-joint displacement between consecutive frames, normalized by body scale (torso size), using only landmarks that pass the confidence gates.</p>
-            <div class="codeblock">
-              <strong>EMA (quick motion)</strong><br>
-              <pre>ema<sub>t</sub> = ema<sub>t−1</sub> + α · (raw<sub>t</sub> − ema<sub>t−1</sub>)</pre>
-              <div>
-                <em>Trip when:</em> ema ≥ <code>EMA_ON</code><br>
-                <em>Clear when:</em> ema ≤ <code>EMA_OFF</code> (with brief hold to prevent flicker)
-              </div>
-            
-              <br>
-            
-              <strong>Leaky integrator (sustained motion)</strong><br>
-              <pre>int<sub>t</sub> = int<sub>t−1</sub> · e<sup>−Δt/τ</sup> + raw<sub>t</sub> · Δt</pre>
-              <div>
-                <em>Trip when:</em> int ≥ <code>INT_ON</code><br>
-                <em>Clear when:</em> int ≤ <code>INT_OFF</code> (with brief hold)
-              </div>
-            
-              <br>
-            
-              <strong>Baseline drift (relative to a still reference pose)</strong><br>
-              <pre>drift = average_distance(current landmarks, baseline landmarks) / body_scale</pre>
-              <div>
-                <em>Trip when:</em> drift ≥ <code>DRIFT_ON</code><br>
-                <em>Clear when:</em> drift ≤ <code>DRIFT_OFF</code>
-              </div>
-            
-              <br>
-            
-              <strong>Baseline adaptation (only while STILL)</strong><br>
-              <pre>
-            baseline ← (1 − β) · baseline + β · current
-            β ≈ 1 − e<sup>−Δt/τ<sub>drift</sub></sup>
-              </pre>
-            
-              <br>
-            
-              <strong>Calibration (duration T)</strong><br>
-              <div>Collect raw scores while the scene is still. Compute:</div>
-              <ul style="margin:6px 0 10px 18px;">
-                <li>Median <em>m</em></li>
-                <li>95th percentile <em>p95</em></li>
-              </ul>
-              <div>Set thresholds (typical):</div>
-              <pre>
-            EMA_ON   ≈ max(3.5·m, 1.2·p95, 0.01)
-            INT_ON   ≈ τ · m · 2.5
-            DRIFT_ON ≈ max(5·m, 1.5·EMA_ON, 0.02)
-              </pre>
-              <div>
-                Initialize <code>OFF</code> thresholds to match <code>ON</code> (you can relax them later).<br>
-                Seed baseline to the last good pose from calibration.
-              </div>
-            </div>
-
-            <p><strong>Combining detectors:</strong> EMA, Integrator, and Drift each vote “moving”. If any enabled detector votes yes, the overall state is <em>MOVING</em>.</p>
-          </div>
-        </details>
-      </section>
-    </div>
-  </aside>
+  <!-- Help side sheet HTML removed; now injected by help-sheet.js -->
 
   <div id="stage">
     <video id="remote" autoplay playsinline></video>
@@ -497,7 +342,7 @@
     const moveClose  = document.getElementById('moveClose');
     const moveReset  = document.getElementById('moveReset');
 
-    const stateRow      = document.getElementById('stateRow'); // NEW: container for pill + scores
+    const stateRow      = document.getElementById('stateRow');
     const moveStateTxt  = document.getElementById('moveStateTxt');
     const emaScoreTxt   = document.getElementById('emaScoreTxt');
     const intScoreTxt   = document.getElementById('intScoreTxt');
@@ -571,7 +416,6 @@
     /* ---------- Utils for live pose gating ---------- */
     const hasLivePose = () => (performance.now() - lastPoseTs) < LIVE_POSE_TIMEOUT_MS;
 
-    // NEW: show/hide the MOVING/STILL pill & scores row based on live pose
     function updateStateRowVisibility() {
       if (!stateRow) return;
       stateRow.style.display = hasLivePose() ? '' : 'none';
@@ -581,9 +425,9 @@
       const live = hasLivePose();
       if (calQuickBtn) calQuickBtn.disabled = !live || !!calActive;
       if (calStartBtn) calStartBtn.disabled = !live || !!calActive;
-      updateStateRowVisibility(); // keep pill visibility in sync
+      updateStateRowVisibility();
     }
-    setInterval(updateCalibrationAvailability, 500); // periodic guard
+    setInterval(updateCalibrationAvailability, 500);
 
     /* ---------- Status overlay ---------- */
     function showStatus(msg) {
@@ -812,27 +656,23 @@
 
     function drawBaselineGhostAndVectors(currLm) {
       if (!MOVE.SHOW_BASELINE || !baseLm || !currLm || currLm.length !== baseLm.length) return;
-    
-      // Align baseline by torso center; DO NOT scale-match to current
+
       const baseAligned = alignedBaseline(baseLm, currLm, MOVE.DRIFT_TORSO_REL, /*scaleMatch*/false);
       if (!baseAligned) return;
-    
+
       const ctx = poseCtx;
       const dpr = window.devicePixelRatio || 1;
-    
-      // --- Ghost baseline skeleton (dashed cyan) ---
+
       ctx.save();
       ctx.globalAlpha = 0.75;
       ctx.strokeStyle = 'rgba(80,200,255,0.95)';
       ctx.fillStyle   = 'rgba(80,200,255,0.70)';
       ctx.lineWidth   = Math.max(1, 1.5 * dpr);
       ctx.setLineDash([6 * dpr, 4 * dpr]);
-    
-      // Use DrawingUtils so POSE_CONNECTIONS works even if not iterable
+
       const utilsGhost = new DrawingUtils(ctx);
       utilsGhost.drawConnectors(baseAligned, PoseLandmarker.POSE_CONNECTIONS);
-    
-      // Baseline joints
+
       ctx.setLineDash([]);
       const JOINT_R = 2 * dpr;
       for (let i = 0; i < baseAligned.length; i++) {
@@ -842,29 +682,27 @@
         ctx.beginPath(); ctx.arc(P.x, P.y, JOINT_R, 0, Math.PI * 2); ctx.fill();
       }
       ctx.restore();
-    
-      // --- Per-joint vectors: baseline → current (always draw; fade small) ---
+
       const scaleNow = scaleFromTorso(currLm);
       const onThresh = Math.max(1e-6, MOVE.DRIFT_ON);
-      const minAlpha = 0.18;   // visible even when tiny
+      const minAlpha = 0.18;
       const maxAlpha = 1.00;
-    
+
       for (let i = 0; i < currLm.length; i++) {
         const c = currLm[i], b = baseAligned[i];
         if (!lmOk(c) || !lmOk(b)) continue;
-    
+
         const dx = c.x - b.x, dy = c.y - b.y;
-        const dNorm = Math.hypot(dx, dy) / scaleNow;   // normalized by torso scale
-        const ratio = dNorm / onThresh;                // 1.0 == at threshold
+        const dNorm = Math.hypot(dx, dy) / scaleNow;
+        const ratio = dNorm / onThresh;
         const alpha = Math.max(minAlpha, Math.min(maxAlpha, ratio));
-    
-        // Color by severity
-        let stroke = 'rgba(180,180,180,1)';                      // small deltas
-        if (ratio >= 0.9 && ratio < 1.0) stroke = 'rgba(255,193,7,1)'; // amber
-        if (ratio >= 1.0)                 stroke = 'rgba(203,36,49,1)'; // red
-    
+
+        let stroke = 'rgba(180,180,180,1)';
+        if (ratio >= 0.9 && ratio < 1.0) stroke = 'rgba(255,193,7,1)';
+        if (ratio >= 1.0)                 stroke = 'rgba(203,36,49,1)';
+
         const B = lmToPx(b), C = lmToPx(c);
-    
+
         ctx.save();
         ctx.globalAlpha = alpha;
         ctx.strokeStyle = stroke;
@@ -877,7 +715,6 @@
       }
     }
 
-
     /* ---------- Badge drawing ---------- */
     function drawMovementBadge(movingState, emaVal, intVal, driftVal) {
       if (!poseCtx) return;
@@ -887,11 +724,6 @@
       const BG        = movingState ? '#4a2a00' : '#111111';
       const BORDER    = movingState ? '#ffa64d' : 'rgba(255,255,255,0.25)';
       const TXT_DIM   = movingState ? '#ffcc80' : '#dddddd';
-
-      const OK_GREEN     = '#4caf50';
-      const AMBER        = '#ffc107';
-      const ALERT_RED    = '#801721';
-      const ALERT_RED_DK = '#3f0b10';
 
       const metrics = [
         { label: 'Short-term motion (EMA)',        val: emaVal,   on: MOVE.ON,       enabled: !!MOVE.USE_EMA },
@@ -940,8 +772,8 @@
 
       const pillX = x + boxW - pillW - INNER;
       const pillY = y + Math.round((HEADER_H - pillH)/2);
-      const pillFill   = movingState ? ALERT_RED    : '#1a1a1a';
-      const pillBorder = movingState ? ALERT_RED_DK : 'rgba(255,255,255,0.25)';
+      const pillFill   = movingState ? '#801721' : '#1a1a1a';
+      const pillBorder = movingState ? '#3f0b10' : 'rgba(255,255,255,0.25)';
       const pillText   = '#ffffff';
 
       roundRectPath(ctx, pillX, pillY, pillW, pillH, pillH/2);
@@ -1014,22 +846,16 @@
 
     // Make Reset buttons match Start button width
     function matchButtonSizes() {
-															 
       if (!movePanel || movePanel.classList.contains('hidden') || !calStartBtn) return;
-	
       const rect = calStartBtn.getBoundingClientRect();
       const w = Math.ceil(rect.width);
-	
-									  
       if (!w || w < 10) return;
-	
       [driftReset, moveReset].forEach(btn => {
         if (!btn) return;
         btn.style.minWidth = w + 'px';
         btn.style.width = w + 'px';
       });
     }
-
 
     function updateCalQuickUI(active, secsLeft = null) {
       if (!calQuickBtn) return;
@@ -1050,10 +876,7 @@
       const utils = new DrawingUtils(poseCtx);
 
       for (const lm of landmarks) {
-														   
         try { drawBaselineGhostAndVectors(lm); } catch (e) { console.warn('[baseline overlay]', e); }
-
-					
         utils.drawLandmarks(lm, {
           radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
         });
@@ -1065,7 +888,7 @@
     function updateMovementFromLandmarks(lm, canSend=true) {
       const now = performance.now();
       lastPoseTs = now;
-      updateCalibrationAvailability(); // also refreshes pill visibility
+      updateCalibrationAvailability();
 
       if (!lastTs) lastTs = now;
       const dt = Math.max(1/120, Math.min(0.2, (now - lastTs) / 1000));
@@ -1113,13 +936,10 @@
         if (calProg) calProg.value = Math.min(1, t / durMs);
         const secsLeft = Math.max(0, Math.ceil((calEndMs - now)/1000));
         if (calTime) calTime.textContent = secsLeft + 's';
-
-        // NEW: mirror main button style in panel status text
         if (calStatus) {
           calStatus.className = 'running';
           calStatus.textContent = `Calibrating… ${secsLeft}s`;
         }
-
         if (calQuickBtnActive) updateCalQuickUI(true, secsLeft);
 
         if ((now - lastCalUIRedraw) >= CAL_RECAL_MS) {
@@ -1183,7 +1003,7 @@
 
       onTh.value       = MOVE.ON;       if (onOut)      onOut.textContent      = MOVE.ON.toFixed(3);
       intOnEl.value    = MOVE.INT_ON;   if (intOnOut)   intOnOut.textContent   = MOVE.INT_ON.toFixed(3);
-      driftOnEl.value  = MOVE.DRIFT_ON; if (driftOnOut) driftOnOut.textContent = MOVE.DRIFT_ON.toFixed(3);
+      driftOnEl.value  = MOVE.DRIFT_ON; if (driftOnOut) driftOnOut.textContent = MOVE.DRIFT_ON;
 
       offTh.value      = Math.min(MOVE.OFF, MOVE.ON);
       if (offOut) offOut.textContent = (MOVE.OFF = Math.min(MOVE.OFF, MOVE.ON)).toFixed(3);
@@ -1209,7 +1029,6 @@
       lastCalUIRedraw = 0;
 
       if (calStats)   calStats.style.display = 'none';
-      // CHANGED: no “keep still”; show countdown like main button
       if (calStatus) {
         calStatus.className = 'running';
         calStatus.textContent = `Calibrating… ${Math.round((calEndMs - calStartMs)/1000)}s`;
@@ -1246,7 +1065,6 @@
       if (calStatus) { calStatus.className = 'ok'; calStatus.textContent = 'Calibrated'; }
       setTimeout(()=>{ if (!calActive && calStatus) calStatus.textContent = ''; }, 3000);
 
-																	  
       if (calQuickBtnActive) {
         updateCalQuickUI(false);
         closeMovePanel();
@@ -1311,7 +1129,6 @@
           } else {
             prevLm = null;
             poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-            // no landmarks → ensure pill hidden
             updateCalibrationAvailability();
           }
         } catch (err) {}
@@ -1325,7 +1142,7 @@
       prevLm = null; moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
       reflectPanel();
-      updateCalibrationAvailability(); // also hides pill
+      updateCalibrationAvailability();
     }
     function applyPoseMode() {
       setOverlayVisible(poseEnabled);
@@ -1372,11 +1189,9 @@
               if (poseEnabled && poseWhere === 'sender' && msg.landmarks?.length) {
                 const lm = msg.landmarks[0];
                 poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-										
                 updateMovementFromLandmarks(lm, /*canSend=*/false);
                 drawPoseLandmarks([lm]);
               } else {
-                // no landmarks arriving from sender → keep pill hidden
                 updateCalibrationAvailability();
               }
             }
@@ -1461,25 +1276,23 @@
 
       if (showBaseline) showBaseline.checked = !!MOVE.SHOW_BASELINE;
 
-      if (calSecs && calSecsOut) { 
-        calSecs.value = clampUi(MOVE.CAL_SECS, 5, 60); 
-        calSecsOut.textContent = `${calSecs.value} s`; 
-        MOVE.CAL_SECS = parseInt(calSecs.value,10); 
+      if (calSecs && calSecsOut) {
+        calSecs.value = clampUi(MOVE.CAL_SECS, 5, 60);
+        calSecsOut.textContent = `${calSecs.value} s`;
+        MOVE.CAL_SECS = parseInt(calSecs.value,10);
       }
       if (calLive) calLive.checked = !!MOVE.CAL_LIVE;
 
       applyOnCaps();
       reflectPanel();
-      updateStateRowVisibility(); // ensure correct initial visibility
+      updateStateRowVisibility();
 
       requestAnimationFrame(matchButtonSizes);
     }
 
-																						  
     function openMovePanel(){
       if (!movePanel) return;
       movePanel.classList.remove('hidden');
-													  
       requestAnimationFrame(() => requestAnimationFrame(matchButtonSizes));
     }
     const closeMovePanel = ()=>{ if (movePanel) movePanel.classList.add('hidden'); };
@@ -1637,66 +1450,64 @@
     });
 
     function beginViewportSetle(){ beginViewportSettle(); }
-    
-    // Help drawer wiring
-    const helpBtn      = document.getElementById('helpBtn');
-    const helpSheet    = document.getElementById('helpSheet');
-    const helpBackdrop = document.getElementById('helpBackdrop');
-    const helpClose    = document.getElementById('helpClose');
-    const helpBody     = document.getElementById('helpBody');
 
-						 
-    function openHelp() {
-      if (!helpSheet || !helpBackdrop) return;
-      helpSheet.classList.add('show');
-      helpBackdrop.classList.add('show');
-																			  
-      document.body.classList.add('help-open');
-    }
-    function closeHelp() {
-      if (!helpSheet || !helpBackdrop) return;
-      helpSheet.classList.remove('show');
-      helpBackdrop.classList.remove('show');
-      document.body.classList.remove('help-open');
-    }
-	
-				
-    if (helpBtn)      helpBtn.addEventListener('click', (e)=>{ e.stopPropagation(); openHelp(); });
-    if (helpClose)    helpClose.addEventListener('click', (e)=>{ e.stopPropagation(); closeHelp(); });
-    if (helpBackdrop) helpBackdrop.addEventListener('click', closeHelp);
-    document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeHelp(); });
+    /* ---------- Help drawer wiring (runs after injection) ---------- */
+    function wireHelpOnce() {
+      const sheet = document.getElementById('helpSheet');
+      const backdrop = document.getElementById('helpBackdrop');
+      const closeBtn = document.getElementById('helpClose');
+      const bodyEl   = document.getElementById('helpBody');
+      const helpBtn  = document.getElementById('helpBtn');
 
-    document.addEventListener('click', (e) => {
-      const btn = e.target && e.target.closest('#helpClose');
-      if (!btn) return;
-      e.preventDefault();
-      e.stopPropagation();
-      closeHelp();
-    }, true);
+      if (!sheet || sheet.dataset.wired === '1') return;
+      sheet.dataset.wired = '1';
 
-	
-																	 
-    document.addEventListener('click', (e) => {
-																				
-																   
-      if (document.body.classList.contains('help-open')) {
-        const sheet = document.getElementById('helpSheet');
-        if (sheet?.contains(e.target)) e.stopPropagation();
-							  
-		 
-      }
-    }, true);
+      const openHelp = () => {
+        sheet.classList.add('show');
+        backdrop?.classList.add('show');
+        document.body.classList.add('help-open');
+      };
+      const closeHelp = () => {
+        sheet.classList.remove('show');
+        backdrop?.classList.remove('show');
+        document.body.classList.remove('help-open');
+      };
 
-								  
-    if (helpBody) {
-      helpBody.addEventListener('click', (e) => {
+      helpBtn?.addEventListener('click', (e)=>{ e.stopPropagation(); openHelp(); });
+      closeBtn?.addEventListener('click', (e)=>{ e.stopPropagation(); closeHelp(); });
+      backdrop?.addEventListener('click', closeHelp);
+      document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeHelp(); });
+
+      // Robust close handler for the “×” even if re-rendered
+      document.addEventListener('click', (e) => {
+        const btn = e.target && e.target.closest('#helpClose');
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        closeHelp();
+      }, true);
+
+      // Keep settings panel open when interacting with the help drawer
+      document.addEventListener('click', (e) => {
+        if (document.body.classList.contains('help-open')) {
+          const liveSheet = document.getElementById('helpSheet');
+          if (liveSheet?.contains(e.target)) e.stopPropagation();
+        }
+      }, true);
+
+      // Smooth scroll for TOC links
+      bodyEl?.addEventListener('click', (e) => {
         const a = e.target.closest('a[href^="#"]');
         if (!a) return;
         const id = a.getAttribute('href');
-        const el = helpBody.querySelector(id);
+        const el = bodyEl.querySelector(id);
         if (el) { e.preventDefault(); el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
       });
     }
-    </script>
+
+    // Run when the HTML is injected; also try immediately in case it’s already present
+    document.addEventListener('help:ready', wireHelpOnce);
+    if (document.getElementById('helpSheet')) wireHelpOnce();
+  </script>
 </body>
 </html>
