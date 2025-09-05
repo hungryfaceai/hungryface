@@ -60,12 +60,49 @@
 
     /* Movement panel */
     #movePanel {
-      position: fixed; right: 16px; bottom: 80px; z-index: 7;
+      position: fixed;
+      right: 16px;
+    
+      /* NEW: pin to both top & bottom so header can’t go off-screen */
+      top: 12px;                 /* was not set */
+      bottom: 80px;              /* unchanged gap above bottom controls */
+    
+      z-index: 7;
       width: min(380px, 92vw);
-      max-height: 80vh; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
-      background: rgba(20,20,20,0.9); border: 1px solid rgba(255,255,255,0.12); border-radius: 14px;
-      backdrop-filter: blur(6px); padding: 12px 12px 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    
+      /* NEW: let top/bottom define the height; avoid vh on iOS */
+      max-height: none;
+    
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
+    
+      background: rgba(20,20,20,0.9);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      backdrop-filter: blur(6px);
+      padding: 12px 12px 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
     }
+    
+    /* SAFE-AREA support for iPhone/iPad (overrides the values above when available) */
+    @supports (padding: env(safe-area-inset-top)) {
+      #movePanel {
+        right: calc(16px + env(safe-area-inset-right));
+        top:   calc(12px + env(safe-area-inset-top));
+        bottom: calc(80px + env(safe-area-inset-bottom));
+        /* keep the same visual width while respecting left/right notches */
+        width: min(380px, calc(100svw - (32px + env(safe-area-inset-left) + env(safe-area-inset-right))));
+      }
+    
+      /* Also lift the bottom controls above the home indicator */
+      #controls {
+        bottom: 16px; /* fallback */
+        bottom: calc(16px + env(safe-area-inset-bottom));
+      }
+    }
+
     #movePanel.hidden { display: none; }
     #movePanel header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
     #movePanel h3 { margin: 0; font-size: 14px; font-weight: 700; color: #eee; }
