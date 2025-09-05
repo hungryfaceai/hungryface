@@ -363,31 +363,59 @@
           <div style="margin-top:8px">
             <p><strong>Raw movement:</strong> average per-joint displacement between consecutive frames, normalized by body scale (torso size), using only landmarks that pass the confidence gates.</p>
             <div class="codeblock">
-  EMA (quick motion):
-  emaₜ = emaₜ₋₁ + α · (rawₜ − emaₜ₋₁)
-  Trip when: ema ≥ EMA_ON; clear when: ema ≤ EMA_OFF (with brief hold to prevent flicker)
-  
-  Leaky integrator (sustained motion):
-  intₜ = intₜ₋₁ · e^(−Δt/τ) + rawₜ · Δt
-  Trip when: int ≥ INT_ON; clear when: int ≤ INT_OFF (with brief hold)
-  
-  Baseline drift (relative to a still reference pose):
-  drift = average distance(current landmarks, baseline landmarks) / body scale
-  Trip when: drift ≥ DRIFT_ON; clear when: drift ≤ DRIFT_OFF
-  
-  Baseline adaptation (only while STILL):
-  baseline ← (1 − β)·baseline + β·current, where β ≈ 1 − e^(−Δt/τ_drift)
-  
-  Calibration (duration T):
-  Collect raw scores while the scene is still. Compute:
-  - median m, 95th percentile p95.
-  Set thresholds (typical):
-  EMA_ON   ≈ max(3.5·m, 1.2·p95, 0.01)
-  INT_ON   ≈ τ · m · 2.5
-  DRIFT_ON ≈ max(5·m, 1.5·EMA_ON, 0.02)
-  Initialize OFF thresholds to match ON (you can relax them later).
-  Seed baseline to the last good pose from calibration.
+              <strong>EMA (quick motion)</strong><br>
+              <pre>ema<sub>t</sub> = ema<sub>t−1</sub> + α · (raw<sub>t</sub> − ema<sub>t−1</sub>)</pre>
+              <div>
+                <em>Trip when:</em> ema ≥ <code>EMA_ON</code><br>
+                <em>Clear when:</em> ema ≤ <code>EMA_OFF</code> (with brief hold to prevent flicker)
+              </div>
+            
+              <br>
+            
+              <strong>Leaky integrator (sustained motion)</strong><br>
+              <pre>int<sub>t</sub> = int<sub>t−1</sub> · e<sup>−Δt/τ</sup> + raw<sub>t</sub> · Δt</pre>
+              <div>
+                <em>Trip when:</em> int ≥ <code>INT_ON</code><br>
+                <em>Clear when:</em> int ≤ <code>INT_OFF</code> (with brief hold)
+              </div>
+            
+              <br>
+            
+              <strong>Baseline drift (relative to a still reference pose)</strong><br>
+              <pre>drift = average_distance(current landmarks, baseline landmarks) / body_scale</pre>
+              <div>
+                <em>Trip when:</em> drift ≥ <code>DRIFT_ON</code><br>
+                <em>Clear when:</em> drift ≤ <code>DRIFT_OFF</code>
+              </div>
+            
+              <br>
+            
+              <strong>Baseline adaptation (only while STILL)</strong><br>
+              <pre>
+            baseline ← (1 − β) · baseline + β · current
+            β ≈ 1 − e<sup>−Δt/τ<sub>drift</sub></sup>
+              </pre>
+            
+              <br>
+            
+              <strong>Calibration (duration T)</strong><br>
+              <div>Collect raw scores while the scene is still. Compute:</div>
+              <ul style="margin:6px 0 10px 18px;">
+                <li>Median <em>m</em></li>
+                <li>95th percentile <em>p95</em></li>
+              </ul>
+              <div>Set thresholds (typical):</div>
+              <pre>
+            EMA_ON   ≈ max(3.5·m, 1.2·p95, 0.01)
+            INT_ON   ≈ τ · m · 2.5
+            DRIFT_ON ≈ max(5·m, 1.5·EMA_ON, 0.02)
+              </pre>
+              <div>
+                Initialize <code>OFF</code> thresholds to match <code>ON</code> (you can relax them later).<br>
+                Seed baseline to the last good pose from calibration.
+              </div>
             </div>
+
             <p><strong>Combining detectors:</strong> EMA, Integrator, and Drift each vote “moving”. If any enabled detector votes yes, the overall state is <em>MOVING</em>.</p>
           </div>
         </details>
