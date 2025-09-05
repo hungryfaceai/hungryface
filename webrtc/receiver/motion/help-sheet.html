@@ -1,0 +1,137 @@
+<!-- Help side sheet -->
+<div id="helpBackdrop" class="help-backdrop"></div>
+<aside id="helpSheet" class="help-sheet" aria-labelledby="helpTitle" aria-modal="true" role="dialog">
+  <div class="help-header">
+    <h3 id="helpTitle">Movement detection – Help</h3>
+    <button id="helpClose" class="close" title="Close">×</button>
+  </div>
+
+  <div class="help-body" id="helpBody">
+    <!-- Mini table of contents -->
+    <nav class="help-toc" aria-label="Contents">
+      <a href="#tldr">Summary</a>
+      <a href="#quickstart">Quick start</a>
+      <a href="#cheatsheet">Key controls</a>
+      <a href="#troubleshoot">Troubleshooting</a>
+      <a href="#learnmore">Learn more</a>
+    </nav>
+
+    <!-- Summary -->
+    <section id="tldr" class="help-section">
+      <h4>Summary</h4>
+      <p class="help-callout">
+        The app detects movement using three lenses: quick motion, sustained motion, and drift from a “still” reference pose.<br>
+        Use <strong>Calibration</strong> when the scene is calm to auto-tune sensitivity for your setup. Keep all three detectors on for best results.
+      </p>
+    </section>
+
+    <!-- Quick start -->
+    <section id="quickstart" class="help-section">
+      <h4>Quick start (3–5 steps)</h4>
+      <ol>
+        <li>Frame the crib; wait until the baby is calm.</li>
+        <li>Open <em>Movement settings</em> → tap <strong>Start</strong> under <em>Calibration</em> (or use the main <strong>Calibration</strong> button).</li>
+        <li>Keep still until the timer finishes; thresholds and baseline are set automatically.</li>
+        <li>Leave <em>EMA</em>, <em>Integrator</em>, and <em>Baseline drift</em> enabled. Keep <em>Torso-relative baseline</em> on.</li>
+        <li>Only tweak gates/thresholds if you see false alerts or missed movement.</li>
+      </ol>
+    </section>
+
+    <!-- Key controls cheat sheet -->
+    <section id="cheatsheet" class="help-section">
+      <h4>Key controls (cheat sheet)</h4>
+      <table class="help-kv">
+        <tr><th>Visibility min</th><td>Ignore body points the model isn’t confident about. Higher = stricter, less noise.</td></tr>
+        <tr><th>Presence min</th><td>Ignore points that may not actually be present. Higher = stricter.</td></tr>
+        <tr><th>EMA α</th><td>Snappiness of quick-motion detector. Higher reacts faster.</td></tr>
+        <tr><th>EMA ON / OFF</th><td>Trip level to call movement, and the level to settle back to still (OFF a bit lower to avoid flicker).</td></tr>
+        <tr><th>INT τ (s)</th><td>How long sustained motion is remembered. Bigger = longer memory.</td></tr>
+        <tr><th>INT ON / OFF</th><td>How much gentle, continuous motion is needed to trip / clear.</td></tr>
+        <tr><th>Baseline τ (s)</th><td>How quickly the reference “still” pose adapts while you’re still.</td></tr>
+        <tr><th>DRIFT ON / OFF</th><td>How far from the reference pose counts as moving / still.</td></tr>
+        <tr><th>Torso-relative baseline</th><td>Compare relative to the torso to reduce camera-shake false alerts.</td></tr>
+        <tr><th>Show baseline overlay</th><td>Show dashed “ghost” of the baseline and per-joint drift vectors.</td></tr>
+        <tr><th>Reset baseline</th><td>Forget the current reference; next calm period becomes the new baseline.</td></tr>
+        <tr><th>Reset all defaults</th><td>Restore factory settings and clear calibration/baseline.</td></tr>
+        <tr><th>Calibration (Start)</th><td>Auto-tunes thresholds from a calm window and seeds the baseline.</td></tr>
+        <tr><th>Duration</th><td>How long to sample during Calibration. 10–20s is a good default.</td></tr>
+        <tr><th>Apply thresholds while running</th><td>Update sliders live during Calibration (or only at the end if off).</td></tr>
+      </table>
+    </section>
+
+    <!-- Troubleshooting -->
+    <section id="troubleshoot" class="help-section">
+      <h4>Troubleshooting (top 3)</h4>
+      <ul>
+        <li><strong>Bars stuck or show 0; pill looks wrong:</strong> Ensure live pose landmarks are arriving (overlay bars should move). Run <em>Calibration</em>. If still flat, lower the <em>Visibility/Presence</em> gates slightly.</li>
+        <li><strong>False alerts from tiny camera bumps:</strong> Keep <em>Torso-relative baseline</em> on, increase <em>Baseline τ</em>, and re-calibrate.</li>
+        <li><strong>Calibration button disabled:</strong> It only enables when live pose landmarks are received. Check the video feed, ensure <em>Pose overlay</em> is enabled by the sender, then try again.</li>
+      </ul>
+    </section>
+
+    <!-- Learn more (collapsed) -->
+    <section id="learnmore" class="help-section">
+      <details class="learn-more">
+        <summary>Learn more</summary>
+        <div style="margin-top:8px">
+          <p><strong>Raw movement:</strong> average per-joint displacement between consecutive frames, normalized by body scale (torso size), using only landmarks that pass the confidence gates.</p>
+          <div class="codeblock">
+            <strong>EMA (quick motion)</strong><br>
+            <pre>ema<sub>t</sub> = ema<sub>t−1</sub> + α · (raw<sub>t</sub> − ema<sub>t−1</sub>)</pre>
+            <div>
+              <em>Trip when:</em> ema ≥ <code>EMA_ON</code><br>
+              <em>Clear when:</em> ema ≤ <code>EMA_OFF</code> (with brief hold to prevent flicker)
+            </div>
+
+            <br>
+
+            <strong>Leaky integrator (sustained motion)</strong><br>
+            <pre>int<sub>t</sub> = int<sub>t−1</sub> · e<sup>−Δt/τ</sup> + raw<sub>t</sub> · Δt</pre>
+            <div>
+              <em>Trip when:</em> int ≥ <code>INT_ON</code><br>
+              <em>Clear when:</em> int ≤ <code>INT_OFF</code> (with brief hold)
+            </div>
+
+            <br>
+
+            <strong>Baseline drift (relative to a still reference pose)</strong><br>
+            <pre>drift = average_distance(current landmarks, baseline landmarks) / body_scale</pre>
+            <div>
+              <em>Trip when:</em> drift ≥ <code>DRIFT_ON</code><br>
+              <em>Clear when:</em> drift ≤ <code>DRIFT_OFF</code>
+            </div>
+
+            <br>
+
+            <strong>Baseline adaptation (only while STILL)</strong><br>
+            <pre>
+baseline ← (1 − β) · baseline + β · current
+β ≈ 1 − e<sup>−Δt/τ<sub>drift</sub></sup>
+            </pre>
+
+            <br>
+
+            <strong>Calibration (duration T)</strong><br>
+            <div>Collect raw scores while the scene is still. Compute:</div>
+            <ul style="margin:6px 0 10px 18px;">
+              <li>Median <em>m</em></li>
+              <li>95th percentile <em>p95</em></li>
+            </ul>
+            <div>Set thresholds (typical):</div>
+            <pre>
+EMA_ON   ≈ max(3.5·m, 1.2·p95, 0.01)
+INT_ON   ≈ τ · m · 2.5
+DRIFT_ON ≈ max(5·m, 1.5·EMA_ON, 0.02)
+            </pre>
+            <div>
+              Initialize <code>OFF</code> thresholds to match <code>ON</code> (you can relax them later).<br>
+              Seed baseline to the last good pose from calibration.
+            </div>
+          </div>
+
+          <p><strong>Combining detectors:</strong> EMA, Integrator, and Drift each vote “moving”. If any enabled detector votes yes, the overall state is <em>MOVING</em>.</p>
+        </div>
+      </details>
+    </section>
+  </div>
+</aside>
