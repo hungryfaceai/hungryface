@@ -197,7 +197,7 @@
       </div>
     </header>
 
-    <div class="stateRow">
+    <div class="stateRow" id="stateRow">
       <div class="muted"><span id="moveStateTxt" class="pill still">STILL</span></div>
       <div class="muted">
         Scores: EMA <strong id="emaScoreTxt">0.000</strong> · INT <strong id="intScoreTxt">0.000</strong> · DRIFT <strong id="driftScoreTxt">0.000</strong>
@@ -497,6 +497,7 @@
     const moveClose  = document.getElementById('moveClose');
     const moveReset  = document.getElementById('moveReset');
 
+    const stateRow      = document.getElementById('stateRow'); // NEW: container for pill + scores
     const moveStateTxt  = document.getElementById('moveStateTxt');
     const emaScoreTxt   = document.getElementById('emaScoreTxt');
     const intScoreTxt   = document.getElementById('intScoreTxt');
@@ -569,10 +570,18 @@
 
     /* ---------- Utils for live pose gating ---------- */
     const hasLivePose = () => (performance.now() - lastPoseTs) < LIVE_POSE_TIMEOUT_MS;
+
+    // NEW: show/hide the MOVING/STILL pill & scores row based on live pose
+    function updateStateRowVisibility() {
+      if (!stateRow) return;
+      stateRow.style.display = hasLivePose() ? '' : 'none';
+    }
+
     function updateCalibrationAvailability() {
       const live = hasLivePose();
       if (calQuickBtn) calQuickBtn.disabled = !live || !!calActive;
       if (calStartBtn) calStartBtn.disabled = !live || !!calActive;
+      updateStateRowVisibility(); // keep pill visibility in sync
     }
     setInterval(updateCalibrationAvailability, 500); // periodic guard
 
@@ -966,9 +975,9 @@
         const ratio = m.val / onThres;
         const fillW = Math.round(BAR_W * Math.max(0, Math.min(ratio, 1)));
 
-        let fillCol = OK_GREEN;
-        if (ratio >= 0.9 && ratio < 1.0) fillCol = AMBER;
-        if (ratio >= 1.0)               fillCol = ALERT_RED;
+        let fillCol = '#4caf50';
+        if (ratio >= 0.9 && ratio < 1.0) fillCol = '#ffc107';
+        if (ratio >= 1.0)               fillCol = '#801721';
 
         ctx.globalAlpha = m.enabled ? 1.0 : 0.35;
         ctx.fillStyle = fillCol;
@@ -1005,15 +1014,15 @@
 
     // Make Reset buttons match Start button width
     function matchButtonSizes() {
-      // Only measure when the panel is visible (not .hidden)
+															 
       if (!movePanel || movePanel.classList.contains('hidden') || !calStartBtn) return;
-    
+	
       const rect = calStartBtn.getBoundingClientRect();
       const w = Math.ceil(rect.width);
-    
-      // Guard: don't write bad widths
+	
+									  
       if (!w || w < 10) return;
-    
+	
       [driftReset, moveReset].forEach(btn => {
         if (!btn) return;
         btn.style.minWidth = w + 'px';
@@ -1025,7 +1034,7 @@
     function updateCalQuickUI(active, secsLeft = null) {
       if (!calQuickBtn) return;
       if (!active) {
-        calQuickBtn.disabled = !hasLivePose(); // re-enable only if live
+        calQuickBtn.disabled = !hasLivePose();
         calQuickBtn.innerHTML = 'Calibration';
         calQuickBtnActive = false;
         return;
@@ -1041,10 +1050,10 @@
       const utils = new DrawingUtils(poseCtx);
 
       for (const lm of landmarks) {
-        // Baseline overlay first (under the live skeleton)
+														   
         try { drawBaselineGhostAndVectors(lm); } catch (e) { console.warn('[baseline overlay]', e); }
 
-        // Live pose
+					
         utils.drawLandmarks(lm, {
           radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
         });
@@ -1056,7 +1065,7 @@
     function updateMovementFromLandmarks(lm, canSend=true) {
       const now = performance.now();
       lastPoseTs = now;
-      updateCalibrationAvailability();
+      updateCalibrationAvailability(); // also refreshes pill visibility
 
       if (!lastTs) lastTs = now;
       const dt = Math.max(1/120, Math.min(0.2, (now - lastTs) / 1000));
@@ -1104,6 +1113,13 @@
         if (calProg) calProg.value = Math.min(1, t / durMs);
         const secsLeft = Math.max(0, Math.ceil((calEndMs - now)/1000));
         if (calTime) calTime.textContent = secsLeft + 's';
+
+        // NEW: mirror main button style in panel status text
+        if (calStatus) {
+          calStatus.className = 'running';
+          calStatus.textContent = `Calibrating… ${secsLeft}s`;
+        }
+
         if (calQuickBtnActive) updateCalQuickUI(true, secsLeft);
 
         if ((now - lastCalUIRedraw) >= CAL_RECAL_MS) {
@@ -1193,7 +1209,11 @@
       lastCalUIRedraw = 0;
 
       if (calStats)   calStats.style.display = 'none';
-      if (calStatus) { calStatus.className = 'running'; calStatus.textContent = 'Calibrating… keep still'; }
+      // CHANGED: no “keep still”; show countdown like main button
+      if (calStatus) {
+        calStatus.className = 'running';
+        calStatus.textContent = `Calibrating… ${Math.round((calEndMs - calStartMs)/1000)}s`;
+      }
       if (calProgRow) calProgRow.style.display = 'grid';
       if (calProg)    calProg.value = 0;
       if (calTime)    calTime.textContent = Math.round((calEndMs - calStartMs)/1000) + 's';
@@ -1226,7 +1246,7 @@
       if (calStatus) { calStatus.className = 'ok'; calStatus.textContent = 'Calibrated'; }
       setTimeout(()=>{ if (!calActive && calStatus) calStatus.textContent = ''; }, 3000);
 
-      // If started via main-page button, restore it and hide settings
+																	  
       if (calQuickBtnActive) {
         updateCalQuickUI(false);
         closeMovePanel();
@@ -1276,7 +1296,7 @@
 
       const onFrame = () => {
         if (!poseLoopRunning || !poseEnabled || poseWhere !== 'receiver') return;
-        if (!videoHasFrame(remoteVideo)) { poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height); scheduleNext(); return; }
+        if (!videoHasFrame(remoteVideo)) { poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height); updateCalibrationAvailability(); scheduleNext(); return; }
         try {
           const ts = performance.now();
           const result = poseTask.detectForVideo(remoteVideo, ts);
@@ -1291,6 +1311,8 @@
           } else {
             prevLm = null;
             poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+            // no landmarks → ensure pill hidden
+            updateCalibrationAvailability();
           }
         } catch (err) {}
         finally { scheduleNext(); }
@@ -1303,6 +1325,7 @@
       prevLm = null; moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
       reflectPanel();
+      updateCalibrationAvailability(); // also hides pill
     }
     function applyPoseMode() {
       setOverlayVisible(poseEnabled);
@@ -1349,8 +1372,12 @@
               if (poseEnabled && poseWhere === 'sender' && msg.landmarks?.length) {
                 const lm = msg.landmarks[0];
                 poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
-                drawPoseLandmarks([lm]);
+										
                 updateMovementFromLandmarks(lm, /*canSend=*/false);
+                drawPoseLandmarks([lm]);
+              } else {
+                // no landmarks arriving from sender → keep pill hidden
+                updateCalibrationAvailability();
               }
             }
           } catch {}
@@ -1434,20 +1461,25 @@
 
       if (showBaseline) showBaseline.checked = !!MOVE.SHOW_BASELINE;
 
-      if (calSecs && calSecsOut) { calSecs.value = clampUi(MOVE.CAL_SECS, 5, 60); calSecsOut.textContent = `${calSecs.value} s`; MOVE.CAL_SECS = parseInt(calSecs.value,10); }
+      if (calSecs && calSecsOut) { 
+        calSecs.value = clampUi(MOVE.CAL_SECS, 5, 60); 
+        calSecsOut.textContent = `${calSecs.value} s`; 
+        MOVE.CAL_SECS = parseInt(calSecs.value,10); 
+      }
       if (calLive) calLive.checked = !!MOVE.CAL_LIVE;
 
       applyOnCaps();
       reflectPanel();
+      updateStateRowVisibility(); // ensure correct initial visibility
 
       requestAnimationFrame(matchButtonSizes);
     }
 
-    //const openMovePanel  = ()=>{ if (movePanel) movePanel.classList.remove('hidden'); };
+																						  
     function openMovePanel(){
       if (!movePanel) return;
       movePanel.classList.remove('hidden');
-      // Double RAF to ensure layout/metrics are ready
+													  
       requestAnimationFrame(() => requestAnimationFrame(matchButtonSizes));
     }
     const closeMovePanel = ()=>{ if (movePanel) movePanel.classList.add('hidden'); };
@@ -1606,19 +1638,19 @@
 
     function beginViewportSetle(){ beginViewportSettle(); }
     
-    // After your other DOM refs:
+    // Help drawer wiring
     const helpBtn      = document.getElementById('helpBtn');
     const helpSheet    = document.getElementById('helpSheet');
     const helpBackdrop = document.getElementById('helpBackdrop');
     const helpClose    = document.getElementById('helpClose');
     const helpBody     = document.getElementById('helpBody');
-    
-    // Open/close helpers
+
+						 
     function openHelp() {
       if (!helpSheet || !helpBackdrop) return;
       helpSheet.classList.add('show');
       helpBackdrop.classList.add('show');
-      // prevent settings panel from being auto-closed by global click handler
+																			  
       document.body.classList.add('help-open');
     }
     function closeHelp() {
@@ -1627,13 +1659,13 @@
       helpBackdrop.classList.remove('show');
       document.body.classList.remove('help-open');
     }
-    
-    // Listeners
+	
+				
     if (helpBtn)      helpBtn.addEventListener('click', (e)=>{ e.stopPropagation(); openHelp(); });
     if (helpClose)    helpClose.addEventListener('click', (e)=>{ e.stopPropagation(); closeHelp(); });
     if (helpBackdrop) helpBackdrop.addEventListener('click', closeHelp);
     document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeHelp(); });
-    // Robust close handler for the Help drawer (capture phase so it always fires first)
+
     document.addEventListener('click', (e) => {
       const btn = e.target && e.target.closest('#helpClose');
       if (!btn) return;
@@ -1642,19 +1674,20 @@
       closeHelp();
     }, true);
 
-    
-    // Keep settings panel open when interacting with the help drawer
+	
+																	 
     document.addEventListener('click', (e) => {
-      // your existing handler likely closes movePanel when clicking outside it.
-      // Add this guard so clicks inside Help don't close settings.
+																				
+																   
       if (document.body.classList.contains('help-open')) {
-        if (helpSheet?.contains(e.target)) {
-          e.stopPropagation();
-        }
+        const sheet = document.getElementById('helpSheet');
+        if (sheet?.contains(e.target)) e.stopPropagation();
+							  
+		 
       }
     }, true);
-    
-    // Smooth scroll for TOC links
+
+								  
     if (helpBody) {
       helpBody.addEventListener('click', (e) => {
         const a = e.target.closest('a[href^="#"]');
