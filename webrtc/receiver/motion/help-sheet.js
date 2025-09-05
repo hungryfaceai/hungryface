@@ -4,7 +4,7 @@
   if (document.getElementById('helpSheet') || document.getElementById('helpBackdrop')) return;
 
   try {
-    const res = await fetch('/hungryface/webrtc/receiver/shared/help-sheet.html', { cache: 'no-cache' });
+    const res = await fetch('/hungryface/webrtc/receiver/motion/help-sheet.html', { cache: 'no-cache' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const html = await res.text();
 
