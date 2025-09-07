@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<main class="card">
+<h2>Pair a device</h2>
+<p>This will create a long‑term trust between two devices. After pairing once, you can connect without room codes.</p>
+<div id="view"></div>
+</main>
+<script type="module">
+import { SecureSignal } from './shared/secure-signal.js';
+import { b64u } from './shared/pairing-crypto.js';
+
+
+const SIGNAL_URL = (location.protocol==='https:'?'wss':'ws') + '://YOUR_RENDER_HOST/ws';
+const ui = document.getElementById('view');
+const ss = new SecureSignal({ url: SIGNAL_URL, onPairPrompt: showPrompt });
+await ss.init();
+await ss.handleSessionMessages();
+
+
+const { b64, json } = ss.makePairingPayload();
+ui.innerHTML = `
+<div class="row">
+<div>
+<div class="qr"><img alt="QR" width="200" height="200" src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(location.origin + location.pathname + '#' + b64)}"></div>
+<div class="sas">Ask the other device to scan the QR by opening the Camera. It will land on this page automatically.</div>
+</div>
+<div style="flex:1;min-width:260px">
+<h3>What happens next?</h3>
+<ol>
+<li>Both devices will show a short code (SAS).</li>
+<li>If they match, press <b>Accept</b> on both.</li>
+<li>The device will appear in your Trusted list.</li>
+</ol>
+<p><small>My fingerprint: <code>${ss.me.fingerprint}</code></small></p>
+</div>
+</div>`;
+
+
+if (location.hash.length>1){
+// We are the scanning device
+const hash = location.hash.slice(1);
+await ss.handlePairingLink(hash);
+}
+
+
+function showPrompt(e){
+if (e.type==='incoming'){
+ui.insertAdjacentHTML('beforeend', `<div class="card" style="margin-top:16px"><h3>Pairing request from ${e.from}</h3><div class="sas">Code: <b>${e.sas}</b></div><p>Does this match the other device?</p><div><button id="acc">Accept</button></div></div>`);
+document.getElementById('acc').onclick = ()=> e.accept();
+} else if (e.type==='confirm'){
+ui.insertAdjacentHTML('beforeend', `<div class="card" style="margin-top:16px"><h3>Confirm pairing with ${e.from}</h3><div class="sas">Code: <b>${e.sas}</b></div><p>If the codes match on both devices, press Accept.</p><div><button id="acc2">Accept</button></div></div>`);
+document.getElementById('acc2').onclick = ()=> e.accept();
+}
+}
+</script>
+</body>
+</html>
