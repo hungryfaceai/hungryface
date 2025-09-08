@@ -113,12 +113,12 @@
     .btn-row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:10px; }
     .list { margin:0; padding:0; list-style:none; }
     .list li { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px dashed #23272c; }
-    code.k { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0b0c0d; border:1px solid #1a1d20; padding:2px 6px; border-radius:8px; }
+    code.k { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0b0c0d; border:1px solid #1f1f1f; padding:2px 6px; border-radius:8px; }
     .notice { background:#0b1d3a; border:1px solid #12315f; color:#cfe1ff; padding:10px 12px; border-radius:12px; }
     .ok   { background:#0f2415; border-color:#1d3c27; color:#ccebd6; }
     .err  { background:#2b1414; border-color:#4a1f1f; color:#ffd6d6; }
 
-    /* ---------- New: paired badge ---------- */
+    /* ---------- Paired badge ---------- */
     .badge {
       display:inline-flex; align-items:center; gap:6px;
       font-size: 0.75rem; line-height: 1;
@@ -128,16 +128,15 @@
     }
     .badge svg { width:12px; height:12px; }
     .badge-new { animation: badge-fade-out 2.8s ease 0.4s forwards; }
-
     @keyframes badge-fade-out {
       0%   { opacity:1; transform: translateY(0); }
       80%  { opacity:0.1; transform: translateY(-2px); }
       100% { opacity:0; transform: translateY(-4px); }
     }
 
-    /* ---------- New: fingerprint row ---------- */
+    /* ---------- Fingerprint row ---------- */
     .fp-row { display:flex; align-items:center; gap:8px; }
-    .icon-fp { --icon-size: 16px; opacity: 0.95; }
+    .icon-fp { --icon-size: 20px; opacity: 0.95; } /* bigger + clearer */
   </style>
 </head>
 <body>
@@ -202,15 +201,23 @@
             <div style="margin-top:12px">
               <div class="muted fp-row">
                 <span>My fingerprint:</span>
-                <!-- small inline fingerprint icon -->
-                <svg class="icon icon-fp" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                  <!-- minimalist fingerprint strokes -->
-                  <path d="M12 4a8 8 0 0 0-8 8v1" />
-                  <path d="M12 7a5 5 0 0 0-5 5v1" />
-                  <path d="M12 10a2 2 0 0 0-2 2v1" />
-                  <path d="M12 12v6" />
-                  <path d="M16 11a4 4 0 0 0-4 4" />
-                  <path d="M20 11a8 8 0 0 0-8 8" />
+                <!-- Improved fingerprint icon (multi-ridge) -->
+                <svg class="icon icon-fp" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+                     fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                  <!-- outer contour -->
+                  <path d="M12 3.5c-4.7 0-8.5 3.8-8.5 8.5v1.2" />
+                  <!-- broad arches -->
+                  <path d="M6.1 9.2c1.9-1.8 3.9-2.7 5.9-2.7s4 .9 5.9 2.7" />
+                  <path d="M7.2 12c1.6-1.5 3.2-2.2 4.8-2.2s3.2.7 4.8 2.2" />
+                  <path d="M8.6 14.5c1.2-1.1 2.4-1.6 3.6-1.6s2.4.5 3.6 1.6" />
+                  <!-- core ridges -->
+                  <path d="M10 17c.8-.8 1.6-1.2 2-1.2s1.2.4 2 1.2" />
+                  <path d="M12 12v6.5" />
+                  <!-- right-side growth (loops) -->
+                  <path d="M16.3 11.2a4.3 4.3 0 0 0-4.3 4.3" />
+                  <path d="M19.2 11.2a7.2 7.2 0 0 0-7.2 7.2" />
+                  <!-- left-side growth -->
+                  <path d="M8.8 12.8a5.2 5.2 0 0 0-.7 5.1" />
                 </svg>
                 <code class="k" id="myfp">…</code>
               </div>
@@ -384,13 +391,14 @@
           <div><b>${heading}</b> ${escapeHtml(e.from)} <span class="muted">(${e.fp})</span></div>
           <div class="sas" style="margin:6px 0">Verification code: <span class="k">${e.sas}</span></div>
           <div class="btn-row"><button class="btn" id="${id}-acc" type="button">Accept</button></div>
+          <div class="muted">Compare this code on both devices before accepting.</div>
         </div>`;
       els.prompt.insertAdjacentHTML('beforeend', html);
       const btn  = document.getElementById(`${id}-acc`);
       btn.onclick = async () => {
         btn.disabled = true;
         btn.textContent = isHost
-          ? 'Waiting for the other device…'
+          ? 'Accepted here — waiting for the other device…'
           : 'Accepted here — finishing setup…';
         try {
           await e.accept();
