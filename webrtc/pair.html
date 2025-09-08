@@ -36,7 +36,7 @@
       <p class="muted">Pair once, then connect securely without room codes. This exchanges device public keys and lets you verify with a short code (SAS).</p>
 
       <div class="row" style="margin-top:8px">
-        <div>
+        <div id="qr-col">
           <div class="qrbox"><img id="qr" alt="Pairing QR"></div>
           <div class="btn-row">
             <button class="btn secondary" id="refresh">Refresh QR</button>
@@ -67,12 +67,13 @@
   </main>
 
   <script type="module">
-    import { SecureSignal } from './shared/secure-signal.js';
+    // ⬇️ cache-bust to ensure the latest module is loaded everywhere
+    import { SecureSignal } from './shared/secure-signal.js?v=3';
 
-    // Your Render WebSocket endpoint
     const WS_ENDPOINT = 'wss://signaling-server-f5gu.onrender.com/ws';
 
     const els = {
+      qrCol: document.getElementById('qr-col'),
       qr: document.getElementById('qr'),
       refresh: document.getElementById('refresh'),
       copy: document.getElementById('copy'),
@@ -92,17 +93,24 @@
     await ss.init();
     els.myfp.textContent = ss.me.fingerprint;
 
-    const isScanner = location.hash.length > 1;
-    const qrBox = document.querySelector('.qrbox');
-    const qrCol = qrBox ? qrBox.parentElement : null;
+    // Robust scanner detection + visible debug
+    const hash = location.hash || '';
+    const isScanner = hash.length > 1;
+    setStatus(`Mode: ${isScanner ? 'scanner' : 'host'} | hashlen=${hash.length}`, 'ok');
+
+    // Reload if hash changes (some scanners change it post-load)
+    addEventListener('hashchange', () => location.reload());
 
     if (isScanner) {
-      // Hide the QR UI on the scanning device
-      if (qrCol) qrCol.style.display = 'none';
+      // Hide QR UI on scanner
+      if (els.qrCol) els.qrCol.remove();
+
+      // Kick off pairing using the payload (after '#')
       try {
-        await ss.handlePairingLink(location.hash.slice(1));
+        await ss.handlePairingLink(hash.slice(1));
         setStatus('Pairing request sent. Check both devices show the same code.', 'ok');
       } catch (e) {
+        console.error('handlePairingLink failed:', e);
         setStatus('Could not process pairing link.', 'err');
       }
     } else {
@@ -118,11 +126,7 @@
 
     function escapeHtml(s) {
       return String(s).replace(/[&<>"']/g, (c) => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;'
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
       })[c]);
     }
 
@@ -132,7 +136,7 @@
         : '<li class="muted">No trusted devices yet.</li>';
     }
 
-    function showPrompt(e){
+    function showPrompt(e) {
       const id = `p-${Math.random().toString(16).slice(2)}`;
       const html = `
         <div id="${id}" class="notice" style="margin:8px 0">
@@ -144,7 +148,7 @@
       document.getElementById(`${id}-acc`).onclick = () => { e.accept(); document.getElementById(id)?.remove(); setStatus('Paired. Device saved to Trusted.', 'ok'); };
     }
 
-    function renderQR(forceNew=false){
+    function renderQR(forceNew=false) {
       const { b64 } = ss.makePairingPayload(); // includes fresh nonce every call
       const link = `${location.origin}${location.pathname}#${b64}`;
       els.qr.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(link)}`;
@@ -152,7 +156,7 @@
       if (forceNew) setStatus('Refreshed QR with a new nonce.', 'ok');
     }
 
-    function setStatus(text, kind){
+    function setStatus(text, kind) {
       els.status.textContent = text;
       els.status.className = `notice ${kind || ''}`;
       els.status.style.display = 'block';
