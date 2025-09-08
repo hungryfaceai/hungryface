@@ -60,6 +60,26 @@
     .modal-card { width:min(96%,1000px); max-height:90vh; overflow-y:auto; background:#0b0b0b; border:1px solid #242424; border-radius:14px; }
     .modal-head { position:sticky; top:0; display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 12px; border-bottom:1px solid #1a1a1a; background:#0d0d0d; border-top-left-radius:14px; border-top-right-radius:14px; }
     .modal-body { padding:12px; }
+
+    /* Help overlay (loads external HTML via iframe) */
+    .help-overlay {
+      position: fixed; inset: 0;
+      display: none; align-items: center; justify-content: center;
+      background: rgba(0,0,0,.6); z-index: 60;
+    }
+    .help-overlay.show { display: flex; }
+    .help-card {
+      width: min(96%, 1000px);
+      max-height: 92vh;
+      background:#0b0b0b; border:1px solid #242424; border-radius:14px;
+      display:flex; flex-direction:column; overflow:hidden;
+    }
+    .help-head {
+      display:flex; justify-content:space-between; align-items:center;
+      gap:10px; padding:10px 12px; border-bottom:1px solid #1a1a1a; background:#0d0d0d;
+    }
+    .help-body { flex:1; min-height:0; }
+    .help-iframe { width:100%; height:100%; border:0; display:block; }
   </style>
 </head>
 <body>
@@ -155,8 +175,6 @@
         </div>
       </div>
 
-      <!-- (Removed) Table view of active weights -->
-
       <!-- Fused score chart -->
       <div class="section">
         <canvas id="chart" height="160"></canvas>
@@ -193,7 +211,10 @@
     <div class="modal-card">
       <div class="modal-head">
         <strong>Settings</strong>
-        <button id="btnSettingsClose" class="btn">Close</button>
+        <div class="row" style="gap:8px;">
+          <button id="btnSettingsHelp" class="btn">Help</button>
+          <button id="btnSettingsClose" class="btn">Close</button>
+        </div>
       </div>
       <div class="modal-body">
         <div class="grid">
@@ -228,6 +249,20 @@
     </div>
   </div>
 
+  <!-- Help overlay (separate help HTML in iframe) -->
+  <div id="helpOverlay" class="help-overlay" aria-hidden="true">
+    <div class="help-card" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <div class="help-head">
+        <strong id="helpTitle">Weighted Top-K – Help</strong>
+        <button id="helpClose" class="btn" title="Close">×</button>
+      </div>
+      <div class="help-body">
+        <!-- Put weighted-topk-help.html next to this file, or change the src below -->
+        <iframe id="helpFrame" class="help-iframe" src="weighted-topk-help.html" loading="lazy"></iframe>
+      </div>
+    </div>
+  </div>
+
   <audio id="trainAudio" crossorigin="anonymous" style="display:none"></audio>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 
@@ -243,6 +278,21 @@
     _open.onclick = () => { _modal.classList.add('show'); _modal.setAttribute('aria-hidden','false'); };
     _close.onclick = () => { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); };
     _modal.addEventListener('click', (e) => { if (e.target === _modal) { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); }});
+
+    /* Help overlay wiring */
+    const helpOverlay = EL('helpOverlay');
+    const helpClose = EL('helpClose');
+    const btnHelp = EL('btnSettingsHelp');
+
+    function openHelp(){ helpOverlay.classList.add('show'); helpOverlay.setAttribute('aria-hidden','false'); }
+    function closeHelp(){ helpOverlay.classList.remove('show'); helpOverlay.setAttribute('aria-hidden','true'); }
+
+    btnHelp && (btnHelp.onclick = openHelp);
+    helpClose && (helpClose.onclick = closeHelp);
+    // Clicking the backdrop (main screen) closes the help overlay
+    helpOverlay && helpOverlay.addEventListener('click', (e)=>{ if (e.target === helpOverlay) closeHelp(); });
+    // Escape key closes
+    document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape' && helpOverlay.classList.contains('show')) closeHelp(); });
 
     /* Logs toggle wiring */
     const btnToggleLogs = EL('btnToggleLogs');
