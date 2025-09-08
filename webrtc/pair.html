@@ -67,8 +67,8 @@
   </main>
 
   <script type="module">
-    // ⬇️ cache-bust to ensure the latest module is loaded everywhere
-    import { SecureSignal } from './shared/secure-signal.js?v=8';
+    // cache-bust to fetch the latest module
+    import { SecureSignal } from './shared/secure-signal.js?v=9';
 
     const WS_ENDPOINT = 'wss://signaling-server-f5gu.onrender.com/ws';
 
@@ -93,28 +93,20 @@
     await ss.init();
     els.myfp.textContent = ss.me.fingerprint;
 
-    // Robust scanner detection + visible debug
     const hash = location.hash || '';
     const isScanner = hash.length > 1;
-    setStatus(`Mode: ${isScanner ? 'scanner' : 'host'} | hashlen=${hash.length}`, 'ok');
-
-    // Reload if hash changes (some scanners change it post-load)
-    addEventListener('hashchange', () => location.reload());
+    // addEventListener('hashchange', () => location.reload()); // optional
 
     if (isScanner) {
-      // Hide QR UI on scanner
       if (els.qrCol) els.qrCol.remove();
-
-      // Kick off pairing using the payload (after '#')
       try {
         await ss.handlePairingLink(hash.slice(1));
-        setStatus('Pairing request sent. Check both devices show the same code.', 'ok');
+        setStatus('Pairing request sent. Compare the codes on both devices, then accept on both.', 'ok');
       } catch (e) {
         console.error('handlePairingLink failed:', e);
         setStatus('Could not process pairing link.', 'err');
       }
     } else {
-      // Host mode: generate and show a fresh QR
       renderQR();
       els.refresh.onclick = () => renderQR(true);
       els.copy.onclick = async () => {
@@ -131,25 +123,56 @@
     }
 
     function renderTrusted(list) {
+      // render the trusted list
       els.trusted.innerHTML = (list && list.length)
         ? list.map(d => `<li><div><b>${escapeHtml(d.name || 'Device')}</b><br><span class="muted">${d.fp}</span></div></li>`).join('')
         : '<li class="muted">No trusted devices yet.</li>';
+
+      // if any pending prompt matches a newly-trusted fp, mark it complete and auto-hide
+      const fps = new Set((list || []).map(d => d.fp));
+      document.querySelectorAll('#prompt .notice[data-fp]').forEach(card => {
+        const fp = card.getAttribute('data-fp');
+        if (fps.has(fp)) {
+          card.className = 'notice ok';
+          const btn = card.querySelector('button.btn'); if (btn) btn.remove();
+          const done = document.createElement('div');
+          done.className = 'muted';
+          done.textContent = 'Paired and saved to Trusted.';
+          card.appendChild(done);
+          setTimeout(() => card.remove(), 3500);
+        }
+      });
     }
 
     function showPrompt(e) {
       const id = `p-${Math.random().toString(16).slice(2)}`;
       const html = `
-        <div id="${id}" class="notice" style="margin:8px 0">
+        <div id="${id}" class="notice" data-fp="${e.fp}" style="margin:8px 0">
           <div><b>${e.type === 'incoming' ? 'Pairing request from' : 'Confirm pairing with'}</b> ${escapeHtml(e.from)} <span class="muted">(${e.fp})</span></div>
           <div class="sas" style="margin:6px 0">Code: <span class="k">${e.sas}</span></div>
           <div class="btn-row"><button class="btn" id="${id}-acc">Accept</button></div>
+          <div class="muted">Compare this code on both devices before accepting.</div>
         </div>`;
       els.prompt.insertAdjacentHTML('beforeend', html);
-      document.getElementById(`${id}-acc`).onclick = () => { e.accept(); document.getElementById(id)?.remove(); setStatus('Paired. Device saved to Trusted.', 'ok'); };
+      const card = document.getElementById(id);
+      const btn  = document.getElementById(`${id}-acc`);
+      btn.onclick = async () => {
+        btn.disabled = true;
+        btn.textContent = 'Accepted here — waiting on other device…';
+        try {
+          await e.accept(); // send ACK/store trusted on this side
+          setStatus('Accepted here. Now accept on the other device.', 'ok');
+        } catch {
+          btn.disabled = false;
+          btn.textContent = 'Accept';
+          setStatus('Accept failed.', 'err');
+        }
+        // DO NOT remove the card; keep SAS visible until the peer is saved
+      };
     }
 
     function renderQR(forceNew=false) {
-      const { b64 } = ss.makePairingPayload(); // includes fresh nonce every call
+      const { b64 } = ss.makePairingPayload();
       const link = `${location.origin}${location.pathname}#${b64}`;
       els.qr.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(link)}`;
       els.qr.dataset.link = link;
