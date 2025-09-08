@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -91,7 +90,7 @@
     });
 
     await ss.init();
-    document.getElementById('myfp').textContent = ss.me.fingerprint;
+    els.myfp.textContent = ss.me.fingerprint;
 
     // If we arrived with a #payload (from scanning), start pairing as the scanner
     if (location.hash.length > 1) {
@@ -106,22 +105,30 @@
     // Otherwise, generate/display a fresh QR for others to scan
     renderQR();
 
-    document.getElementById('refresh').onclick = () => renderQR(true);
-    document.getElementById('copy').onclick = async () => {
-      const url = document.getElementById('qr').dataset.link;
+    els.refresh.onclick = () => renderQR(true);
+    els.copy.onclick = async () => {
+      const url = els.qr.dataset.link;
       try { await navigator.clipboard.writeText(url); setStatus('Pairing link copied to clipboard.', 'ok'); }
       catch { setStatus('Copy failed.', 'err'); }
     };
 
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      })[c]);
+    }
+
     function renderTrusted(list) {
-      const escapeHtml = s => String(s).replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;','\\'':'&#39;'}[c]));
-      document.getElementById('trusted').innerHTML = (list && list.length)
+      els.trusted.innerHTML = (list && list.length)
         ? list.map(d => `<li><div><b>${escapeHtml(d.name || 'Device')}</b><br><span class="muted">${d.fp}</span></div></li>`).join('')
         : '<li class="muted">No trusted devices yet.</li>';
     }
 
     function showPrompt(e){
-      const escapeHtml = s => String(s).replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;','\\'':'&#39;'}[c]));
       const id = `p-${Math.random().toString(16).slice(2)}`;
       const html = `
         <div id="${id}" class="notice" style="margin:8px 0">
@@ -129,23 +136,22 @@
           <div class="sas" style="margin:6px 0">Code: <span class="k">${e.sas}</span></div>
           <div class="btn-row"><button class="btn" id="${id}-acc">Accept</button></div>
         </div>`;
-      document.getElementById('prompt').insertAdjacentHTML('beforeend', html);
+      els.prompt.insertAdjacentHTML('beforeend', html);
       document.getElementById(`${id}-acc`).onclick = () => { e.accept(); document.getElementById(id)?.remove(); setStatus('Paired. Device saved to Trusted.', 'ok'); };
     }
 
     function renderQR(forceNew=false){
       const { b64 } = ss.makePairingPayload(); // includes fresh nonce every call
       const link = `${location.origin}${location.pathname}#${b64}`;
-      document.getElementById('qr').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(link)}`;
-      document.getElementById('qr').dataset.link = link;
+      els.qr.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(link)}`;
+      els.qr.dataset.link = link;
       if (forceNew) setStatus('Refreshed QR with a new nonce.', 'ok');
     }
 
     function setStatus(text, kind){
-      const el = document.getElementById('status');
-      el.textContent = text;
-      el.className = `notice ${kind || ''}`;
-      el.style.display = 'block';
+      els.status.textContent = text;
+      els.status.className = `notice ${kind || ''}`;
+      els.status.style.display = 'block';
     }
   </script>
 </body>
