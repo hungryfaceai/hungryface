@@ -45,10 +45,21 @@ export async function ensureIdentity({deviceName}={}){
   return { ...recNew, signKey: signPair.privateKey, ecdhKey: ecdhPair.privateKey };
 }
 
-export function shortSAS(bytes){
-  const n = (bytes[0]<<7) | (bytes[1]>>1);
-  const EMO = ['😀','😁','😂','🤣','😃','😄','😅','😆','😉','😊','😋','😎','😍','😘','😗','😙','😚','🙂','🤗','🤩','🤔','🤨','😐','😑','😶','🙄','😏','😣','😥','😮','🤐','😯','😪','😫','😴','😌','😛','😜','😝','🤤','😒','😓','😔','😕','🙃','🫠','🤑','😲','☹️','🙁','😖','😞','😟','😤','😢','😭','😦','😧','😨','😩','🤯','😬','😮‍💨','😰','😱','🥵','🥶','😳','🤪','😵','🥴','😠','😡','🤬','🤥','🤫','🤭','🫢','🫣','🤗','🤔','🤨','🫤','🤓','🧐','😇','🥳','🥸','😺','😸','😹','😻','😼','😽','🙀','😿','😾'];
-  const a = EMO[n % EMO.length], b = EMO[(n*7) % EMO.length];
-  const digits = (('000000'+(bytes[2] * 257 % 1000000)).slice(-6));
-  return `${a}${b} ${digits}`;
+// Numeric SAS: 6 digits shown as XXX-XXX (derived from the transcript hash)
+export function shortSAS(hash, opts = {}) {
+  const fmt = opts.format || 'numeric6';
+  const b = new Uint8Array(hash);
+
+  if (fmt === 'numeric9') {
+    // 9 digits → three groups (XXX-XXX-XXX) using 5 bytes (~30 bits)
+    const n = ((b[0] << 24) >>> 0) ^ ((b[1] << 16) >>> 0) ^ ((b[2] << 8) >>> 0) ^ (b[3] >>> 0) ^ ((b[4] & 0x7F) << 1);
+    const s = (n % 1_000_000_000).toString().padStart(9, '0');
+    return `${s.slice(0,3)}-${s.slice(3,6)}-${s.slice(6,9)}`;
+  }
+
+  // default: 6 digits → two groups (XXX-XXX) using first 3 bytes (~20 bits)
+  const n = ((b[0] << 16) | (b[1] << 8) | b[2]) >>> 0;
+  const s = (n % 1_000_000).toString().padStart(6, '0');
+  return `${s.slice(0,3)}-${s.slice(3,6)}`;
 }
+
