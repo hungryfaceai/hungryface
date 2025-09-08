@@ -53,14 +53,20 @@
     html, body { height:auto; min-height:100%; overflow-y:auto; }
     #stage { position:static; min-height:100vh; }
     .panel { margin:0 auto 24px; }
+
+    /* Settings modal */
+    .modal { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.6); z-index:50; }
+    .modal.show { display:flex; }
+    .modal-card { width:min(96%,1000px); max-height:90vh; overflow-y:auto; background:#0b0b0b; border:1px solid #242424; border-radius:14px; }
+    .modal-head { position:sticky; top:0; display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 12px; border-bottom:1px solid #1a1a1a; background:#0d0d0d; border-top-left-radius:14px; border-top-right-radius:14px; }
+    .modal-body { padding:12px; }
   </style>
 </head>
 <body>
   <div id="stage">
     <div class="panel">
       <header>
-        <h1>Weighted Top-K Cry Detector</h1>
-        <div class="sub">Late-fusion of MediaPipe classes with per-class EMA, fused EMA, hysteresis, quiet calibration, on-device training — with live logs & mic/file/folder training.</div>
+        <h1>Weighted Top-K Audio Detector (Late-fusion)</h1>
       </header>
 
       <div class="row">
@@ -73,22 +79,8 @@
 
       <!-- Settings -->
       <div class="section">
-        <div class="grid">
-          <label><span>Sample Rate (target Hz)</span><input id="SR_TARGET" type="number" min="8000" step="1000" value="16000" /></label>
-          <label><span>Frame length (s)</span><input id="FRAME_LEN_S" type="number" min="0.1" step="0.005" value="0.975" /></label>
-          <label><span>Hop (s)</span><input id="HOP_S" type="number" min="0.01" step="0.01" value="0.48" /></label>
-
-          <label><span>Per-class EMA τ (s)</span><input id="CLASS_EMA_TAU_S" type="number" min="0.1" step="0.1" value="0.8" /></label>
-          <label><span>Fused score EMA τ (s)</span><input id="FUSED_EMA_TAU_S" type="number" min="0.1" step="0.1" value="0.8" /></label>
-          <label><span>Min ON hold (ms)</span><input id="ALERT_HOLD_MS" type="number" min="0" step="100" value="3000" /></label>
-
-          <label><span>Quiet calibration (s)</span><input id="CAL_SEC" type="number" min="5" step="1" value="20" /></label>
-          <label><span>OFF delta (below ON)</span><input id="ALERT_OFF_DELTA" type="number" min="0" step="0.01" value="0.10" /></label>
-          <label><span>Top-K classes</span><input id="TOP_K" type="number" min="1" step="1" value="6" /></label>
-
-          <label><span>Hybrid prior (kPrior)</span><input id="K_PRIOR" type="number" min="1" step="1" value="50" /></label>
-          <label><span>Hybrid half-life (s, training EMA)</span><input id="HALF_LIFE_S" type="number" min="30" step="10" value="3600" /></label>
-          <label><span>Max results from MP</span><input id="MAX_RESULTS" type="number" min="5" step="1" value="25" /></label>
+        <div class="row">
+          <button id="btnOpenSettings" class="btn">Settings</button>
         </div>
 
         <div class="row" style="margin-top:10px;">
@@ -142,9 +134,9 @@
 
       <!-- Live bars -->
       <div class="section">
-        <strong>Live top classes (Training)</strong>
+        <strong>Live top classes</strong>
         <canvas id="bars" height="180"></canvas>
-        <div class="muted" style="margin-top:6px;">Uses the <b>Top-K</b> setting above. Updates while training (mic, file, or folder).</div>
+        <div class="muted" style="margin-top:6px;">Uses the <b>Top-K</b> setting above. Updates while training (mic, file, or folder). Excluded classes are grey; we extend to show Top-K non-excluded.</div>
       </div>
 
       <!-- Weights – preview vs saved -->
@@ -163,7 +155,7 @@
         </div>
       </div>
 
-      <!-- Table view -->
+      <!-- Table view of active weights -->
       <div class="section">
         <strong>Active weights (Top-K, normalized)</strong>
         <div id="weightsView" class="kvs" style="display:grid;grid-template-columns:1fr auto;gap:6px 10px;margin-top:8px;"></div>
@@ -180,8 +172,13 @@
         </div>
       </div>
 
+      <!-- Logs toggle + console -->
+      <div class="section">
+        <button id="btnToggleLogs" class="btn">Display logs</button>
+      </div>
+
       <!-- Log console -->
-      <div class="section log-panel">
+      <div id="logsContainer" class="section log-panel" style="display:none">
         <div class="log-toolbar">
           <label><input type="checkbox" id="LOG_ENABLE" checked> Log inference</label>
           <label><input type="checkbox" id="LOG_ALL" > Log ALL classes</label>
@@ -195,15 +192,70 @@
     </div>
   </div>
 
-  <!-- Hidden audio element for file/folder training -->
-  <audio id="trainAudio" crossorigin="anonymous" muted style="display:none"></audio>
+  <!-- Settings modal -->
+  <div id="settingsModal" class="modal" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <strong>Settings</strong>
+        <button id="btnSettingsClose" class="btn">Close</button>
+      </div>
+      <div class="modal-body">
+        <div class="grid">
+          <label><span>Sample Rate (target Hz)</span><input id="SR_TARGET" type="number" min="8000" step="1000" value="16000" /></label>
+          <label><span>Frame length (s)</span><input id="FRAME_LEN_S" type="number" min="0.1" step="0.005" value="0.975" /></label>
+          <label><span>Hop (s)</span><input id="HOP_S" type="number" min="0.01" step="0.01" value="0.48" /></label>
 
+          <label><span>Per-class EMA τ (s)</span><input id="CLASS_EMA_TAU_S" type="number" min="0.1" step="0.1" value="0.8" /></label>
+          <label><span>Fused score EMA τ (s)</span><input id="FUSED_EMA_TAU_S" type="number" min="0.1" step="0.1" value="0.8" /></label>
+          <label><span>Min ON hold (ms)</span><input id="ALERT_HOLD_MS" type="number" min="0" step="100" value="3000" /></label>
+
+          <label><span>Quiet calibration (s)</span><input id="CAL_SEC" type="number" min="5" step="1" value="20" /></label>
+          <label><span>OFF delta (below ON)</span><input id="ALERT_OFF_DELTA" type="number" min="0" step="0.01" value="0.10" /></label>
+          <label><span>Top-K classes</span><input id="TOP_K" type="number" min="1" step="1" value="6" /></label>
+
+          <label><span>Hybrid prior (kPrior)</span><input id="K_PRIOR" type="number" min="1" step="1" value="50" /></label>
+          <label><span>Hybrid half-life (s, training EMA)</span><input id="HALF_LIFE_S" type="number" min="30" step="10" value="3600" /></label>
+          <label><span>Max results from MP</span><input id="MAX_RESULTS" type="number" min="5" step="1" value="25" /></label>
+
+          <label><span>Ignore classes (training)</span>
+            <input id="IGNORE_CLASSES" type="text" value="Silence, Inside, Outside, Vehicle, Noise" placeholder="Silence, Background noise, White noise">
+          </label>
+          <label><span>Penalty map (inference)</span>
+            <input id="PENALTY_MAP" type="text" value="Silence:-0.45, White noise:-0.2" placeholder="Silence:-0.4, White noise:-0.2">
+          </label>
+        </div>
+        <div class="row" style="margin-top:12px; justify-content:flex-end;">
+          <button id="btnResetDefaults" class="btn">Reset all defaults</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <audio id="trainAudio" crossorigin="anonymous" style="display:none"></audio>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 
   <script type="module">
     /* ========= Helpers & UI ========= */
     const EL = id => document.getElementById(id);
     const ASM_LOG_MS = 2000;
+
+    /* Settings modal wiring */
+    const _modal = EL('settingsModal');
+    const _open = EL('btnOpenSettings');
+    const _close = EL('btnSettingsClose');
+    _open.onclick = () => { _modal.classList.add('show'); _modal.setAttribute('aria-hidden','false'); };
+    _close.onclick = () => { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); };
+    _modal.addEventListener('click', (e) => { if (e.target === _modal) { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); }});
+
+    /* Logs toggle wiring */
+    const btnToggleLogs = EL('btnToggleLogs');
+    const logsContainer = EL('logsContainer');
+    btnToggleLogs.onclick = () => {
+      const visible = logsContainer.style.display !== 'none';
+      logsContainer.style.display = visible ? 'none' : '';
+      btnToggleLogs.textContent = visible ? 'Display logs' : 'Hide logs';
+    };
 
     const LOGS = {
       body: EL('logBody'),
@@ -251,7 +303,9 @@
       'btnRecompute','btnClear','btnExport',
       'trainAudio','weightsView','chart','bars','barsDynW','barsSavedW',
       'MODEL_NAME','btnModelUse','btnModelLoad',
-      'folderInp','btnChooseFolder','btnTrainFolder','btnStopTrainFolder','folderInfo'
+      'folderInp','btnChooseFolder','btnTrainFolder','btnStopTrainFolder','folderInfo',
+      'IGNORE_CLASSES','PENALTY_MAP',
+      'btnResetDefaults'
     ].map(x => [x, document.getElementById(x)])) )();
 
     function setStatus(s){ els.status.textContent = s; log('info', s); }
@@ -267,25 +321,41 @@
       for (let i=0;i<n;i++){ const pos=i*dx, i0=Math.floor(pos), i1=Math.min(i0+1,x.length-1), t=pos-i0; out[i]=x[i0]*(1-t)+x[i1]*t; }
       return out;
     }
+    // === helper used by calibration ===
+    function quantile(arr, q){
+      if (!arr?.length) return 0;
+      const a = [...arr].sort((x,y)=>x-y);
+      const idx = (a.length - 1) * q;
+      const lo = Math.floor(idx), hi = Math.ceil(idx);
+      if (lo === hi) return a[lo];
+      const t = idx - lo;
+      return a[lo] * (1 - t) + a[hi] * t;
+    }
 
-    /* ========= Chart.js % labels plugin (opt-in) ========= */
+    /* ========= Chart.js % labels plugin ========= *//* ========= Chart.js % labels plugin (opt-in per chart) ========= */
     const pctLabelPlugin = {
       id: 'pctLabel',
-      afterDatasetsDraw(chart){
-        const enabled = chart?.options?.plugins?.pctLabel?.enabled;
-        if (!enabled) return;
+      afterDatasetsDraw(chart, args, options) {
+        // Only run when explicitly enabled on this chart AND the chart is a bar chart
+        if (!options || options.enabled !== true) return;
+        if (chart.config.type !== 'bar') return;
+    
         const ds = chart.data.datasets?.[0];
         if (!ds) return;
-        const meta = chart.getDatasetMeta(0);
+    
         const { ctx } = chart;
+        const meta = chart.getDatasetMeta(0);
         ctx.save();
-        ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-        ctx.fillStyle = '#ddd';
+        ctx.font = (options?.font) || '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+        ctx.fillStyle = options?.color || '#ddd';
+    
         const data = ds.data || [];
         meta.data.forEach((bar, i) => {
           const v = Number(data[i]) || 0;
           const txt = `${Math.round(v * 100)}%`;
-          ctx.fillText(txt, bar.x + 6, bar.y + 4);
+          const x = bar.x + 6;
+          const y = bar.y + 4;
+          ctx.fillText(txt, x, y);
         });
         ctx.restore();
       }
@@ -323,7 +393,6 @@
           log('ok', `YAMNet ready (maxResults=${maxResults}).`);
           return _yamTask;
         } catch (e1) {
-          log('warn', `Path load failed (${e1?.message||e1}); retrying with buffer…`);
           const resp = await fetch(MODEL_URL + "?cb=" + Date.now(), { cache: "no-store" });
           if (!resp.ok) throw new Error(`yamnet fetch ${resp.status}`);
           const buf = new Uint8Array(await resp.arrayBuffer());
@@ -377,6 +446,8 @@
 
     function MODEL_KEY(){ return `cryModelV1_${getModelName()}`; }
     function CALIB_KEY(){ return `cryCalibV1_${getModelName()}`; }
+    function IGNORE_KEY(){ return `cryIgnore_${getModelName()}`; }
+    function PENALTY_KEY(){ return `cryPenalty_${getModelName()}`; }
 
     function loadModel() {
       const raw = localStorage.getItem(MODEL_KEY());
@@ -399,14 +470,81 @@
     function clearModel(){
       localStorage.removeItem(MODEL_KEY());
       localStorage.removeItem(CALIB_KEY());
-      log('warn',`Cleared model “${getModelName()}” + its calibration.`);
+      localStorage.removeItem(IGNORE_KEY());
+      localStorage.removeItem(PENALTY_KEY());
+      log('warn',`Cleared model “${getModelName()}” + its calibration & ignore/penalty settings.`);
     }
+
+    /* ========= Ignore / Penalty ========= */
+    function getIgnoreTokens(){
+      const s = (els.IGNORE_CLASSES?.value ?? localStorage.getItem(IGNORE_KEY()) ?? '').trim();
+      return s ? s.split(',').map(t=>t.trim().toLowerCase()).filter(Boolean) : [];
+    }
+    function shouldIgnore(name){
+      if (!name) return false;
+      const n = name.toLowerCase();
+      return getIgnoreTokens().some(tok => n.includes(tok));
+    }
+    function getPenaltyMap(){
+      const s = (els.PENALTY_MAP?.value ?? localStorage.getItem(PENALTY_KEY()) ?? '').trim();
+      const map = {};
+      if (!s) return map;
+      s.split(',').forEach(pair=>{
+        const [k,v] = pair.split(':');
+        if (!k) return;
+        const w = Math.max(-1, Math.min(0, parseFloat(v)));
+        map[k.trim().toLowerCase()] = Number.isFinite(w) ? w : -0.3;
+      });
+      return map;
+    }
+
+    function resetDefaults(){
+      // Core numeric defaults
+      els.SR_TARGET.value        = 16000;
+      els.FRAME_LEN_S.value      = 0.975;
+      els.HOP_S.value            = 0.48;
+      els.CLASS_EMA_TAU_S.value  = 0.8;
+      els.FUSED_EMA_TAU_S.value  = 0.8;
+      els.ALERT_HOLD_MS.value    = 3000;
+      els.CAL_SEC.value          = 20;
+      els.ALERT_OFF_DELTA.value  = 0.10;
+      els.TOP_K.value            = 6;
+      els.K_PRIOR.value          = 50;
+      els.HALF_LIFE_S.value      = 3600;
+      els.MAX_RESULTS.value      = 25;
+
+      // Text defaults
+      els.IGNORE_CLASSES.value   = 'Silence, Inside, Outside, Vehicle, Noise';
+      els.PENALTY_MAP.value      = 'Silence:-0.45, White noise:-0.2';
+
+      // Persist per-model fields immediately
+      localStorage.setItem(IGNORE_KEY(), els.IGNORE_CLASSES.value);
+      localStorage.setItem(PENALTY_KEY(), els.PENALTY_MAP.value);
+
+      // Trigger the same change handlers your code already uses
+      ['TOP_K','K_PRIOR','HALF_LIFE_S'].forEach(id => {
+        const el = document.getElementById(id);
+        el && el.dispatchEvent(new Event('change'));
+      });
+
+      // Update preview/saved charts to reflect new knobs
+      const m = loadModel();
+      const preview = computeWeightsPreview(m);
+      setWeightsChart(state.barDynW, preview);
+      setWeightsChart(state.barSavedW, m.weights || {});
+      if (state.mode === 'idle') clearTopBars();
+
+      log('ok', 'Settings reset to defaults.');
+    }
+
+    // Wire up button
+    els.btnResetDefaults && (els.btnResetDefaults.onclick = resetDefaults);
 
     /* ========= Stats → weights ========= */
     function updateStats(model, categories, dtSec) {
       const a = alphaForTau(dtSec, model.halfLifeSec || 3600);
       for (const { categoryName: name, score=0 } of categories) {
-        if (!name) continue;
+        if (!name || shouldIgnore(name)) continue;
         const s = model.classes[name] || (model.classes[name] = { n:0, sum:0, ema:0, emaPres:0 });
         s.n   += 1; s.sum += score; s.ema  = emaStep(s.ema, score, a); s.emaPres = emaStep(s.emaPres, score>0 ? 1 : 0, a);
       }
@@ -416,6 +554,7 @@
       const K = model.K || 6, kPrior = model.kPrior || 50;
       const raw = [];
       for (const [name, s] of Object.entries(model.classes || {})) {
+        if (shouldIgnore(name)) continue;
         const mean = s.sum / Math.max(1, s.n);
         const lambda = kPrior / (kPrior + (s.n || 0));
         const hybrid = (1 - lambda) * mean + lambda * (s.ema ?? 0);
@@ -433,7 +572,7 @@
       const preview = computeWeightsPreview(model);
       model.weights = preview;
       model.updatedAt = Date.now();
-      saveModel(model);  // persisted under current model name
+      saveModel(model);
       const lines = Object.entries(preview)
         .sort((a,b)=>b[1]-a[1])
         .map(([n,v]) => `${n.padEnd(24,' ')}  w=${(v).toFixed(3)}  n=${model.classes?.[n]?.n ?? 0}`);
@@ -463,7 +602,11 @@
       chart: null, barChart: null, barDynW: null, barSavedW: null,
       labels: [], fusedRaw: [], fusedSm: [],
       thrOn: 0.35, thrOff: 0.25,
-      frameCount: 0, asmLastLogTs: 0
+      frameCount: 0, asmLastLogTs: 0,
+      // calibration
+      calActive: false,
+      calVals: [],
+      calTimerId: null,
     };
 
     function setupChart(){
@@ -502,55 +645,63 @@
       if (!state.barChart && els.bars) {
         state.barChart = new Chart(els.bars.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{ label: 'score', data: [], borderWidth: 1 }] },
-          options: {
-            indexAxis: 'y',
-            animation: false,
-            plugins: {
-              legend: { display:false },
-              pctLabel: { enabled: false }   // no % on live training bars
-            },
-            scales: {
-              x: { min: 0, max: 1, title: { display:true, text:'score' } },
-              y: { ticks: { autoSkip: false } }
-            }
-          }
+          data: { labels: [], datasets: [{ label: 'score', data: [], borderWidth: 1, backgroundColor: [], borderColor: [] }] },
+          options: { indexAxis: 'y', animation: false, plugins: { legend: { display:false } },
+            scales: { x: { min: 0, max: 1, title: { display:true, text:'score' } }, y: { ticks: { autoSkip: false } } } }
         });
       }
       if (!state.barDynW && els.barsDynW) {
         state.barDynW = new Chart(els.barsDynW.getContext('2d'), {
           type: 'bar',
           data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
-          options: {
-            indexAxis:'y',
-            animation:false,
-            plugins:{ legend:{display:false}, pctLabel:{ enabled: true } }, // % labels on weights
-            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } }
-          }
+          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{enabled: true} },
+            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
         });
       }
       if (!state.barSavedW && els.barsSavedW) {
         state.barSavedW = new Chart(els.barsSavedW.getContext('2d'), {
           type: 'bar',
           data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
-          options: {
-            indexAxis:'y',
-            animation:false,
-            plugins:{ legend:{display:false}, pctLabel:{ enabled: true } }, // % labels on weights
-            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } }
-          }
+          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{enabled: true} },
+            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
         });
       }
+    }
+    function clearTopBars(){
+      if (!state.barChart) return;
+      state.barChart.data.labels = [];
+      state.barChart.data.datasets[0].data = [];
+      state.barChart.data.datasets[0].backgroundColor = [];
+      state.barChart.data.datasets[0].borderColor = [];
+      state.barChart.update();
     }
     function updateTopBars(cats){
       if (!els.bars) return;
       setupBars();
       const K = Math.max(1, Number(els.TOP_K.value) || 6);
-      const sorted = [...cats].sort((a,b)=> (b.score||0)-(a.score||0)).slice(0, K);
-      state.barChart.data.labels = sorted.map(c => c.categoryName || '(unnamed)');
-      state.barChart.data.datasets[0].data = sorted.map(c => c.score || 0);
+      const sorted = [...cats].sort((a,b)=> (b.score||0)-(a.score||0));
+
+      const display = [];
+      let kept = 0, i = 0;
+      while (i < sorted.length && kept < K) {
+        const c = sorted[i++];
+        const excluded = shouldIgnore(c.categoryName);
+        display.push({ name: c.categoryName || '(unnamed)', v: c.score || 0, excluded });
+        if (!excluded) kept++;
+      }
+
+      const labels = display.map(d => d.name);
+      const values = display.map(d => d.v);
+      const bg = display.map(d => d.excluded ? 'rgba(107,114,128,0.85)' : 'rgba(96,165,250,0.85)');
+      const bd = display.map(d => d.excluded ? 'rgba(75,85,99,1)' : 'rgba(59,130,246,1)');
+
+      state.barChart.data.labels = labels;
+      state.barChart.data.datasets[0].data = values;
+      state.barChart.data.datasets[0].backgroundColor = bg;
+      state.barChart.data.datasets[0].borderColor = bd;
       state.barChart.update();
     }
+
     function setWeightsChart(chart, weightsDict){
       if (!chart) return;
       const entries = Object.entries(weightsDict || {}).sort((a,b)=>b[1]-a[1]);
@@ -561,18 +712,36 @@
 
     /* ========= Fusion scoring ========= */
     function ensurePerClassEma(weights) {
-      const names = new Set(Object.keys(weights));
-      for (const n of names) if (!state.perClassEma.has(n)) state.perClassEma.set(n, 0);
-      for (const n of Array.from(state.perClassEma.keys())) if (!names.has(n)) state.perClassEma.delete(n);
+      for (const n of Object.keys(weights || {})) {
+        if (!state.perClassEma.has(n)) state.perClassEma.set(n, 0);
+      }
     }
     function fusedScoreFromCategories(categories, weights, dt) {
       const a = alphaForTau(dt, Number(els.CLASS_EMA_TAU_S.value) || 0.8);
-      for (const name of state.perClassEma.keys()) {
-        const s = categories.find(c => c.categoryName === name)?.score ?? 0;
-        state.perClassEma.set(name, emaStep(state.perClassEma.get(name) || 0, s, a));
+
+      for (const c of categories) {
+        const name = c.categoryName; if (!name) continue;
+        const prev = state.perClassEma.get(name) || 0;
+        state.perClassEma.set(name, emaStep(prev, c.score || 0, a));
       }
+      ensurePerClassEma(weights);
+
       let fused = 0;
-      for (const [name, w] of Object.entries(weights)) fused += (w || 0) * (state.perClassEma.get(name) || 0);
+      for (const [name, w] of Object.entries(weights || {})) {
+        fused += (w || 0) * (state.perClassEma.get(name) || 0);
+      }
+
+      const pmap = getPenaltyMap();
+      if (Object.keys(pmap).length) {
+        for (const [tok, pen] of Object.entries(pmap)) {
+          const token = String(tok || '').toLowerCase();
+          if (!token) continue;
+          for (const [nm, ema] of state.perClassEma.entries()) {
+            if (nm.toLowerCase().includes(token)) fused += (pen || 0) * (ema || 0);
+          }
+        }
+      }
+
       fused = clamp01(fused);
       state.fusedEma = emaStep(state.fusedEma, fused, alphaForTau(dt, Number(els.FUSED_EMA_TAU_S.value) || 0.8));
       return { raw: fused, sm: state.fusedEma };
@@ -583,10 +752,71 @@
       else { if (sm >= state.thrOn) { state.alertUntil = nowMs + hold; return true; } return false; }
     }
 
+    /* ========= Quiet calibration ========= */
+    async function quietCalibrate(){
+      if (state.calActive) return;
+
+      const durSec  = Math.max(5, Number(els.CAL_SEC.value) || 20);
+      const offDelta = Number(els.ALERT_OFF_DELTA.value) || 0.10;
+
+      // Prep collection
+      state.calActive = true;
+      state.calVals = [];
+      setStatus(`Quiet calibration for ${durSec}s… Please keep things quiet.`);
+
+      // Start mic (detect mode) so classifyChunk flows; then mark UI
+      await startMic('detect');
+      setPill('calibrating', true);
+
+      // Stop after duration, compute thresholds, persist, and clean up
+      state.calTimerId = setTimeout(async () => {
+        const vals = state.calVals.slice();
+        state.calActive = false;
+        state.calTimerId = null;
+
+        if (!vals.length) {
+          const thr_on = 0.35;
+          const thr_off = Math.max(0, thr_on - offDelta);
+          localStorage.setItem(CALIB_KEY(), JSON.stringify({
+            version: 1, thr_on, thr_off, n: 0, at: new Date().toISOString()
+          }));
+          state.thrOn = thr_on; state.thrOff = thr_off;
+          await stopAll();
+          setPill('idle', false);
+          log('warn', 'Calibration captured 0 frames; using defaults.');
+          return;
+        }
+
+        const p99 = quantile(vals, 0.995);
+        const thr_off = Math.min(0.95, p99 + 0.02);
+        const thr_on  = Math.min(0.99, thr_off + offDelta);
+
+        const payload = {
+          version: 1,
+          thr_on, thr_off,
+          n: vals.length, p99,
+          off_delta: offDelta,
+          dur_s: durSec,
+          at: new Date().toISOString()
+        };
+        localStorage.setItem(CALIB_KEY(), JSON.stringify(payload));
+        state.thrOn = thr_on; state.thrOff = thr_off;
+
+        log('ok', 'Quiet calibration complete.',
+          `<div class="log-code">${JSON.stringify(payload, null, 2)}</div>`);
+
+        await stopAll();
+        setPill('idle', false);
+        setStatus('Calibration done. Start Detect to use the new thresholds.');
+      }, durSec * 1000);
+    }
+
     /* ========= Classify loop & modes ========= */
     function concatFloat32(a,b){ const out=new Float32Array(a.length+b.length); out.set(a,0); out.set(b,a.length); return out; }
 
     async function classifyChunk(chunk, deviceSr, params, mode){
+      if (state.mode !== mode) return;
+
       const SR_TARGET = Number(els.SR_TARGET.value)||16000;
       const HOP_S = Number(els.HOP_S.value)||0.48;
       const MAX_RESULTS = Number(els.MAX_RESULTS.value)||25;
@@ -612,6 +842,11 @@
 
         const res = await classifyMP(task, w, SR_TARGET);
         const cats = extractCategories(res);
+
+        // During quiet calibration, show live top classes in the bars
+        if (state.calActive) {
+          updateTopBars(cats);
+        }
 
         if (LOGS.enable.checked) {
           const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
@@ -640,7 +875,6 @@
           const model = loadModel();
           model.K = Number(els.TOP_K.value) || model.K || 6;
           const weights = model.weights || {"Baby cry, infant cry":1};
-          ensurePerClassEma(weights);
           const { raw, sm } = fusedScoreFromCategories(cats, weights, HOP_S);
 
           const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
@@ -648,6 +882,12 @@
           else { state.thrOn = 0.35; state.thrOff = state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1); }
 
           pushChart(state.labels.length * HOP_S, raw, sm);
+
+          // While calibrating, collect fused(EMA) samples
+          if (state.calActive) {
+            state.calVals.push(sm);
+          }
+
           const on = applyHysteresis(sm, performance.now());
           if (on && !state.alertOn) { setPill('CRYING', true); log('ok','ALERT ON (cry detected).'); }
           if (!on && state.alertOn) { setPill('idle', false); log('warn','ALERT OFF.'); }
@@ -663,12 +903,10 @@
       }
     }
 
-    /* ========= Mic / File / Folder / Calibrate control ========= */
-    let trainCtx=null, trainSrc=null, trainNode=null, trainSink=null;
-
+    /* ========= Mic control ========= */
     async function startMic(mode) {
-      await stopFolderTraining(true);   // ensure folder queue is down
-      await stopTrainingFile();         // ensure file graph is down
+      await stopFolderTraining();
+      await stopFilePlayback();
       await stopAll();
       setStatus(mode==='detect' ? 'Starting microphone (detect)…' : 'Starting microphone (train)…');
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
@@ -720,162 +958,90 @@
       state.ring=new Float32Array(0); state.lastPos=0; state.perClassEma.clear(); state.fusedEma=0; state.frameCount=0;
       state.asmLastLogTs = 0;
       setPill('idle', false); setRMS(0);
+      clearTopBars();
       if (wasRunning) log('warn','Stopped audio graph.');
     }
 
-    async function quietCalibrate() {
-      await stopFolderTraining(true);
-      await stopTrainingFile();
-      await stopAll();
-      setStatus('Quiet calibration…');
-      state.mode = 'calibrate';
-      const dur = Math.max(5, Number(els.CAL_SEC.value)||20);
-      const SR_TARGET = Number(els.SR_TARGET.value)||16000;
-      const HOP_S  = Number(els.HOP_S.value)||0.48;
-      const MAX_RESULTS = Number(els.MAX_RESULTS.value)||25;
-      const task = await ensureAudioTask(MAX_RESULTS);
+    /* ========= Training on FILE/FOLDER (persistent graph) ========= */
+    let trainCtx=null, trainSrc=null, trainNode=null, trainSink=null, trainBlobUrl=null;
+    let trainUsingWorklet = false;
 
-      const ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
-      const stream = await navigator.mediaDevices.getUserMedia({audio:true, video:false});
-      const src = ctx.createMediaStreamSource(stream);
-      const sink = ctx.createGain(); sink.gain.value=0; sink.connect(ctx.destination);
-      const node = ctx.createScriptProcessor(4096,1,1);
+    async function ensureTrainGraph(modeLabel){
+      if (!trainCtx) {
+        trainCtx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
+      }
+      if (trainCtx.state === 'suspended') await trainCtx.resume();
 
-      let ring = new Float32Array(0), last=0, t=0, asmLastLogTs=0;
-      const samples = [];
-      const weights = loadModel().weights || {"Baby cry, infant cry":1};
-      state.perClassEma.clear(); ensurePerClassEma(weights);
-      state.fusedEma = 0; state.frameCount = 0;
-      const fram = snapFrameSamples(SR_TARGET, Number(els.FRAME_LEN_S.value));
-
-      node.onaudioprocess = async (e) => {
-        const buf = new Float32Array(e.inputBuffer.getChannelData(0));
-        let s=0; for(let i=0;i<buf.length;i++){ const v=buf[i]; s+=v*v; }
-        setRMS(Math.sqrt(s/Math.max(1,buf.length)));
-
-        const x16 = resampleLinear(buf, ctx.sampleRate, SR_TARGET);
-        ring = concatFloat32(ring, x16);
-        const hop = Math.round(HOP_S * SR_TARGET);
-
-        const now = performance.now();
-        if (now - asmLastLogTs >= ASM_LOG_MS) {
-          log('info', `[cal] Audio buf len=${ring.length}, need≥${last + hop} (hop=${hop}, frame=${fram})`);
-          asmLastLogTs = now;
+      if (!trainSink) { trainSink = trainCtx.createGain(); trainSink.gain.value = 0; trainSink.connect(trainCtx.destination); }
+      if (!trainNode) {
+        try {
+          const mod = URL.createObjectURL(new Blob([`
+            class Tap extends AudioWorkletProcessor {
+              process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }
+            } registerProcessor('tap', Tap);
+          `], {type:'application/javascript'}));
+          await trainCtx.audioWorklet.addModule(mod); URL.revokeObjectURL(mod);
+          trainNode = new AudioWorkletNode(trainCtx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
+          trainUsingWorklet = true;
+        } catch {
+          const node = trainCtx.createScriptProcessor(4096,1,1);
+          trainNode = node;
+          trainUsingWorklet = false;
         }
+      }
 
-        while (ring.length - last >= hop) {
-          const end = last + hop, start = Math.max(0, end - fram);
-          let w = ring.slice(start, end); if (w.length !== fram){ const pad=new Float32Array(fram); pad.set(w, fram-w.length); w=pad; }
-          const res = await classifyMP(task, w, SR_TARGET);
-          const cats = extractCategories(res);
+      if (trainUsingWorklet) {
+        trainNode.port.onmessage = (ev)=> classifyChunk(ev.data, trainCtx.sampleRate, getParams(), modeLabel);
+      } else {
+        trainNode.onaudioprocess = (e)=> classifyChunk(new Float32Array(e.inputBuffer.getChannelData(0)), trainCtx.sampleRate, getParams(), modeLabel);
+      }
 
-          if (LOGS.enable.checked) {
-            const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
-            const html = formatCats(cats, topN, LOGS.all.checked);
-            log('inf', `Inference#${++state.frameCount} [mode=calibrate] cats=${cats.length}`, html, { mode:'calibrate', frame: state.frameCount, cats });
-            if (!res) log('warn', 'Inference returned null result (classify failed).');
-            else if (!cats.length) log('warn', 'Inference returned 0 categories.');
-          }
-
-          ensurePerClassEma(weights);
-          const { sm } = fusedScoreFromCategories(cats, weights, HOP_S);
-          samples.push(sm);
-          last += hop;
-          t += HOP_S;
-          if (t >= dur) break;
-        }
-        if (t >= dur) {
-          try { node.disconnect(); src.disconnect(); sink.disconnect(); } catch {}
-          stream.getTracks().forEach(t=>t.stop());
-          ctx.close();
-          const mu = samples.reduce((a,b)=>a+b,0)/Math.max(1,samples.length);
-          const sd = Math.sqrt(samples.reduce((a,b)=>a+(b-mu)*(b-mu),0)/Math.max(1,samples.length));
-          const thr_on = Math.min(1.2, mu + 3*sd);
-          const thr_off = Math.max(0, thr_on - (Number(els.ALERT_OFF_DELTA.value)||0.1));
-          const calib = { thr_on, thr_off, mu, sd, n:samples.length, at:Date.now() };
-          localStorage.setItem(CALIB_KEY(), JSON.stringify(calib));
-          state.thrOn = thr_on; state.thrOff = thr_off;
-          setStatus(`Calibrated ON=${thr_on.toFixed(3)} OFF=${thr_off.toFixed(3)} (μ=${mu.toFixed(3)}, σ=${sd.toFixed(3)}, n=${samples.length})`);
-          log('ok', 'Calibration complete.', `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
-          state.mode = 'idle';
-          setPill('idle', false);
-        }
-      };
-      src.connect(node).connect(sink);
-      log('info', `Calibration started for ${dur}s.`);
+      if (!trainSrc) {
+        trainSrc = trainCtx.createMediaElementSource(els.trainAudio);
+      }
+      try { trainSrc.disconnect(); } catch {}
+      try { trainNode.disconnect(); } catch {}
+      trainSrc.connect(trainNode).connect(trainSink);
     }
 
-    async function startTrainingOnFile(file, opts = {}) {
-      const isPlaylist = !!opts.playlist;
-
-      if (!isPlaylist) await stopFolderTraining(true); // don't kill playlist when called by folder trainer
-      await stopAll();          // stop mic graph
-      await stopTrainingFile(); // stop any prior file graph
-
-      const url = URL.createObjectURL(file);
-      els.trainAudio.src = url;
+    function setTrainAudioSrcFromFile(file){
+      if (trainBlobUrl) { try { URL.revokeObjectURL(trainBlobUrl); } catch {} }
+      trainBlobUrl = URL.createObjectURL(file);
+      els.trainAudio.src = trainBlobUrl;
       els.trainAudio.loop = false;
-      els.trainAudio.muted = true;            // allow autoplay across files
-      els.trainAudio.currentTime = 0;
+    }
 
-      const ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
-      trainCtx = ctx;
-      const src = ctx.createMediaElementSource(els.trainAudio); trainSrc=src;
-      const sink = ctx.createGain(); sink.gain.value=0; sink.connect(ctx.destination); trainSink=sink;
+    async function startTrainingOnFile(file) {
+      await stopFolderTraining(true);
+      await stopAll();
+      await ensureTrainGraph('train_file');
 
-      try {
-        const mod = URL.createObjectURL(new Blob([`
-          class Tap extends AudioWorkletProcessor {
-            process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }
-          } registerProcessor('tap', Tap);
-        `], {type:'application/javascript'}));
-        await ctx.audioWorklet.addModule(mod); URL.revokeObjectURL(mod);
-        const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
-        node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate, getParams(), 'train_file');
-        src.connect(node).connect(sink);
-        trainNode = node;
-        setStatus('Training graph (Worklet) ready.');
-      } catch {
-        const node = ctx.createScriptProcessor(4096,1,1);
-        node.onaudioprocess = (e)=> classifyChunk(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate, getParams(), 'train_file');
-        src.connect(node).connect(sink);
-        trainNode = node;
-        setStatus('Training graph (ScriptProcessor) ready.');
-      }
-
+      setTrainAudioSrcFromFile(file);
       await ensureAudioTask(Number(els.MAX_RESULTS.value)||25);
-
-      if (!isPlaylist) {
-        els.trainAudio.onended = async () => {
-          await stopTrainingFile();
-          setStatus('Training clip ended. Click “Recompute Weights”.');
-          setPill('idle', false);
-          state.mode='idle';
-        };
-      } else {
-        els.trainAudio.onended = null; // folder trainer will attach its own
-      }
-
-      try {
-        await els.trainAudio.play();
-      } catch (e) {
-        log('warn', 'Autoplay was blocked — tap anywhere to continue playback.', `<div class="log-code">${e?.message||e}</div>`);
-      }
 
       state.mode = 'train_file';
       setPill('training', true);
       log('ok', `Training started on file: ${file.name}`, `<span class="chip">${(file.size/1024/1024).toFixed(2)} MB</span>`);
-    }
-    async function stopTrainingFile(){
-      try { els.trainAudio.pause(); } catch {}
-      try { trainNode?.disconnect(); } catch {}
-      try { trainSrc?.disconnect(); } catch {}
-      try { trainSink?.disconnect(); } catch {}
-      try { trainCtx && trainCtx.state!=='closed' && trainCtx.close(); } catch {}
-      trainCtx=null; trainSrc=null; trainNode=null; trainSink=null;
+
+      els.trainAudio.onended = async () => {
+        await stopFilePlayback();
+        setStatus('Training clip ended. Click “Recompute Weights”.');
+        setPill('idle', false);
+        state.mode='idle';
+        clearTopBars();
+      };
+
+      try { await els.trainAudio.play(); } catch {}
     }
 
-    /* ========= Folder training (recursive via directory picker) ========= */
+    async function stopFilePlayback(){
+      try { els.trainAudio.pause(); } catch {}
+      els.trainAudio.onended = null;
+      try { if (trainCtx && trainCtx.state !== 'suspended') await trainCtx.suspend(); } catch {}
+      clearTopBars();
+    }
+
+    /* ========= Folder training ========= */
     let folderFiles = [];
     let folderIdx = 0;
     let folderActive = false;
@@ -888,7 +1054,6 @@
       let i=0; while (i<minLen && split.every(a => a[i]===split[0][i])) i++;
       return split[0].slice(0, Math.max(0, i-1)).join('/') || '(root)';
     }
-
     function pickAudioFilesFromList(list){
       const arr = Array.from(list || []);
       return arr.filter(f => {
@@ -902,18 +1067,17 @@
     }
 
     async function startFolderTraining(){
-      if (!folderFiles.length) {
-        els.btnChooseFolder.click();
-        return;
-      }
+      if (!folderFiles.length) { els.btnChooseFolder.click(); return; }
       await stopAll();
-      await stopTrainingFile();
+      await ensureTrainGraph('train_folder');
+      await ensureAudioTask(Number(els.MAX_RESULTS.value)||25);
+
       folderActive = true;
       folderIdx = 0;
       state.mode = 'train_folder';
       setPill('training', true);
       log('ok', `Folder training queued: ${folderFiles.length} file(s) from “${describeCommonRoot(folderFiles)}”.`);
-      trainNextFileInFolder();
+      await trainNextFileInFolder();
     }
 
     async function trainNextFileInFolder(){
@@ -921,28 +1085,30 @@
       if (folderIdx >= folderFiles.length) {
         await stopFolderTraining(true);
         log('ok', 'Folder training complete.');
+        clearTopBars();
         return;
       }
-
       const f = folderFiles[folderIdx];
       const label = f.webkitRelativePath || f.name;
       log('info', `Starting file ${folderIdx+1}/${folderFiles.length}: ${label}`);
 
-      await startTrainingOnFile(f, { playlist: true });   // do NOT install single-file onended
+      setTrainAudioSrcFromFile(f);
       els.trainAudio.onended = async () => {
-        await stopTrainingFile();
         log('info', `Finished ${folderIdx+1}/${folderFiles.length}`);
         folderIdx++;
-        if (folderActive) trainNextFileInFolder();
+        if (folderActive) { await trainNextFileInFolder(); }
       };
+
+      try { await els.trainAudio.play(); } catch (e) { log('err', 'Failed to play file in folder: '+(e?.message||e)); folderIdx++; await trainNextFileInFolder(); }
     }
 
     async function stopFolderTraining(silent=false){
       folderActive = false;
       folderIdx = 0;
-      await stopTrainingFile();
+      await stopFilePlayback();
       setPill('idle', false);
       state.mode = 'idle';
+      clearTopBars();
       if (!silent) log('warn','Stopped folder training.');
     }
 
@@ -958,7 +1124,7 @@
 
     // Detect / Calibrate
     els.btnStartDetect.onclick = () => startMic('detect');
-    els.btnStop.onclick = async () => { await stopFolderTraining(true); await stopTrainingFile(); await stopAll(); };
+    els.btnStop.onclick = async () => { await stopFolderTraining(true); await stopFilePlayback(); await stopAll(); };
     els.btnCal.onclick = () => quietCalibrate();
 
     // Training via MIC
@@ -971,7 +1137,7 @@
       if (!f) { setStatus('Pick an audio file first'); return; }
       await startTrainingOnFile(f);
     };
-    els.btnStopTrainFile.onclick = () => stopTrainingFile();
+    els.btnStopTrainFile.onclick = () => stopFilePlayback();
 
     // Folder training UI
     els.btnChooseFolder.onclick = () => els.folderInp.click();
@@ -992,7 +1158,7 @@
       m.K = Number(els.TOP_K.value)||m.K||6;
       m.kPrior = Number(els.K_PRIOR.value)||m.kPrior||50;
       m.halfLifeSec = Number(els.HALF_LIFE_S.value)||m.halfLifeSec||3600;
-      const w = recomputeWeights(m);      // persists under current name
+      const w = recomputeWeights(m);
       renderWeights(w);
       setWeightsChart(state.barSavedW, w);
     };
@@ -1003,6 +1169,7 @@
       setWeightsChart(state.barDynW, {});
       setWeightsChart(state.barSavedW, {});
       setupChart();
+      clearTopBars();
       setStatus(`Model “${name}” cleared.`);
     };
     els.btnExport.onclick = () => {
@@ -1016,8 +1183,13 @@
     // Model name controls
     els.btnModelUse.onclick = () => {
       const name = els.MODEL_NAME.value.trim() || 'default';
+      localStorage.setItem('cryActiveModelName', name);
       setModelName(name);
       setStatus(`Active model name set to “${name}”. New training/recompute will persist there.`);
+      const ignoreSaved = localStorage.getItem(IGNORE_KEY());
+      if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
+      const penaltySaved = localStorage.getItem(PENALTY_KEY());
+      if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
     };
     els.btnModelLoad.onclick = () => {
       const name = els.MODEL_NAME.value.trim() || 'default';
@@ -1029,10 +1201,14 @@
       setWeightsChart(state.barDynW, preview);
       const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
       if (calib) log('ok', `Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
+      const ignoreSaved = localStorage.getItem(IGNORE_KEY());
+      if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
+      const penaltySaved = localStorage.getItem(PENALTY_KEY());
+      if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
       setStatus(`Loaded model “${name}”.`);
     };
 
-    // Persist critical knobs immediately
+    // Persist knobs immediately + update preview/saved charts
     ['TOP_K','K_PRIOR','HALF_LIFE_S'].forEach(id => {
       document.getElementById(id).addEventListener('change', () => {
         const m = loadModel();
@@ -1047,16 +1223,28 @@
       });
     });
 
+    // Persist ignore/penalty per model immediately
+    ['IGNORE_CLASSES','PENALTY_MAP'].forEach(id=>{
+      const el = document.getElementById(id);
+      if (!el) return;
+      const save = () => {
+        const key = (id==='IGNORE_CLASSES') ? IGNORE_KEY() : PENALTY_KEY();
+        localStorage.setItem(key, el.value);
+        log('info', `${id==='IGNORE_CLASSES'?'Ignore classes':'Penalty map'} updated for “${getModelName()}”.`);
+        if (state.mode==='idle') clearTopBars();
+      };
+      el.addEventListener('change', save);
+      el.addEventListener('blur', save);
+    });
+
     /* ========= Boot ========= */
     (function boot(){
-      const name = localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default';
+      const name = localStorage.getItem('cryActiveModelName') || 'default';
       setModelName(name);
 
-      // Charts
       setupBars();
       const ctx = els.chart.getContext('2d'); ctx && setupChart();
 
-      // Load current model & calibration
       const m = loadModel();
       renderWeights(m.weights||{});
       setWeightsChart(state.barSavedW, m.weights || {});
@@ -1065,6 +1253,12 @@
 
       const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
       if (calib) { state.thrOn=calib.thr_on; state.thrOff=calib.thr_off; log('ok',`Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`); }
+
+      const ignoreSaved = localStorage.getItem(IGNORE_KEY());
+      if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
+      const penaltySaved = localStorage.getItem(PENALTY_KEY());
+      if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
+
       setStatus('Ready. Train (mic/file/folder) → Recompute Weights → Quiet Calibrate → Start Detect.');
     })();
   </script>
