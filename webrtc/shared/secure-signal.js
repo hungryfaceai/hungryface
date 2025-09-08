@@ -1,4 +1,4 @@
-// /webrtc/shared/secure-signal.js (fixed pairing + multi-session)
+// /webrtc/shared/secure-signal.js (WS-open wait + nonceQR + multi-session)
 import { te, td, b64u, b64uToBytes, digestSHA256, concatBytes, rand, hkdf, aesGcmEncrypt, aesGcmDecrypt } from './pairing-crypto.js';
 import { ensureIdentity, shortSAS } from './identity.js';
 
@@ -20,6 +20,7 @@ export class SecureSignal {
     this.onOpen = onOpen || (()=>{});
     this.onSession = onSession || (()=>{});
     this._qrNonce = null; // set when we render a QR
+    this._openWaiters = []; // waiters for WS "open"
   }
 
   async init() {
@@ -32,12 +33,21 @@ export class SecureSignal {
     const ws = new WebSocket(this.url);
     this.ws = ws;
     ws.onopen = () => {
+      // resolve any waiters now that we are OPEN
+      const w = this._openWaiters.splice(0);
+      for (const res of w) try { res(); } catch {}
       ws.send(JSON.stringify({ op:'register', fp:this.me.fingerprint, device:this.me.deviceName }));
       this.onOpen();
       this._emitTrusted();
     };
     ws.onmessage = (e) => this._onmsg(JSON.parse(e.data));
     ws.onclose = () => setTimeout(()=>this._connect(), 1200);
+  }
+
+  // Await until WebSocket is OPEN
+  _whenOpen() {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) return Promise.resolve();
+    return new Promise(res => this._openWaiters.push(res));
   }
 
   _emitTrusted(){ this.onTrustedList([...this.trusted]); }
@@ -49,7 +59,7 @@ export class SecureSignal {
   // Host renders a QR and REMEMBERS its nonce so it can verify the incoming request
   makePairingPayload() {
     const nonce = rand(16);
-    this._qrNonce = nonce;                // <-- remember!
+    this._qrNonce = nonce; // remember
     const payload = {
       v:'n1',
       name:this.me.deviceName,
@@ -91,6 +101,7 @@ export class SecureSignal {
       T
     ));
 
+    await this._whenOpen(); // <-- wait for WS to be OPEN before sending
     this.ws.send(JSON.stringify({
       op:'pair-init',
       to: peer.fp,
@@ -98,8 +109,8 @@ export class SecureSignal {
       name: this.me.deviceName,
       signSpki: this.me.signSpki,
       ecdhSpki: this.me.ecdhSpki,
-      nonceQR: payload.nonce,   // <-- include the QR host's nonce from the link
-      nonceB:  b64u(nonceScan), // <-- scanner's own nonce
+      nonceQR: payload.nonce,   // include QR host's nonce
+      nonceB:  b64u(nonceScan), // scanner's nonce
       sig: b64u(sig)
     }));
 
@@ -110,8 +121,8 @@ export class SecureSignal {
   async _onmsg(m) {
     // QR host receives scanner's init
     if (m.op === 'pair-init' && m.to === this.me.fingerprint) {
-    const nonceQR = m.nonceQR ? b64uToBytes(m.nonceQR) : this._qrNonce;
-    if (!nonceQR) return; // no nonce to verify with
+      const nonceQR = m.nonceQR ? b64uToBytes(m.nonceQR) : this._qrNonce;
+      if (!nonceQR) return; // no nonce to verify with
 
       const nonceScan = b64uToBytes(m.nonceB);
       const tag = te.encode('NaptioPair-v1');
@@ -201,6 +212,7 @@ export class SecureSignal {
       this.me.signKey,
       T
     ));
+    await this._whenOpen();
     this.ws.send(JSON.stringify({
       op:'pair-ack',
       to,
@@ -236,7 +248,8 @@ export class SecureSignal {
     const sess = { toFp, key:null, onmsg:null, role:'initiator' };
     this.sessions.set(sid, sess);
 
-    const reply = await this._waitFor(`eph-reply:${sid}`, 15000, () => {
+    const reply = await this._waitFor(`eph-reply:${sid}`, 15000, async () => {
+      await this._whenOpen();
       this.ws.send(JSON.stringify({ op:'relay', to: peer.fp, from:this.me.fingerprint, kind:'eph-hello', sid, ephSpki: b64u(ephSpki), nonce: b64u(nonce), sig: b64u(sig) }));
     });
 
@@ -278,6 +291,7 @@ export class SecureSignal {
     const sessionKey = await this._deriveSessionKey(eph.privateKey, b64uToBytes(m.ephSpki), concatBytes(b64uToBytes(m.nonce), nonce));
 
     this.sessions.set(sid, { toFp: m.from, key: sessionKey, onmsg:null, role:'responder' });
+    await this._whenOpen();
     this.ws.send(JSON.stringify({ op:'relay', to: peer.fp, from:this.me.fingerprint, kind:'eph-reply', sid, ephSpki: b64u(ephSpki), nonce: b64u(nonce), sig: b64u(sig) }));
     this.onSession({ sid, peerFp: m.from, role:'responder' });
   }
@@ -292,6 +306,7 @@ export class SecureSignal {
   async sendJSON(sid, obj) {
     const s = this.sessions.get(sid); if (!s || !s.key) throw new Error('Missing session');
     const { iv, ct } = await aesGcmEncrypt(s.key, te.encode(JSON.stringify(obj)));
+    await this._whenOpen();
     this.ws.send(JSON.stringify({ op:'relay', to: s.toFp, from:this.me.fingerprint, kind:'enc', sid, iv: b64u(iv), ct: b64u(ct) }));
   }
   onEncrypted(sid, handler) {
@@ -304,7 +319,7 @@ export class SecureSignal {
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => { this.pending.delete(key); reject(new Error('timeout')); }, timeout || 10000);
       this.pending.set(key, (m) => { clearTimeout(t); this.pending.delete(key); resolve(m); });
-      firstSend && firstSend();
+      firstSend && firstSend(); // can be async; we don't await
     });
   }
   _resolveWaiter(key, payload) {
