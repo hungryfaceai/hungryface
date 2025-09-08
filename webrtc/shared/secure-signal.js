@@ -1,15 +1,8 @@
-// /webrtc/shared/secure-signal.js (WS-open wait + nonceQR + multi-session)
+// /webrtc/shared/secure-signal.js (WS-open wait + nonceQR + delayed-save with pair-done)
 import { te, td, b64u, b64uToBytes, digestSHA256, concatBytes, rand, hkdf, aesGcmEncrypt, aesGcmDecrypt } from './pairing-crypto.js';
 import { ensureIdentity, shortSAS } from './identity.js';
 
 export class SecureSignal {
-  /**
-   * Hooks:
-   *  - onPairPrompt({ type:'incoming'|'confirm', from, fp, sas, accept })
-   *  - onTrustedList(trustedArray)
-   *  - onOpen()
-   *  - onSession({ sid, peerFp, role:'initiator'|'responder' })
-   */
   constructor({ url, onPairPrompt, onTrustedList, onOpen, onSession } = {}) {
     this.url = url; this.ws = null;
     this.pending = new Map();
@@ -19,8 +12,8 @@ export class SecureSignal {
     this.onTrustedList = onTrustedList || (()=>{});
     this.onOpen = onOpen || (()=>{});
     this.onSession = onSession || (()=>{});
-    this._qrNonce = null; // set when we render a QR
-    this._openWaiters = []; // waiters for WS "open"
+    this._qrNonce = null;         // stored when we render QR
+    this._openWaiters = [];       // waiters for WS "open"
   }
 
   async init() {
@@ -33,7 +26,6 @@ export class SecureSignal {
     const ws = new WebSocket(this.url);
     this.ws = ws;
     ws.onopen = () => {
-      // resolve any waiters now that we are OPEN
       const w = this._openWaiters.splice(0);
       for (const res of w) try { res(); } catch {}
       ws.send(JSON.stringify({ op:'register', fp:this.me.fingerprint, device:this.me.deviceName }));
@@ -41,10 +33,9 @@ export class SecureSignal {
       this._emitTrusted();
     };
     ws.onmessage = (e) => this._onmsg(JSON.parse(e.data));
-    ws.onclose = () => setTimeout(()=>this._connect(), 1200);
+    ws.onclose   = () => setTimeout(()=>this._connect(), 1200);
   }
 
-  // Await until WebSocket is OPEN
   _whenOpen() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) return Promise.resolve();
     return new Promise(res => this._openWaiters.push(res));
@@ -56,7 +47,6 @@ export class SecureSignal {
 
   // ===== Pairing (QR host <-> scanner) =====
 
-  // Host renders a QR and REMEMBERS its nonce so it can verify the incoming request
   makePairingPayload() {
     const nonce = rand(16);
     this._qrNonce = nonce; // remember
@@ -71,7 +61,7 @@ export class SecureSignal {
     return { json: payload, b64: b64u(te.encode(JSON.stringify(payload))) };
   }
 
-  // Scanner reads the QR and sends a signed request using a canonical transcript (QR-first order)
+  // Scanner
   async handlePairingLink(hashB64) {
     const payload = JSON.parse(td.decode(b64uToBytes(hashB64)));
     const peer = {
@@ -84,7 +74,6 @@ export class SecureSignal {
     const nonceScan = rand(16);
     const tag = te.encode('NaptioPair-v1');
 
-    // Canonical transcript (QR-first): tag || nonceQR || nonceScan || signQR || signSCAN || ecdhQR || ecdhSCAN
     const T = concatBytes(
       tag,
       peer.nonceQR,
@@ -101,33 +90,31 @@ export class SecureSignal {
       T
     ));
 
-    await this._whenOpen(); // <-- wait for WS to be OPEN before sending
+    await this._whenOpen();
     this.ws.send(JSON.stringify({
       op:'pair-init',
-      to: peer.fp,
-      from: this.me.fingerprint,
-      name: this.me.deviceName,
+      to:     peer.fp,
+      from:   this.me.fingerprint,
+      name:   this.me.deviceName,
       signSpki: this.me.signSpki,
       ecdhSpki: this.me.ecdhSpki,
-      nonceQR: payload.nonce,   // include QR host's nonce
-      nonceB:  b64u(nonceScan), // scanner's nonce
-      sig: b64u(sig)
+      nonceQR:  payload.nonce,   // host's QR nonce
+      nonceB:   b64u(nonceScan), // scanner's nonce
+      sig:      b64u(sig)
     }));
 
-    // Keep T so we can verify the ACK and show SAS on the scanner too
     this.pending.set('pairing', { peer, T });
   }
 
   async _onmsg(m) {
-    // QR host receives scanner's init
+    // Host receives scanner's init
     if (m.op === 'pair-init' && m.to === this.me.fingerprint) {
       const nonceQR = m.nonceQR ? b64uToBytes(m.nonceQR) : this._qrNonce;
-      if (!nonceQR) return; // no nonce to verify with
+      if (!nonceQR) return;
 
       const nonceScan = b64uToBytes(m.nonceB);
       const tag = te.encode('NaptioPair-v1');
 
-      // Same canonical transcript (QR-first)
       const T = concatBytes(
         tag,
         nonceQR,
@@ -152,9 +139,7 @@ export class SecureSignal {
 
       this.onPairPrompt({
         type:'incoming',
-        from:m.name,
-        fp:m.from,
-        sas,
+        from:m.name, fp:m.from, sas,
         accept: () => this._acceptPair(m.from, T, ctx),
         reject: () => {}
       });
@@ -177,18 +162,30 @@ export class SecureSignal {
       const sas = shortSAS(await digestSHA256(T));
       this.onPairPrompt({
         type:'confirm',
-        from:m.name,
-        fp:m.from,
-        sas,
-        accept: () => {
-          this._storeTrusted({ fp:m.from, name:m.name, signSpki:m.signSpki, ecdhSpki:m.ecdhSpki });
-        },
+        from:m.name, fp:m.from, sas,
+        accept: () => this._finalizePair(m.from, T, m),   // <-- send pair-done AFTER saving here
         reject: () => {}
       });
       return;
     }
 
-    // ===== Encrypted signaling + session setup (unchanged) =====
+    // Host receives final confirmation from scanner
+    if (m.op === 'pair-done' && m.to === this.me.fingerprint) {
+      const key = `pair-done:${m.from}`;
+      const st = this.pending.get(key);
+      if (st) {
+        // Optional: check transcript hash matches
+        if (m.th && m.th !== st.th) { /* ignore or log */ }
+        await this._storeTrusted({
+          fp: st.ctx.fp, name: st.ctx.name,
+          signSpki: st.ctx.signSpki, ecdhSpki: st.ctx.ecdhSpki
+        });
+        this.pending.delete(key);
+      }
+      return;
+    }
+
+    // ===== Encrypted signaling + session setup =====
     if (m.op === 'relay' && m.to === this.me.fingerprint) {
       if (m.kind === 'eph-reply') { this._resolveWaiter(`eph-reply:${m.sid}`, m); return; }
       if (m.kind === 'eph-hello') { await this._handleEphHello(m); return; }
@@ -206,12 +203,16 @@ export class SecureSignal {
     if (m.op === 'ping') this.ws.send(JSON.stringify({ op:'pong' }));
   }
 
+  // Host accept: send ACK, then wait for scanner's 'pair-done' to save
   async _acceptPair(to, T, ctx) {
     const sig = new Uint8Array(await crypto.subtle.sign(
       { name:'ECDSA', hash:'SHA-256' },
       this.me.signKey,
       T
     ));
+    const th = b64u(new Uint8Array(await digestSHA256(T)));
+    this.pending.set(`pair-done:${to}`, { th, ctx });
+
     await this._whenOpen();
     this.ws.send(JSON.stringify({
       op:'pair-ack',
@@ -222,7 +223,18 @@ export class SecureSignal {
       ecdhSpki: this.me.ecdhSpki,
       sig: b64u(sig)
     }));
-    await this._storeTrusted({ fp:ctx.fp, name:ctx.name, signSpki:ctx.signSpki, ecdhSpki:ctx.ecdhSpki });
+    // Do NOT storeTrusted here; wait for 'pair-done'
+  }
+
+  // Scanner confirm: save locally, then notify host with 'pair-done'
+  async _finalizePair(peerFp, T, devMsg) {
+    await this._storeTrusted({
+      fp: peerFp, name: devMsg.name,
+      signSpki: devMsg.signSpki, ecdhSpki: devMsg.ecdhSpki
+    });
+    const th = b64u(new Uint8Array(await digestSHA256(T)));
+    await this._whenOpen();
+    this.ws.send(JSON.stringify({ op:'pair-done', to: peerFp, from: this.me.fingerprint, th }));
   }
 
   async _storeTrusted(dev) {
@@ -314,12 +326,11 @@ export class SecureSignal {
     s.onmsg = handler;
   }
 
-  // ===== tiny wait/resolve helper =====
   _waitFor(key, timeout, firstSend) {
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => { this.pending.delete(key); reject(new Error('timeout')); }, timeout || 10000);
       this.pending.set(key, (m) => { clearTimeout(t); this.pending.delete(key); resolve(m); });
-      firstSend && firstSend(); // can be async; we don't await
+      firstSend && firstSend();
     });
   }
   _resolveWaiter(key, payload) {
