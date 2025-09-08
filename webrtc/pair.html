@@ -117,6 +117,23 @@
     .notice { background:#0b1d3a; border:1px solid #12315f; color:#cfe1ff; padding:10px 12px; border-radius:12px; }
     .ok   { background:#0f2415; border-color:#1d3c27; color:#ccebd6; }
     .err  { background:#2b1414; border-color:#4a1f1f; color:#ffd6d6; }
+
+    /* ---------- New: paired badge ---------- */
+    .badge {
+      display:inline-flex; align-items:center; gap:6px;
+      font-size: 0.75rem; line-height: 1;
+      padding: 2px 6px; border-radius: 9999px;
+      background:#14331f; border:1px solid #245c39; color:#ccebd6;
+      margin-left: 8px;
+    }
+    .badge svg { width:12px; height:12px; }
+    .badge-new { animation: badge-fade-out 2.8s ease 0.4s forwards; }
+
+    @keyframes badge-fade-out {
+      0%   { opacity:1; transform: translateY(0); }
+      80%  { opacity:0.1; transform: translateY(-2px); }
+      100% { opacity:0; transform: translateY(-4px); }
+    }
   </style>
 </head>
 <body>
@@ -209,6 +226,9 @@
       status: document.getElementById('status'),
     };
 
+    // Track previously trusted FPS to show the badge only for newly added devices
+    let prevTrustedFps = new Set();
+
     const ss = new SecureSignal({
       url: WS_ENDPOINT,
       onPairPrompt: showPrompt,
@@ -253,12 +273,10 @@
       const ok = confirm(`Forget ${name} (${fp})?\nYou will need to pair again to reconnect.`);
       if (!ok) return;
       try {
-        // remove locally and persist
         ss.trusted = ss.trusted.filter(d => d.fp !== fp);
         await ss._saveTrusted();
         ss._emitTrusted();
         setStatus(`${name} removed from Trusted.`, 'ok');
-        // remove any pending prompt card for this fp
         document.querySelectorAll(`#prompt .notice[data-fp="${fp}"]`).forEach(el => el.remove());
       } catch {
         setStatus('Could not forget device.', 'err');
@@ -266,13 +284,17 @@
     }
 
     function renderTrusted(list) {
-      // render list with "Forget"
+      // Compute sets for "newly added" detection
+      const nowFps = new Set((list || []).map(d => d.fp));
+      const newlyAdded = new Set([...nowFps].filter(fp => !prevTrustedFps.has(fp)));
+
       if (list && list.length) {
         els.trusted.innerHTML = list.map(d => `
-          <li>
+          <li data-fp="${d.fp}">
             <div>
-              <b>${escapeHtml(d.name || 'Device')}</b><br>
-              <span class="muted">${d.fp}</span>
+              <b>${escapeHtml(d.name || 'Device')}</b>
+              <!-- Badge injected via JS for newly added entries -->
+              <br><span class="muted">${d.fp}</span>
             </div>
             <div>
               <button class="btn secondary sm forget-btn" type="button" data-fp="${d.fp}" aria-label="Forget ${escapeHtml(d.name || 'device')}">
@@ -281,6 +303,8 @@
             </div>
           </li>
         `).join('');
+
+        // Bind "Forget" buttons
         els.trusted.querySelectorAll('.forget-btn').forEach(btn => {
           btn.addEventListener('click', async (e) => {
             const fp = e.currentTarget.getAttribute('data-fp');
@@ -289,34 +313,56 @@
             e.currentTarget.disabled = false;
           });
         });
+
+        // Inject a temporary "Paired ✓" badge for newly added devices
+        newlyAdded.forEach(fp => {
+          const li = els.trusted.querySelector(`li[data-fp="${fp}"] > div:first-child`);
+          if (!li) return;
+          const badge = document.createElement('span');
+          badge.className = 'badge badge-new';
+          badge.innerHTML = `
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+              <path d="M9 16.2l-3.5-3.5-1.4 1.4L9 19 20 8l-1.4-1.4L9 16.2z" fill="currentColor"></path>
+            </svg>
+            Paired
+          `;
+          // Insert badge after the <b>DeviceName</b>
+          const b = li.querySelector('b');
+          if (b) b.insertAdjacentElement('afterend', badge);
+          // Remove node after animation
+          setTimeout(() => badge.remove(), 3200);
+        });
+
       } else {
         els.trusted.innerHTML = '<li class="muted">No trusted devices yet.</li>';
       }
 
-      // finish any pending prompts for devices now in Trusted
+      // Mark prompts complete for trusted devices
       const byFp = Object.create(null);
       for (const d of (list || [])) byFp[d.fp] = d;
-      const fps = new Set((list || []).map(d => d.fp));
+
       document.querySelectorAll('#prompt .notice[data-fp]').forEach(card => {
         const fp = card.getAttribute('data-fp');
-        if (fps.has(fp)) {
+        if (nowFps.has(fp)) {
           card.className = 'notice ok';
           const btn = card.querySelector('button.btn'); if (btn) btn.remove();
           const done = document.createElement('div');
           done.className = 'muted';
           done.textContent = 'Paired and saved to Trusted.';
           card.appendChild(done);
-          // ✅ Replace any lingering "waiting..." status with a final success
           const who = byFp[fp]?.name || 'Device';
           setStatus(`Paired with ${who}. Saved to Trusted.`, 'ok');
           setTimeout(() => card.remove(), 3000);
         }
       });
+
+      // Update previous set for next diff
+      prevTrustedFps = nowFps;
     }
 
     function showPrompt(e) {
       const id = `p-${Math.random().toString(16).slice(2)}`;
-      const isHost = e.type === 'incoming';   // host sees "incoming", scanner sees "confirm"
+      const isHost = e.type === 'incoming';
       const heading = isHost ? 'Pairing request from' : 'Confirm pairing with';
       const html = `
         <div id="${id}" class="notice" data-fp="${e.fp}" style="margin:8px 0">
@@ -334,7 +380,6 @@
           : 'Accepted here — finishing setup…';
         try {
           await e.accept();
-          // More precise, role-aware status text:
           setStatus(
             isHost
               ? 'Accepted on this device. Please accept on the other device to complete pairing.'
