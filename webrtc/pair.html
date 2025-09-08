@@ -134,6 +134,10 @@
       80%  { opacity:0.1; transform: translateY(-2px); }
       100% { opacity:0; transform: translateY(-4px); }
     }
+
+    /* ---------- New: fingerprint row ---------- */
+    .fp-row { display:flex; align-items:center; gap:8px; }
+    .icon-fp { --icon-size: 16px; opacity: 0.95; }
   </style>
 </head>
 <body>
@@ -196,7 +200,20 @@
             <div id="prompt" aria-live="polite"></div>
             <div id="status" class="notice" style="margin-top:8px; display:none"></div>
             <div style="margin-top:12px">
-              <div class="muted">My fingerprint: <code class="k" id="myfp">…</code></div>
+              <div class="muted fp-row">
+                <span>My fingerprint:</span>
+                <!-- small inline fingerprint icon -->
+                <svg class="icon icon-fp" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <!-- minimalist fingerprint strokes -->
+                  <path d="M12 4a8 8 0 0 0-8 8v1" />
+                  <path d="M12 7a5 5 0 0 0-5 5v1" />
+                  <path d="M12 10a2 2 0 0 0-2 2v1" />
+                  <path d="M12 12v6" />
+                  <path d="M16 11a4 4 0 0 0-4 4" />
+                  <path d="M20 11a8 8 0 0 0-8 8" />
+                </svg>
+                <code class="k" id="myfp">…</code>
+              </div>
             </div>
           </div>
         </div>
@@ -326,10 +343,8 @@
             </svg>
             Paired
           `;
-          // Insert badge after the <b>DeviceName</b>
           const b = li.querySelector('b');
           if (b) b.insertAdjacentElement('afterend', badge);
-          // Remove node after animation
           setTimeout(() => badge.remove(), 3200);
         });
 
@@ -352,7 +367,7 @@
           card.appendChild(done);
           const who = byFp[fp]?.name || 'Device';
           setStatus(`Paired with ${who}. Saved to Trusted.`, 'ok');
-          setTimeout(() => card.remove(), 5000);
+          setTimeout(() => card.remove(), 3000);
         }
       });
 
@@ -376,7 +391,7 @@
       btn.onclick = async () => {
         btn.disabled = true;
         btn.textContent = isHost
-          ? 'Accepted here — waiting for the other device…'
+          ? 'Waiting for the other device…'
           : 'Accepted here — finishing setup…';
         try {
           await e.accept();
