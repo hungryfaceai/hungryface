@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Weighted Top-K – Help</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin:0; background:#0a0a0a; color:#e5e7eb; font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
+    main { padding:16px; box-sizing:border-box; max-width: 1000px; margin: 0 auto; }
+    h1 { font-size:22px; margin: 0 0 8px; }
+    h2 { font-size:16px; margin: 18px 0 8px; color:#fff; }
+    h3 { font-size:14px; margin: 14px 0 6px; color:#fff; }
+    p, li { font-size:13px; line-height:1.55; color:#d1d5db; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; }
+    .muted { color:#9ca3af; }
+    .toc a { color:#93c5fd; text-decoration:none; }
+    .toc a:hover { text-decoration:underline; }
+    .box { background:#0b0b0b; border:1px solid #1f2937; border-radius:10px; padding:10px; }
+    ul { margin:8px 0 8px 18px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Weighted Top-K – Help</h1>
+    <p class="muted">How the training, calibration, and detection pipeline works, and what each setting controls.</p>
+
+    <div class="box toc" aria-label="Contents">
+      <strong>Contents</strong>
+      <ul>
+        <li><a href="#overview">Overview & flow</a></li>
+        <li><a href="#framing">Signal framing & rate</a></li>
+        <li><a href="#smoothing">Smoothing & alerting</a></li>
+        <li><a href="#calibration">Calibration & thresholds</a></li>
+        <li><a href="#training">Class selection & model training</a></li>
+        <li><a href="#ignore-penalties">Ignore & penalties</a></li>
+        <li><a href="#buttons">Buttons and when settings apply</a></li>
+        <li><a href="#cheatsheet">Cheat-sheet</a></li>
+      </ul>
+    </div>
+
+    <h2 id="overview">Overview & flow</h2>
+    <p>
+      1) <strong>Train</strong> on mic/file/folder → collect per-class stats (EMA + mean).<br>
+      2) <strong>Recompute Weights</strong> → keep Top-K, normalize → Active model weights.<br>
+      3) <strong>Quiet Calibrate</strong> → set <code>thr_on/off</code> from quiet fused scores.<br>
+      4) <strong>Detect</strong> → fuse class EMAs with active weights, apply penalties, smooth, hysteresis.
+    </p>
+
+    <h2 id="framing">Signal framing & rate</h2>
+    <ul>
+      <li><strong>Sample Rate (target Hz)</strong> – Resample to this rate before inference (keep 16 kHz for YAMNet).</li>
+      <li><strong>Frame length (s)</strong> – Analysis window; snapped to <code>0.975s</code> for YAMNet compatibility.</li>
+      <li><strong>Hop (s)</strong> – Step between frames; also the timebase for EMAs and charts.</li>
+      <li><strong>Max results from MP</strong> – How many classes YAMNet returns (task is cached until recreated).</li>
+    </ul>
+
+    <h2 id="smoothing">Smoothing & alerting</h2>
+    <ul>
+      <li><strong>Per-class EMA τ</strong> – Smooth each class score before fusion (detection & quiet cal).</li>
+      <li><strong>Fused score EMA τ</strong> – Smooth the final fused score (detection & quiet cal).</li>
+      <li><strong>Min ON hold (ms)</strong> – Keep alert ON for at least this long to avoid flicker.</li>
+    </ul>
+
+    <h2 id="calibration">Calibration & thresholds</h2>
+    <ul>
+      <li><strong>Quiet calibration (s)</strong> – Duration to capture quiet fused scores and set thresholds.</li>
+      <li><strong>OFF delta</strong> – Hysteresis gap; <code>thr_on = thr_off + delta</code>.</li>
+    </ul>
+    <p class="muted">
+      Implementation detail: <code>thr_off = min(0.95, p99 + 0.02)</code> from quiet fused scores; then <code>thr_on = thr_off + delta</code>.
+      Values are saved per model in <code>localStorage</code> and loaded during detection.
+    </p>
+
+    <h2 id="training">Class selection & model training</h2>
+    <ul>
+      <li><strong>Top-K classes</strong> – Keep K non-ignored classes when forming the normalized weights.</li>
+      <li><strong>Hybrid prior (kPrior)</strong> – Blend mean vs EMA when data is sparse:
+        <pre>λ = kPrior / (kPrior + n)
+hybrid = (1−λ)·mean + λ·ema</pre>
+      </li>
+      <li><strong>Hybrid half-life (s)</strong> – EMA time constant used while accumulating training stats.</li>
+    </ul>
+
+    <h2 id="ignore-penalties">Ignore & penalties</h2>
+    <ul>
+      <li><strong>Ignore classes (training)</strong> – Tokens to exclude from stats and Top-K (case-insensitive substring).</li>
+      <li><strong>Penalty map (inference)</strong> – Token → negative weight applied to fused score for matching classes.</li>
+    </ul>
+
+    <h2 id="buttons">Buttons and when settings apply</h2>
+    <ul>
+      <li><strong>Start Training</strong> – Uses framing/rate, ignores, and training EMAs; updates preview weights continuously.</li>
+      <li><strong>Recompute Weights</strong> – Applies Top-K / kPrior / half-life to freeze the new Active weights.</li>
+      <li><strong>Quiet Calibrate</strong> – Uses detection path smoothing to set thresholds for later detection.</li>
+      <li><strong>Start Detect</strong> – Uses Active weights, penalties, smoothing + hysteresis.</li>
+    </ul>
+
+    <h2 id="cheatsheet">Cheat-sheet</h2>
+    <ul>
+      <li><code>SR_TARGET</code>, <code>FRAME_LEN_S</code> (snapped), <code>HOP_S</code>, <code>MAX_RESULTS</code> → Training & Detection</li>
+      <li><code>CLASS_EMA_TAU_S</code>, <code>FUSED_EMA_TAU_S</code>, <code>ALERT_HOLD_MS</code> → Detection (+ quiet cal)</li>
+      <li><code>CAL_SEC</code>, <code>ALERT_OFF_DELTA</code> → Quiet cal (and delta used as fallback in detection)</li>
+      <li><code>TOP_K</code>, <code>K_PRIOR</code>, <code>HALF_LIFE_S</code> → Training (then used by detection once recomputed)</li>
+      <li><code>IGNORE_CLASSES</code> → Training (& UI); <code>PENALTY_MAP</code> → Detection</li>
+    </ul>
+
+    <p class="muted">Tip: Train 20–60s per condition, then Recompute Weights, then Quiet Calibrate, then Detect.</p>
+  </main>
+</body>
+</html>
