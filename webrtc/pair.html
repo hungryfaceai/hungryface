@@ -154,7 +154,7 @@
       <section class="card" aria-labelledby="pairing-title">
         <h1 id="pairing-title">Pair devices</h1>
         <p class="muted">
-          Pair once, then connect securely without room codes. This exchanges device public keys and lets you verify with a short code (SAS).
+          Pair once, then connect securely without any code. This exchanges device public keys and lets you verify with a short code (SAS).
         </p>
 
         <div class="row" style="margin-top:8px">
@@ -165,7 +165,7 @@
               <button class="btn secondary" id="copy" type="button">Copy link</button>
             </div>
             <p class="muted" style="max-width: 420px; margin-top:8px">
-              Open this page on the other device by scanning the QR with its camera. It will land here with a secure pairing payload.
+              Open this page on the other device by scanning the QR with its camera.
             </p>
           </div>
 
@@ -174,7 +174,7 @@
             <ol class="muted" style="margin:0 0 12px 20px;">
               <li>Both devices display the same <b>Verification code</b> (SAS).</li>
               <li>Tap <b>Accept</b> on both devices if the codes match.</li>
-              <li>The device is saved under <b>Trusted devices</b>.</li>
+              <li>The device is then saved under <b>Trusted devices</b>.</li>
             </ol>
             <div id="prompt" aria-live="polite"></div>
             <div id="status" class="notice" style="margin-top:8px; display:none"></div>
@@ -266,6 +266,7 @@
     }
 
     function renderTrusted(list) {
+      // render list with "Forget"
       if (list && list.length) {
         els.trusted.innerHTML = list.map(d => `
           <li>
@@ -280,7 +281,6 @@
             </div>
           </li>
         `).join('');
-        // bind buttons
         els.trusted.querySelectorAll('.forget-btn').forEach(btn => {
           btn.addEventListener('click', async (e) => {
             const fp = e.currentTarget.getAttribute('data-fp');
@@ -293,7 +293,9 @@
         els.trusted.innerHTML = '<li class="muted">No trusted devices yet.</li>';
       }
 
-      // if any pending prompt matches a newly-trusted fp, mark it complete and auto-hide
+      // finish any pending prompts for devices now in Trusted
+      const byFp = Object.create(null);
+      for (const d of (list || [])) byFp[d.fp] = d;
       const fps = new Set((list || []).map(d => d.fp));
       document.querySelectorAll('#prompt .notice[data-fp]').forEach(card => {
         const fp = card.getAttribute('data-fp');
@@ -304,16 +306,21 @@
           done.className = 'muted';
           done.textContent = 'Paired and saved to Trusted.';
           card.appendChild(done);
-          setTimeout(() => card.remove(), 3500);
+          // ✅ Replace any lingering "waiting..." status with a final success
+          const who = byFp[fp]?.name || 'Device';
+          setStatus(`Paired with ${who}. Saved to Trusted.`, 'ok');
+          setTimeout(() => card.remove(), 3000);
         }
       });
     }
 
     function showPrompt(e) {
       const id = `p-${Math.random().toString(16).slice(2)}`;
+      const isHost = e.type === 'incoming';   // host sees "incoming", scanner sees "confirm"
+      const heading = isHost ? 'Pairing request from' : 'Confirm pairing with';
       const html = `
         <div id="${id}" class="notice" data-fp="${e.fp}" style="margin:8px 0">
-          <div><b>${e.type === 'incoming' ? 'Pairing request from' : 'Confirm pairing with'}</b> ${escapeHtml(e.from)} <span class="muted">(${e.fp})</span></div>
+          <div><b>${heading}</b> ${escapeHtml(e.from)} <span class="muted">(${e.fp})</span></div>
           <div class="sas" style="margin:6px 0">Verification code: <span class="k">${e.sas}</span></div>
           <div class="btn-row"><button class="btn" id="${id}-acc" type="button">Accept</button></div>
           <div class="muted">Compare this code on both devices before accepting.</div>
@@ -322,10 +329,18 @@
       const btn  = document.getElementById(`${id}-acc`);
       btn.onclick = async () => {
         btn.disabled = true;
-        btn.textContent = 'Accepted here — waiting on other device…';
+        btn.textContent = isHost
+          ? 'Accepted here — waiting for the other device…'
+          : 'Accepted here — finishing setup…';
         try {
           await e.accept();
-          setStatus('Accepted here. Now accept on the other device.', 'ok');
+          // More precise, role-aware status text:
+          setStatus(
+            isHost
+              ? 'Accepted on this device. Please accept on the other device to complete pairing.'
+              : 'Paired on this device. The other device will complete shortly.',
+            'ok'
+          );
         } catch {
           btn.disabled = false;
           btn.textContent = 'Accept';
