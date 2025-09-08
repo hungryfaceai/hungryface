@@ -98,7 +98,8 @@ export class SecureSignal {
       name: this.me.deviceName,
       signSpki: this.me.signSpki,
       ecdhSpki: this.me.ecdhSpki,
-      nonceB: b64u(nonceScan),
+      nonceQR: payload.nonce,   // <-- include the QR host's nonce from the link
+      nonceB:  b64u(nonceScan), // <-- scanner's own nonce
       sig: b64u(sig)
     }));
 
@@ -109,8 +110,8 @@ export class SecureSignal {
   async _onmsg(m) {
     // QR host receives scanner's init
     if (m.op === 'pair-init' && m.to === this.me.fingerprint) {
-      const nonceQR = this._qrNonce; // must match the QR we rendered
-      if (!nonceQR) { /* We didn't render a QR here */ return; }
+    const nonceQR = m.nonceQR ? b64uToBytes(m.nonceQR) : this._qrNonce;
+    if (!nonceQR) return; // no nonce to verify with
 
       const nonceScan = b64uToBytes(m.nonceB);
       const tag = te.encode('NaptioPair-v1');
