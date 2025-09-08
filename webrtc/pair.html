@@ -109,6 +109,7 @@
     .muted { color:#9aa1a8; }
     .btn { appearance:none; border:0; border-radius: 12px; padding: 10px 14px; font-weight: 650; cursor:pointer; background:#2b74ff; color:#fff; }
     .btn.secondary { background:#22262b; color:#e6eaef; border:1px solid #2a2f35; }
+    .btn.sm { padding: 6px 10px; font-size: 0.9rem; border-radius: 10px; }
     .btn-row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:10px; }
     .list { margin:0; padding:0; list-style:none; }
     .list li { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px dashed #23272c; }
@@ -246,10 +247,51 @@
       })[c]);
     }
 
+    async function forgetDevice(fp) {
+      const dev = ss.trusted.find(d => d.fp === fp);
+      const name = dev?.name || 'Device';
+      const ok = confirm(`Forget ${name} (${fp})?\nYou will need to pair again to reconnect.`);
+      if (!ok) return;
+      try {
+        // remove locally and persist
+        ss.trusted = ss.trusted.filter(d => d.fp !== fp);
+        await ss._saveTrusted();
+        ss._emitTrusted();
+        setStatus(`${name} removed from Trusted.`, 'ok');
+        // remove any pending prompt card for this fp
+        document.querySelectorAll(`#prompt .notice[data-fp="${fp}"]`).forEach(el => el.remove());
+      } catch {
+        setStatus('Could not forget device.', 'err');
+      }
+    }
+
     function renderTrusted(list) {
-      els.trusted.innerHTML = (list && list.length)
-        ? list.map(d => `<li><div><b>${escapeHtml(d.name || 'Device')}</b><br><span class="muted">${d.fp}</span></div></li>`).join('')
-        : '<li class="muted">No trusted devices yet.</li>';
+      if (list && list.length) {
+        els.trusted.innerHTML = list.map(d => `
+          <li>
+            <div>
+              <b>${escapeHtml(d.name || 'Device')}</b><br>
+              <span class="muted">${d.fp}</span>
+            </div>
+            <div>
+              <button class="btn secondary sm forget-btn" type="button" data-fp="${d.fp}" aria-label="Forget ${escapeHtml(d.name || 'device')}">
+                Forget this device
+              </button>
+            </div>
+          </li>
+        `).join('');
+        // bind buttons
+        els.trusted.querySelectorAll('.forget-btn').forEach(btn => {
+          btn.addEventListener('click', async (e) => {
+            const fp = e.currentTarget.getAttribute('data-fp');
+            e.currentTarget.disabled = true;
+            await forgetDevice(fp);
+            e.currentTarget.disabled = false;
+          });
+        });
+      } else {
+        els.trusted.innerHTML = '<li class="muted">No trusted devices yet.</li>';
+      }
 
       // if any pending prompt matches a newly-trusted fp, mark it complete and auto-hide
       const fps = new Set((list || []).map(d => d.fp));
@@ -294,7 +336,7 @@
 
     function renderQR(forceNew=false) {
       const { b64 } = ss.makePairingPayload();
-      const PAGE_V = 'pv=4'; // bump to force reload on the scanning device when modules change
+      const PAGE_V = 'pv=5'; // bump to force reload on the scanning device when modules change
       const link = `${location.origin}${location.pathname}?${PAGE_V}#${b64}`;
       els.qr.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(link)}`;
       els.qr.dataset.link = link;
