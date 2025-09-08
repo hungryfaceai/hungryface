@@ -21,6 +21,8 @@
     .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
     .btn { padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.4); background:transparent; color:#fff; font-weight:600; cursor:pointer; }
     .btn:active { transform:scale(.98); }
+    .btn[disabled] { opacity:.6; cursor:default; }
+    .small { padding:8px 10px; font-size:13px; border-radius:10px; } /* for compact buttons */
     .muted { color:#aaa; font-size:12px; }
     .meter { height:10px; border-radius:8px; background:#0a0a0a; border:1px solid #222; overflow:hidden; }
     .fill { height:100%; width:0%; background:linear-gradient(to right, rgba(96,165,250,.9), rgba(239,68,68,.9)); transition:width 120ms linear; }
@@ -59,27 +61,43 @@
     .modal.show { display:flex; }
     .modal-card { width:min(96%,1000px); max-height:90vh; overflow-y:auto; background:#0b0b0b; border:1px solid #242424; border-radius:14px; }
     .modal-head { position:sticky; top:0; display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 12px; border-bottom:1px solid #1a1a1a; background:#0d0d0d; border-top-left-radius:14px; border-top-right-radius:14px; }
+    .modal-actions { display:flex; gap:8px; align-items:center; }
     .modal-body { padding:12px; }
 
-    /* Help overlay (loads external HTML via iframe) */
-    .help-overlay {
-      position: fixed; inset: 0;
-      display: none; align-items: center; justify-content: center;
-      background: rgba(0,0,0,.6); z-index: 60;
+    /* ===== Help side-sheet styles (aligned with motion app) ===== */
+    .help-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+      z-index: 110; opacity: 0; pointer-events: none; transition: opacity .2s ease;
     }
-    .help-overlay.show { display: flex; }
-    .help-card {
-      width: min(96%, 1000px);
-      max-height: 92vh;
-      background:#0b0b0b; border:1px solid #242424; border-radius:14px;
-      display:flex; flex-direction:column; overflow:hidden;
+    .help-backdrop.show { opacity: 1; pointer-events: auto; }
+    .help-sheet {
+      position: fixed; right: 0; top: 0; height: 100svh; width: min(92vw, 420px);
+      background: #121212; color: #f3f3f3; border-left: 1px solid rgba(255,255,255,0.12);
+      box-shadow: -12px 0 32px rgba(0,0,0,0.6); z-index: 120;
+      transform: translateX(100%); transition: transform .24s cubic-bezier(.2,.8,.2,1);
+      display: flex; flex-direction: column;
     }
-    .help-head {
-      display:flex; justify-content:space-between; align-items:center;
-      gap:10px; padding:10px 12px; border-bottom:1px solid #1a1a1a; background:#0d0d0d;
-    }
-    .help-body { flex:1; min-height:0; }
-    .help-iframe { width:100%; height:100%; border:0; display:block; }
+    .help-sheet.show { transform: translateX(0); }
+    .help-header { position: sticky; top: 0; z-index: 1; background: rgba(18,18,18,0.96); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: space-between; padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .help-header h3 { margin: 0; font-size: 16px; font-weight: 700; color: #fff; }
+    .help-header .close { appearance: none; border: none; background: transparent; color: #aaa; font-size: 22px; cursor: pointer; padding: 2px 6px; }
+    .help-body { padding: 10px 12px 16px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .help-toc { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; padding-bottom: 8px; border-bottom: 1px dashed rgba(255,255,255,0.15); }
+    .help-toc a { font-size: 12px; color: #ddd; text-decoration: none; border: 1px solid rgba(255,255,255,0.18); padding: 6px 8px; border-radius: 999px; }
+    .help-toc a:active { transform: scale(0.98); }
+    .help-section { margin: 14px 0; }
+    .help-section h4 { margin: 0 0 6px; font-size: 14px; color: #fff; }
+    .help-section p, .help-section li, .help-section td, .help-section th { font-size: 13px; color: #ddd; line-height: 1.45; }
+    .help-kv { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    .help-kv th, .help-kv td { border: 1px solid rgba(255,255,255,0.12); padding: 8px; vertical-align: top; }
+    .help-kv th { background: rgba(255,255,255,0.06); font-weight: 700; color: #eee; white-space: nowrap; }
+    .help-kv td { color: #ddd; }
+    .help-callout { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 10px; }
+    details.learn-more { border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 10px; background: rgba(255,255,255,0.04); }
+    details.learn-more > summary { cursor: pointer; list-style: none; font-weight: 700; color: #fff; }
+    details.learn-more > summary::-webkit-details-marker { display: none; }
+    details.learn-more[open] { background: rgba(255,255,255,0.06); }
+    .codeblock { background: #0e0e0e; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #d7eaff; font-size: 12px; overflow-x: auto; }
   </style>
 </head>
 <body>
@@ -211,8 +229,8 @@
     <div class="modal-card">
       <div class="modal-head">
         <strong>Settings</strong>
-        <div class="row" style="gap:8px;">
-          <button id="btnSettingsHelp" class="btn">Help</button>
+        <div class="modal-actions">
+          <button id="btnHelp" class="btn small" type="button" title="Open Help">Help</button>
           <button id="btnSettingsClose" class="btn">Close</button>
         </div>
       </div>
@@ -249,22 +267,11 @@
     </div>
   </div>
 
-  <!-- Help overlay (separate help HTML in iframe) -->
-  <div id="helpOverlay" class="help-overlay" aria-hidden="true">
-    <div class="help-card" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
-      <div class="help-head">
-        <strong id="helpTitle">Weighted Top-K – Help</strong>
-        <button id="helpClose" class="btn" title="Close">×</button>
-      </div>
-      <div class="help-body">
-        <!-- Put weighted-topk-help.html next to this file, or change the src below -->
-        <iframe id="helpFrame" class="help-iframe" src="weighted-topk-help.html" loading="lazy"></iframe>
-      </div>
-    </div>
-  </div>
-
   <audio id="trainAudio" crossorigin="anonymous" style="display:none"></audio>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+  <!-- Load the external Help HTML (injected at runtime) -->
+  <script type="module" src="./help-sheet.js"></script>
 
   <script type="module">
     /* ========= Helpers & UI ========= */
@@ -279,20 +286,51 @@
     _close.onclick = () => { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); };
     _modal.addEventListener('click', (e) => { if (e.target === _modal) { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); }});
 
-    /* Help overlay wiring */
-    const helpOverlay = EL('helpOverlay');
-    const helpClose = EL('helpClose');
-    const btnHelp = EL('btnSettingsHelp');
+    /* Help side-sheet wiring (runs after help HTML is injected) */
+    function wireHelpOnce() {
+      const sheet = document.getElementById('helpSheet');
+      const backdrop = document.getElementById('helpBackdrop');
+      const closeBtn = document.getElementById('helpClose');
+      const bodyEl   = document.getElementById('helpBody');
+      const helpBtn  = document.getElementById('btnHelp');
+      if (!sheet || sheet.dataset.wired === '1') return;
+      sheet.dataset.wired = '1';
 
-    function openHelp(){ helpOverlay.classList.add('show'); helpOverlay.setAttribute('aria-hidden','false'); }
-    function closeHelp(){ helpOverlay.classList.remove('show'); helpOverlay.setAttribute('aria-hidden','true'); }
+      const openHelp = () => {
+        sheet.classList.add('show');
+        backdrop?.classList.add('show');
+        document.body.classList.add('help-open');
+      };
+      const closeHelp = () => {
+        sheet.classList.remove('show');
+        backdrop?.classList.remove('show');
+        document.body.classList.remove('help-open');
+      };
 
-    btnHelp && (btnHelp.onclick = openHelp);
-    helpClose && (helpClose.onclick = closeHelp);
-    // Clicking the backdrop (main screen) closes the help overlay
-    helpOverlay && helpOverlay.addEventListener('click', (e)=>{ if (e.target === helpOverlay) closeHelp(); });
-    // Escape key closes
-    document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape' && helpOverlay.classList.contains('show')) closeHelp(); });
+      helpBtn?.addEventListener('click', (e)=>{ e.stopPropagation(); openHelp(); });
+      closeBtn?.addEventListener('click', (e)=>{ e.stopPropagation(); closeHelp(); });
+      backdrop?.addEventListener('click', closeHelp);
+      document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeHelp(); });
+
+      // Close if you click anywhere on the main screen (outside the sheet)
+      document.addEventListener('click', (e) => {
+        if (!sheet.classList.contains('show')) return;
+        if (sheet.contains(e.target)) return; // clicks inside sheet shouldn't close
+        closeHelp();
+      });
+
+      // Smooth scroll for TOC links inside the help drawer
+      bodyEl?.addEventListener('click', (e) => {
+        const a = e.target.closest('a[href^="#"]');
+        if (!a) return;
+        const id = a.getAttribute('href');
+        const el = bodyEl.querySelector(id);
+        if (el) { e.preventDefault(); el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      });
+    }
+    // Run when the HTML is injected; also try immediately if already present
+    document.addEventListener('help:ready', wireHelpOnce);
+    if (document.getElementById('helpSheet')) wireHelpOnce();
 
     /* Logs toggle wiring */
     const btnToggleLogs = EL('btnToggleLogs');
