@@ -1,56 +1,152 @@
+
 <!DOCTYPE html>
-<main class="card">
-<h2>Pair a device</h2>
-<p>This will create a long‑term trust between two devices. After pairing once, you can connect without room codes.</p>
-<div id="view"></div>
-</main>
-<script type="module">
-import { SecureSignal } from './shared/secure-signal.js';
-import { b64u } from './shared/pairing-crypto.js';
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Naptio – Pair Devices</title>
+  <link rel="icon" href="data:," />
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin:0; height:100%; background:#000; color:#fff; font:16px/1.4 -apple-system, system-ui, Segoe UI, Roboto, sans-serif; }
+    main { min-height: 100svh; display: grid; place-items: center; padding: 24px; }
+    .card { width: min(960px, 100%); background:#0e0f10; border:1px solid #1f2225; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.45); padding: 20px; }
+    h1 { font-size: 22px; margin: 0 0 8px; }
+    p  { margin: 8px 0 12px; color: #cfd3d7; }
+    .row { display:flex; flex-wrap:wrap; gap:16px; }
+    .col { flex:1; min-width: 260px; }
+    .qrbox { width:220px; height:220px; background:#000; border-radius: 12px; display:grid; place-items:center; border:1px solid #222; }
+    .qrbox img { width:200px; height:200px; image-rendering: pixelated; }
+    .sas { margin-top: 8px; font-weight: 600; font-size: 18px; letter-spacing: .6px; }
+    .muted { color:#9aa1a8; }
+    .btn { appearance:none; border:0; border-radius: 12px; padding: 10px 14px; font-weight: 650; cursor:pointer; background:#2b74ff; color:#fff; }
+    .btn.secondary { background:#22262b; color:#e6eaef; border:1px solid #2a2f35; }
+    .btn-row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+    .list { margin:0; padding:0; list-style:none; }
+    .list li { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px dashed #23272c; }
+    code.k { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0b0c0d; border:1px solid #1a1d20; padding:2px 6px; border-radius:8px; }
+    .notice { background:#0b1d3a; border:1px solid #12315f; color:#cfe1ff; padding:10px 12px; border-radius:12px; }
+    .ok   { background:#0f2415; border-color:#1d3c27; color:#ccebd6; }
+    .err  { background:#2b1414; border-color:#4a1f1f; color:#ffd6d6; }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="card">
+      <h1>Pair devices</h1>
+      <p class="muted">Pair once, then connect securely without room codes. This exchanges device public keys and lets you verify with a short code (SAS).</p>
 
+      <div class="row" style="margin-top:8px">
+        <div>
+          <div class="qrbox"><img id="qr" alt="Pairing QR"></div>
+          <div class="btn-row">
+            <button class="btn secondary" id="refresh">Refresh QR</button>
+            <button class="btn secondary" id="copy">Copy link</button>
+          </div>
+          <p class="muted" style="max-width: 420px; margin-top:8px">Open this page on the other device by scanning the QR with its camera. It will land here with a secure pairing payload.</p>
+        </div>
+        <div class="col">
+          <h3 style="margin:8px 0 6px">What you'll see</h3>
+          <ol class="muted" style="margin:0 0 12px 20px;">
+            <li>Both devices display the same <b>Short Authentication String</b> (SAS).</li>
+            <li>Tap <b>Accept</b> on both devices if the codes match.</li>
+            <li>The device is saved under <b>Trusted devices</b>.</li>
+          </ol>
+          <div id="prompt"></div>
+          <div id="status" class="notice" style="margin-top:8px; display:none"></div>
+          <div style="margin-top:12px">
+            <div class="muted">My fingerprint: <code class="k" id="myfp">…</code></div>
+          </div>
+        </div>
+      </div>
 
-const SIGNAL_URL = (location.protocol==='https:'?'wss':'ws') + '://YOUR_RENDER_HOST/ws';
-const ui = document.getElementById('view');
-const ss = new SecureSignal({ url: SIGNAL_URL, onPairPrompt: showPrompt });
-await ss.init();
-await ss.handleSessionMessages();
+      <div style="margin-top:18px">
+        <h3 style="margin:0 0 6px">Trusted devices</h3>
+        <ul id="trusted" class="list"></ul>
+      </div>
+    </section>
+  </main>
 
+  <script type="module">
+    import { SecureSignal } from './shared/secure-signal.js';
 
-const { b64, json } = ss.makePairingPayload();
-ui.innerHTML = `
-<div class="row">
-<div>
-<div class="qr"><img alt="QR" width="200" height="200" src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(location.origin + location.pathname + '#' + b64)}"></div>
-<div class="sas">Ask the other device to scan the QR by opening the Camera. It will land on this page automatically.</div>
-</div>
-<div style="flex:1;min-width:260px">
-<h3>What happens next?</h3>
-<ol>
-<li>Both devices will show a short code (SAS).</li>
-<li>If they match, press <b>Accept</b> on both.</li>
-<li>The device will appear in your Trusted list.</li>
-</ol>
-<p><small>My fingerprint: <code>${ss.me.fingerprint}</code></small></p>
-</div>
-</div>`;
+    // Your Render WebSocket endpoint
+    const WS_ENDPOINT = 'wss://signaling-server-f5gu.onrender.com/ws';
 
+    const els = {
+      qr: document.getElementById('qr'),
+      refresh: document.getElementById('refresh'),
+      copy: document.getElementById('copy'),
+      prompt: document.getElementById('prompt'),
+      trusted: document.getElementById('trusted'),
+      myfp: document.getElementById('myfp'),
+      status: document.getElementById('status'),
+    };
 
-if (location.hash.length>1){
-// We are the scanning device
-const hash = location.hash.slice(1);
-await ss.handlePairingLink(hash);
-}
+    const ss = new SecureSignal({
+      url: WS_ENDPOINT,
+      onPairPrompt: showPrompt,
+      onTrustedList: renderTrusted,
+      onOpen: () => setStatus('Connected to signaling', 'ok')
+    });
 
+    await ss.init();
+    document.getElementById('myfp').textContent = ss.me.fingerprint;
 
-function showPrompt(e){
-if (e.type==='incoming'){
-ui.insertAdjacentHTML('beforeend', `<div class="card" style="margin-top:16px"><h3>Pairing request from ${e.from}</h3><div class="sas">Code: <b>${e.sas}</b></div><p>Does this match the other device?</p><div><button id="acc">Accept</button></div></div>`);
-document.getElementById('acc').onclick = ()=> e.accept();
-} else if (e.type==='confirm'){
-ui.insertAdjacentHTML('beforeend', `<div class="card" style="margin-top:16px"><h3>Confirm pairing with ${e.from}</h3><div class="sas">Code: <b>${e.sas}</b></div><p>If the codes match on both devices, press Accept.</p><div><button id="acc2">Accept</button></div></div>`);
-document.getElementById('acc2').onclick = ()=> e.accept();
-}
-}
-</script>
+    // If we arrived with a #payload (from scanning), start pairing as the scanner
+    if (location.hash.length > 1) {
+      try {
+        await ss.handlePairingLink(location.hash.slice(1));
+        setStatus('Pairing request sent. Check both devices show the same code.', 'ok');
+      } catch (e) {
+        setStatus('Could not process pairing link.', 'err');
+      }
+    }
+
+    // Otherwise, generate/display a fresh QR for others to scan
+    renderQR();
+
+    document.getElementById('refresh').onclick = () => renderQR(true);
+    document.getElementById('copy').onclick = async () => {
+      const url = document.getElementById('qr').dataset.link;
+      try { await navigator.clipboard.writeText(url); setStatus('Pairing link copied to clipboard.', 'ok'); }
+      catch { setStatus('Copy failed.', 'err'); }
+    };
+
+    function renderTrusted(list) {
+      const escapeHtml = s => String(s).replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;','\\'':'&#39;'}[c]));
+      document.getElementById('trusted').innerHTML = (list && list.length)
+        ? list.map(d => `<li><div><b>${escapeHtml(d.name || 'Device')}</b><br><span class="muted">${d.fp}</span></div></li>`).join('')
+        : '<li class="muted">No trusted devices yet.</li>';
+    }
+
+    function showPrompt(e){
+      const escapeHtml = s => String(s).replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;','\\'':'&#39;'}[c]));
+      const id = `p-${Math.random().toString(16).slice(2)}`;
+      const html = `
+        <div id="${id}" class="notice" style="margin:8px 0">
+          <div><b>${e.type === 'incoming' ? 'Pairing request from' : 'Confirm pairing with'}</b> ${escapeHtml(e.from)} <span class="muted">(${e.fp})</span></div>
+          <div class="sas" style="margin:6px 0">Code: <span class="k">${e.sas}</span></div>
+          <div class="btn-row"><button class="btn" id="${id}-acc">Accept</button></div>
+        </div>`;
+      document.getElementById('prompt').insertAdjacentHTML('beforeend', html);
+      document.getElementById(`${id}-acc`).onclick = () => { e.accept(); document.getElementById(id)?.remove(); setStatus('Paired. Device saved to Trusted.', 'ok'); };
+    }
+
+    function renderQR(forceNew=false){
+      const { b64 } = ss.makePairingPayload(); // includes fresh nonce every call
+      const link = `${location.origin}${location.pathname}#${b64}`;
+      document.getElementById('qr').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(link)}`;
+      document.getElementById('qr').dataset.link = link;
+      if (forceNew) setStatus('Refreshed QR with a new nonce.', 'ok');
+    }
+
+    function setStatus(text, kind){
+      const el = document.getElementById('status');
+      el.textContent = text;
+      el.className = `notice ${kind || ''}`;
+      el.style.display = 'block';
+    }
+  </script>
 </body>
 </html>
