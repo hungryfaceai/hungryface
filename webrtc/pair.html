@@ -136,7 +136,16 @@
 
     /* ---------- Fingerprint row ---------- */
     .fp-row { display:flex; align-items:center; gap:8px; }
-    .icon-fp { --icon-size: 20px; opacity: 0.95; } /* bigger + clearer */
+    .icon-fp { --icon-size: 20px; opacity: 0.95; }
+
+    /* ---------- Inline rename UI ---------- */
+    .edit-row { display:flex; align-items:center; gap:8px; margin-top:6px; flex-wrap:wrap; }
+    .input {
+      background:#0b0c0d; color:#fff; border:1px solid #2a2f35; border-radius:10px;
+      padding:8px 10px; min-width: 180px; max-width: 260px;
+      font:inherit;
+    }
+    .actions { display:flex; gap:8px; align-items:center; }
   </style>
 </head>
 <body>
@@ -204,19 +213,14 @@
                 <!-- Improved fingerprint icon (multi-ridge) -->
                 <svg class="icon icon-fp" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
                      fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-                  <!-- outer contour -->
                   <path d="M12 3.5c-4.7 0-8.5 3.8-8.5 8.5v1.2" />
-                  <!-- broad arches -->
                   <path d="M6.1 9.2c1.9-1.8 3.9-2.7 5.9-2.7s4 .9 5.9 2.7" />
                   <path d="M7.2 12c1.6-1.5 3.2-2.2 4.8-2.2s3.2.7 4.8 2.2" />
                   <path d="M8.6 14.5c1.2-1.1 2.4-1.6 3.6-1.6s2.4.5 3.6 1.6" />
-                  <!-- core ridges -->
                   <path d="M10 17c.8-.8 1.6-1.2 2-1.2s1.2.4 2 1.2" />
                   <path d="M12 12v6.5" />
-                  <!-- right-side growth (loops) -->
                   <path d="M16.3 11.2a4.3 4.3 0 0 0-4.3 4.3" />
                   <path d="M19.2 11.2a7.2 7.2 0 0 0-7.2 7.2" />
-                  <!-- left-side growth -->
                   <path d="M8.8 12.8a5.2 5.2 0 0 0-.7 5.1" />
                 </svg>
                 <code class="k" id="myfp">…</code>
@@ -250,7 +254,7 @@
       status: document.getElementById('status'),
     };
 
-    // Track previously trusted FPS to show the badge only for newly added devices
+    // Track previously trusted FPS (for the paired badge)
     let prevTrustedFps = new Set();
 
     const ss = new SecureSignal({
@@ -307,6 +311,72 @@
       }
     }
 
+    // Begin inline rename for a device
+    function beginRename(fp) {
+      // Close any existing editor
+      document.querySelectorAll('.edit-row').forEach(el => el.remove());
+
+      const li = els.trusted.querySelector(`li[data-fp="${fp}"]`);
+      if (!li) return;
+
+      const dev = ss.trusted.find(d => d.fp === fp);
+      const current = (dev?.name || '').trim();
+
+      // Build small inline form safely with DOM
+      const form = document.createElement('div');
+      form.className = 'edit-row';
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.maxLength = 40;
+      input.className = 'input';
+      input.placeholder = 'Enter a name (e.g., “Nursery iPhone”)';
+      input.value = current;
+
+      const saveBtn = document.createElement('button');
+      saveBtn.className = 'btn sm';
+      saveBtn.type = 'button';
+      saveBtn.textContent = 'Save';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'btn secondary sm';
+      cancelBtn.type = 'button';
+      cancelBtn.textContent = 'Cancel';
+
+      form.appendChild(input);
+      form.appendChild(saveBtn);
+      form.appendChild(cancelBtn);
+
+      // Insert after the device main block (first div inside li)
+      const mainBlock = li.querySelector('div:first-child');
+      (mainBlock || li).appendChild(form);
+
+      input.focus();
+      input.select();
+
+      const doSave = async () => {
+        const name = input.value.trim().slice(0, 40);
+        try {
+          const idx = ss.trusted.findIndex(d => d.fp === fp);
+          if (idx >= 0) {
+            ss.trusted[idx] = { ...ss.trusted[idx], name };
+            await ss._saveTrusted();
+            ss._emitTrusted();
+            setStatus(`Device renamed to “${name || 'Device'}”.`, 'ok');
+          }
+        } catch {
+          setStatus('Rename failed.', 'err');
+        }
+      };
+
+      saveBtn.addEventListener('click', doSave);
+      cancelBtn.addEventListener('click', () => form.remove());
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') doSave();
+        if (ev.key === 'Escape') form.remove();
+      });
+    }
+
     function renderTrusted(list) {
       // Compute sets for "newly added" detection
       const nowFps = new Set((list || []).map(d => d.fp));
@@ -315,18 +385,25 @@
       if (list && list.length) {
         els.trusted.innerHTML = list.map(d => `
           <li data-fp="${d.fp}">
-            <div>
-              <b>${escapeHtml(d.name || 'Device')}</b>
-              <!-- Badge injected via JS for newly added entries -->
+            <div class="dev-main">
+              <b class="dev-name">${escapeHtml(d.name || 'Device')}</b>
+              <!-- Paired badge injected via JS for newly added entries -->
               <br><span class="muted">${d.fp}</span>
             </div>
-            <div>
-              <button class="btn secondary sm forget-btn" type="button" data-fp="${d.fp}" aria-label="Forget ${escapeHtml(d.name || 'device')}">
-                Forget this device
-              </button>
+            <div class="actions">
+              <button class="btn secondary sm rename-btn" type="button" data-fp="${d.fp}" aria-label="Rename ${escapeHtml(d.name || 'device')}">Rename</button>
+              <button class="btn secondary sm forget-btn" type="button" data-fp="${d.fp}" aria-label="Forget ${escapeHtml(d.name || 'device')}">Forget this device</button>
             </div>
           </li>
         `).join('');
+
+        // Bind "Rename" buttons
+        els.trusted.querySelectorAll('.rename-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            const fp = e.currentTarget.getAttribute('data-fp');
+            beginRename(fp);
+          });
+        });
 
         // Bind "Forget" buttons
         els.trusted.querySelectorAll('.forget-btn').forEach(btn => {
@@ -340,7 +417,7 @@
 
         // Inject a temporary "Paired ✓" badge for newly added devices
         newlyAdded.forEach(fp => {
-          const li = els.trusted.querySelector(`li[data-fp="${fp}"] > div:first-child`);
+          const li = els.trusted.querySelector(`li[data-fp="${fp}"] > .dev-main`);
           if (!li) return;
           const badge = document.createElement('span');
           badge.className = 'badge badge-new';
@@ -350,7 +427,7 @@
             </svg>
             Paired
           `;
-          const b = li.querySelector('b');
+          const b = li.querySelector('b.dev-name');
           if (b) b.insertAdjacentElement('afterend', badge);
           setTimeout(() => badge.remove(), 3200);
         });
