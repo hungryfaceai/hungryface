@@ -92,25 +92,29 @@
     await ss.init();
     els.myfp.textContent = ss.me.fingerprint;
 
-    // If we arrived with a #payload (from scanning), start pairing as the scanner
-    if (location.hash.length > 1) {
+    const isScanner = location.hash.length > 1;
+    const qrBox = document.querySelector('.qrbox');
+    const qrCol = qrBox ? qrBox.parentElement : null;
+
+    if (isScanner) {
+      // Hide the QR UI on the scanning device
+      if (qrCol) qrCol.style.display = 'none';
       try {
         await ss.handlePairingLink(location.hash.slice(1));
         setStatus('Pairing request sent. Check both devices show the same code.', 'ok');
       } catch (e) {
         setStatus('Could not process pairing link.', 'err');
       }
+    } else {
+      // Host mode: generate and show a fresh QR
+      renderQR();
+      els.refresh.onclick = () => renderQR(true);
+      els.copy.onclick = async () => {
+        const url = els.qr.dataset.link;
+        try { await navigator.clipboard.writeText(url); setStatus('Pairing link copied to clipboard.', 'ok'); }
+        catch { setStatus('Copy failed.', 'err'); }
+      };
     }
-
-    // Otherwise, generate/display a fresh QR for others to scan
-    renderQR();
-
-    els.refresh.onclick = () => renderQR(true);
-    els.copy.onclick = async () => {
-      const url = els.qr.dataset.link;
-      try { await navigator.clipboard.writeText(url); setStatus('Pairing link copied to clipboard.', 'ok'); }
-      catch { setStatus('Copy failed.', 'err'); }
-    };
 
     function escapeHtml(s) {
       return String(s).replace(/[&<>"']/g, (c) => ({
