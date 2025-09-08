@@ -289,6 +289,7 @@
     /* ========= Helpers & UI ========= */
     const EL = id => document.getElementById(id);
     const ASM_LOG_MS = 2000;
+    const SCORE_LOG_MS = 800; // throttle score logs (~1 per 0.8s)
 
     /* Settings modal wiring */
     const _modal = EL('settingsModal');
@@ -694,6 +695,7 @@
       calActive: false,
       calVals: [],
       calTimerId: null,
+      scoreLastLogTs: 0,
     };
 
     function setupChart(){
@@ -971,6 +973,26 @@
             state.calVals.push(sm);
           }
 
+          // NEW: log fused scores (raw & EMA), thresholds, and alert state (works during normal detect & quiet-cal)
+          if (LOGS.enable.checked) {
+            const nowTs = performance.now();
+            if (nowTs - state.scoreLastLogTs >= SCORE_LOG_MS) {
+              // compute next alert state to reflect what UI will show
+              const nextOn = (() => {
+                const hold = Number(els.ALERT_HOLD_MS.value) || 0;
+                if (state.alertOn) return (nowTs < state.alertUntil) ? true : (sm >= state.thrOff);
+                if (sm >= state.thrOn) return true;
+                return false;
+              })();
+              const tag = state.calActive ? 'cal' : 'run';
+              log(
+                'inf',
+                `[${tag}] score raw=${raw.toFixed(3)} sm=${sm.toFixed(3)} | thrOn=${state.thrOn.toFixed(3)} thrOff=${state.thrOff.toFixed(3)} | alert=${nextOn ? 'ON' : 'off'}`
+              );
+              state.scoreLastLogTs = nowTs;
+            }
+          }
+          
           const on = applyHysteresis(sm, performance.now());
           if (on && !state.alertOn) { setPill('CRYING', true); log('ok','ALERT ON (cry detected).'); }
           if (!on && state.alertOn) { setPill('idle', false); log('warn','ALERT OFF.'); }
@@ -1040,6 +1062,7 @@
       state.procNode=null; state.srcNode=null; state.sinkNode=null; state.micCtx=null;
       state.ring=new Float32Array(0); state.lastPos=0; state.perClassEma.clear(); state.fusedEma=0; state.frameCount=0;
       state.asmLastLogTs = 0;
+      state.scoreLastLogTs = 0; // reset score log throttle
       setPill('idle', false); setRMS(0);
       clearTopBars();
       if (wasRunning) log('warn','Stopped audio graph.');
