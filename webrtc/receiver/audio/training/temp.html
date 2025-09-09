@@ -918,10 +918,33 @@
       else { if (sm >= state.thrOn) { state.alertUntil = nowMs + hold; return true; } return false; }
     }
 
-    /* ========= Quiet calibration ========= */
-    function updateCalDurLabel(){ els.CAL_DUR_LABEL.textContent = `${els.CAL_DUR_SLIDER.value}s`; }
-    els.CAL_DUR_SLIDER.addEventListener('input', updateCalDurLabel);
-    updateCalDurLabel();
+    /* ========= Quiet calibration (SYNCED controls) ========= */
+    function clampCalDur(v){
+      const n = Math.round(Number(v) || 20);
+      return Math.max(5, Math.min(120, n));
+    }
+    function setCalDur(v){
+      const val = clampCalDur(v);
+      if (els.CAL_DUR_SLIDER)    els.CAL_DUR_SLIDER.value = val;
+      if (els.CAL_SEC_SETTINGS)  els.CAL_SEC_SETTINGS.value = val;
+      if (els.CAL_DUR_LABEL)     els.CAL_DUR_LABEL.textContent = `${val}s`;
+      return val;
+    }
+    function syncCalDurFromSlider(){ setCalDur(els.CAL_DUR_SLIDER.value); }
+    function syncCalDurFromSettings(){ setCalDur(els.CAL_SEC_SETTINGS.value); }
+    
+    /* Keep both inputs mirrored while editing */
+    els.CAL_DUR_SLIDER.addEventListener('input',  syncCalDurFromSlider);
+    els.CAL_DUR_SLIDER.addEventListener('change', syncCalDurFromSlider);
+    els.CAL_SEC_SETTINGS.addEventListener('input',  syncCalDurFromSettings);
+    els.CAL_SEC_SETTINGS.addEventListener('change', syncCalDurFromSettings);
+    
+    /* Keep compatibility with resetDefaults(), which calls updateCalDurLabel() */
+    function updateCalDurLabel(){ setCalDur(els.CAL_DUR_SLIDER.value); }
+    
+    /* Initial sync (prefer slider if present, else settings, else 20s) */
+    setCalDur(Number(els.CAL_DUR_SLIDER.value) || Number(els.CAL_SEC_SETTINGS.value) || 20);
+
 
     async function quietCalibrate(){
       if (state.calActive) return;
