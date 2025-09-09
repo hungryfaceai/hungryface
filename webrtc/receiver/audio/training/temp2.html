@@ -65,7 +65,7 @@
     canvas { display:block; width:100%; height:160px; background:#0a0a0a; border-radius:10px; }
     .legend { margin-top:6px; display:flex; gap:12px; font-size:12px; color:#ccc; flex-wrap:wrap; }
     .key { width:14px; height:3px; border-radius:2px; display:inline-block; margin-right:4px; vertical-align:middle; }
-    .blue { background:#60a5fa; } .red { background:#ef4444; } .or { background:#f97316; } .lo { background:#fb923c; }
+    .blue { background:#60a5fa; } .red { background:#ef4444; } .or { background:#f97316; } .lo { background:#fb923c; } .green{ background:#22c55e; }
 
     .weights-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; align-items:start; }
     @media (max-width: 820px) { .weights-grid { grid-template-columns: 1fr; } }
@@ -281,10 +281,10 @@
         <h2>Fused score over time</h2>
         <canvas id="chart" height="160"></canvas>
         <div class="legend">
-          <span class="key blue"></span> fused (raw, histogram)
-          <span class="key red"></span> fused (EMA, curve)
-          <span class="key or"></span> thresh ON
-          <span class="key lo"></span> thresh OFF
+          <span class="key blue"></span> fused (raw)
+          <span class="key red"></span> fused (EMA)
+          <span class="key red"></span> thresh ON
+          <span class="key green"></span> thresh OFF
         </div>
       </div>
 
@@ -341,7 +341,7 @@
             <input id="IGNORE_CLASSES" type="text" value="Silence, Inside, Outside, Vehicle, Noise" placeholder="Silence, Background noise, White noise">
           </label>
           <label style="display:grid; gap:6px; min-width:320px;"><span>Penalty map (inference)</span>
-            <input id="PENALTY_MAP" type="text" value="Silence:-0.45, White noise:-0.2" placeholder="Silence:-0.4, White noise:-0.2">
+            <input id="PENALTY_MAP" type="text" value="Silence:-0.01, White noise:-0.01" placeholder="Silence:-0.4, White noise:-0.2">
           </label>
         </div>
         <div class="row" style="margin-top:12px; justify-content:flex-end;">
@@ -466,8 +466,15 @@
 
     function clamp01(x){ return Math.max(0, Math.min(1, x)); }
     function emaStep(prev, x, a){ return prev + a * (x - prev); }
+    function rmsToMeter(rms){
+      // Convert amplitude RMS (≈0..1) to dBFS and map [-85 dB … 0 dB] → [0 … 1]
+      const db = 20 * Math.log10(Math.max(1e-8, rms));
+      const FLOOR_DB = -85;                 // make more negative (e.g. -90) to show even lower noise
+      const norm = (db - FLOOR_DB) / (0 - FLOOR_DB);
+      return clamp01(norm);
+    }
     function alphaForTau(dt, tau){ return 1 - Math.exp(-dt / Math.max(1e-3, tau)); }
-    function setRMS(x){ els.rmsFill.style.width = Math.round(clamp01(x)*100)+'%'; }
+    function setRMS(x){ els.rmsFill.style.width = Math.round(rmsToMeter(x)*100)+'%'; }
     function resampleLinear(x, fromSr, toSr){
       if (fromSr === toSr) return x;
       const ratio = toSr / fromSr, n = Math.max(1, Math.round(x.length * ratio)), out = new Float32Array(n);
@@ -641,7 +648,7 @@
       els.HALF_LIFE_S.value      = 3600;
       els.MAX_RESULTS.value      = 25;
       els.IGNORE_CLASSES.value   = 'Silence, Inside, Outside, Vehicle, Noise';
-      els.PENALTY_MAP.value      = 'Silence:-0.45, White noise:-0.2';
+      els.PENALTY_MAP.value      = 'Silence:-0.01, White noise:-0.01';
       localStorage.setItem(IGNORE_KEY(), els.IGNORE_CLASSES.value);
       localStorage.setItem(PENALTY_KEY(), els.PENALTY_MAP.value);
 
@@ -720,13 +727,16 @@
       state.chart?.destroy?.();
       const ctx = els.chart.getContext('2d');
       state.chart = new Chart(ctx, {
-        type: 'bar', /* bars for raw */
-        data: { labels: [], datasets: [
-          { label:'fused(raw)', data:[], borderWidth:0, pointRadius:0, barPercentage:1.0, categoryPercentage:1.0 },
-          { label:'fused(EMA)', data:[], borderWidth:2, pointRadius:0, tension:0.15, type:'line' },
-          { label:'thr ON', data:[], borderWidth:1, pointRadius:0, borderDash:[6,4], type:'line' },
-          { label:'thr OFF', data:[], borderWidth:1, pointRadius:0, borderDash:[2,2], type:'line' },
-        ]},
+        type: 'bar',
+        data: {
+          labels: [],
+          datasets: [
+            { label:'fused(raw)', data:[], borderWidth:0, pointRadius:0, barPercentage:1.0, categoryPercentage:1.0 },
+            { label:'fused(EMA)', data:[], borderWidth:2, pointRadius:0, tension:0.15, type:'line' },
+            { label:'thr ON',  data:[], type:'line', borderWidth:1, pointRadius:0, borderDash:[6,4],  borderColor:'rgba(239,68,68,1)' }, // RED
+            { label:'thr OFF', data:[], type:'line', borderWidth:1, pointRadius:0, borderDash:[2,2],  borderColor:'rgba(34,197,94,1)' }  // GREEN
+          ]
+        },
         options: {
           animation:false,
           plugins:{ legend:{ display:false } },
