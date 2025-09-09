@@ -19,37 +19,43 @@
     .btn[disabled] { opacity:.6; cursor:default; }
     .small { padding:8px 10px; font-size:13px; border-radius:10px; }
 
-    /* Pair layout for aligned Start/Stop */
+    /* Pair layout */
     .btn-pair { display:flex; gap:10px; min-width:240px; }
     .btn-pair .btn { flex:1 1 0; min-width:120px; }
 
     /* Meter & state pill */
+    .status-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
     .meter { height:10px; border-radius:8px; background:#0a0a0a; border:1px solid #222; overflow:hidden; }
     .fill { height:100%; width:0%; background:linear-gradient(to right, rgba(96,165,250,.9), rgba(239,68,68,.9)); transition:width 120ms linear; }
-    .pill { display:inline-block; padding:6px 12px; border-radius:999px; border:1px solid #333; font-size:13px; font-weight:700; margin-left:6px; }
+    .pill { display:none; align-items:center; gap:8px; padding:6px 12px; border-radius:999px; border:1px solid #333; font-size:13px; font-weight:700; }
     .pill.on { background:#310000; border-color:#a00; color:#ffb3b3; }
-    #statePill { margin-left:auto; }
+    .pill.busy { position:relative; }
+    .pill.busy::after { content:''; width:8px; height:8px; border-radius:50%; background: currentColor; opacity:.7; margin-left:6px; animation: pillPulse .9s ease-in-out infinite alternate; }
+    .status-row + .meter { margin-top: 6px; }
+    @keyframes pillPulse { from { transform: translateX(0) scale(0.8); opacity:.45; } to { transform: translateX(4px) scale(1); opacity:1; } }
 
     /* Carded sections */
     .card { background:#0a0a0a; border:1px solid #171717; border-radius:12px; padding:12px; margin-top:12px; }
     .card h2 { margin:0 0 8px 0; font-size:16px; }
     .subgroup { display:flex; gap:14px; align-items:center; padding:10px; border:1px dashed #1b1b1b; border-radius:10px; background:#0b0b0b; }
-    .subgroup strong { min-width:180px; }
+    .subgroup strong { min-width:150px; }
 
     /* Inputs */
     input[type="number"], input[type="text"] { padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; }
     input[type="file"] { font-size:13px; }
+    select { padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; }
 
     /* Sliders */
-    .slider-wrap { display:flex; align-items:center; gap:10px; margin-left:auto; }
+    .slider-wrap { display:flex; align-items:center; gap:10px; }
     input[type="range"] { width:220px; }
 
     /* Charts */
-    canvas { display:block; width:100%; height:160px; background:#0a0a0a; border-radius:10px; }
-    #chart { height:320px; }
+    .chart-wrap { position: relative; }
+    .chart-wrap > canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; display: block; background:#0a0a0a; border-radius:10px; }
+    .h160{height:160px;} .h170{height:170px;} .h180{height:180px;} .h320{height:320px;}
     .legend { margin-top:6px; display:flex; gap:12px; font-size:12px; color:#ccc; flex-wrap:wrap; }
     .key { width:14px; height:3px; border-radius:2px; display:inline-block; margin-right:4px; vertical-align:middle; }
-    .blue { background:#60a5fa; } .red { background:#ef4444; } .or { background:#f97316; } .lo { background:#fb923c; }
+    .blue { background:#60a5fa; } .red { background:#ef4444; } .green{ background:#22c55e; } .darkred { background:#991b1b; }
 
     .weights-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; align-items:start; }
     @media (max-width: 820px) { .weights-grid { grid-template-columns: 1fr; } }
@@ -69,99 +75,57 @@
     .log-code { display:block; background:#0b0b0b; border:1px solid #1f2937; border-radius:8px; padding:6px; margin-top:4px; overflow:auto; }
 
     /* Top bar */
-    .topbar { display:flex; justify-content:space-between; align-items:center; }
+    .topbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
 
-    /* ================= Help side-sheet (FULL styling restored) ================= */
-    .help-backdrop {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.5);
-      z-index: 110; opacity: 0; pointer-events: none; transition: opacity .2s ease;
-    }
-    .help-backdrop.show { opacity: 1; pointer-events: auto; }
-    .help-sheet {
-      position: fixed; right: 0; top: 0; height: 100svh; width: min(92vw, 420px);
-      background: #121212; color: #f3f3f3; border-left: 1px solid rgba(255,255,255,0.12);
-      box-shadow: -12px 0 32px rgba(0,0,0,0.6); z-index: 120;
-      transform: translateX(100%); transition: transform .24s cubic-bezier(.2,.8,.2,1);
-      display: flex; flex-direction: column;
-    }
-    .help-sheet.show { transform: translateX(0); }
-    .help-header { position: sticky; top: 0; z-index: 1; background: rgba(18,18,18,0.96); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: space-between; padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }
-    .help-header h3 { margin: 0; font-size: 16px; font-weight: 700; color: #fff; }
-    .help-header .close { appearance: none; border: none; background: transparent; color: #aaa; font-size: 22px; cursor: pointer; padding: 2px 6px; }
-    .help-body { padding: 10px 12px 16px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-    .help-body p, .help-body li, .help-body td, .help-body th { font-size: 13px; color: #ddd; line-height: 1.45; }
-    .help-body code, .help-body pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .help-toc { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; padding-bottom: 8px; border-bottom: 1px dashed rgba(255,255,255,0.15); }
-    .help-toc a { font-size: 12px; color: #ddd; text-decoration: none; border: 1px solid rgba(255,255,255,0.18); padding: 6px 8px; border-radius: 999px; }
-    .help-toc a:active { transform: scale(0.98); }
-    .help-section { margin: 14px 0; }
-    .help-section h4 { margin: 0 0 6px; font-size: 14px; color: #fff; }
-    .help-kv { width: 100%; border-collapse: collapse; margin-top: 6px; }
-    .help-kv th, .help-kv td { border: 1px solid rgba(255,255,255,0.12); padding: 8px; vertical-align: top; }
-    .help-kv th { background: rgba(255,255,255,0.06); font-weight: 700; color: #eee; white-space: nowrap; }
-    .help-kv td { color: #ddd; }
-    .help-callout { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 10px; }
-    details.learn-more { border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 10px; background: rgba(255,255,255,0.04); }
-    details.learn-more > summary { cursor: pointer; list-style: none; font-weight: 700; color: #fff; }
-    details.learn-more > summary::-webkit-details-marker { display: none; }
-    details.learn-more[open] { background: rgba(255,255,255,0.06); }
-    .codeblock { background: #0e0e0e; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #d7eaff; font-size: 12px; overflow-x: auto; }
+    /* Help + modal */
+    .help-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:110;opacity:0;pointer-events:none;transition:opacity .2s ease;}
+    .help-backdrop.show{opacity:1;pointer-events:auto;}
+    .help-sheet{position:fixed;right:0;top:0;height:100svh;width:min(92vw,420px);background:#121212;color:#f3f3f3;border-left:1px solid rgba(255,255,255,0.12);box-shadow:-12px 0 32px rgba(0,0,0,0.6);z-index:120;transform:translateX(100%);transition:transform .24s cubic-bezier(.2,.8,.2,1);display:flex;flex-direction:column;}
+    .help-sheet.show{transform:translateX(0);}
+    .help-header{position:sticky;top:0;z-index:1;background:rgba(18,18,18,0.96);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid rgba(255,255,255,0.08);}
+    .help-header h3{margin:0;font-size:16px;font-weight:700;color:#fff;}
+    .help-header .close{appearance:none;border:none;background:transparent;color:#aaa;font-size:22px;cursor:pointer;padding:2px 6px;}
+    .help-body{padding:10px 12px 16px;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+    .help-body p,.help-body li,.help-body td,.help-body th{font-size:13px;color:#ddd;line-height:1.45;}
+    .help-body code,.help-body pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+    .help-toc{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px;padding-bottom:8px;border-bottom:1px dashed rgba(255,255,255,0.15);}
+    .help-toc a{font-size:12px;color:#ddd;text-decoration:none;border:1px solid rgba(255,255,255,0.18);padding:6px 8px;border-radius:999px;}
+    .help-toc a:active{transform:scale(0.98);}
+    .help-section{margin:14px 0;}
+    .help-section h4{margin:0 0 6px;font-size:14px;color:#fff;}
+    .help-kv{width:100%;border-collapse:collapse;margin-top:6px;}
+    .help-kv th,.help-kv td{border:1px solid rgba(255,255,255,0.12);padding:8px;vertical-align:top;}
+    .help-kv th{background:rgba(255,255,255,0.06);font-weight:700;color:#eee;white-space:nowrap;}
+    .help-kv td{color:#ddd;}
+    .help-callout{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:10px;}
+    details.learn-more{border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:10px;background:rgba(255,255,255,0.04);}
+    details.learn-more>summary{cursor:pointer;list-style:none;font-weight:700;color:#fff;}
+    details.learn-more>summary::-webkit-details-marker{display:none;}
+    details.learn-more[open]{background:rgba(255,255,255,0.06);}
+    .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);z-index:140;}
+    .modal.show{display:flex;}
+    .modal-card{width:min(96%,1000px);max-height:90vh;overflow-y:auto;background:#0b0b0b;border:1px solid #242424;border-radius:14px;}
+    .modal-head{position:sticky;top:0;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #1a1a1a;background:#0d0d0d;border-top-left-radius:14px;border-top-right-radius:14px;}
+    .modal-actions{display:flex;gap:8px;align-items:center;}
+    .modal-body{padding:12px;}
+    .modal-head .close{appearance:none;border:none;background:transparent;color:#aaa;font-size:22px;cursor:pointer;padding:2px 6px;}
+    .modal-head .close:active{transform:scale(0.98);}
+    .modal{z-index:140;} .help-backdrop{z-index:180;} .help-sheet{z-index:190;}
 
-    /* Settings modal (restored) */
-    .modal {
-      position: fixed;
-      inset: 0;
-      display: none;                 /* hidden by default */
-      align-items: center;
-      justify-content: center;
-      background: rgba(0,0,0,.6);
-      z-index: 140;                  /* above help drawer (which is 120) */
+    /* Mobile tweaks */
+    @media (max-width: 560px) {
+      .btn-pair { min-width:auto; width:100%; }
+      .btn-pair .btn { min-width:0; flex:1; }
+      .subgroup { flex-direction:column; align-items:stretch; }
+      .subgroup strong { min-width:unset; }
+      .slider-wrap { width:100%; }
+      input[type="range"] { width:100%; }
+      .row { gap:8px; }
+      select, input[type="number"], input[type="text"] { width:100%; box-sizing:border-box; }
     }
-    .modal.show { display: flex; }
-    
-    .modal-card {
-      width: min(96%, 1000px);
-      max-height: 90vh;
-      overflow-y: auto;
-      background: #0b0b0b;
-      border: 1px solid #242424;
-      border-radius: 14px;
-    }
-    
-    .modal-head {
-      position: sticky;
-      top: 0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 12px;
-      border-bottom: 1px solid #1a1a1a;
-      background: #0d0d0d;
-      border-top-left-radius: 14px;
-      border-top-right-radius: 14px;
-    }
-    
-    .modal-actions { display: flex; gap: 8px; align-items: center; }
-    .modal-body { padding: 12px; }
-    
-    /* Cross button in Settings header */
-    .modal-head .close {
-      appearance: none;
-      border: none;
-      background: transparent;
-      color: #aaa;
-      font-size: 22px;
-      cursor: pointer;
-      padding: 2px 6px;
-    }
-    .modal-head .close:active { transform: scale(0.98); }
-    /* --- Layering fix: put Help above the Settings modal --- */
-    .modal { z-index: 140; }              /* keep modal high */
-    .help-backdrop { z-index: 180; }      /* higher than modal */
-    .help-sheet { z-index: 190; }         /* highest so it's fully readable */
 
-    
+    /* Hidden remote video host (for audio track) */
+    #remote { position:absolute; width:1px; height:1px; left:-99999px; top:-99999px; }
   </style>
 </head>
 <body>
@@ -174,7 +138,7 @@
         </div>
       </header>
 
-      <div class="row" style="margin-top:8px;">
+      <div class="row status-row" style="margin-top:8px;">
         <div id="status" class="muted">Booting…</div>
         <div id="statePill" class="pill">idle</div>
       </div>
@@ -184,38 +148,33 @@
 
       <!-- ===== Panels ===== -->
 
-      <!-- Training panel -->
+      <!-- Training panel (dropdown-based) -->
       <div class="card" id="cardTraining">
         <h2>Training</h2>
 
         <div class="subgroup">
-          <strong>Microphone</strong>
-          <div class="btn-pair">
-            <button id="btnStartTrainMic" class="btn">Start</button>
-            <button id="btnStopTrainMic" class="btn">Stop</button>
-          </div>
-          <span class="muted">Use 20–60s segments; then recompute weights.</span>
-        </div>
+          <strong>Source</strong>
+          <select id="TRAIN_SRC" style="min-width:220px;">
+            <option value="mic" selected>Microphone (Receiver)</option>
+            <option value="file">File</option>
+            <option value="folder">Folder</option>
+            <option value="sender">Sender (WebRTC)</option>
+          </select>
 
-        <div class="subgroup">
-          <strong>File</strong>
-          <input id="fileInp" type="file" accept="audio/*" />
-          <div class="btn-pair">
-            <button id="btnTrainFile" class="btn">Start</button>
-            <button id="btnStopTrainFile" class="btn">Stop</button>
-          </div>
-        </div>
+          <div id="trainChooseWrap" class="row" style="margin-left:auto; gap:10px;">
+            <input id="fileInp" type="file" accept="audio/*" style="display:none" />
+            <button id="btnChooseFile" class="btn" style="display:none;">Choose file…</button>
 
-        <div class="subgroup">
-          <strong>Folder</strong>
-          <input id="folderInp" type="file" webkitdirectory directory multiple style="display:none" />
-          <button id="btnChooseFolder" class="btn">Choose Folder…</button>
-          <div class="btn-pair">
-            <button id="btnTrainFolder" class="btn">Start</button>
-            <button id="btnStopTrainFolder" class="btn">Stop</button>
+            <input id="folderInp" type="file" webkitdirectory directory multiple style="display:none" />
+            <button id="btnChooseFolder" class="btn" style="display:none;">Choose folder…</button>
           </div>
-          <span id="folderInfo" class="muted"></span>
+
+          <div class="btn-pair" style="margin-left:auto;">
+            <button id="btnTrainStart" class="btn">Start</button>
+            <button id="btnTrainStop" class="btn">Stop</button>
+          </div>
         </div>
+        <span id="trainInfo" class="muted"></span>
       </div>
 
       <!-- Model panel -->
@@ -223,53 +182,75 @@
         <h2>Model</h2>
         <div class="row" style="gap:8px 10px;">
           <label style="display:flex;align-items:center;gap:8px;">
-            <span>Model name</span>
-            <input id="MODEL_NAME" type="text" placeholder="default" style="width:180px;">
+            <span>Model</span>
+            <select id="MODEL_SELECT" style="width:220px;"></select>
           </label>
-          <button id="btnModelUse" class="btn">Use Name</button>
-          <button id="btnModelLoad" class="btn">Load</button>
           <button id="btnRecompute" class="btn">Recompute Weights</button>
           <button id="btnClear" class="btn">Clear Model</button>
           <button id="btnExport" class="btn">Export Model</button>
         </div>
-        <div class="muted" style="margin-top:6px;">Mic/file/folder training updates class stats live; then click “Recompute Weights”.</div>
+        <div class="muted" style="margin-top:6px;">Pick an existing model or choose “New…” to create one. Train (mic/file/folder/sender), then click “Recompute Weights”.</div>
       </div>
 
       <!-- Quiet calibration panel -->
       <div class="card" id="cardCal">
         <h2>Quiet calibration</h2>
+
+        <!-- Calibrate controls -->
         <div class="subgroup">
           <strong>Calibrate thresholds</strong>
           <div class="btn-pair">
             <button id="btnCal" class="btn">Start</button>
             <button id="btnCalStop" class="btn">Stop</button>
           </div>
+        </div>
+
+        <!-- Sliders STACKED: Duration first -->
+        <div class="subgroup">
+          <strong>Duration</strong>
           <div class="slider-wrap">
-            <span class="muted">Duration</span>
             <input id="CAL_DUR_SLIDER" type="range" min="5" max="120" step="1" value="20" />
             <span id="CAL_DUR_LABEL">20s</span>
           </div>
         </div>
-        <div class="muted" style="margin-top:6px;">Keep the room quiet. When running, the Start button shows a countdown and is disabled.</div>
+
+        <!-- Then Thresholds OFF and ON -->
+        <div class="subgroup">
+          <strong>Thresholds</strong>
+          <div class="slider-wrap">
+            <span class="muted" style="min-width:28px;">OFF</span>
+            <input id="THR_OFF_SLIDER" type="range" min="0" max="1" step="0.01" />
+            <span id="THR_OFF_LABEL">0.25</span>
+          </div>
+          <div class="slider-wrap">
+            <span class="muted" style="min-width:28px;">ON</span>
+            <input id="THR_ON_SLIDER" type="range" min="0" max="1" step="0.01" />
+            <span id="THR_ON_LABEL">0.35</span>
+          </div>
+        </div>
+
+        <div class="muted" style="margin-top:6px;">Keep the room quiet. (Uses the selected source: Mic or Sender.)</div>
       </div>
 
       <!-- Live detection panel -->
       <div class="card" id="cardDetect">
-        <h2>Live audio detection (Mic)</h2>
+        <h2>Live audio detection</h2>
         <div class="subgroup">
           <strong>Detection</strong>
           <div class="btn-pair">
             <button id="btnStartDetect" class="btn">Start</button>
             <button id="btnStop" class="btn">Stop</button>
           </div>
-          <span class="muted">Uses the active model & thresholds.</span>
+          <span class="muted">Uses the active model & thresholds and the selected source (Mic or Sender).</span>
         </div>
       </div>
 
-      <!-- Live bars -->
-      <div class="card">
+      <!-- Live bars (hidden until used) -->
+      <div class="card" id="cardLiveBars" style="display:none">
         <h2>Live top classes</h2>
-        <canvas id="bars" height="180"></canvas>
+        <div class="chart-wrap h160">
+          <canvas id="bars"></canvas>
+        </div>
         <div class="muted" style="margin-top:6px;">Uses the <b>Top-K</b> setting. Excluded classes are grey; we extend to show Top-K non-excluded.</div>
       </div>
 
@@ -279,12 +260,16 @@
         <div class="weights-grid">
           <div class="weights-card">
             <h3>Live dynamic weights (unsaved preview)</h3>
-            <canvas id="barsDynW" height="220"></canvas>
+            <div class="chart-wrap h170">
+              <canvas id="barsDynW"></canvas>
+            </div>
             <span class="muted">Top-K normalized weights recomputed on every training inference. Not stored.</span>
           </div>
           <div class="weights-card">
             <h3>Active model weights (Top-K, normalized)</h3>
-            <canvas id="barsSavedW" height="220"></canvas>
+            <div class="chart-wrap h170">
+              <canvas id="barsSavedW"></canvas>
+            </div>
             <span class="muted">What detection uses (until you click “Recompute Weights”).</span>
           </div>
         </div>
@@ -292,18 +277,21 @@
 
       <!-- Fused score chart -->
       <div class="card">
-        <div class="row" style="justify-content:space-between; align-items:center;">
-          <h2 style="margin:0;">Fused score over time</h2>
-          <label class="muted">Window (s)
-            <input id="CHART_WINDOW_S" type="number" min="5" max="180" step="5" value="30" style="width:84px;margin-left:6px;">
+        <h2>Fused score over time</h2>
+        <div class="subgroup" style="justify-content:flex-end">
+          <label style="display:flex;align-items:center;gap:8px;">
+            <span class="muted">Window (s)</span>
+            <input id="CHART_WINDOW_S" type="number" min="5" step="5" value="30" style="width:84px;">
           </label>
         </div>
-        <canvas id="chart" height="160"></canvas>
+        <div class="chart-wrap h320">
+          <canvas id="chart"></canvas>
+        </div>
         <div class="legend">
-          <span class="key blue"></span> fused (raw, histogram)
-          <span class="key red"></span> fused (EMA, curve)
-          <span class="key or"></span> thresh ON
-          <span class="key lo"></span> thresh OFF
+          <span class="key blue"></span> fused (raw)
+          <span class="key red"></span> fused (EMA)
+          <span class="key darkred"></span> thresh ON
+          <span class="key green"></span> thresh OFF
         </div>
       </div>
 
@@ -327,6 +315,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Hidden host for remote audio track -->
+  <video id="remote" autoplay playsinline muted></video>
 
   <!-- Settings modal -->
   <div id="settingsModal" class="modal" aria-hidden="true">
@@ -360,12 +351,7 @@
             <input id="IGNORE_CLASSES" type="text" value="Silence, Inside, Outside, Vehicle, Noise" placeholder="Silence, Background noise, White noise">
           </label>
           <label style="display:grid; gap:6px; min-width:320px;"><span>Penalty map (inference)</span>
-            <input id="PENALTY_MAP" type="text" value="Silence:-0.45, White noise:-0.2" placeholder="Silence:-0.4, White noise:-0.2">
-          </label>
-
-          <label style="display:grid; gap:6px; min-width:220px;">
-            <span>Chart window (s)</span>
-            <input id="CHART_WINDOW_S_SETTINGS" type="number" min="5" max="180" step="5" value="30" />
+            <input id="PENALTY_MAP" type="text" value="Silence:-0.01, White noise:-0.01" placeholder="Silence:-0.4, White noise:-0.2">
           </label>
         </div>
         <div class="row" style="margin-top:12px; justify-content:flex-end;">
@@ -382,7 +368,26 @@
   <script type="module" src="./help-sheet.js"></script>
 
   <script type="module">
-    /* ========= Helpers & UI ========= */
+    /* ========= NEW: WebRTC (ReceiverCore) ========= */
+    import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
+
+    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const room = new URLSearchParams(location.search).get("room") || "Baby";
+
+    // WebRTC holder
+    const wrtc = {
+      core: null,
+      dc: null,
+      stream: null,
+      // Remote audio tap graph
+      ctx: null, src: null, sink: null, node: null,
+      audioEnabled: true,
+      where: 'sender', // 'sender' (scores via DC) | 'receiver' (audio streamed; classify here)
+      visualMeterFromTap: false, // we reuse existing RMS from classifyChunk
+      connected: false,
+    };
+
+    /* ========= Helpers & UI (existing) ========= */
     const EL = id => document.getElementById(id);
     const ASM_LOG_MS = 2000;
     const SCORE_LOG_MS = 800;
@@ -393,7 +398,7 @@
     EL('btnSettingsClose').onclick = () => { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); };
     _modal.addEventListener('click', (e) => { if (e.target === _modal) { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); }});
 
-    /* Help side-sheet wiring (if help-sheet injects it) */
+    /* Help side-sheet wiring (unchanged) */
     function wireHelpOnce() {
       const sheet = document.getElementById('helpSheet');
       const backdrop = document.getElementById('helpBackdrop');
@@ -468,31 +473,36 @@
       'CLASS_EMA_TAU_S','FUSED_EMA_TAU_S','ALERT_HOLD_MS',
       'CAL_SEC_SETTINGS','ALERT_OFF_DELTA','TOP_K','K_PRIOR','HALF_LIFE_S','MAX_RESULTS',
       'btnStartDetect','btnStop','btnCal','btnCalStop','CAL_DUR_SLIDER','CAL_DUR_LABEL',
-      'btnStartTrainMic','btnStopTrainMic',
-      'fileInp','btnTrainFile','btnStopTrainFile',
+      'fileInp','folderInp','btnChooseFolder','btnChooseFile',
       'btnRecompute','btnClear','btnExport',
       'trainAudio','chart','bars','barsDynW','barsSavedW',
-      'MODEL_NAME','btnModelUse','btnModelLoad',
-      'folderInp','btnChooseFolder','btnTrainFolder','btnStopTrainFolder','folderInfo',
-      'IGNORE_CLASSES','PENALTY_MAP',
-      'btnResetDefaults',
-      'CHART_WINDOW_S','CHART_WINDOW_S_SETTINGS'
+      'IGNORE_CLASSES','PENALTY_MAP','btnResetDefaults',
+      'THR_OFF_SLIDER','THR_OFF_LABEL','THR_ON_SLIDER','THR_ON_LABEL',
+      'MODEL_SELECT','CHART_WINDOW_S','cardLiveBars',
+      'TRAIN_SRC','btnTrainStart','btnTrainStop','trainInfo'
     ].map(x => [x, document.getElementById(x)])) )();
 
     function setStatus(s){ els.status.textContent = s; log('info', s); }
-    function setPill(s, on=false){ els.statePill.textContent=s; els.statePill.classList.toggle('on', !!on); }
+
+    // Pill: only show during training or calibration
+    function setPill(s, on=false){
+      const show = (s === 'training' || s === 'calibrating');
+      els.statePill.style.display = show ? 'inline-flex' : 'none';
+      els.statePill.textContent = s;
+      els.statePill.classList.toggle('on',   show && !!on);
+      els.statePill.classList.toggle('busy', show && !!on);
+    }
+
     function clamp01(x){ return Math.max(0, Math.min(1, x)); }
     function emaStep(prev, x, a){ return prev + a * (x - prev); }
-    function alphaForTau(dt, tau){ return 1 - Math.exp(-dt / Math.max(1e-3, tau)); }
-
-    // Stronger non-linear mapping for RMS meter
     function rmsToMeter(rms){
-      const scaled = Math.min(1, rms * 6);      // amplify quiet levels
-      const meter  = Math.pow(scaled, 0.6);     // compress dynamic range
-      return clamp01(meter);
+      const db = 20 * Math.log10(Math.max(1e-8, rms));
+      const FLOOR_DB = -85;
+      const norm = (db - FLOOR_DB) / (0 - FLOOR_DB);
+      return clamp01(norm);
     }
+    function alphaForTau(dt, tau){ return 1 - Math.exp(-dt / Math.max(1e-3, tau)); }
     function setRMS(x){ els.rmsFill.style.width = Math.round(rmsToMeter(x)*100)+'%'; }
-
     function resampleLinear(x, fromSr, toSr){
       if (fromSr === toSr) return x;
       const ratio = toSr / fromSr, n = Math.max(1, Math.round(x.length * ratio)), out = new Float32Array(n);
@@ -511,29 +521,22 @@
     }
 
     /* ========= Chart labels plugin (percent) ========= */
-    const pctLabelPlugin = {
-      id: 'pctLabel',
-      afterDatasetsDraw(chart, args, options) {
-        if (!options || options.enabled !== true) return;
-        if (chart.config.type !== 'bar') return;
-        const ds = chart.data.datasets?.[0];
-        if (!ds) return;
-        const { ctx } = chart;
-        const meta = chart.getDatasetMeta(0);
-        ctx.save();
-        ctx.font = (options?.font) || '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-        ctx.fillStyle = options?.color || '#ddd';
-        const data = ds.data || [];
-        meta.data.forEach((bar, i) => {
-          const v = Number(data[i]) || 0;
-          const txt = `${Math.round(v * 100)}%`;
-          const x = bar.x + 6;
-          const y = bar.y + 4;
-          ctx.fillText(txt, x, y);
-        });
-        ctx.restore();
-      }
-    };
+    const pctLabelPlugin = { id:'pctLabel', afterDatasetsDraw(chart, args, options) {
+      if (!options || options.enabled !== true) return;
+      if (chart.config.type !== 'bar') return;
+      const ds = chart.data.datasets?.[0]; if (!ds) return;
+      const { ctx } = chart; const meta = chart.getDatasetMeta(0);
+      ctx.save(); ctx.font = (options?.font) || '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.fillStyle = options?.color || '#ddd';
+      const data = ds.data || [];
+      meta.data.forEach((bar, i) => {
+        const v = Number(data[i]) || 0;
+        const txt = `${Math.round(v * 100)}%`;
+        const x = bar.x + 6; const y = bar.y + 4;
+        ctx.fillText(txt, x, y);
+      });
+      ctx.restore();
+    }};
     Chart.register(pctLabelPlugin);
 
     /* ========= MediaPipe (Audio) ========= */
@@ -598,8 +601,11 @@
 
     /* ========= Model persistence ========= */
     const ACTIVE_MODEL_NAME_KEY = 'cryActiveModelName';
-    function getModelName(){ return els.MODEL_NAME?.value?.trim() || localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default'; }
-    function setModelName(name){ els.MODEL_NAME.value = name; localStorage.setItem(ACTIVE_MODEL_NAME_KEY, name); }
+    function getModelName(){ return els.MODEL_SELECT?.value || localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default'; }
+    function setModelName(name){
+      localStorage.setItem(ACTIVE_MODEL_NAME_KEY, name);
+      if (els.MODEL_SELECT) els.MODEL_SELECT.value = name;
+    }
     function MODEL_KEY(){ return `cryModelV1_${getModelName()}`; }
     function CALIB_KEY(){ return `cryCalibV1_${getModelName()}`; }
     function IGNORE_KEY(){ return `cryIgnore_${getModelName()}`; }
@@ -615,7 +621,7 @@
         K: Number(els.TOP_K.value),
         kPrior: Number(els.K_PRIOR.value),
         classes: {},
-        weights: { "Baby cry, infant cry": 1.0 },
+        weights: { "Crying, sobbing": 0.493, "Baby cry, infant cry": 0.421, "Whimper": 0.086 },
         updatedAt: Date.now()
       };
     }
@@ -626,6 +632,34 @@
       localStorage.removeItem(IGNORE_KEY());
       localStorage.removeItem(PENALTY_KEY());
       log('warn',`Cleared model “${getModelName()}” + its calibration & ignore/penalty settings.`);
+    }
+
+    /* List & select models */
+    const NEW_MODEL_VALUE = '__NEW__';
+    function listModelNames(){
+      const names = [];
+      for (let i=0;i<localStorage.length;i++){
+        const k = localStorage.key(i);
+        if (k && k.startsWith('cryModelV1_')) names.push(k.replace('cryModelV1_',''));
+      }
+      if (!names.includes('default')) names.push('default');
+      names.sort((a,b)=>a.localeCompare(b));
+      return names;
+    }
+    function refreshModelSelect(activeName){
+      const sel = els.MODEL_SELECT;
+      if (!sel) return;
+      const names = listModelNames();
+      sel.innerHTML = '';
+      for (const n of names){
+        const opt = document.createElement('option');
+        opt.value = n; opt.textContent = n;
+        sel.appendChild(opt);
+      }
+      const optNew = document.createElement('option');
+      optNew.value = NEW_MODEL_VALUE; optNew.textContent = 'New…';
+      sel.appendChild(optNew);
+      sel.value = names.includes(activeName) ? activeName : (localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default');
     }
 
     /* ========= Ignore / Penalty ========= */
@@ -666,7 +700,7 @@
       els.HALF_LIFE_S.value      = 3600;
       els.MAX_RESULTS.value      = 25;
       els.IGNORE_CLASSES.value   = 'Silence, Inside, Outside, Vehicle, Noise';
-      els.PENALTY_MAP.value      = 'Silence:-0.45, White noise:-0.2';
+      els.PENALTY_MAP.value      = 'Silence:-0.01, White noise:-0.01';
       localStorage.setItem(IGNORE_KEY(), els.IGNORE_CLASSES.value);
       localStorage.setItem(PENALTY_KEY(), els.PENALTY_MAP.value);
 
@@ -738,136 +772,147 @@
       thrOn: 0.35, thrOff: 0.25,
       frameCount: 0, asmLastLogTs: 0,
       calActive: false, calVals: [], calTimerId: null, scoreLastLogTs: 0,
-      calCountdownId: null
+      calCountdownId: null,
+      hopSec: 0.48,
+      chartWindowSec: 30,
+      chartCap: 0
     };
 
-    // Local time label
-    function fmtTime(ms){
-      return new Date(ms).toLocaleTimeString(undefined, { hour12:false });
+    /* ====== Time-windowed chart helpers ====== */
+    function hhmmss(tMs){
+      const d = new Date(tMs);
+      return d.toLocaleTimeString([], { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
     }
-
-    // Build fixed-size right-aligned buffers for the rolling window
-    function rebuildChartBuffers(){
-      const hopS = Number(els.HOP_S.value) || 0.48;
-      const winS = Math.max(5, Number(els.CHART_WINDOW_S?.value) || Number(els.CHART_WINDOW_S_SETTINGS?.value) || 30);
-      const N = Math.max(10, Math.round(winS / hopS));
-      const now = Date.now();
-
-      state.labels   = new Array(N);
-      state.fusedRaw = new Array(N).fill(null);
-      state.fusedSm  = new Array(N).fill(null);
-      for (let i=0;i<N;i++){
-        const t = now - (N - 1 - i) * hopS * 1000;
-        state.labels[i] = fmtTime(t);
-      }
-      state.chartWindowSec = winS;
-      return N;
+    function computeChartCap(){
+      const cap = Math.max(10, Math.round(state.chartWindowSec / Math.max(0.01, state.hopSec)));
+      return cap;
+    }
+    function initChartBuffers(){
+      state.chartCap = computeChartCap();
+      state.labels   = new Array(state.chartCap).fill('');
+      state.fusedRaw = new Array(state.chartCap).fill(null);
+      state.fusedSm  = new Array(state.chartCap).fill(null);
     }
 
     function setupChart(){
-      const N = rebuildChartBuffers();
       state.chart?.destroy?.();
       const ctx = els.chart.getContext('2d');
-
+      initChartBuffers();
       state.chart = new Chart(ctx, {
-        type: 'bar', /* bars for raw */
-        data: { labels: state.labels, datasets: [
-          { label:'fused(raw)', data:[...state.fusedRaw], borderWidth:0, pointRadius:0, barPercentage:1.0, categoryPercentage:1.0 },
-          { label:'fused(EMA)', data:[...state.fusedSm], borderWidth:2, pointRadius:0, tension:0.15, type:'line' },
-          { label:'thr ON',     data:new Array(N).fill(state.thrOn),  borderWidth:1, pointRadius:0, borderDash:[6,4], type:'line' },
-          { label:'thr OFF',    data:new Array(N).fill(state.thrOff), borderWidth:1, pointRadius:0, borderDash:[2,2], type:'line' },
-        ]},
+        type: 'bar',
+        data: {
+          labels: state.labels,
+          datasets: [
+            { label:'fused(raw)', data: state.fusedRaw, type:'bar', borderWidth:0, pointRadius:0, barPercentage:1.0, categoryPercentage:1.0, backgroundColor:'rgba(96,165,250,0.55)' },
+            { label:'fused(EMA)', data: state.fusedSm, type:'line', borderWidth:2, pointRadius:0, tension:0.15, borderColor:'rgba(239,68,68,0.95)', spanGaps:true },
+            { label:'thr ON',  data:new Array(state.chartCap).fill(state.thrOn), type:'line', borderWidth:1, pointRadius:0, borderDash:[6,4],  borderColor:'rgba(153,27,27,1)', spanGaps:true },
+            { label:'thr OFF', data:new Array(state.chartCap).fill(state.thrOff), type:'line', borderWidth:1, pointRadius:0, borderDash:[2,2],  borderColor:'rgba(34,197,94,1)', spanGaps:true }
+          ]
+        },
         options: {
-          animation:false,
-          plugins:{ legend:{ display:false } },
-          scales:{
-            x:{ title:{display:true, text:'time (local)'}, ticks:{ maxRotation:0, autoSkip:true } },
-            y:{ title:{display:true, text:'score'}, min:0, max:1.2, grid:{ color:'rgba(255,255,255,0.08)' } }
-          }
+          responsive: true, maintainAspectRatio: false, animation:false, plugins:{ legend:{ display:false } },
+          scales:{ x:{ title:{display:true, text:'time (local)'}, ticks:{ maxRotation:0, autoSkip:true } },
+                  y:{ title:{display:true, text:'score'}, min:0, max:1.2, grid:{ color:'rgba(255,255,255,0.08)' } } }
         }
       });
     }
 
-    function pushChart(raw, sm){
-      const now = Date.now();
-
-      // slide fixed window left, append new point on the right
-      state.labels.shift();   state.labels.push(fmtTime(now));
+    function pushChart(nowMs, raw, sm){
+      const capNow = computeChartCap();
+      if (capNow !== state.chartCap) { setupChart(); }
       state.fusedRaw.shift(); state.fusedRaw.push(raw);
       state.fusedSm.shift();  state.fusedSm.push(sm);
-
-      state.chart.data.labels = state.labels;
-      state.chart.data.datasets[0].data = state.fusedRaw;                    // bars
-      state.chart.data.datasets[1].data = state.fusedSm;                     // line
-      state.chart.data.datasets[2].data = new Array(state.labels.length).fill(state.thrOn);
-      state.chart.data.datasets[3].data = new Array(state.labels.length).fill(state.thrOff);
-
-      const all = state.fusedRaw.concat(state.fusedSm, [state.thrOn, state.thrOff]).filter(v => v != null);
-      const ymax = all.length ? Math.max(...all) : 1;
-      state.chart.options.scales.y.max = Math.max(0.6, Math.min(1.5, ymax + 0.05));
-
+      const dt = state.hopSec * 1000;
+      for (let i=0;i<state.chartCap;i++){
+        const t = nowMs - (state.chartCap - 1 - i) * dt;
+        state.labels[i] = hhmmss(t);
+      }
+      state.chart.data.datasets[2].data = new Array(state.chartCap).fill(state.thrOn);
+      state.chart.data.datasets[3].data = new Array(state.chartCap).fill(state.thrOff);
+      state.chart.data.labels = state.labels.slice();
+      state.chart.data.datasets[0].data = state.fusedRaw.slice();
+      state.chart.data.datasets[1].data = state.fusedSm.slice();
+      const nums = [...state.fusedRaw, ...state.fusedSm].filter(v => typeof v === 'number' && isFinite(v));
+      const ymax = nums.length ? Math.max(...nums, state.thrOn, state.thrOff) + 0.05 : 1.0;
+      state.chart.options.scales.y.max = Math.max(0.6, Math.min(1.5, ymax));
       state.chart.update();
     }
+
+    /* ========= Live bars show/hide ========= */
+    function showLiveBars(){
+      if (els.cardLiveBars && els.cardLiveBars.style.display === 'none') {
+        els.cardLiveBars.style.display = '';
+        setTimeout(()=>{ state.barChart?.resize?.(); }, 0);
+      }
+    }
+    function hideLiveBars(){ if (els.cardLiveBars) els.cardLiveBars.style.display = 'none'; }
 
     function setupBars(){
       if (!state.barChart && els.bars) {
         state.barChart = new Chart(els.bars.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{ label: 'score', data: [], borderWidth: 1, backgroundColor: [], borderColor: [] }] },
-          options: { indexAxis: 'y', animation: false, plugins: { legend: { display:false } },
-            scales: { x: { min: 0, max: 1, title: { display:true, text:'score' } }, y: { ticks: { autoSkip: false } } } }
+          data: { labels: [], datasets: [{ label: 'score', data: [], borderWidth: 1, backgroundColor: [], borderColor: [], barThickness: 12, maxBarThickness: 14, categoryPercentage: 0.55, barPercentage: 0.9 }]},
+          options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display:false } },
+            scales: { x: { min: 0, max: 1, title: { display:true, text:'score' }, ticks: { font: { size: 11 } } },
+                      y: { ticks: { autoSkip: false, font: { size: 11 } } } }
+          }
         });
       }
       if (!state.barDynW && els.barsDynW) {
         state.barDynW = new Chart(els.barsDynW.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
-          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{enabled: true} },
-            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
+          data: { labels: [], datasets: [{ label:'weight', data: [], borderWidth:1, barThickness:10, maxBarThickness:12, categoryPercentage:0.5, barPercentage:0.9 }]},
+          options: {
+            indexAxis:'y', responsive:true, maintainAspectRatio:false, animation:false,
+            plugins:{ legend:{display:false}, pctLabel:{enabled: true, font:'11px system-ui', color:'#bbb'} },
+            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}, ticks:{ font:{ size:11 } } }, y:{ ticks:{ autoSkip:false, font:{ size:11 } } } }
+          }
         });
       }
       if (!state.barSavedW && els.barsSavedW) {
         state.barSavedW = new Chart(els.barsSavedW.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
-          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{enabled: true} },
-            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
+          data: { labels: [], datasets: [{ label:'weight', data: [], borderWidth:1, barThickness:10, maxBarThickness:12, categoryPercentage:0.5, barPercentage:0.9 }]},
+          options: {
+            indexAxis:'y', responsive:true, maintainAspectRatio:false, animation:false,
+            plugins:{ legend:{display:false}, pctLabel:{enabled: true, font:'11px system-ui', color:'#bbb'} },
+            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}, ticks:{ font:{ size:11 } } }, y:{ ticks:{ autoSkip:false, font:{ size:11 } } } }
+          }
         });
       }
     }
     function clearTopBars(){
-      if (!state.barChart) return;
+      if (!state.barChart) { hideLiveBars(); return; }
       state.barChart.data.labels = [];
       state.barChart.data.datasets[0].data = [];
       state.barChart.data.datasets[0].backgroundColor = [];
       state.barChart.data.datasets[0].borderColor = [];
       state.barChart.update();
+      hideLiveBars();
     }
     function updateTopBars(cats){
       if (!els.bars) return;
       setupBars();
       const K = Math.max(1, Number(els.TOP_K.value) || 6);
       const sorted = [...cats].sort((a,b)=> (b.score||0)-(a.score||0));
-
       const display = [];
       let kept = 0, i = 0;
       while (i < sorted.length && kept < K) {
-        const c = sorted[i++];
-        const excluded = shouldIgnore(c.categoryName);
+        const c = sorted[i++]; const excluded = shouldIgnore(c.categoryName);
         display.push({ name: c.categoryName || '(unnamed)', v: c.score || 0, excluded });
         if (!excluded) kept++;
       }
-
       const labels = display.map(d => d.name);
       const values = display.map(d => d.v);
       const bg = display.map(d => d.excluded ? 'rgba(107,114,128,0.85)' : 'rgba(96,165,250,0.85)');
       const bd = display.map(d => d.excluded ? 'rgba(75,85,99,1)' : 'rgba(59,130,246,1)');
-
       state.barChart.data.labels = labels;
       state.barChart.data.datasets[0].data = values;
       state.barChart.data.datasets[0].backgroundColor = bg;
       state.barChart.data.datasets[0].borderColor = bd;
       state.barChart.update();
+      if (labels.length > 0) showLiveBars();
     }
     function setWeightsChart(chart, weightsDict){
       if (!chart) return;
@@ -891,23 +936,19 @@
         state.perClassEma.set(name, emaStep(prev, c.score || 0, a));
       }
       ensurePerClassEma(weights);
-
       let fused = 0;
       for (const [name, w] of Object.entries(weights || {})) {
         fused += (w || 0) * (state.perClassEma.get(name) || 0);
       }
-
       const pmap = getPenaltyMap();
       if (Object.keys(pmap).length) {
         for (const [tok, pen] of Object.entries(pmap)) {
-          const token = String(tok || '').toLowerCase();
-          if (!token) continue;
+          const token = String(tok || '').toLowerCase(); if (!token) continue;
           for (const [nm, ema] of state.perClassEma.entries()) {
             if (nm.toLowerCase().includes(token)) fused += (pen || 0) * (ema || 0);
           }
         }
       }
-
       fused = clamp01(fused);
       state.fusedEma = emaStep(state.fusedEma, fused, alphaForTau(dt, Number(els.FUSED_EMA_TAU_S.value) || 0.8));
       return { raw: fused, sm: state.fusedEma };
@@ -918,33 +959,113 @@
       else { if (sm >= state.thrOn) { state.alertUntil = nowMs + hold; return true; } return false; }
     }
 
-    /* ========= Quiet calibration (SYNCED controls) ========= */
-    function clampCalDur(v){
-      const n = Math.round(Number(v) || 20);
-      return Math.max(5, Math.min(120, n));
+    /* ========= Threshold slider helpers ========= */
+    function setThrUI() {
+      els.THR_OFF_SLIDER.value = String(state.thrOff.toFixed(2));
+      els.THR_ON_SLIDER.value  = String(state.thrOn.toFixed(2));
+      els.THR_OFF_LABEL.textContent = state.thrOff.toFixed(2);
+      els.THR_ON_LABEL.textContent  = state.thrOn.toFixed(2);
     }
-    function setCalDur(v){
-      const val = clampCalDur(v);
-      if (els.CAL_DUR_SLIDER)    els.CAL_DUR_SLIDER.value = val;
-      if (els.CAL_SEC_SETTINGS)  els.CAL_SEC_SETTINGS.value = val;
-      if (els.CAL_DUR_LABEL)     els.CAL_DUR_LABEL.textContent = `${val}s`;
-      return val;
+    function enableThrSliders(on) { els.THR_OFF_SLIDER.disabled = !on; els.THR_ON_SLIDER.disabled  = !on; }
+    function persistThresholds(extra={}) {
+      const prev = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null') || {};
+      const payload = { ...prev, version: 1, thr_on: state.thrOn, thr_off: state.thrOff, at: new Date().toISOString(), ...extra };
+      localStorage.setItem(CALIB_KEY(), JSON.stringify(payload));
+      log('ok','Saved thresholds.', `<div class="log-code">${JSON.stringify(payload, null, 2)}</div>`);
     }
-    function syncCalDurFromSlider(){ setCalDur(els.CAL_DUR_SLIDER.value); }
-    function syncCalDurFromSettings(){ setCalDur(els.CAL_SEC_SETTINGS.value); }
-    
-    /* Keep both inputs mirrored while editing */
-    els.CAL_DUR_SLIDER.addEventListener('input',  syncCalDurFromSlider);
-    els.CAL_DUR_SLIDER.addEventListener('change', syncCalDurFromSlider);
-    els.CAL_SEC_SETTINGS.addEventListener('input',  syncCalDurFromSettings);
-    els.CAL_SEC_SETTINGS.addEventListener('change', syncCalDurFromSettings);
-    
-    /* Keep compatibility with resetDefaults(), which calls updateCalDurLabel() */
-    function updateCalDurLabel(){ setCalDur(els.CAL_DUR_SLIDER.value); }
-    
-    /* Initial sync (prefer slider if present, else settings, else 20s) */
-    setCalDur(Number(els.CAL_DUR_SLIDER.value) || Number(els.CAL_SEC_SETTINGS.value) || 20);
 
+    els.THR_OFF_SLIDER.addEventListener('input', () => {
+      state.thrOff = clamp01(parseFloat(els.THR_OFF_SLIDER.value) || 0);
+      if (state.thrOn < state.thrOff) state.thrOn = state.thrOff;
+      setThrUI();
+    });
+    els.THR_ON_SLIDER.addEventListener('input', () => {
+      state.thrOn = clamp01(parseFloat(els.THR_ON_SLIDER.value) || 0);
+      if (state.thrOn < state.thrOff) state.thrOff = state.thrOn;
+      setThrUI();
+    });
+    ['change','blur'].forEach(evt => {
+      els.THR_OFF_SLIDER.addEventListener(evt, () => { if (!state.calActive) persistThresholds(); });
+      els.THR_ON_SLIDER.addEventListener(evt,  () => { if (!state.calActive) persistThresholds(); });
+    });
+
+    function updateCalLiveThresholds() {
+      if (!state.calActive || state.calVals.length < 2) return;
+      const offDelta = Number(els.ALERT_OFF_DELTA.value) || 0.10;
+      const p99 = quantile(state.calVals, 0.995);
+      const thr_off = Math.min(0.95, p99 + 0.02);
+      const thr_on  = Math.min(0.99, thr_off + offDelta);
+      state.thrOff = thr_off; state.thrOn = Math.max(thr_on, state.thrOff);
+      setThrUI();
+    }
+
+    /* ========= Quiet calibration ========= */
+    function updateCalDurLabel(){ els.CAL_DUR_SLIDER.textContent = els.CAL_DUR_SLIDER.value; els.CAL_DUR_LABEL.textContent = `${els.CAL_DUR_SLIDER.value}s`; }
+    els.CAL_DUR_SLIDER.addEventListener('input', updateCalDurLabel);
+    updateCalDurLabel();
+
+    // NEW: common categories handler (used by both local classify and DC stream)
+    function onCategories(cats, mode) {
+      const HOP_S = Number(els.HOP_S.value)||0.48;
+      if (state.calActive) { updateTopBars(cats); }
+
+      if (LOGS.enable.checked) {
+        const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
+        const items = [...cats].sort((a,b)=>(b.score||0)-(a.score||0)).slice(0, LOGS.all.checked ? cats.length : topN)
+                          .map(c => `${c.categoryName || '(unnamed)'}:${(c.score||0).toFixed(3)}`);
+        const msg  = `Inf#${++state.frameCount} [${mode}] cats=${cats.length}`;
+        log('inf', msg, `<div class="log-code"><strong>Top ${LOGS.all.checked ? cats.length : topN}</strong>:\n${items.join('\n')}</div>`, { mode, frame: state.frameCount, cats });
+      }
+
+      const trainingActive = (mode === 'train' || mode === 'train_file' || mode === 'train_folder') && (state.mode === mode);
+
+      if (trainingActive) {
+        updateTopBars(cats);
+        const model = loadModel();
+        model.halfLifeSec = Number(els.HALF_LIFE_S.value) || 3600;
+        model.kPrior = Number(els.K_PRIOR.value) || 50;
+        model.K = Number(els.TOP_K.value) || 6;
+        updateStats(model, cats, HOP_S);
+        saveModel(model);
+        setWeightsChart(state.barDynW, computeWeightsPreview(model));
+      } else if (mode === 'detect' && state.mode === 'detect') {
+        updateTopBars(cats);
+        const model = loadModel();
+        model.K = Number(els.TOP_K.value) || model.K || 6;
+        const weights = model.weights || {"Baby cry, infant cry":1};
+        const { raw, sm } = fusedScoreFromCategories(cats, weights, HOP_S);
+
+        const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+        if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; }
+        else { state.thrOn = 0.35; state.thrOff = state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1); }
+
+        pushChart(Date.now(), raw, sm);
+
+        if (state.calActive) {
+          state.calVals.push(sm);
+          updateCalLiveThresholds();
+        }
+
+        if (LOGS.enable.checked) {
+          const nowTs = performance.now();
+          if (nowTs - state.scoreLastLogTs >= SCORE_LOG_MS) {
+            const nextOn = (() => {
+              const hold = Number(els.ALERT_HOLD_MS.value) || 0;
+              if (state.alertOn) return (nowTs < state.alertUntil) ? true : (sm >= state.thrOff);
+              return sm >= state.thrOn;
+            })();
+            const tag = state.calActive ? 'cal' : 'run';
+            log('inf', `[${tag}] score raw=${raw.toFixed(3)} sm=${sm.toFixed(3)} | thrOn=${state.thrOn.toFixed(3)} thrOff=${state.thrOff.toFixed(3)} | alert=${nextOn ? 'ON' : 'off'}`);
+            state.scoreLastLogTs = nowTs;
+          }
+        }
+
+        const on = applyHysteresis(sm, performance.now());
+        if (on && !state.alertOn) { log('ok','ALERT ON (cry detected).'); }
+        if (!on && state.alertOn) { log('warn','ALERT OFF.'); }
+        state.alertOn = on;
+      }
+    }
 
     async function quietCalibrate(){
       if (state.calActive) return;
@@ -955,8 +1076,10 @@
       state.calActive = true;
       state.calVals = [];
       setStatus(`Quiet calibration for ${durSec}s… Please keep things quiet.`);
+      enableThrSliders(false);
 
-      await startMic('detect');
+      await startInputForMode('detect'); // Mic or Sender
+      setStatus(`Quiet calibration for ${durSec}s… Please keep things quiet.`);
       setPill('calibrating', true);
 
       const startedAt = performance.now();
@@ -981,6 +1104,8 @@
           const thr_off = Math.max(0, thr_on - offDelta);
           localStorage.setItem(CALIB_KEY(), JSON.stringify({ version: 1, thr_on, thr_off, n: 0, at: new Date().toISOString() }));
           state.thrOn = thr_on; state.thrOff = thr_off;
+          setThrUI();
+          enableThrSliders(true);
           await stopAll();
           setPill('idle', false);
           log('warn', 'Calibration captured 0 frames; using defaults.');
@@ -990,14 +1115,18 @@
         const p99 = quantile(vals, 0.995);
         const thr_off = Math.min(0.95, p99 + 0.02);
         const thr_on  = Math.min(0.99, thr_off + offDelta);
+        state.thrOff = thr_off; state.thrOn = thr_on;
+
         const payload = { version: 1, thr_on, thr_off, n: vals.length, p99, off_delta: offDelta, dur_s: durSec, at: new Date().toISOString() };
         localStorage.setItem(CALIB_KEY(), JSON.stringify(payload));
-        state.thrOn = thr_on; state.thrOff = thr_off;
         log('ok', 'Quiet calibration complete.', `<div class="log-code">${JSON.stringify(payload, null, 2)}</div>`);
+
+        setThrUI();
+        enableThrSliders(true);
 
         await stopAll();
         setPill('idle', false);
-        setStatus('Calibration done. Start detection to use the new thresholds.');
+        setStatus('Calibration done. Adjust thresholds if needed, then start detection.');
       }, durSec * 1000);
     }
     function stopCalibrationEarly(){
@@ -1006,8 +1135,8 @@
       if (state.calTimerId) { clearTimeout(state.calTimerId); state.calTimerId = null; }
       if (state.calCountdownId) { clearInterval(state.calCountdownId); state.calCountdownId = null; }
       els.btnCal.disabled = false; els.btnCal.textContent = 'Start';
+      enableThrSliders(true);
       setPill('idle', false);
-      setStatus('Calibration stopped.');
       stopAll();
     }
 
@@ -1019,6 +1148,7 @@
 
       const SR_TARGET = Number(els.SR_TARGET.value)||16000;
       const HOP_S = Number(els.HOP_S.value)||0.48;
+      state.hopSec = HOP_S;
       const MAX_RESULTS = Number(els.MAX_RESULTS.value)||25;
       const task = await ensureAudioTask(MAX_RESULTS);
 
@@ -1043,64 +1173,7 @@
         const res = await classifyMP(task, w, SR_TARGET);
         const cats = extractCategories(res);
 
-        if (state.calActive) { updateTopBars(cats); }
-
-        if (LOGS.enable.checked) {
-          const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
-          const items = [...cats].sort((a,b)=>(b.score||0)-(a.score||0)).slice(0, LOGS.all.checked ? cats.length : topN)
-                                .map(c => `${c.categoryName || '(unnamed)'}:${(c.score||0).toFixed(3)}`);
-          const msg  = `Inf#${++state.frameCount} [${mode}] cats=${cats.length}`;
-          log('inf', msg, `<div class="log-code"><strong>Top ${LOGS.all.checked ? cats.length : topN}</strong>:\n${items.join('\n')}</div>`, { mode, frame: state.frameCount, cats });
-          if (!res) log('warn', 'Inference returned null result (classify failed).');
-          else if (!cats.length) log('warn', 'Inference returned 0 categories.');
-        }
-
-        const trainingActive = (mode === 'train' || mode === 'train_file' || mode === 'train_folder') && (state.mode === mode);
-
-        if (trainingActive) {
-          updateTopBars(cats);
-          const model = loadModel();
-          model.halfLifeSec = Number(els.HALF_LIFE_S.value) || 3600;
-          model.kPrior = Number(els.K_PRIOR.value) || 50;
-          model.K = Number(els.TOP_K.value) || 6;
-          updateStats(model, cats, HOP_S);
-          saveModel(model);
-          setWeightsChart(state.barDynW, computeWeightsPreview(model));
-        } else if (mode === 'detect' && state.mode === 'detect') {
-          updateTopBars(cats);
-          const model = loadModel();
-          model.K = Number(els.TOP_K.value) || model.K || 6;
-          const weights = model.weights || {"Baby cry, infant cry":1};
-          const { raw, sm } = fusedScoreFromCategories(cats, weights, HOP_S);
-
-          const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
-          if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; }
-          else { state.thrOn = 0.35; state.thrOff = state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1); }
-
-          pushChart(raw, sm);
-
-          if (state.calActive) { state.calVals.push(sm); }
-
-          if (LOGS.enable.checked) {
-            const nowTs = performance.now();
-            if (nowTs - state.scoreLastLogTs >= SCORE_LOG_MS) {
-              const nextOn = (() => {
-                const hold = Number(els.ALERT_HOLD_MS.value) || 0;
-                if (state.alertOn) return (nowTs < state.alertUntil) ? true : (sm >= state.thrOff);
-                return sm >= state.thrOn;
-              })();
-              const tag = state.calActive ? 'cal' : 'run';
-              log('inf', `[${tag}] score raw=${raw.toFixed(3)} sm=${sm.toFixed(3)} | thrOn=${state.thrOn.toFixed(3)} thrOff=${state.thrOff.toFixed(3)} | alert=${nextOn ? 'ON' : 'off'}`);
-              state.scoreLastLogTs = nowTs;
-            }
-          }
-
-          const on = applyHysteresis(sm, performance.now());
-          if (on && !state.alertOn) { setPill('CRYING', true); log('ok','ALERT ON (cry detected).'); }
-          if (!on && state.alertOn) { setPill('idle', false); log('warn','ALERT OFF.'); }
-          state.alertOn = on;
-        }
-
+        onCategories(cats, mode);
         state.lastPos += hop;
         if (state.lastPos > fram * 4) {
           const cut = state.lastPos - fram;
@@ -1114,7 +1187,8 @@
     async function startMic(mode) {
       await stopFolderTraining();
       await stopFilePlayback();
-      await stopAll();
+      await stopRemoteAudioTap(); // ensure remote tap is off
+      await stopMicOnly();
       setStatus(mode==='detect' ? 'Starting microphone (detect)…' : 'Starting microphone (train)…');
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
       state.micCtx = ctx;
@@ -1130,18 +1204,18 @@
       state.srcNode = src; state.sinkNode = sink;
 
       try {
-        const workletCode =
+        const Code =
           'class Tap extends AudioWorkletProcessor {' +
           '  process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }' +
           '}' +
           'registerProcessor("tap", Tap);';
-        const url = URL.createObjectURL(new Blob([workletCode], { type: 'application/javascript; charset=utf-8' }));
+        const url = URL.createObjectURL(new Blob([Code], { type: 'application/javascript; charset=utf-8' }));
         await ctx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
         const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
         node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate, getParams(), mode);
         src.connect(node).connect(sink);
         state.procNode = node;
-        setStatus('AudioWorklet active @ '+ctx.sampleRate+' Hz');
+        log('info', 'AudioWorklet active @ '+ctx.sampleRate+' Hz');
       } catch (e) {
         const node = ctx.createScriptProcessor(4096,1,1);
         node.onaudioprocess = (ev)=> classifyChunk(new Float32Array(ev.inputBuffer.getChannelData(0)), ctx.sampleRate, getParams(), mode);
@@ -1149,26 +1223,34 @@
         state.procNode = node;
         setStatus('ScriptProcessor active @ '+ctx.sampleRate+' Hz');
         log('warn', 'AudioWorklet fell back: ' + (e?.message || e));
+        log('info', 'ScriptProcessor active @ '+ctx.sampleRate+' Hz');
       }
       state.running = true;
       state.mode = mode;
       setPill(mode==='detect' ? 'idle' : 'training', mode!=='detect');
+      setupChart();
       log('ok', `Mic started in ${mode.toUpperCase()} mode.`);
+      if (mode === 'train') setStatus('Training started (mic).');
+      else if (mode === 'detect' && !state.calActive) setStatus('Detection started (mic).');
     }
 
-    async function stopAll(){
-      const wasRunning = state.running || state.mode!=='idle';
-      state.running=false; state.mode='idle';
+    async function stopMicOnly(){
       try { state.procNode?.disconnect(); } catch {}
       try { state.srcNode?.disconnect(); } catch {}
       try { state.sinkNode?.disconnect(); } catch {}
       try { state.micCtx && state.micCtx.state!=='closed' && state.micCtx.close(); } catch {}
       state.procNode=null; state.srcNode=null; state.sinkNode=null; state.micCtx=null;
+    }
+
+    async function stopAll(){
+      const wasRunning = state.running || state.mode!=='idle';
+      state.running=false; state.mode='idle';
+      await stopMicOnly();
+      await stopRemoteAudioTap();
       state.ring=new Float32Array(0); state.lastPos=0; state.perClassEma.clear(); state.fusedEma=0; state.frameCount=0;
-      state.asmLastLogTs = 0;
-      state.scoreLastLogTs = 0;
+      state.asmLastLogTs = 0; state.scoreLastLogTs = 0;
       setPill('idle', false); setRMS(0);
-      clearTopBars();
+      clearTopBars(); setupChart();
       if (wasRunning) log('warn','Stopped audio graph.');
     }
 
@@ -1229,6 +1311,7 @@
 
       state.mode = 'train_file';
       setPill('training', true);
+      setStatus(`Training started (file): ${file.name}`);
       log('ok', `Training started on file: ${file.name}`, `<span class="chip">${(file.size/1024/1024).toFixed(2)} MB</span>`);
 
       els.trainAudio.onended = async () => {
@@ -1247,6 +1330,9 @@
       els.trainAudio.onended = null;
       try { if (trainCtx && trainCtx.state !== 'suspended') await trainCtx.suspend(); } catch {}
       clearTopBars();
+      setPill('idle', false);
+      state.mode = 'idle';
+      setStatus('Training stopped.');
     }
 
     /* ========= Folder training ========= */
@@ -1284,6 +1370,7 @@
       folderIdx = 0;
       state.mode = 'train_folder';
       setPill('training', true);
+      setStatus(`Training started (folder): ${folderFiles.length} file(s).`);
       log('ok', `Folder training queued: ${folderFiles.length} file(s) from “${describeCommonRoot(folderFiles)}”.`);
       await trainNextFileInFolder();
     }
@@ -1317,7 +1404,10 @@
       setPill('idle', false);
       state.mode = 'idle';
       clearTopBars();
-      if (!silent) log('warn','Stopped folder training.');
+      if (!silent) {
+        log('warn','Stopped folder training.');
+        setStatus('Training stopped.');
+      }
     }
 
     /* ========= Params & UI wiring ========= */
@@ -1331,35 +1421,83 @@
     }
 
     // Detect / Calibrate
-    els.btnStartDetect.onclick = () => startMic('detect');
+    els.btnStartDetect.onclick = () => startDetectBasedOnSource();
     els.btnStop.onclick = async () => { await stopFolderTraining(true); await stopFilePlayback(); await stopAll(); };
     els.btnCal.onclick = () => quietCalibrate();
     els.btnCalStop.onclick = () => stopCalibrationEarly();
 
-    // Training via MIC
-    els.btnStartTrainMic.onclick = () => startMic('train');
-    els.btnStopTrainMic.onclick = () => stopAll();
+    // Training source UI
+    function updateTrainingSourceUI(){
+      const v = els.TRAIN_SRC.value;
+      const showFile   = (v === 'file');
+      const showFolder = (v === 'folder');
 
-    // Training via FILE
-    els.btnTrainFile.onclick = async () => {
+      els.btnChooseFile.style.display   = showFile ? '' : 'none';
+      els.btnChooseFolder.style.display = showFolder ? '' : 'none';
+
+      if (v === 'mic') els.trainInfo.textContent = 'Training from microphone.';
+      if (v === 'file') els.trainInfo.textContent = els.fileInp.files?.[0] ? `Selected file: ${els.fileInp.files[0].name}` : 'Choose a file to train.';
+      if (v === 'folder') {
+        const count = folderFiles.length;
+        els.trainInfo.textContent = count ? `${count} audio file(s) selected from “${describeCommonRoot(folderFiles)}”.` : 'Choose a folder with audio files.';
+      }
+      if (v === 'sender') {
+        els.trainInfo.textContent = `Sender mode. Room “${room}”. Waiting for stream or scores…`;
+        ensureCoreStarted();
+      }
+    }
+    els.TRAIN_SRC.addEventListener('change', updateTrainingSourceUI);
+    updateTrainingSourceUI();
+
+    // Choose buttons
+    els.btnChooseFile.onclick = () => els.fileInp.click();
+    els.fileInp.onchange = () => {
       const f = els.fileInp.files?.[0];
-      if (!f) { setStatus('Pick an audio file first'); return; }
-      await startTrainingOnFile(f);
+      els.trainInfo.textContent = f ? `Selected file: ${f.name}` : 'Choose a file to train.';
+      log('info', els.trainInfo.textContent);
     };
-    els.btnStopTrainFile.onclick = () => stopFilePlayback();
 
-    // Folder training UI
     els.btnChooseFolder.onclick = () => els.folderInp.click();
     els.folderInp.onchange = () => {
       folderFiles = pickAudioFilesFromList(els.folderInp.files);
       const root = describeCommonRoot(folderFiles);
-      els.folderInfo.textContent = folderFiles.length
+      els.trainInfo.textContent = folderFiles.length
         ? `${folderFiles.length} audio file(s) selected from “${root}”.`
         : 'No audio files found in the chosen folder.';
-      log('info', els.folderInfo.textContent);
+      log('info', els.trainInfo.textContent);
     };
-    els.btnTrainFolder.onclick = () => startFolderTraining();
-    els.btnStopTrainFolder.onclick = () => stopFolderTraining();
+
+    // Training Start/Stop (based on source)
+    els.btnTrainStart.onclick = async () => {
+      const src = els.TRAIN_SRC.value;
+      if (src === 'mic') {
+        await startMic('train');
+      } else if (src === 'file') {
+        const f = els.fileInp.files?.[0];
+        if (!f) { els.btnChooseFile.click(); setStatus('Pick an audio file first'); return; }
+        await startTrainingOnFile(f);
+      } else if (src === 'folder') {
+        if (!folderFiles.length) { els.btnChooseFolder.click(); setStatus('Pick a folder first'); return; }
+        await startFolderTraining();
+      } else if (src === 'sender') {
+        ensureCoreStarted();
+        state.mode = 'train';
+        setPill('training', true);
+        setStatus('Training started (sender).');
+        // If sender selected "receiver" path, we classify the remote audio here:
+        if (wrtc.where === 'receiver' && wrtc.stream) {
+          await startRemoteAudioTap('train');
+        }
+      }
+    };
+    els.btnTrainStop.onclick = async () => {
+      const src = els.TRAIN_SRC.value;
+      if (src === 'mic') await stopAll();
+      else if (src === 'file') await stopFilePlayback();
+      else if (src === 'folder') await stopFolderTraining();
+      else if (src === 'sender') { await stopAll(); }
+      setStatus('Training stopped');
+    };
 
     // Recompute / Clear / Export
     els.btnRecompute.onclick = () => {
@@ -1369,6 +1507,7 @@
       m.halfLifeSec = Number(els.HALF_LIFE_S.value)||m.halfLifeSec||3600;
       const w = recomputeWeights(m);
       setWeightsChart(state.barSavedW, w);
+      setStatus('Weights recomputed. Model updated.');
     };
     els.btnClear.onclick = () => {
       const name = getModelName();
@@ -1378,6 +1517,7 @@
       setupChart();
       clearTopBars();
       setStatus(`Model “${name}” cleared.`);
+      refreshModelSelect(getModelName());
     };
     els.btnExport.onclick = () => {
       const key = MODEL_KEY();
@@ -1387,27 +1527,37 @@
       log('ok',`Exported cryModel_${getModelName()}.json`);
     };
 
-    // Model name controls
-    els.btnModelUse.onclick = () => {
-      const name = els.MODEL_NAME.value.trim() || 'default';
-      localStorage.setItem('cryActiveModelName', name);
-      setModelName(name);
-      setStatus(`Active model name set to “${name}”. New training/recompute will persist there.`);
-      const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
-      const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
-    };
-    els.btnModelLoad.onclick = () => {
-      const name = els.MODEL_NAME.value.trim() || 'default';
-      setModelName(name);
-      const m = loadModel();
-      setWeightsChart(state.barSavedW, m.weights || {});
-      setWeightsChart(state.barDynW, computeWeightsPreview(m));
-      const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
-      if (calib) log('ok', `Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
-      const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
-      const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
-      setStatus(`Loaded model “${name}”.`);
-    };
+    /* Dropdown behavior */
+    els.MODEL_SELECT.addEventListener('change', () => {
+      const v = els.MODEL_SELECT.value;
+      if (v === NEW_MODEL_VALUE) {
+        const name = (prompt('New model name:', '').trim() || '').replace(/[^\w \-().,]/g,'').trim();
+        if (!name) { refreshModelSelect(getModelName()); return; }
+        const exists = listModelNames().includes(name);
+        setModelName(name);
+        if (!exists) { const m = loadModel(); saveModel(m); log('ok', `Created model “${name}”.`); }
+        else { log('info', `Switched to existing model “${name}”.`); }
+        refreshModelSelect(name);
+        const m2 = loadModel();
+        setWeightsChart(state.barSavedW, m2.weights || {});
+        setWeightsChart(state.barDynW, computeWeightsPreview(m2));
+        const calib2 = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+        if (calib2) { state.thrOn = calib2.thr_on; state.thrOff = calib2.thr_off; setThrUI(); log('ok', `Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib2,null,2)}</div>`); }
+        const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
+        const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
+        setStatus(`Active model set to “${name}”.`);
+      } else {
+        setModelName(v);
+        const m = loadModel();
+        setWeightsChart(state.barSavedW, m.weights || {});
+        setWeightsChart(state.barDynW, computeWeightsPreview(m));
+        const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+        if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; setThrUI(); log('ok', `Loaded calibration for “${v}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`); }
+        const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
+        const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
+        setStatus(`Loaded model “${v}”.`);
+      }
+    });
 
     // Persist knobs + update preview/saved charts
     ['TOP_K','K_PRIOR','HALF_LIFE_S'].forEach(id => {
@@ -1423,10 +1573,24 @@
       });
     });
 
+    // If hop changes, recompute chart window capacity immediately
+    document.getElementById('HOP_S').addEventListener('change', () => {
+      state.hopSec = Number(els.HOP_S.value)||0.48;
+      setupChart();
+    });
+
+    // Chart window control
+    els.CHART_WINDOW_S.addEventListener('change', () => {
+      const v = Math.max(5, Number(els.CHART_WINDOW_S.value) || 30);
+      els.CHART_WINDOW_S.value = String(v);
+      state.chartWindowSec = v;
+      setupChart();
+      log('info', `Chart window set to ${v}s`);
+    });
+
     // Persist ignore/penalty immediately
     ['IGNORE_CLASSES','PENALTY_MAP'].forEach(id=>{
-      const el = document.getElementById(id);
-      if (!el) return;
+      const el = document.getElementById(id); if (!el) return;
       const save = () => {
         const key = (id==='IGNORE_CLASSES') ? IGNORE_KEY() : PENALTY_KEY();
         localStorage.setItem(key, el.value);
@@ -1437,20 +1601,6 @@
       el.addEventListener('blur', save);
     });
 
-    // Chart window controls: keep Settings & inline control in sync
-    function syncChartWindowInputs(val){
-      if (els.CHART_WINDOW_S) els.CHART_WINDOW_S.value = val;
-      if (els.CHART_WINDOW_S_SETTINGS) els.CHART_WINDOW_S_SETTINGS.value = val;
-    }
-    els.CHART_WINDOW_S?.addEventListener('change', () => {
-      syncChartWindowInputs(els.CHART_WINDOW_S.value);
-      setupChart();
-    });
-    els.CHART_WINDOW_S_SETTINGS?.addEventListener('change', () => {
-      syncChartWindowInputs(els.CHART_WINDOW_S_SETTINGS.value);
-      setupChart();
-    });
-
     /* ========= Bars setup ========= */
     function setupAllBars(){
       setupBars();
@@ -1459,24 +1609,160 @@
       setWeightsChart(state.barDynW, computeWeightsPreview(m));
     }
 
+    /* ========= NEW: WebRTC integration ========= */
+    function ensureCoreStarted(){
+      if (wrtc.core) return;
+      wrtc.core = new ReceiverCore({
+        wsEndpoint: WS_ENDPOINT,
+        room,
+        onStatus: (msg) => { log('info', `[RTC] ${msg}`); },
+        onStream: (stream) => {
+          if (EL('remote').srcObject !== stream) {
+            EL('remote').srcObject = stream;
+          }
+          wrtc.stream = stream;
+          log('ok', `[RTC] Remote stream: tracks=${stream.getTracks().map(t=>t.kind).join(',')}`);
+          if (state.mode !== 'idle' && wrtc.audioEnabled && wrtc.where === 'receiver') {
+            startRemoteAudioTap(state.mode).catch(()=>{});
+          }
+        },
+        onIceState: (s) => log('info', `[RTC] ICE: ${s}`),
+        onBye: () => log('warn', '[RTC] bye'),
+        onCreatePC: (pc) => {
+          const ch = pc.createDataChannel('pose');
+          ch.onopen  = () => { log('ok','[RTC] DC open'); try { ch.send(JSON.stringify({ type: 'need-modes' })); } catch{} };
+          ch.onclose = () => log('warn','[RTC] DC close');
+          ch.onerror = (e) => log('err', `[RTC] DC error: ${e?.message||e}`);
+          ch.onmessage = (ev) => {
+            let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+            if (!msg || !msg.type) return;
+
+            if (msg.type === 'audio-mode') {
+              wrtc.audioEnabled = !!msg.enabled;
+              wrtc.where       = msg.where || 'sender';
+              log('info', `[RTC] audio-mode: enabled=${wrtc.audioEnabled} where=${wrtc.where}`);
+              if (!wrtc.audioEnabled) { stopRemoteAudioTap(); }
+              else if (wrtc.where === 'receiver' && wrtc.stream && state.mode !== 'idle') startRemoteAudioTap(state.mode);
+            } else if (msg.type === 'ai-modes' && msg.audio) {
+              wrtc.audioEnabled = !!msg.audio.enabled;
+              wrtc.where       = msg.audio.where || 'sender';
+              log('info', `[RTC] ai-modes: enabled=${wrtc.audioEnabled} where=${wrtc.where}`);
+              if (!wrtc.audioEnabled) { stopRemoteAudioTap(); }
+              else if (wrtc.where === 'receiver' && wrtc.stream && state.mode !== 'idle') startRemoteAudioTap(state.mode);
+            } else if (msg.type === 'audio') {
+              // Categories directly from sender
+              const categories = (msg.categories || []).map(c => ({
+                categoryName: (c.displayName || c.categoryName || '').trim(),
+                score: c.score || 0
+              }));
+              if (els.TRAIN_SRC.value === 'sender') {
+                const mode = state.mode; // 'train' or 'detect'
+                if (mode === 'train' || mode === 'detect') onCategories(categories, mode);
+              }
+            }
+          };
+          wrtc.dc = ch;
+        },
+        onDataChannel: (e) => log('info', `[RTC] inbound DC: ${e.channel?.label}`)
+      });
+      wrtc.core.start().then(()=>{ wrtc.connected = true; log('ok', `[RTC] Connected to room “${room}”.`); }).catch(e => log('err', `[RTC] start error: ${e?.message||e}`));
+    }
+
+    async function startRemoteAudioTap(mode){
+      if (!wrtc.stream) { log('warn','[RTC] No remote stream yet.'); return; }
+      await stopRemoteAudioTap();
+      const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
+      wrtc.ctx = ctx; await ctx.resume().catch(()=>{});
+      const src = ctx.createMediaStreamSource(wrtc.stream);
+      const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
+      wrtc.src = src; wrtc.sink = sink;
+
+      try {
+        const workletURL = URL.createObjectURL(new Blob([`
+          class Tap extends AudioWorkletProcessor {
+            process(inputs) {
+              const i = inputs[0]; if (i && i[0]) this.port.postMessage(i[0].slice(0)); return true;
+            }
+          }
+          registerProcessor('tap', Tap);
+        `], { type: 'application/javascript' }));
+        await ctx.audioWorklet.addModule(workletURL); URL.revokeObjectURL(workletURL);
+        const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
+        node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate, getParams(), mode);
+        src.connect(node).connect(sink);
+        wrtc.node = node;
+        log('info','[RTC] Remote tap (worklet) active.');
+      } catch (e) {
+        const node = ctx.createScriptProcessor(4096,1,1);
+        node.onaudioprocess = (ev)=> classifyChunk(new Float32Array(ev.inputBuffer.getChannelData(0)), ctx.sampleRate, getParams(), mode);
+        src.connect(node).connect(sink);
+        wrtc.node = node;
+        log('warn','[RTC] Worklet failed; using ScriptProcessor.');
+      }
+      state.running = true;
+      state.mode = mode;
+      setupChart();
+      if (mode === 'train') setStatus('Training started (sender audio → local inference).');
+      if (mode === 'detect' && !state.calActive) setStatus('Detection started (sender audio → local inference).');
+    }
+
+    async function stopRemoteAudioTap(){
+      try { wrtc.node?.disconnect?.(); } catch {}
+      try { wrtc.src?.disconnect?.(); } catch {}
+      try { wrtc.sink?.disconnect?.(); } catch {}
+      try { wrtc.ctx && wrtc.ctx.state!=='closed' && wrtc.ctx.close(); } catch {}
+      wrtc.node = null; wrtc.src = null; wrtc.sink = null; wrtc.ctx = null;
+    }
+
+    /* ========= Mode selection helpers ========= */
+    async function startInputForMode(mode){
+      const src = els.TRAIN_SRC.value;
+      if (src === 'mic') return startMic(mode);
+      if (src === 'sender') {
+        ensureCoreStarted();
+        // If sender wants receiver to classify, start tap:
+        if (wrtc.where === 'receiver') await startRemoteAudioTap(mode);
+        state.mode = mode;
+        if (mode === 'detect' && !state.calActive) setStatus('Detection started (sender).');
+        if (mode === 'train') setStatus('Training started (sender).');
+        return;
+      }
+      // file/folder not applicable here
+      setStatus('Select Mic or Sender for this action.');
+    }
+
+    async function startDetectBasedOnSource(){
+      await stopFolderTraining(true);
+      await stopFilePlayback();
+      await startInputForMode('detect');
+      setPill('idle', false);
+    }
+
     /* ========= Boot ========= */
     (function boot(){
-      const name = localStorage.getItem('cryActiveModelName') || 'default';
-      setModelName(name);
+      const active = localStorage.getItem('cryActiveModelName') || 'default';
+      refreshModelSelect(active);
+      setModelName(active);
 
       setupAllBars();
-      if (els.chart.getContext) {
-        syncChartWindowInputs(els.CHART_WINDOW_S?.value || els.CHART_WINDOW_S_SETTINGS?.value || 30);
-        setupChart();
-      }
+      els.chart.getContext && setupChart();
 
       const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
-      if (calib) { state.thrOn=calib.thr_on; state.thrOff=calib.thr_off; log('ok',`Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`); }
+      if (calib) {
+        state.thrOn=calib.thr_on; state.thrOff=calib.thr_off;
+        log('ok',`Loaded calibration for “${getModelName()}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
+      } else {
+        const offDelta = Number(els.ALERT_OFF_DELTA.value) || 0.10;
+        state.thrOn = 0.35; state.thrOff = Math.max(0, state.thrOn - offDelta);
+      }
+      setThrUI();
+      enableThrSliders(true);
 
       const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
       const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
 
-      setStatus('Ready. Train (mic/file/folder) → Recompute Weights → Quiet Calibrate → Start detection.');
+      hideLiveBars();
+      setStatus('Ready. Train (mic/file/folder/sender) → Recompute Weights → Quiet Calibrate → Start detection.');
     })();
   </script>
 </body>
