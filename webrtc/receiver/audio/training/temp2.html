@@ -24,10 +24,28 @@
     .btn-pair .btn { flex:1 1 0; min-width:120px; }
 
     /* Meter & state pill */
+    /* Right-aligned status row (status left, pill hard-right) */
+    .status-row { display:flex; align-items:center; justify-content:space-between; }
     .meter { height:10px; border-radius:8px; background:#0a0a0a; border:1px solid #222; overflow:hidden; }
     .fill { height:100%; width:0%; background:linear-gradient(to right, rgba(96,165,250,.9), rgba(239,68,68,.9)); transition:width 120ms linear; }
-    .pill { display:inline-block; padding:4px 8px; border-radius:999px; border:1px solid #333; font-size:12px; margin-left:6px; }
+    .pill {
+      display:inline-flex; align-items:center; gap:8px;
+      padding:6px 12px; border-radius:999px; border:1px solid #333;
+      font-size:13px; font-weight:700;
+    }
     .pill.on { background:#310000; border-color:#a00; color:#ffb3b3; }
+    
+    /* "Doing something" animation when busy */
+    .pill.busy { position:relative; }
+    .pill.busy::after {
+      content:''; width:8px; height:8px; border-radius:50%;
+      background: currentColor; opacity:.7; margin-left:6px;
+      animation: pillPulse .9s ease-in-out infinite alternate;
+    }
+    @keyframes pillPulse {
+      from { transform: translateX(0) scale(0.8); opacity:.45; }
+      to   { transform: translateX(4px) scale(1);   opacity:1;  }
+    }
 
     /* Carded sections */
     .card { background:#0a0a0a; border:1px solid #171717; border-radius:12px; padding:12px; margin-top:12px; }
@@ -126,7 +144,7 @@
         </div>
       </header>
 
-      <div class="row" style="margin-top:8px;">
+      <div class="row status-row" style="margin-top:8px;">
         <div id="status" class="muted">Booting…</div>
         <div id="statePill" class="pill">idle</div>
       </div>
@@ -439,7 +457,13 @@
     ].map(x => [x, document.getElementById(x)])) )();
 
     function setStatus(s){ els.status.textContent = s; log('info', s); }
-    function setPill(s, on=false){ els.statePill.textContent=s; els.statePill.classList.toggle('on', !!on); }
+    function setPill(s, on=false){
+      els.statePill.textContent = s;
+      const busy = !!on; // treat "on" states as busy/doing-something
+      els.statePill.classList.toggle('on',   busy);
+      els.statePill.classList.toggle('busy', busy);
+    }
+
     function clamp01(x){ return Math.max(0, Math.min(1, x)); }
     function emaStep(prev, x, a){ return prev + a * (x - prev); }
     function alphaForTau(dt, tau){ return 1 - Math.exp(-dt / Math.max(1e-3, tau)); }
