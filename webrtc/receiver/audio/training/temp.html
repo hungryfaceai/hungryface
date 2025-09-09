@@ -1093,11 +1093,14 @@
       state.srcNode = src; state.sinkNode = sink;
 
       try {
-        const url = URL.createObjectURL(new Blob([\`
+        const url = URL.createObjectURL(new Blob([`
           class Tap extends AudioWorkletProcessor {
             process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }
-          } registerProcessor('tap', Tap);
-        \`], {type:'application/javascript'}));
+          }
+          registerProcessor('tap', Tap);
+        `], {type:'application/javascript'}));
+
+        
         await ctx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
         const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
         node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate, getParams(), mode);
@@ -1144,11 +1147,13 @@
       if (!trainSink) { trainSink = trainCtx.createGain(); trainSink.gain.value = 0; trainSink.connect(trainCtx.destination); }
       if (!trainNode) {
         try {
-          const mod = URL.createObjectURL(new Blob([\`
+          const mod = URL.createObjectURL(new Blob([`
             class Tap extends AudioWorkletProcessor {
               process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }
-            } registerProcessor('tap', Tap);
-          \`], {type:'application/javascript'}));
+            }
+            registerProcessor('tap', Tap);
+          `], {type:'application/javascript'}));
+
           await trainCtx.audioWorklet.addModule(mod); URL.revokeObjectURL(mod);
           trainNode = new AudioWorkletNode(trainCtx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
           trainUsingWorklet = true;
