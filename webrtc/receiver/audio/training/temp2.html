@@ -63,8 +63,14 @@
     input[type="range"] { width:220px; }
 
     /* Charts */
-    .chart-wrap { position: relative; height: 320px; }   /* pick your size */
-    #chart { position:absolute; inset:0; width:100% !important; height:100% !important; }
+    .chart-wrap { position: relative; }
+    .chart-wrap > canvas {
+      position: absolute; inset: 0;
+      width: 100% !important; height: 100% !important;
+      display: block; background:#0a0a0a; border-radius:10px;
+    }
+    .h160{height:160px;} .h170{height:170px;} .h180{height:180px;} .h320{height:320px;}
+
     .legend { margin-top:6px; display:flex; gap:12px; font-size:12px; color:#ccc; flex-wrap:wrap; }
     .key { width:14px; height:3px; border-radius:2px; display:inline-block; margin-right:4px; vertical-align:middle; }
     .blue { background:#60a5fa; } .red { background:#ef4444; } .or { background:#f97316; } .lo { background:#fb923c; } .green{ background:#22c55e; } .darkred { background:#991b1b; }
@@ -255,7 +261,9 @@
       <!-- Live bars -->
       <div class="card">
         <h2>Live top classes</h2>
-        <canvas id="bars" height="180"></canvas>
+        <div class="chart-wrap h160">
+          <canvas id="bars"></canvas>
+        </div>
         <div class="muted" style="margin-top:6px;">Uses the <b>Top-K</b> setting. Excluded classes are grey; we extend to show Top-K non-excluded.</div>
       </div>
 
@@ -265,12 +273,16 @@
         <div class="weights-grid">
           <div class="weights-card">
             <h3>Live dynamic weights (unsaved preview)</h3>
-            <canvas id="barsDynW" height="220"></canvas>
+            <div class="chart-wrap h170">
+              <canvas id="barsDynW"></canvas>
+            </div>
             <span class="muted">Top-K normalized weights recomputed on every training inference. Not stored.</span>
           </div>
           <div class="weights-card">
             <h3>Active model weights (Top-K, normalized)</h3>
-            <canvas id="barsSavedW" height="220"></canvas>
+            <div class="chart-wrap h170">
+              <canvas id="barsSavedW"></canvas>
+            </div>
             <span class="muted">What detection uses (until you click “Recompute Weights”).</span>
           </div>
         </div>
@@ -279,7 +291,7 @@
       <!-- Fused score chart -->
       <div class="card">
         <h2>Fused score over time</h2>
-        <div class="chart-wrap">
+        <div class="chart-wrap h320">
           <canvas id="chart"></canvas>
         </div>
         <div class="legend">
@@ -771,7 +783,7 @@
         },
         options: {
           responsive: true,
-          maintainAspectRatio: false,   // ← add this
+          maintainAspectRatio: false,
           animation:false,
           plugins:{ legend:{ display:false } },
           scales:{
@@ -790,8 +802,8 @@
       if (state.labels.length > N) { state.labels.shift(); state.fusedRaw.shift(); state.fusedSm.shift(); }
       const thrOn = state.thrOn, thrOff = state.thrOff;
       state.chart.data.labels = state.labels;
-      state.chart.data.datasets[0].data = state.fusedRaw;   // bars
-      state.chart.data.datasets[1].data = state.fusedSm;    // line
+      state.chart.data.datasets[0].data = state.fusedRaw;
+      state.chart.data.datasets[1].data = state.fusedSm;
       state.chart.data.datasets[2].data = new Array(state.labels.length).fill(thrOn);
       state.chart.data.datasets[3].data = new Array(state.labels.length).fill(thrOff);
       const all = state.fusedRaw.concat(state.fusedSm, [thrOn, thrOff]);
@@ -803,25 +815,50 @@
       if (!state.barChart && els.bars) {
         state.barChart = new Chart(els.bars.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{ label: 'score', data: [], borderWidth: 1, backgroundColor: [], borderColor: [] }] },
-          options: { indexAxis: 'y', animation: false, plugins: { legend: { display:false } },
-            scales: { x: { min: 0, max: 1, title: { display:true, text:'score' } }, y: { ticks: { autoSkip: false } } } }
+          data: { labels: [], datasets: [{
+            label: 'score', data: [],
+            borderWidth: 1, backgroundColor: [], borderColor: [],
+            barThickness: 12, maxBarThickness: 14, categoryPercentage: 0.55, barPercentage: 0.9
+          }]},
+          options: {
+            indexAxis: 'y',
+            responsive: true, maintainAspectRatio: false, animation: false,
+            plugins: { legend: { display:false } },
+            scales: {
+              x: { min: 0, max: 1, title: { display:true, text:'score' }, ticks: { font: { size: 11 } } },
+              y: { ticks: { autoSkip: false, font: { size: 11 } } }
+            }
+          }
         });
       }
       if (!state.barDynW && els.barsDynW) {
         state.barDynW = new Chart(els.barsDynW.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
-          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{enabled: true} },
-            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
+          data: { labels: [], datasets: [{
+            label: 'weight', data: [], borderWidth:1,
+            barThickness: 10, maxBarThickness: 12, categoryPercentage: 0.5, barPercentage: 0.9
+          }]},
+          options: {
+            indexAxis:'y',
+            responsive:true, maintainAspectRatio:false, animation:false,
+            plugins:{ legend:{display:false}, pctLabel:{enabled: true, font:'11px system-ui', color:'#bbb'} },
+            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}, ticks:{ font:{ size:11 } } }, y:{ ticks:{ autoSkip:false, font:{ size:11 } } } }
+          }
         });
       }
       if (!state.barSavedW && els.barsSavedW) {
         state.barSavedW = new Chart(els.barsSavedW.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
-          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{enabled: true} },
-            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
+          data: { labels: [], datasets: [{
+            label: 'weight', data: [], borderWidth:1,
+            barThickness: 10, maxBarThickness: 12, categoryPercentage: 0.5, barPercentage: 0.9
+          }]},
+          options: {
+            indexAxis:'y',
+            responsive:true, maintainAspectRatio:false, animation:false,
+            plugins:{ legend:{display:false}, pctLabel:{enabled: true, font:'11px system-ui', color:'#bbb'} },
+            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}, ticks:{ font:{ size:11 } } }, y:{ ticks:{ autoSkip:false, font:{ size:11 } } } }
+          }
         });
       }
     }
@@ -852,7 +889,6 @@
       const values = display.map(d => d.v);
       const bg = display.map(d => d.excluded ? 'rgba(107,114,128,0.85)' : 'rgba(96,165,250,0.85)');
       const bd = display.map(d => d.excluded ? 'rgba(75,85,99,1)' : 'rgba(59,130,246,1)');
-
 
       state.barChart.data.labels = labels;
       state.barChart.data.datasets[0].data = values;
