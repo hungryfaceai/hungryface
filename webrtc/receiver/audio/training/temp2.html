@@ -1084,6 +1084,8 @@
       enableThrSliders(false);
 
       await startMic('detect');
+      // keep the calibration status visible after mic boot
+      setStatus(`Quiet calibration for ${durSec}s… Please keep things quiet.`);
       setPill('calibrating', true);
 
       const startedAt = performance.now();
@@ -1297,7 +1299,11 @@
       // Reset time-window chart so it starts from the right edge
       setupChart();
       log('ok', `Mic started in ${mode.toUpperCase()} mode.`);
-      setStatus(mode==='detect' ? 'Detection started (mic).' : 'Training started (mic).');
+      // ↓ One final, readable status the user will actually see — but don't
+      //    overwrite calibration's status while it's running.
+      if (!(state.calActive && mode === 'detect')) {
+        setStatus(mode === 'detect' ? 'Detection started (mic).' : 'Training started (mic).');
+}
     }
 
     async function stopAll(){
