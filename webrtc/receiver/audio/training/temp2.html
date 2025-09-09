@@ -56,6 +56,7 @@
     /* Inputs */
     input[type="number"], input[type="text"] { padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; }
     input[type="file"] { font-size:13px; }
+    select { padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; }
 
     /* Sliders */
     .slider-wrap { display:flex; align-items:center; gap:10px; margin-left:auto; }
@@ -63,6 +64,7 @@
 
     /* Charts */
     canvas { display:block; width:100%; height:160px; background:#0a0a0a; border-radius:10px; }
+    #chart { height:320px; } 
     .legend { margin-top:6px; display:flex; gap:12px; font-size:12px; color:#ccc; flex-wrap:wrap; }
     .key { width:14px; height:3px; border-radius:2px; display:inline-block; margin-right:4px; vertical-align:middle; }
     .blue { background:#60a5fa; } .red { background:#ef4444; } .or { background:#f97316; } .lo { background:#fb923c; } .green{ background:#22c55e; } .darkred { background:#991b1b; }
@@ -192,24 +194,15 @@
       <div class="card" id="cardModel">
         <h2>Model</h2>
         <div class="row" style="gap:8px 10px;">
-
-          <!-- NEW: models dropdown -->
           <label style="display:flex;align-items:center;gap:8px;">
-            <span>Models</span>
-            <select id="MODEL_DROPDOWN" style="padding:10px 12px;border-radius:10px;border:1px solid #222;background:#0b0b0b;color:#ddd;min-width:160px;"></select>
+            <span>Model</span>
+            <select id="MODEL_SELECT" style="width:220px;"></select>
           </label>
-
-          <label style="display:flex;align-items:center;gap:8px;">
-            <span>Model name</span>
-            <input id="MODEL_NAME" type="text" placeholder="default" style="width:180px;">
-          </label>
-          <button id="btnModelUse" class="btn">Use Name</button>
-          <button id="btnModelLoad" class="btn">Load</button>
           <button id="btnRecompute" class="btn">Recompute Weights</button>
           <button id="btnClear" class="btn">Clear Model</button>
           <button id="btnExport" class="btn">Export Model</button>
         </div>
-        <div class="muted" style="margin-top:6px;">Mic/file/folder training updates class stats live; then click “Recompute Weights”.</div>
+        <div class="muted" style="margin-top:6px;">Pick an existing model or choose “New…” to create one. Train (mic/file/folder), then click “Recompute Weights”.</div>
       </div>
 
       <!-- Quiet calibration panel -->
@@ -286,7 +279,7 @@
       <!-- Fused score chart -->
       <div class="card">
         <h2>Fused score over time</h2>
-        <canvas id="chart" height="160"></canvas>
+        <canvas id="chart" height="320"></canvas>
         <div class="legend">
           <span class="key blue"></span> fused (raw)
           <span class="key red"></span> fused (EMA)
@@ -455,13 +448,12 @@
       'fileInp','btnTrainFile','btnStopTrainFile',
       'btnRecompute','btnClear','btnExport',
       'trainAudio','chart','bars','barsDynW','barsSavedW',
-      'MODEL_NAME','btnModelUse','btnModelLoad',
       'folderInp','btnChooseFolder','btnTrainFolder','btnStopTrainFolder','folderInfo',
       'IGNORE_CLASSES','PENALTY_MAP',
       'btnResetDefaults',
       // NEW elements:
       'THR_OFF_SLIDER','THR_OFF_LABEL','THR_ON_SLIDER','THR_ON_LABEL',
-      'MODEL_DROPDOWN'
+      'MODEL_SELECT'
     ].map(x => [x, document.getElementById(x)])) )();
 
     function setStatus(s){ els.status.textContent = s; log('info', s); }
@@ -475,7 +467,6 @@
     function clamp01(x){ return Math.max(0, Math.min(1, x)); }
     function emaStep(prev, x, a){ return prev + a * (x - prev); }
     function rmsToMeter(rms){
-      // Convert amplitude RMS (≈0..1) to dBFS and map [-85 dB … 0 dB] → [0 … 1]
       const db = 20 * Math.log10(Math.max(1e-8, rms));
       const FLOOR_DB = -85;
       const norm = (db - FLOOR_DB) / (0 - FLOOR_DB);
@@ -588,8 +579,11 @@
 
     /* ========= Model persistence ========= */
     const ACTIVE_MODEL_NAME_KEY = 'cryActiveModelName';
-    function getModelName(){ return els.MODEL_NAME?.value?.trim() || localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default'; }
-    function setModelName(name){ els.MODEL_NAME.value = name; localStorage.setItem(ACTIVE_MODEL_NAME_KEY, name); }
+    function getModelName(){ return els.MODEL_SELECT?.value || localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default'; }
+    function setModelName(name){
+      localStorage.setItem(ACTIVE_MODEL_NAME_KEY, name);
+      if (els.MODEL_SELECT) els.MODEL_SELECT.value = name;
+    }
     function MODEL_KEY(){ return `cryModelV1_${getModelName()}`; }
     function CALIB_KEY(){ return `cryCalibV1_${getModelName()}`; }
     function IGNORE_KEY(){ return `cryIgnore_${getModelName()}`; }
@@ -616,6 +610,34 @@
       localStorage.removeItem(IGNORE_KEY());
       localStorage.removeItem(PENALTY_KEY());
       log('warn',`Cleared model “${getModelName()}” + its calibration & ignore/penalty settings.`);
+    }
+
+    /* List & select models */
+    const NEW_MODEL_VALUE = '__NEW__';
+    function listModelNames(){
+      const names = [];
+      for (let i=0;i<localStorage.length;i++){
+        const k = localStorage.key(i);
+        if (k && k.startsWith('cryModelV1_')) names.push(k.replace('cryModelV1_',''));
+      }
+      if (!names.includes('default')) names.push('default');
+      names.sort((a,b)=>a.localeCompare(b));
+      return names;
+    }
+    function refreshModelSelect(activeName){
+      const sel = els.MODEL_SELECT;
+      if (!sel) return;
+      const names = listModelNames();
+      sel.innerHTML = '';
+      for (const n of names){
+        const opt = document.createElement('option');
+        opt.value = n; opt.textContent = n;
+        sel.appendChild(opt);
+      }
+      const optNew = document.createElement('option');
+      optNew.value = NEW_MODEL_VALUE; optNew.textContent = 'New…';
+      sel.appendChild(optNew);
+      sel.value = names.includes(activeName) ? activeName : (localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default');
     }
 
     /* ========= Ignore / Penalty ========= */
@@ -746,6 +768,8 @@
           ]
         },
         options: {
+          responsive: true,
+          maintainAspectRatio: false,   // ← add this
           animation:false,
           plugins:{ legend:{ display:false } },
           scales:{
@@ -826,6 +850,7 @@
       const values = display.map(d => d.v);
       const bg = display.map(d => d.excluded ? 'rgba(107,114,128,0.85)' : 'rgba(96,165,250,0.85)');
       const bd = display.map(d => d.excluded ? 'rgba(75,85,99,1)' : 'rgba(59,130,246,1)');
+
 
       state.barChart.data.labels = labels;
       state.barChart.data.datasets[0].data = values;
@@ -1375,7 +1400,6 @@
       m.halfLifeSec = Number(els.HALF_LIFE_S.value)||m.halfLifeSec||3600;
       const w = recomputeWeights(m);
       setWeightsChart(state.barSavedW, w);
-      populateModelDropdown(); // refresh list in case this was a new model
     };
     els.btnClear.onclick = () => {
       const name = getModelName();
@@ -1385,7 +1409,7 @@
       setupChart();
       clearTopBars();
       setStatus(`Model “${name}” cleared.`);
-      populateModelDropdown(); // reflect deletion
+      refreshModelSelect(getModelName());
     };
     els.btnExport.onclick = () => {
       const key = MODEL_KEY();
@@ -1395,30 +1419,49 @@
       log('ok',`Exported cryModel_${getModelName()}.json`);
     };
 
-    // Model name controls
-    els.btnModelUse.onclick = () => {
-      const name = els.MODEL_NAME.value.trim() || 'default';
-      localStorage.setItem('cryActiveModelName', name);
-      setModelName(name);
-      setStatus(`Active model name set to “${name}”. New training/recompute will persist there.`);
-      const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
-      const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
-      populateModelDropdown(name);
-    };
-    els.btnModelLoad.onclick = () => {
-      const name = els.MODEL_NAME.value.trim() || 'default';
-      setModelName(name);
-      const m = loadModel();
-      setWeightsChart(state.barSavedW, m.weights || {});
-      setWeightsChart(state.barDynW, computeWeightsPreview(m));
-      const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
-      if (calib) log('ok', `Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
-      const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
-      const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
-      setStatus(`Loaded model “${name}”.`);
-      if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; setThrUI(); }
-      populateModelDropdown(name);
-    };
+    /* Dropdown behavior */
+    els.MODEL_SELECT.addEventListener('change', () => {
+      const v = els.MODEL_SELECT.value;
+      if (v === NEW_MODEL_VALUE) {
+        // prompt for name
+        const name = (prompt('New model name:', '').trim() || '').replace(/[^\w \-().,]/g,'').trim();
+        if (!name) { refreshModelSelect(getModelName()); return; }
+        // if it already exists, just select it
+        const exists = listModelNames().includes(name);
+        setModelName(name);
+        if (!exists) {
+          const m = loadModel(); // creates default structure for this name
+          saveModel(m);
+          log('ok', `Created model “${name}”.`);
+        } else {
+          log('info', `Switched to existing model “${name}”.`);
+        }
+        refreshModelSelect(name);
+        // load state for this model
+        const m2 = loadModel();
+        setWeightsChart(state.barSavedW, m2.weights || {});
+        setWeightsChart(state.barDynW, computeWeightsPreview(m2));
+        const calib2 = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+        if (calib2) {
+          state.thrOn = calib2.thr_on; state.thrOff = calib2.thr_off; setThrUI();
+          log('ok', `Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib2,null,2)}</div>`);
+        }
+        const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
+        const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
+        setStatus(`Active model set to “${name}”.`);
+      } else {
+        // switch model
+        setModelName(v);
+        const m = loadModel();
+        setWeightsChart(state.barSavedW, m.weights || {});
+        setWeightsChart(state.barDynW, computeWeightsPreview(m));
+        const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+        if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; setThrUI(); log('ok', `Loaded calibration for “${v}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`); }
+        const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
+        const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
+        setStatus(`Loaded model “${v}”.`);
+      }
+    });
 
     // Persist knobs + update preview/saved charts
     ['TOP_K','K_PRIOR','HALF_LIFE_S'].forEach(id => {
@@ -1448,70 +1491,6 @@
       el.addEventListener('blur', save);
     });
 
-    /* ========= NEW: Models dropdown helpers ========= */
-    function listExistingModels(){
-      const prefix = 'cryModelV1_';
-      const names = [];
-      for (let i=0;i<localStorage.length;i++){
-        const k = localStorage.key(i);
-        if (k && k.startsWith(prefix)) {
-          const n = k.slice(prefix.length);
-          if (n) names.push(n);
-        }
-      }
-      const active = localStorage.getItem('cryActiveModelName') || 'default';
-      if (active && !names.includes(active)) names.push(active);
-      names.sort((a,b)=>a.localeCompare(b));
-      return names;
-    }
-    function populateModelDropdown(selectName){
-      const sel = els.MODEL_DROPDOWN;
-      if (!sel) return;
-      const names = listExistingModels();
-      sel.innerHTML = '';
-      for (const n of names){
-        const opt = document.createElement('option');
-        opt.value = n; opt.textContent = n;
-        sel.appendChild(opt);
-      }
-      const optNew = document.createElement('option');
-      optNew.value = '__new__'; optNew.textContent = 'New…';
-      sel.appendChild(optNew);
-      const target = selectName || getModelName();
-      if ([...sel.options].some(o => o.value === target)) sel.value = target;
-      else if (names.length) sel.value = names[0];
-      else sel.value = '__new__';
-    }
-    els.MODEL_DROPDOWN?.addEventListener('change', () => {
-      const v = els.MODEL_DROPDOWN.value;
-      if (v === '__new__') {
-        const suggested = `model-${new Date().toISOString().slice(0,16).replace(/[T:]/g,'')}`;
-        const name = (prompt('Enter a new model name:', suggested) || '').trim();
-        if (!name) { populateModelDropdown(getModelName()); return; }
-        setModelName(name);
-        // create and persist a fresh model skeleton
-        const m = loadModel(); // returns skeleton if none
-        saveModel(m);
-        setWeightsChart(state.barSavedW, m.weights || {});
-        setWeightsChart(state.barDynW, computeWeightsPreview(m));
-        const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
-        if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; setThrUI(); }
-        setStatus(`Created & activated model “${name}”.`);
-        populateModelDropdown(name);
-      } else {
-        setModelName(v);
-        const m = loadModel();
-        setWeightsChart(state.barSavedW, m.weights || {});
-        setWeightsChart(state.barDynW, computeWeightsPreview(m));
-        const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
-        if (calib) log('ok', `Loaded calibration for “${v}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
-        const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
-        const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
-        if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; setThrUI(); }
-        setStatus(`Loaded model “${v}”.`);
-      }
-    });
-
     /* ========= Bars setup ========= */
     function setupAllBars(){
       setupBars();
@@ -1522,10 +1501,9 @@
 
     /* ========= Boot ========= */
     (function boot(){
-      const name = localStorage.getItem('cryActiveModelName') || 'default';
-      setModelName(name);
-
-      populateModelDropdown(name);  // <-- NEW (initial fill)
+      const active = localStorage.getItem('cryActiveModelName') || 'default';
+      refreshModelSelect(active);
+      setModelName(active);
 
       setupAllBars();
       els.chart.getContext && setupChart();
@@ -1533,7 +1511,7 @@
       const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
       if (calib) {
         state.thrOn=calib.thr_on; state.thrOff=calib.thr_off;
-        log('ok',`Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
+        log('ok',`Loaded calibration for “${getModelName()}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
       } else {
         const offDelta = Number(els.ALERT_OFF_DELTA.value) || 0.10;
         state.thrOn = 0.35; state.thrOff = Math.max(0, state.thrOn - offDelta);
