@@ -1,0 +1,1440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Naptio – Weighted Top-K Training</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <link rel="icon" href="data:," />
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin:0; background:#000; color:#fff; font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; height:auto; min-height:100%; overflow-y:auto; }
+    #stage { padding:16px; box-sizing:border-box; display:flex; justify-content:center; position:static; min-height:100vh; }
+    .panel { width:min(100%,1200px); background:#0b0b0b; border:1px solid #141414; border-radius:14px; padding:16px; margin:0 auto 24px; }
+    h1 { margin:.2rem 0 .1rem; font-size:22px; }
+    .sub { margin:.1rem 0 1rem; color:#bbb; font-size:13px; }
+
+    /* Cards/panels */
+    .cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    @media (max-width: 980px) { .cards { grid-template-columns:1fr; } }
+    .card { background:#0a0a0a; border:1px solid #1a1a1a; border-radius:12px; padding:12px; }
+    .card h2 { margin:0 0 8px 0; font-size:16px; }
+    .section-title { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+    .section-sub { color:#bbb; font-size:12px; margin-top:2px; }
+
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+    @media (max-width: 860px) { .grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    @media (max-width: 560px) { .grid { grid-template-columns:1fr; } }
+
+    .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    label { display:grid; gap:6px; font-size:13px; color:#ddd; }
+    input[type="number"], input[type="text"] { padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; }
+    input[type="file"] { font-size:13px; }
+    input[type="range"] { width:220px; }
+    output { font-variant-numeric: tabular-nums; min-width:48px; text-align:right; display:inline-block; }
+
+    .btn { padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.4); background:transparent; color:#fff; font-weight:600; cursor:pointer; }
+    .btn:active { transform:scale(.98); }
+    .btn[disabled] { opacity:.6; cursor:default; }
+    .small { padding:8px 10px; font-size:13px; border-radius:10px; } /* compact buttons */
+    .muted { color:#aaa; font-size:12px; }
+    .chip { display:inline-block; padding:2px 6px; border:1px solid #333; border-radius:999px; margin-left:6px; font-size:11px; color:#bbb; }
+
+    /* Status & meter */
+    .pill { display:inline-block; padding:4px 8px; border-radius:999px; border:1px solid #333; font-size:12px; margin-left:6px; }
+    .pill.on { background:#310000; border-color:#a00; color:#ffb3b3; }
+    .meter { height:10px; border-radius:8px; background:#0a0a0a; border:1px solid #222; overflow:hidden; }
+    .fill { height:100%; width:0%; background:linear-gradient(to right, rgba(96,165,250,.9), rgba(239,68,68,.9)); transition:width 120ms linear; }
+
+    /* Charts */
+    canvas { display:block; width:100%; background:#0a0a0a; border-radius:10px; }
+    #bars { height:180px; }
+    #barsDynW, #barsSavedW { height:220px; }
+    #chart { height:200px; }
+    .legend { margin-top:6px; display:flex; gap:12px; font-size:12px; color:#ccc; flex-wrap:wrap; }
+    .key { width:14px; height:3px; border-radius:2px; display:inline-block; margin-right:4px; vertical-align:middle; }
+    .blue { background:#60a5fa; } .red { background:#ef4444; } .or { background:#f97316; } .lo { background:#fb923c; }
+
+    /* Logs */
+    .log-panel { margin-top:12px; background:#0a0a0a; border:1px solid #222; border-radius:12px; }
+    .log-toolbar { display:flex; gap:10px; align-items:center; padding:8px 10px; border-bottom:1px solid #1a1a1a; font-size:12px; color:#ddd; flex-wrap:wrap; }
+    .log-body { max-height:300px; overflow:auto; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; line-height:1.4; padding:10px; }
+    .log-line { white-space:pre-wrap; margin:0; padding:2px 0; border-bottom:1px dotted #111; }
+    .log-time { color:#9ca3af; }
+    .log-kind-info { color:#e5e7eb; }
+    .log-kind-ok   { color:#86efac; }
+    .log-kind-warn { color:#fbbf24; }
+    .log-kind-err  { color:#fca5a5; }
+    .log-kind-inf  { color:#93c5fd; }
+    .log-code { display:block; background:#0b0b0b; border:1px solid #1f2937; border-radius:8px; padding:6px; margin-top:4px; overflow:auto; }
+
+    /* Top-right Settings button */
+    #btnOpenSettings {
+      position:fixed; top:12px; right:12px; z-index:60;
+      box-shadow:0 6px 18px rgba(0,0,0,0.35); backdrop-filter: blur(4px);
+    }
+
+    /* Settings modal */
+    .modal { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.6); z-index:50; }
+    .modal.show { display:flex; }
+    .modal-card { width:min(96%,1000px); max-height:90vh; overflow-y:auto; background:#0b0b0b; border:1px solid #242424; border-radius:14px; }
+    .modal-head { position:sticky; top:0; display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 12px; border-bottom:1px solid #1a1a1a; background:#0d0d0d; border-top-left-radius:14px; border-top-right-radius:14px; }
+    .modal-actions { display:flex; gap:8px; align-items:center; }
+    .modal-body { padding:12px; }
+    .modal-head .close {
+      appearance: none; border: none; background: transparent; color: #aaa; font-size: 22px; cursor: pointer; padding: 2px 6px;
+    }
+    .modal-head .close:active { transform: scale(0.98); }
+
+    /* Help side-sheet (same look as motion app) */
+    .help-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 110; opacity: 0; pointer-events: none; transition: opacity .2s ease; }
+    .help-backdrop.show { opacity: 1; pointer-events: auto; }
+    .help-sheet {
+      position: fixed; right: 0; top: 0; height: 100svh; width: min(92vw, 420px);
+      background: #121212; color: #f3f3f3; border-left: 1px solid rgba(255,255,255,0.12);
+      box-shadow: -12px 0 32px rgba(0,0,0,0.6); z-index: 120;
+      transform: translateX(100%); transition: transform .24s cubic-bezier(.2,.8,.2,1);
+      display: flex; flex-direction: column;
+    }
+    .help-sheet.show { transform: translateX(0); }
+    .help-header { position: sticky; top: 0; z-index: 1; background: rgba(18,18,18,0.96); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: space-between; padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .help-header h3 { margin: 0; font-size: 16px; font-weight: 700; color: #fff; }
+    .help-header .close { appearance: none; border: none; background: transparent; color: #aaa; font-size: 22px; cursor: pointer; padding: 2px 6px; }
+    .help-body { padding: 10px 12px 16px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .help-toc { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; padding-bottom: 8px; border-bottom: 1px dashed rgba(255,255,255,0.15); }
+    .help-toc a { font-size: 12px; color: #ddd; text-decoration: none; border: 1px solid rgba(255,255,255,0.18); padding: 6px 8px; border-radius: 999px; }
+    .help-section { margin: 14px 0; }
+    .help-section h4 { margin: 0 0 6px; font-size: 14px; color: #fff; }
+    .help-section p, .help-section li, .help-section td, .help-section th { font-size: 13px; color: #ddd; line-height: 1.45; }
+    .help-kv { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    .help-kv th, .help-kv td { border: 1px solid rgba(255,255,255,0.12); padding: 8px; vertical-align: top; }
+    .help-kv th { background: rgba(255,255,255,0.06); font-weight: 700; color: #eee; white-space: nowrap; }
+    .help-callout { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 10px; }
+    details.learn-more { border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 10px; background: rgba(255,255,255,0.04); }
+    details.learn-more[open] { background: rgba(255,255,255,0.06); }
+    .codeblock { background: #0e0e0e; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #d7eaff; font-size: 12px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <!-- Top-right settings button -->
+  <button id="btnOpenSettings" class="btn small">Settings</button>
+
+  <div id="stage">
+    <div class="panel">
+      <header class="section-title">
+        <div>
+          <h1>Weighted Top-K Audio Detector Training (Late-fusion)</h1>
+          <div class="sub">Train weights → Load/Manage model → Quiet Calibrate → Start Detect.</div>
+        </div>
+        <div class="row">
+          <div id="status" class="muted">Booting…</div>
+          <div id="statePill" class="pill">idle</div>
+        </div>
+      </header>
+
+      <div class="meter" title="Input level (RMS)">
+        <div id="rmsFill" class="fill"></div>
+      </div>
+
+      <!-- PANELS -->
+      <div class="cards" style="margin-top:12px;">
+        <!-- Training -->
+        <section class="card">
+          <h2>Training</h2>
+          <div class="section-sub">Use the microphone, a single audio file, or a folder of files to build per-class stats. Then click “Recompute Weights”.</div>
+
+          <!-- Mic -->
+          <div class="row" style="margin-top:8px;">
+            <strong>Microphone</strong>
+            <button id="btnStartTrainMic" class="btn">Start</button>
+            <button id="btnStopTrainMic" class="btn">Stop</button>
+          </div>
+
+          <!-- File -->
+          <div class="row" style="margin-top:8px;">
+            <strong>File</strong>
+            <input id="fileInp" type="file" accept="audio/*" />
+            <button id="btnTrainFile" class="btn">Start</button>
+            <button id="btnStopTrainFile" class="btn">Stop</button>
+          </div>
+
+          <!-- Folder -->
+          <div class="row" style="margin-top:8px;">
+            <strong>Folder</strong>
+            <input id="folderInp" type="file" webkitdirectory directory multiple style="display:none" />
+            <button id="btnChooseFolder" class="btn">Choose Folder…</button>
+            <button id="btnTrainFolder" class="btn">Start</button>
+            <button id="btnStopTrainFolder" class="btn">Stop</button>
+            <span id="folderInfo" class="muted"></span>
+          </div>
+
+          <div class="muted" style="margin-top:6px;">Mic/file/folder training logs show MediaPipe outputs before stats update.</div>
+        </section>
+
+        <!-- Model -->
+        <section class="card">
+          <h2>Model</h2>
+          <div class="row" style="margin-top:4px;">
+            <label style="display:flex;align-items:center;gap:8px;">
+              <span>Model name</span>
+              <input id="MODEL_NAME" type="text" placeholder="default" style="width:180px;">
+            </label>
+            <button id="btnModelUse" class="btn">Use Name</button>
+            <button id="btnModelLoad" class="btn">Load</button>
+          </div>
+
+          <div class="row" style="margin-top:8px;">
+            <button id="btnRecompute" class="btn">Recompute Weights</button>
+            <button id="btnClear" class="btn">Clear Model</button>
+            <button id="btnExport" class="btn">Export Model</button>
+          </div>
+
+          <div class="row" style="margin-top:12px;">
+            <label style="display:flex;align-items:center;gap:10px;">
+              <span>Ignore classes (training)</span>
+              <input id="IGNORE_CLASSES" type="text" value="Silence, Inside, Outside, Vehicle, Noise" placeholder="Silence, Background noise, White noise" style="width:380px;">
+            </label>
+          </div>
+          <div class="row" style="margin-top:8px;">
+            <label style="display:flex;align-items:center;gap:10px;">
+              <span>Penalty map (inference)</span>
+              <input id="PENALTY_MAP" type="text" value="Silence:-0.45, White noise:-0.2" placeholder="Silence:-0.4, White noise:-0.2" style="width:380px;">
+            </label>
+          </div>
+        </section>
+
+        <!-- Quiet calibration -->
+        <section class="card">
+          <h2>Quiet calibration</h2>
+          <div class="section-sub">Sample a still/quiet window to auto-set thresholds. Default is 20s.</div>
+
+          <div class="row" style="margin-top:8px; align-items:center;">
+            <label style="display:flex; align-items:center; gap:10px;">
+              <span>Duration</span>
+              <input id="CAL_SLIDER" type="range" min="5" max="60" step="1" value="20">
+              <output id="CAL_SEC_OUT">20s</output>
+            </label>
+          </div>
+
+          <div class="row" style="margin-top:8px;">
+            <button id="btnCalStart" class="btn">Start Calibration</button>
+            <button id="btnCalStop" class="btn" disabled>Stop</button>
+          </div>
+        </section>
+
+        <!-- Live detection -->
+        <section class="card">
+          <h2>Live detection (Microphone)</h2>
+          <div class="row" style="margin-top:8px;">
+            <button id="btnStartDetect" class="btn">Start Detect</button>
+            <button id="btnStop" class="btn">Stop</button>
+          </div>
+          <div class="section-sub" style="margin-top:6px;">Uses current model weights and thresholds.</div>
+        </section>
+      </div>
+
+      <!-- Live top classes -->
+      <section class="card" style="margin-top:12px;">
+        <h2>Live top classes</h2>
+        <canvas id="bars" height="180"></canvas>
+        <div class="muted" style="margin-top:6px;">Uses the <b>Top-K</b> model setting. Updates during training and detection. Excluded classes are grey; Top-K non-excluded are shown.</div>
+      </section>
+
+      <!-- Weights: live vs saved -->
+      <section class="cards" style="margin-top:12px;">
+        <div class="card">
+          <h2>Live dynamic weights (preview)</h2>
+          <canvas id="barsDynW" height="220"></canvas>
+          <span class="muted">Top-K normalized weights recomputed on each training inference. Not stored.</span>
+        </div>
+        <div class="card">
+          <h2>Active model weights</h2>
+          <canvas id="barsSavedW" height="220"></canvas>
+          <span class="muted">Weights used by detection (until you click “Recompute Weights”).</span>
+        </div>
+      </section>
+
+      <!-- Score graph -->
+      <section class="card" style="margin-top:12px;">
+        <h2>Scores over time</h2>
+        <canvas id="chart" height="200"></canvas>
+        <div class="legend">
+          <span class="key blue"></span> fused (raw, histogram)
+          <span class="key red"></span> fused (EMA)
+          <span class="key or"></span> thresh ON
+          <span class="key lo"></span> thresh OFF
+        </div>
+      </section>
+
+      <!-- Logs -->
+      <section class="card" style="margin-top:12px;">
+        <div class="row" style="justify-content:space-between; width:100%;">
+          <h2 style="margin:0;">Logs</h2>
+          <button id="btnToggleLogs" class="btn">Display logs</button>
+        </div>
+
+        <div id="logsContainer" class="log-panel" style="display:none">
+          <div class="log-toolbar">
+            <label><input type="checkbox" id="LOG_ENABLE" checked> Log inference</label>
+            <label><input type="checkbox" id="LOG_ALL"> Log ALL classes</label>
+            <label>Top-N <input id="LOG_TOPN" type="number" min="1" step="1" value="5" style="width:64px;margin-left:6px;"></label>
+            <label><input type="checkbox" id="LOG_AUTOSCROLL" checked> Autoscroll</label>
+            <button id="LOG_CLEAR" class="btn" style="padding:6px 10px;">Clear Logs</button>
+            <button id="LOG_EXPORT" class="btn" style="padding:6px 10px;">Export JSON</button>
+          </div>
+          <div id="logBody" class="log-body"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Settings modal -->
+  <div id="settingsModal" class="modal" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <strong>Settings</strong>
+        <div class="modal-actions">
+          <button id="btnHelp" class="btn small" type="button" title="Open Help">Help</button>
+          <button id="btnSettingsClose" class="close" type="button" title="Close" aria-label="Close">×</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="grid">
+          <label><span>Sample Rate (target Hz)</span><input id="SR_TARGET" type="number" min="8000" step="1000" value="16000" /></label>
+          <label><span>Frame length (s)</span><input id="FRAME_LEN_S" type="number" min="0.1" step="0.005" value="0.975" /></label>
+          <label><span>Hop (s)</span><input id="HOP_S" type="number" min="0.01" step="0.01" value="0.48" /></label>
+
+          <label><span>Per-class EMA τ (s)</span><input id="CLASS_EMA_TAU_S" type="number" min="0.1" step="0.1" value="0.8" /></label>
+          <label><span>Fused score EMA τ (s)</span><input id="FUSED_EMA_TAU_S" type="number" min="0.1" step="0.1" value="0.8" /></label>
+          <label><span>Min ON hold (ms)</span><input id="ALERT_HOLD_MS" type="number" min="0" step="100" value="3000" /></label>
+
+          <!-- Retain numeric field internally; slider lives in the main panel -->
+          <label><span>Quiet calibration (s)</span><input id="CAL_SEC" type="number" min="5" step="1" value="20" /></label>
+          <label><span>OFF delta (below ON)</span><input id="ALERT_OFF_DELTA" type="number" min="0" step="0.01" value="0.10" /></label>
+          <label><span>Top-K classes</span><input id="TOP_K" type="number" min="1" step="1" value="6" /></label>
+
+          <label><span>Hybrid prior (kPrior)</span><input id="K_PRIOR" type="number" min="1" step="1" value="50" /></label>
+          <label><span>Hybrid half-life (s, training EMA)</span><input id="HALF_LIFE_S" type="number" min="30" step="10" value="3600" /></label>
+          <label><span>Max results from MP</span><input id="MAX_RESULTS" type="number" min="5" step="1" value="25" /></label>
+        </div>
+        <div class="row" style="margin-top:12px; justify-content:flex-end;">
+          <!-- same size as Help (small) -->
+          <button id="btnResetDefaults" class="btn small">Reset all defaults</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <audio id="trainAudio" crossorigin="anonymous" style="display:none"></audio>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+  <!-- Load the external Help HTML (injected at runtime) -->
+  <script type="module" src="./help-sheet.js"></script>
+
+  <script type="module">
+    /* ========= Helpers & UI ========= */
+    const EL = id => document.getElementById(id);
+    const ASM_LOG_MS = 2000;
+    const SCORE_LOG_MS = 800; // throttle score logs (~1 per 0.8s)
+
+    /* Settings modal wiring (top-right button) */
+    const _modal = EL('settingsModal');
+    const _open = EL('btnOpenSettings');
+    const _close = EL('btnSettingsClose');
+    _open.onclick = () => { _modal.classList.add('show'); _modal.setAttribute('aria-hidden','false'); };
+    _close.onclick = () => { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); };
+    _modal.addEventListener('click', (e) => { if (e.target === _modal) { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); }});
+
+    /* Help side-sheet wiring (runs after help HTML is injected) */
+    function wireHelpOnce() {
+      const sheet = document.getElementById('helpSheet');
+      const backdrop = document.getElementById('helpBackdrop');
+      const closeBtn = document.getElementById('helpClose');
+      const bodyEl   = document.getElementById('helpBody');
+      const helpBtn  = document.getElementById('btnHelp');
+      if (!sheet || sheet.dataset.wired === '1') return;
+      sheet.dataset.wired = '1';
+
+      const openHelp = () => { sheet.classList.add('show'); backdrop?.classList.add('show'); document.body.classList.add('help-open'); };
+      const closeHelp = () => { sheet.classList.remove('show'); backdrop?.classList.remove('show'); document.body.classList.remove('help-open'); };
+
+      helpBtn?.addEventListener('click', (e)=>{ e.stopPropagation(); openHelp(); });
+      closeBtn?.addEventListener('click', (e)=>{ e.stopPropagation(); closeHelp(); });
+      backdrop?.addEventListener('click', closeHelp);
+      document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeHelp(); });
+
+      // Smooth scroll for TOC links inside the help drawer
+      bodyEl?.addEventListener('click', (e) => {
+        const a = e.target.closest('a[href^="#"]');
+        if (!a) return;
+        const id = a.getAttribute('href');
+        const el = bodyEl.querySelector(id);
+        if (el) { e.preventDefault(); el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      });
+    }
+    document.addEventListener('help:ready', wireHelpOnce);
+    if (document.getElementById('helpSheet')) wireHelpOnce();
+
+    /* Logs toggle wiring */
+    const btnToggleLogs = EL('btnToggleLogs');
+    const logsContainer = EL('logsContainer');
+    btnToggleLogs.onclick = () => {
+      const visible = logsContainer.style.display !== 'none';
+      logsContainer.style.display = visible ? 'none' : '';
+      btnToggleLogs.textContent = visible ? 'Display logs' : 'Hide logs';
+    };
+
+    const LOGS = {
+      body: EL('logBody'),
+      enable: EL('LOG_ENABLE'),
+      all: EL('LOG_ALL'),
+      topn: EL('LOG_TOPN'),
+      autoscroll: EL('LOG_AUTOSCROLL'),
+      clearBtn: EL('LOG_CLEAR'),
+      exportBtn: EL('LOG_EXPORT'),
+      maxLines: 1200,
+      lines: 0,
+      records: []
+    };
+    function ts(){ return new Date().toLocaleTimeString(undefined,{hour12:false}); }
+    function log(kind, msg, extraHtml, data){
+      const p = document.createElement('div');
+      p.className = \`log-line log-kind-\${kind}\`;
+      p.innerHTML = \`<span class="log-time">[\${ts()}]</span> \${msg}\${extraHtml ? extraHtml : ''}\`;
+      LOGS.body.appendChild(p);
+      LOGS.lines++;
+      LOGS.records.push({ t: Date.now(), ts: new Date().toISOString(), kind, msg, data: data ?? null });
+      while (LOGS.lines > LOGS.maxLines) { LOGS.body.removeChild(LOGS.body.firstChild); LOGS.lines--; }
+      if (LOGS.records.length > LOGS.maxLines) LOGS.records.shift();
+      if (LOGS.autoscroll.checked) LOGS.body.scrollTop = LOGS.body.scrollHeight;
+    }
+    LOGS.clearBtn.onclick = () => { LOGS.body.innerHTML = ''; LOGS.lines = 0; LOGS.records = []; };
+    LOGS.exportBtn.onclick = () => {
+      const payload = { version: 1, exportedAt: new Date().toISOString(), params: getParams(), records: LOGS.records };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = \`cry_logs_\${getModelName()}_\${new Date().toISOString().replace(/[:.]/g,'-')}.json\`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      log('ok','Exported logs JSON');
+    };
+
+    const els = (id => Object.fromEntries([
+      'status','statePill','rmsFill','SR_TARGET','FRAME_LEN_S','HOP_S',
+      'CLASS_EMA_TAU_S','FUSED_EMA_TAU_S','ALERT_HOLD_MS',
+      'CAL_SEC','ALERT_OFF_DELTA','TOP_K','K_PRIOR','HALF_LIFE_S','MAX_RESULTS',
+      // detection & calibration
+      'btnStartDetect','btnStop',
+      'btnCalStart','btnCalStop','CAL_SLIDER','CAL_SEC_OUT',
+      // training
+      'btnStartTrainMic','btnStopTrainMic',
+      'fileInp','btnTrainFile','btnStopTrainFile',
+      'btnRecompute','btnClear','btnExport',
+      'trainAudio','weightsView','chart','bars','barsDynW','barsSavedW',
+      'MODEL_NAME','btnModelUse','btnModelLoad',
+      'folderInp','btnChooseFolder','btnTrainFolder','btnStopTrainFolder','folderInfo',
+      'IGNORE_CLASSES','PENALTY_MAP',
+      'btnResetDefaults'
+    ].map(x => [x, document.getElementById(x)])) )();
+
+    function setStatus(s){ els.status.textContent = s; log('info', s); }
+    function setPill(s, on=false){ els.statePill.textContent=s; els.statePill.classList.toggle('on', !!on); }
+    function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+    function emaStep(prev, x, a){ return prev + a * (x - prev); }
+    function alphaForTau(dt, tau){ return 1 - Math.exp(-dt / Math.max(1e-3, tau)); }
+    function setRMS(x){ els.rmsFill.style.width = Math.round(clamp01(x)*100)+'%'; }
+
+    function resampleLinear(x, fromSr, toSr){
+      if (fromSr === toSr) return x;
+      const ratio = toSr / fromSr, n = Math.max(1, Math.round(x.length * ratio)), out = new Float32Array(n);
+      const dx = (x.length - 1) / (n - 1);
+      for (let i=0;i<n;i++){ const pos=i*dx, i0=Math.floor(pos), i1=Math.min(i0+1,x.length-1), t=pos-i0; out[i]=x[i0]*(1-t)+x[i1]*t; }
+      return out;
+    }
+
+    // === helper used by calibration ===
+    function quantile(arr, q){
+      if (!arr?.length) return 0;
+      const a = [...arr].sort((x,y)=>x-y);
+      const idx = (a.length - 1) * q;
+      const lo = Math.floor(idx), hi = Math.ceil(idx);
+      if (lo === hi) return a[lo];
+      const t = idx - lo;
+      return a[lo] * (1 - t) + a[hi] * t;
+    }
+
+    /* ========= Chart.js % labels plugin (opt-in per chart) ========= */
+    const pctLabelPlugin = {
+      id: 'pctLabel',
+      afterDatasetsDraw(chart, args, options) {
+        if (!options || options.enabled !== true) return;
+        if (chart.config.type !== 'bar') return;
+        const ds = chart.data.datasets?.[0];
+        if (!ds) return;
+        const { ctx } = chart;
+        const meta = chart.getDatasetMeta(0);
+        ctx.save();
+        ctx.font = (options?.font) || '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+        ctx.fillStyle = options?.color || '#ddd';
+        const data = ds.data || [];
+        meta.data.forEach((bar, i) => {
+          const v = Number(data[i]) || 0;
+          const txt = \`\${Math.round(v * 100)}%\`;
+          const x = bar.x + 6;
+          const y = bar.y + 4;
+          ctx.fillText(txt, x, y);
+        });
+        ctx.restore();
+      }
+    };
+    Chart.register(pctLabelPlugin);
+
+    /* ========= MediaPipe (Audio) ========= */
+    const AUDIO_PKG_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0";
+    const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite";
+    const WASM_DIR  = AUDIO_PKG_URL + "/wasm";
+    let AudioClassifier, FilesetResolver, _yamTask = null, _yamTaskPromise = null;
+
+    try {
+      const AudioMod = await import(AUDIO_PKG_URL);
+      AudioClassifier = AudioMod.AudioClassifier;
+      FilesetResolver = AudioMod.FilesetResolver;
+      log('ok', 'MediaPipe Tasks Audio module loaded.');
+    } catch (e) {
+      log('err', 'Failed to import MediaPipe Tasks Audio. See console.'); console.error(e);
+    }
+
+    async function ensureAudioTask(maxResults=25) {
+      if (_yamTask) return _yamTask;
+      if (_yamTaskPromise) return _yamTaskPromise;
+      _yamTaskPromise = (async () => {
+        if (!AudioClassifier || !FilesetResolver) throw new Error('MediaPipe not available');
+        log('info','Loading YAMNet model…');
+        const resolver = await FilesetResolver.forAudioTasks(WASM_DIR);
+        try {
+          _yamTask = await AudioClassifier.createFromOptions(resolver, {
+            baseOptions: { modelAssetPath: MODEL_URL },
+            runningMode: "AUDIO_CLIPS",
+            classifierOptions: { scoreThreshold: 0.0, maxResults: Math.max(5, maxResults|0) }
+          });
+          log('ok', \`YAMNet ready (maxResults=\${maxResults}).\`);
+          return _yamTask;
+        } catch (e1) {
+          const resp = await fetch(MODEL_URL + "?cb=" + Date.now(), { cache: "no-store" });
+          if (!resp.ok) throw new Error(\`yamnet fetch \${resp.status}\`);
+          const buf = new Uint8Array(await resp.arrayBuffer());
+          _yamTask = await AudioClassifier.createFromOptions(resolver, {
+            baseOptions: { modelAssetBuffer: buf },
+            runningMode: "AUDIO_CLIPS",
+            classifierOptions: { scoreThreshold: 0.0, maxResults: Math.max(5, maxResults|0) }
+          });
+          log('ok', \`YAMNet ready (buffer, maxResults=\${maxResults}).\`);
+          return _yamTask;
+        }
+      })();
+      try { return await _yamTaskPromise; } finally { _yamTaskPromise = null; }
+    }
+
+    async function classifyMP(task, w, sr) {
+      try { return await task.classify(w, sr); }
+      catch (e1) {
+        try { return await task.classify({ audioClip: w, sampleRateHz: sr }); }
+        catch (e2) { log('err', \`MediaPipe classify failed: \${e1?.message || e1} / \${e2?.message || e2}\`); return null; }
+      }
+    }
+    function extractCategories(result) {
+      if (!result) return [];
+      const r = Array.isArray(result) ? result[0] : result;
+      const cats = r?.classifications?.[0]?.categories ?? r?.classificationResult?.classifications?.[0]?.categories ?? [];
+      return (cats||[]).map(c => ({ score: c.score ?? 0, categoryName: (c.displayName || c.categoryName || '').trim() }));
+    }
+    function formatCats(cats, topN=5, all=false){
+      const sorted = [...cats].sort((a,b)=> (b.score||0)-(a.score||0));
+      const useList = all ? sorted : sorted.slice(0, topN);
+      const items = useList.map(c => \`\${c.categoryName || '(unnamed)'}:\${(c.score||0).toFixed(3)}\`);
+      return \`<div class="log-code"><strong>\${all?'All':'Top '+topN}</strong> of \${sorted.length} classes:\\n\${items.join('\\n')}</div>\`;
+    }
+    const yamnetFrameSamples = (sr) => Math.round(0.975 * sr);
+    let _snappedLogged = false;
+    function snapFrameSamples(sr, uiSeconds){
+      const want = yamnetFrameSamples(sr);
+      const ui = Math.round((uiSeconds||0.975) * sr);
+      if (Math.abs(ui - want) > 8 && !_snappedLogged){
+        log('warn', \`Frame length adjusted to 0.975s (\${want} samples) for YAMNet.\`);
+        _snappedLogged = true;
+      }
+      return want;
+    }
+
+    /* ========= Named model persistence ========= */
+    const ACTIVE_MODEL_NAME_KEY = 'cryActiveModelName';
+    function getModelName(){ return els.MODEL_NAME?.value?.trim() || localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default'; }
+    function setModelName(name){ els.MODEL_NAME.value = name; localStorage.setItem(ACTIVE_MODEL_NAME_KEY, name); }
+
+    function MODEL_KEY(){ return \`cryModelV1_\${getModelName()}\`; }
+    function CALIB_KEY(){ return \`cryCalibV1_\${getModelName()}\`; }
+    function IGNORE_KEY(){ return \`cryIgnore_\${getModelName()}\`; }
+    function PENALTY_KEY(){ return \`cryPenalty_\${getModelName()}\`; }
+
+    function loadModel() {
+      const raw = localStorage.getItem(MODEL_KEY());
+      if (raw) { try { return JSON.parse(raw); } catch {} }
+      return {
+        version: 1,
+        name: getModelName(),
+        halfLifeSec: Number(els.HALF_LIFE_S.value),
+        K: Number(els.TOP_K.value),
+        kPrior: Number(els.K_PRIOR.value),
+        classes: {},
+        weights: { "Baby cry, infant cry": 1.0 },
+        updatedAt: Date.now()
+      };
+    }
+    function saveModel(m){
+      m.name = getModelName();
+      localStorage.setItem(MODEL_KEY(), JSON.stringify(m));
+    }
+    function clearModel(){
+      localStorage.removeItem(MODEL_KEY());
+      localStorage.removeItem(CALIB_KEY());
+      localStorage.removeItem(IGNORE_KEY());
+      localStorage.removeItem(PENALTY_KEY());
+      log('warn',\`Cleared model “\${getModelName()}” + its calibration & ignore/penalty settings.\`);
+    }
+
+    /* ========= Ignore / Penalty ========= */
+    function getIgnoreTokens(){
+      const s = (els.IGNORE_CLASSES?.value ?? localStorage.getItem(IGNORE_KEY()) ?? '').trim();
+      return s ? s.split(',').map(t=>t.trim().toLowerCase()).filter(Boolean) : [];
+    }
+    function shouldIgnore(name){
+      if (!name) return false;
+      const n = name.toLowerCase();
+      return getIgnoreTokens().some(tok => n.includes(tok));
+    }
+    function getPenaltyMap(){
+      const s = (els.PENALTY_MAP?.value ?? localStorage.getItem(PENALTY_KEY()) ?? '').trim();
+      const map = {};
+      if (!s) return map;
+      s.split(',').forEach(pair=>{
+        const [k,v] = pair.split(':');
+        if (!k) return;
+        const w = Math.max(-1, Math.min(0, parseFloat(v)));
+        map[k.trim().toLowerCase()] = Number.isFinite(w) ? w : -0.3;
+      });
+      return map;
+    }
+
+    function resetDefaults(){
+      els.SR_TARGET.value        = 16000;
+      els.FRAME_LEN_S.value      = 0.975;
+      els.HOP_S.value            = 0.48;
+      els.CLASS_EMA_TAU_S.value  = 0.8;
+      els.FUSED_EMA_TAU_S.value  = 0.8;
+      els.ALERT_HOLD_MS.value    = 3000;
+      els.CAL_SEC.value          = 20;
+      els.ALERT_OFF_DELTA.value  = 0.10;
+      els.TOP_K.value            = 6;
+      els.K_PRIOR.value          = 50;
+      els.HALF_LIFE_S.value      = 3600;
+      els.MAX_RESULTS.value      = 25;
+
+      els.IGNORE_CLASSES.value   = 'Silence, Inside, Outside, Vehicle, Noise';
+      els.PENALTY_MAP.value      = 'Silence:-0.45, White noise:-0.2';
+
+      // Sync the slider/output too
+      if (els.CAL_SLIDER) els.CAL_SLIDER.value = 20, els.CAL_SEC_OUT.textContent = '20s';
+
+      localStorage.setItem(IGNORE_KEY(), els.IGNORE_CLASSES.value);
+      localStorage.setItem(PENALTY_KEY(), els.PENALTY_MAP.value);
+
+      ['TOP_K','K_PRIOR','HALF_LIFE_S'].forEach(id => {
+        const el = document.getElementById(id);
+        el && el.dispatchEvent(new Event('change'));
+      });
+
+      const m = loadModel();
+      const preview = computeWeightsPreview(m);
+      setWeightsChart(state.barDynW, preview);
+      setWeightsChart(state.barSavedW, m.weights || {});
+      if (state.mode === 'idle') clearTopBars();
+
+      log('ok', 'Settings reset to defaults.');
+    }
+    els.btnResetDefaults && (els.btnResetDefaults.onclick = resetDefaults);
+
+    /* ========= Stats → weights ========= */
+    function updateStats(model, categories, dtSec) {
+      const a = alphaForTau(dtSec, model.halfLifeSec || 3600);
+      for (const { categoryName: name, score=0 } of categories) {
+        if (!name || shouldIgnore(name)) continue;
+        const s = model.classes[name] || (model.classes[name] = { n:0, sum:0, ema:0, emaPres:0 });
+        s.n   += 1; s.sum += score; s.ema  = emaStep(s.ema, score, a); s.emaPres = emaStep(s.emaPres, score>0 ? 1 : 0, a);
+      }
+      model.updatedAt = Date.now();
+    }
+    function computeWeightsPreview(model){
+      const K = model.K || 6, kPrior = model.kPrior || 50;
+      const raw = [];
+      for (const [name, s] of Object.entries(model.classes || {})) {
+        if (shouldIgnore(name)) continue;
+        const mean = s.sum / Math.max(1, s.n);
+        const lambda = kPrior / (kPrior + (s.n || 0));
+        const hybrid = (1 - lambda) * mean + lambda * (s.ema ?? 0);
+        const prevalence = clamp01(s.emaPres ?? 0);
+        const score = Math.max(0, hybrid * (0.5 + 0.5 * prevalence));
+        raw.push([name, score]);
+      }
+      if (!raw.length) return {};
+      raw.sort((a,b)=>b[1]-a[1]);
+      const top = raw.slice(0, K);
+      const Z = top.reduce((acc,[,v])=>acc+v,0) || 1;
+      return Object.fromEntries(top.map(([n,v])=>[n, v/Z]));
+    }
+    function recomputeWeights(model) {
+      const preview = computeWeightsPreview(model);
+      model.weights = preview;
+      model.updatedAt = Date.now();
+      saveModel(model);
+      const lines = Object.entries(preview)
+        .sort((a,b)=>b[1]-a[1])
+        .map(([n,v]) => \`\${n.padEnd(24,' ')}  w=\${(v).toFixed(3)}  n=\${model.classes?.[n]?.n ?? 0}\`);
+      log('ok', \`Recomputed weights for “\${getModelName()}” (Top-K normalized):\`, \`<div class="log-code">\${lines.join('\\n')}</div>\`);
+      return model.weights;
+    }
+
+    /* ========= Detection state & charts ========= */
+    const state = {
+      running: false,
+      mode: 'idle',
+      micCtx: null, srcNode: null, procNode: null, sinkNode: null,
+      ring: new Float32Array(0), lastPos: 0,
+      perClassEma: new Map(), fusedEma: 0,
+      alertOn: false, alertUntil: 0,
+      chart: null, barChart: null, barDynW: null, barSavedW: null,
+      labels: [], fusedRaw: [], fusedSm: [],
+      thrOn: 0.35, thrOff: 0.25,
+      frameCount: 0, asmLastLogTs: 0,
+      // calibration
+      calActive: false,
+      calVals: [],
+      calTimerId: null,
+      calTickId: null,
+      calEndAt: 0,
+      scoreLastLogTs: 0,
+    };
+
+    function setupChart(){
+      state.chart?.destroy?.();
+      const ctx = els.chart.getContext('2d');
+      state.chart = new Chart(ctx, {
+        type: 'bar', // container type; dataset-level types override too
+        data: { labels: [], datasets: [
+          // fused raw as histogram (bar)
+          { type:'bar', label:'fused(raw)', data:[], borderWidth:0 },
+          // fused EMA as smooth line
+          { type:'line', label:'fused(EMA)', data:[], borderWidth:2, pointRadius:0, tension:0.2 },
+          // thresholds
+          { type:'line', label:'thr ON', data:[], borderWidth:1, pointRadius:0, borderDash:[6,4] },
+          { type:'line', label:'thr OFF', data:[], borderWidth:1, pointRadius:0, borderDash:[2,2] },
+        ]},
+        options: {
+          responsive:true,
+          animation:false,
+          plugins:{ legend:{ display:false }, tooltip:{ mode:'index', intersect:false } },
+          scales:{
+            x:{ title:{display:true, text:'time (local)'}, ticks:{ maxRotation:0, autoSkip:true, maxTicksLimit:10 } },
+            y:{ title:{display:true, text:'score'}, min:0, max:1.2 }
+          }
+        }
+      });
+    }
+    function nowLabel(){
+      const d = new Date();
+      return d.toLocaleTimeString([], {hour12:false});
+    }
+    function pushChart(/*tSec*/, raw, sm){
+      const N = 300;
+      state.labels.push(nowLabel());
+      state.fusedRaw.push(raw);
+      state.fusedSm.push(sm);
+      if (state.labels.length > N) { state.labels.shift(); state.fusedRaw.shift(); state.fusedSm.shift(); }
+      const thrOn = state.thrOn, thrOff = state.thrOff;
+      state.chart.data.labels = state.labels;
+      state.chart.data.datasets[0].data = state.fusedRaw; // bars
+      state.chart.data.datasets[1].data = state.fusedSm;  // line
+      state.chart.data.datasets[2].data = new Array(state.labels.length).fill(thrOn);
+      state.chart.data.datasets[3].data = new Array(state.labels.length).fill(thrOff);
+      const all = state.fusedRaw.concat(state.fusedSm, [thrOn, thrOff]);
+      state.chart.options.scales.y.max = Math.max(0.6, Math.min(1.5, Math.max(...all)+0.05));
+      state.chart.update();
+    }
+
+    function setupBars(){
+      if (!state.barChart && els.bars) {
+        state.barChart = new Chart(els.bars.getContext('2d'), {
+          type: 'bar',
+          data: { labels: [], datasets: [{ label: 'score', data: [], borderWidth: 1, backgroundColor: [], borderColor: [] }] },
+          options: { indexAxis: 'y', animation: false, plugins: { legend: { display:false } },
+            scales: { x: { min: 0, max: 1, title: { display:true, text:'score' } }, y: { ticks: { autoSkip: false } } } }
+        });
+      }
+      if (!state.barDynW && els.barsDynW) {
+        state.barDynW = new Chart(els.barsDynW.getContext('2d'), {
+          type: 'bar',
+          data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
+          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{enabled: true} },
+            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
+        });
+      }
+      if (!state.barSavedW && els.barsSavedW) {
+        state.barSavedW = new Chart(els.barsSavedW.getContext('2d'), {
+          type: 'bar',
+          data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
+          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{enabled: true} },
+            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
+        });
+      }
+    }
+    function clearTopBars(){
+      if (!state.barChart) return;
+      state.barChart.data.labels = [];
+      state.barChart.data.datasets[0].data = [];
+      state.barChart.data.datasets[0].backgroundColor = [];
+      state.barChart.data.datasets[0].borderColor = [];
+      state.barChart.update();
+    }
+    function updateTopBars(cats){
+      if (!els.bars) return;
+      setupBars();
+      const K = Math.max(1, Number(els.TOP_K.value) || 6);
+      const sorted = [...cats].sort((a,b)=> (b.score||0)-(a.score||0));
+
+      const display = [];
+      let kept = 0, i = 0;
+      while (i < sorted.length && kept < K) {
+        const c = sorted[i++];
+        const excluded = shouldIgnore(c.categoryName);
+        display.push({ name: c.categoryName || '(unnamed)', v: c.score || 0, excluded });
+        if (!excluded) kept++;
+      }
+
+      const labels = display.map(d => d.name);
+      const values = display.map(d => d.v);
+      const bg = display.map(d => d.excluded ? 'rgba(107,114,128,0.85)' : 'rgba(96,165,250,0.85)');
+      const bd = display.map(d => d.excluded ? 'rgba(75,85,99,1)' : 'rgba(59,130,246,1)');
+
+      state.barChart.data.labels = labels;
+      state.barChart.data.datasets[0].data = values;
+      state.barChart.data.datasets[0].backgroundColor = bg;
+      state.barChart.data.datasets[0].borderColor = bd;
+      state.barChart.update();
+    }
+
+    function setWeightsChart(chart, weightsDict){
+      if (!chart) return;
+      const entries = Object.entries(weightsDict || {}).sort((a,b)=>b[1]-a[1]);
+      chart.data.labels = entries.map(([n]) => n);
+      chart.data.datasets[0].data = entries.map(([,v]) => v);
+      chart.update();
+    }
+
+    /* ========= Fusion scoring ========= */
+    function ensurePerClassEma(weights) {
+      for (const n of Object.keys(weights || {})) {
+        if (!state.perClassEma.has(n)) state.perClassEma.set(n, 0);
+      }
+    }
+    function fusedScoreFromCategories(categories, weights, dt) {
+      const a = alphaForTau(dt, Number(els.CLASS_EMA_TAU_S.value) || 0.8);
+
+      for (const c of categories) {
+        const name = c.categoryName; if (!name) continue;
+        const prev = state.perClassEma.get(name) || 0;
+        state.perClassEma.set(name, emaStep(prev, c.score || 0, a));
+      }
+      ensurePerClassEma(weights);
+
+      let fused = 0;
+      for (const [name, w] of Object.entries(weights || {})) {
+        fused += (w || 0) * (state.perClassEma.get(name) || 0);
+      }
+
+      const pmap = getPenaltyMap();
+      if (Object.keys(pmap).length) {
+        for (const [tok, pen] of Object.entries(pmap)) {
+          const token = String(tok || '').toLowerCase();
+          if (!token) continue;
+          for (const [nm, ema] of state.perClassEma.entries()) {
+            if (nm.toLowerCase().includes(token)) fused += (pen || 0) * (ema || 0);
+          }
+        }
+      }
+
+      fused = clamp01(fused);
+      state.fusedEma = emaStep(state.fusedEma, fused, alphaForTau(dt, Number(els.FUSED_EMA_TAU_S.value) || 0.8));
+      return { raw: fused, sm: state.fusedEma };
+    }
+    function applyHysteresis(sm, nowMs){
+      const hold = Number(els.ALERT_HOLD_MS.value) || 0;
+      if (state.alertOn) { if (nowMs < state.alertUntil) return true; return sm >= state.thrOff; }
+      else { if (sm >= state.thrOn) { state.alertUntil = nowMs + hold; return true; } return false; }
+    }
+
+    /* ========= Quiet calibration (with slider + countdown UI) ========= */
+    function syncCalOutput(){
+      if (els.CAL_SLIDER && els.CAL_SEC_OUT) els.CAL_SEC_OUT.textContent = \`\${els.CAL_SLIDER.value}s\`;
+      if (els.CAL_SEC) els.CAL_SEC.value = els.CAL_SLIDER ? els.CAL_SLIDER.value : els.CAL_SEC.value;
+    }
+    els.CAL_SLIDER?.addEventListener('input', syncCalOutput);
+    syncCalOutput();
+
+    function startCalUI(durSec){
+      els.btnCalStart.disabled = true;
+      els.btnCalStop.disabled = false;
+      state.calEndAt = performance.now() + durSec * 1000;
+      const tick = () => {
+        const left = Math.max(0, Math.ceil((state.calEndAt - performance.now())/1000));
+        els.btnCalStart.textContent = \`Calibrating… (\${left}s)\`;
+        if (!state.calActive) return; // stopped externally
+        if (left <= 0) return; // will be reset in finish
+      };
+      tick();
+      state.calTickId = setInterval(tick, 500);
+    }
+    function stopCalUI(){
+      clearInterval(state.calTickId); state.calTickId = null;
+      els.btnCalStart.disabled = false;
+      els.btnCalStop.disabled = true;
+      els.btnCalStart.textContent = 'Start Calibration';
+    }
+
+    async function quietCalibrate(){
+      if (state.calActive) return;
+
+      const durSec = Math.max(5, Number(els.CAL_SLIDER?.value) || Number(els.CAL_SEC?.value) || 20);
+      const offDelta = Number(els.ALERT_OFF_DELTA.value) || 0.10;
+
+      state.calActive = true;
+      state.calVals = [];
+      setStatus(\`Quiet calibration for \${durSec}s… Please keep things quiet.\`);
+
+      await startMic('detect');
+      setPill('calibrating', true);
+      startCalUI(durSec);
+
+      state.calTimerId = setTimeout(async () => {
+        const vals = state.calVals.slice();
+        state.calActive = false;
+        state.calTimerId = null;
+
+        if (!vals.length) {
+          const thr_on = 0.35;
+          const thr_off = Math.max(0, thr_on - offDelta);
+          localStorage.setItem(CALIB_KEY(), JSON.stringify({ version: 1, thr_on, thr_off, n: 0, at: new Date().toISOString() }));
+          state.thrOn = thr_on; state.thrOff = thr_off;
+          await stopAll();
+          setPill('idle', false);
+          stopCalUI();
+          log('warn', 'Calibration captured 0 frames; using defaults.');
+          return;
+        }
+
+        const p99 = quantile(vals, 0.995);
+        const thr_off = Math.min(0.95, p99 + 0.02);
+        const thr_on  = Math.min(0.99, thr_off + offDelta);
+
+        const payload = { version: 1, thr_on, thr_off, n: vals.length, p99, off_delta: offDelta, dur_s: durSec, at: new Date().toISOString() };
+        localStorage.setItem(CALIB_KEY(), JSON.stringify(payload));
+        state.thrOn = thr_on; state.thrOff = thr_off;
+
+        log('ok', 'Quiet calibration complete.', \`<div class="log-code">\${JSON.stringify(payload, null, 2)}</div>\`);
+
+        await stopAll();
+        setPill('idle', false);
+        stopCalUI();
+        setStatus('Calibration done. Start Detect to use the new thresholds.');
+      }, durSec * 1000);
+    }
+
+    async function stopCalibration(){
+      if (!state.calActive) return;
+      state.calActive = false;
+      if (state.calTimerId) { clearTimeout(state.calTimerId); state.calTimerId = null; }
+      await stopAll();
+      setPill('idle', false);
+      stopCalUI();
+      log('warn','Calibration stopped by user.');
+    }
+
+    /* ========= Classify loop & modes ========= */
+    function concatFloat32(a,b){ const out=new Float32Array(a.length+b.length); out.set(a,0); out.set(b,a.length); return out; }
+
+    async function classifyChunk(chunk, deviceSr, params, mode){
+      if (state.mode !== mode) return;
+
+      const SR_TARGET = Number(els.SR_TARGET.value)||16000;
+      const HOP_S = Number(els.HOP_S.value)||0.48;
+      const MAX_RESULTS = Number(els.MAX_RESULTS.value)||25;
+      const task = await ensureAudioTask(MAX_RESULTS);
+
+      let s=0; for(let i=0;i<chunk.length;i++){ const v=chunk[i]; s+=v*v; }
+      setRMS(Math.sqrt(s/Math.max(1,chunk.length)));
+
+      const x16 = resampleLinear(chunk, deviceSr, SR_TARGET);
+      state.ring = concatFloat32(state.ring, x16);
+      const fram = snapFrameSamples(SR_TARGET, Number(els.FRAME_LEN_S.value));
+      const hop  = Math.round(HOP_S * SR_TARGET);
+
+      const now = performance.now();
+      if (now - state.asmLastLogTs >= ASM_LOG_MS) {
+        log('info', \`Audio buf len=\${state.ring.length}, need≥\${state.lastPos + hop} (hop=\${hop}, frame=\${fram})\`);
+        state.asmLastLogTs = now;
+      }
+
+      while (state.ring.length - state.lastPos >= hop) {
+        const end = state.lastPos + hop, start = Math.max(0, end - fram);
+        let w = state.ring.slice(start, end); if (w.length !== fram) { const pad = new Float32Array(fram); pad.set(w, fram-w.length); w = pad; }
+
+        const res = await classifyMP(task, w, SR_TARGET);
+        const cats = extractCategories(res);
+
+        if (state.calActive) {
+          updateTopBars(cats);
+        }
+
+        if (LOGS.enable.checked) {
+          const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
+          const html = formatCats(cats, topN, LOGS.all.checked);
+          const msg  = \`Inference#\${++state.frameCount} [mode=\${mode}] cats=\${cats.length}\`;
+          log('inf', msg, html, { mode, frame: state.frameCount, cats });
+          if (!res) log('warn', 'Inference returned null result (classify failed).');
+          else if (!cats.length) log('warn', 'Inference returned 0 categories.');
+        }
+
+        const trainingActive = (mode === 'train' || mode === 'train_file' || mode === 'train_folder') && (state.mode === mode);
+
+        if (trainingActive) {
+          updateTopBars(cats);
+          const model = loadModel();
+          model.halfLifeSec = Number(els.HALF_LIFE_S.value) || 3600;
+          model.kPrior = Number(els.K_PRIOR.value) || 50;
+          model.K = Number(els.TOP_K.value) || 6;
+          updateStats(model, cats, HOP_S);
+          saveModel(model);
+
+          const previewW = computeWeightsPreview(model);
+          setWeightsChart(state.barDynW, previewW);
+        } else if (mode === 'detect' && state.mode === 'detect') {
+          updateTopBars(cats);
+          const model = loadModel();
+          model.K = Number(els.TOP_K.value) || model.K || 6;
+          const weights = model.weights || {"Baby cry, infant cry":1};
+          const { raw, sm } = fusedScoreFromCategories(cats, weights, HOP_S);
+
+          const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+          if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; }
+          else { state.thrOn = 0.35; state.thrOff = state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1); }
+
+          pushChart(0, raw, sm);
+
+          if (state.calActive) {
+            state.calVals.push(sm);
+          }
+
+          // Log fused scores (raw & EMA), thresholds, and alert state (detect & quiet-cal)
+          if (LOGS.enable.checked) {
+            const nowTs = performance.now();
+            if (nowTs - state.scoreLastLogTs >= SCORE_LOG_MS) {
+              const nextOn = (() => {
+                const hold = Number(els.ALERT_HOLD_MS.value) || 0;
+                if (state.alertOn) return (nowTs < state.alertUntil) ? true : (sm >= state.thrOff);
+                if (sm >= state.thrOn) return true;
+                return false;
+              })();
+              const tag = state.calActive ? 'cal' : 'run';
+              log('inf', \`[\${tag}] score raw=\${raw.toFixed(3)} sm=\${sm.toFixed(3)} | thrOn=\${state.thrOn.toFixed(3)} thrOff=\${state.thrOff.toFixed(3)} | alert=\${nextOn ? 'ON' : 'off'}\`);
+              state.scoreLastLogTs = nowTs;
+            }
+          }
+
+          const on = applyHysteresis(sm, performance.now());
+          if (on && !state.alertOn) { setPill('CRYING', true); log('ok','ALERT ON (cry detected).'); }
+          if (!on && state.alertOn) { setPill('idle', false); log('warn','ALERT OFF.'); }
+          state.alertOn = on;
+        }
+
+        state.lastPos += hop;
+        if (state.lastPos > fram * 4) {
+          const cut = state.lastPos - fram;
+          state.ring = state.ring.slice(cut);
+          state.lastPos -= cut;
+        }
+      }
+    }
+
+    /* ========= Mic control ========= */
+    async function startMic(mode) {
+      await stopFolderTraining();
+      await stopFilePlayback();
+      await stopAll();
+      setStatus(mode==='detect' ? 'Starting microphone (detect)…' : 'Starting microphone (train)…');
+      const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
+      state.micCtx = ctx;
+      await ctx.resume();
+      log('info', \`Mic AudioContext sampleRate=\${ctx.sampleRate} Hz\`);
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false },
+        video: false
+      });
+      const src = ctx.createMediaStreamSource(stream);
+      const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
+      state.srcNode = src; state.sinkNode = sink;
+
+      try {
+        const url = URL.createObjectURL(new Blob([\`
+          class Tap extends AudioWorkletProcessor {
+            process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }
+          } registerProcessor('tap', Tap);
+        \`], {type:'application/javascript'}));
+        await ctx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
+        const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
+        node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate, getParams(), mode);
+        src.connect(node).connect(sink);
+        state.procNode = node;
+        setStatus('AudioWorklet active @ '+ctx.sampleRate+' Hz');
+      } catch {
+        const node = ctx.createScriptProcessor(4096,1,1);
+        node.onaudioprocess = (e)=> classifyChunk(new Float32Array(e.inputBuffer.getChannelData(0)), ctx.sampleRate, getParams(), mode);
+        src.connect(node).connect(sink);
+        state.procNode = node;
+        setStatus('ScriptProcessor active @ '+ctx.sampleRate+' Hz');
+      }
+      state.running = true;
+      state.mode = mode;
+      setPill(mode==='detect' ? 'idle' : 'training', mode!=='detect');
+      log('ok', \`Mic started in \${mode.toUpperCase()} mode.\`);
+    }
+
+    async function stopAll(){
+      const wasRunning = state.running || state.mode!=='idle';
+      state.running=false; state.mode='idle';
+      try { state.procNode?.disconnect(); } catch {}
+      try { state.srcNode?.disconnect(); } catch {}
+      try { state.sinkNode?.disconnect(); } catch {}
+      try { state.micCtx && state.micCtx.state!=='closed' && state.micCtx.close(); } catch {}
+      state.procNode=null; state.srcNode=null; state.sinkNode=null; state.micCtx=null;
+      state.ring=new Float32Array(0); state.lastPos=0; state.perClassEma.clear(); state.fusedEma=0; state.frameCount=0;
+      state.asmLastLogTs = 0;
+      state.scoreLastLogTs = 0;
+      setPill('idle', false); setRMS(0);
+      clearTopBars();
+      if (wasRunning) log('warn','Stopped audio graph.');
+    }
+
+    /* ========= Training on FILE/FOLDER ========= */
+    let trainCtx=null, trainSrc=null, trainNode=null, trainSink=null, trainBlobUrl=null;
+    let trainUsingWorklet = false;
+
+    async function ensureTrainGraph(modeLabel){
+      if (!trainCtx) trainCtx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
+      if (trainCtx.state === 'suspended') await trainCtx.resume();
+
+      if (!trainSink) { trainSink = trainCtx.createGain(); trainSink.gain.value = 0; trainSink.connect(trainCtx.destination); }
+      if (!trainNode) {
+        try {
+          const mod = URL.createObjectURL(new Blob([\`
+            class Tap extends AudioWorkletProcessor {
+              process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }
+            } registerProcessor('tap', Tap);
+          \`], {type:'application/javascript'}));
+          await trainCtx.audioWorklet.addModule(mod); URL.revokeObjectURL(mod);
+          trainNode = new AudioWorkletNode(trainCtx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
+          trainUsingWorklet = true;
+        } catch {
+          const node = trainCtx.createScriptProcessor(4096,1,1);
+          trainNode = node;
+          trainUsingWorklet = false;
+        }
+      }
+
+      if (trainUsingWorklet) {
+        trainNode.port.onmessage = (ev)=> classifyChunk(ev.data, trainCtx.sampleRate, getParams(), 'train_file');
+      } else {
+        trainNode.onaudioprocess = (e)=> classifyChunk(new Float32Array(e.inputBuffer.getChannelData(0)), trainCtx.sampleRate, getParams(), 'train_file');
+      }
+
+      if (!trainSrc) trainSrc = trainCtx.createMediaElementSource(els.trainAudio);
+      try { trainSrc.disconnect(); } catch {}
+      try { trainNode.disconnect(); } catch {}
+      trainSrc.connect(trainNode).connect(trainSink);
+    }
+
+    function setTrainAudioSrcFromFile(file){
+      if (trainBlobUrl) { try { URL.revokeObjectURL(trainBlobUrl); } catch {} }
+      trainBlobUrl = URL.createObjectURL(file);
+      els.trainAudio.src = trainBlobUrl;
+      els.trainAudio.loop = false;
+    }
+
+    async function startTrainingOnFile(file) {
+      await stopFolderTraining(true);
+      await stopAll();
+      await ensureTrainGraph('train_file');
+      setTrainAudioSrcFromFile(file);
+      await ensureAudioTask(Number(els.MAX_RESULTS.value)||25);
+
+      state.mode = 'train_file';
+      setPill('training', true);
+      log('ok', \`Training started on file: \${file.name}\`, \`<span class="chip">\${(file.size/1024/1024).toFixed(2)} MB</span>\`);
+
+      els.trainAudio.onended = async () => {
+        await stopFilePlayback();
+        setStatus('Training clip ended. Click “Recompute Weights”.');
+        setPill('idle', false);
+        state.mode='idle';
+        clearTopBars();
+      };
+
+      try { await els.trainAudio.play(); } catch {}
+    }
+
+    async function stopFilePlayback(){
+      try { els.trainAudio.pause(); } catch {}
+      els.trainAudio.onended = null;
+      try { if (trainCtx && trainCtx.state !== 'suspended') await trainCtx.suspend(); } catch {}
+      clearTopBars();
+    }
+
+    /* ========= Folder training ========= */
+    let folderFiles = [];
+    let folderIdx = 0;
+    let folderActive = false;
+
+    function describeCommonRoot(files){
+      const paths = files.map(f => f.webkitRelativePath || f.name);
+      if (!paths.length) return '';
+      const split = paths.map(p => p.split('/'));
+      const minLen = Math.min(...split.map(a=>a.length));
+      let i=0; while (i<minLen && split.every(a => a[i]===split[0][i])) i++;
+      return split[0].slice(0, Math.max(0, i-1)).join('/') || '(root)';
+    }
+    function pickAudioFilesFromList(list){
+      const arr = Array.from(list || []);
+      return arr.filter(f => {
+        if (f.type && f.type.startsWith('audio/')) return true;
+        return /\.(wav|mp3|m4a|aac|ogg|opus|flac)$/i.test(f.name);
+      }).sort((a,b) => {
+        const pa = (a.webkitRelativePath || a.name).toLowerCase();
+        const pb = (b.webkitRelativePath || b.name).toLowerCase();
+        return pa.localeCompare(pb);
+      });
+    }
+
+    async function startFolderTraining(){
+      if (!folderFiles.length) { els.btnChooseFolder.click(); return; }
+      await stopAll();
+      await ensureAudioTask(Number(els.MAX_RESULTS.value)||25);
+
+      folderActive = true;
+      folderIdx = 0;
+      state.mode = 'train_folder';
+      setPill('training', true);
+      log('ok', \`Folder training queued: \${folderFiles.length} file(s) from “\${describeCommonRoot(folderFiles)}”.\`);
+      await trainNextFileInFolder();
+    }
+
+    async function trainNextFileInFolder(){
+      if (!folderActive) return;
+      if (folderIdx >= folderFiles.length) {
+        await stopFolderTraining(true);
+        log('ok', 'Folder training complete.');
+        clearTopBars();
+        return;
+      }
+      const f = folderFiles[folderIdx];
+      const label = f.webkitRelativePath || f.name;
+      log('info', \`Starting file \${folderIdx+1}/\${folderFiles.length}: \${label}\`);
+
+      setTrainAudioSrcFromFile(f);
+      els.trainAudio.onended = async () => {
+        log('info', \`Finished \${folderIdx+1}/\${folderFiles.length}\`);
+        folderIdx++;
+        if (folderActive) { await trainNextFileInFolder(); }
+      };
+
+      try {
+        await ensureTrainGraph('train_folder');
+        // switch the processor callback to folder mode
+        if (trainCtx && trainCtx.state === 'suspended') await trainCtx.resume();
+        if (trainNode?.port) {
+          trainNode.port.onmessage = (ev)=> classifyChunk(ev.data, trainCtx.sampleRate, getParams(), 'train_folder');
+        } else if (trainNode) {
+          trainNode.onaudioprocess = (e)=> classifyChunk(new Float32Array(e.inputBuffer.getChannelData(0)), trainCtx.sampleRate, getParams(), 'train_folder');
+        }
+        await els.trainAudio.play();
+      } catch (e) {
+        log('err', 'Failed to play file in folder: '+(e?.message||e));
+        folderIdx++;
+        await trainNextFileInFolder();
+      }
+    }
+
+    async function stopFolderTraining(silent=false){
+      folderActive = false;
+      folderIdx = 0;
+      await stopFilePlayback();
+      setPill('idle', false);
+      state.mode = 'idle';
+      clearTopBars();
+      if (!silent) log('warn','Stopped folder training.');
+    }
+
+    /* ========= Params & UI wiring ========= */
+    function getParams(){
+      return {
+        SR_TARGET: Number(els.SR_TARGET.value)||16000,
+        FRAME_LEN_S: Number(els.FRAME_LEN_S.value)||0.975,
+        HOP_S: Number(els.HOP_S.value)||0.48,
+        MAX_RESULTS: Number(els.MAX_RESULTS.value)||25
+      };
+    }
+
+    // Detect / Calibrate
+    els.btnStartDetect.onclick = () => startMic('detect');
+    els.btnStop.onclick = async () => { await stopFolderTraining(true); await stopFilePlayback(); await stopAll(); };
+    els.btnCalStart.onclick = () => quietCalibrate();
+    els.btnCalStop.onclick = () => stopCalibration();
+
+    // Training via MIC
+    els.btnStartTrainMic.onclick = () => startMic('train');
+    els.btnStopTrainMic.onclick = () => stopAll();
+
+    // Training via FILE
+    els.btnTrainFile.onclick = async () => {
+      const f = els.fileInp.files?.[0];
+      if (!f) { setStatus('Pick an audio file first'); return; }
+      await startTrainingOnFile(f);
+    };
+    els.btnStopTrainFile.onclick = () => stopFilePlayback();
+
+    // Folder training UI
+    els.btnChooseFolder.onclick = () => els.folderInp.click();
+    els.folderInp.onchange = () => {
+      folderFiles = pickAudioFilesFromList(els.folderInp.files);
+      const root = describeCommonRoot(folderFiles);
+      els.folderInfo.textContent = folderFiles.length
+        ? \`\${folderFiles.length} audio file(s) selected from “\${root}”.\`
+        : 'No audio files found in the chosen folder.';
+      log('info', els.folderInfo.textContent);
+    };
+    els.btnTrainFolder.onclick = () => startFolderTraining();
+    els.btnStopTrainFolder.onclick = () => stopFolderTraining();
+
+    // Recompute / Clear / Export
+    els.btnRecompute.onclick = () => {
+      const m = loadModel();
+      m.K = Number(els.TOP_K.value)||m.K||6;
+      m.kPrior = Number(els.K_PRIOR.value)||m.kPrior||50;
+      m.halfLifeSec = Number(els.HALF_LIFE_S.value)||m.halfLifeSec||3600;
+      const w = recomputeWeights(m);
+      setWeightsChart(state.barSavedW, w);
+    };
+    els.btnClear.onclick = () => {
+      const name = getModelName();
+      clearModel();
+      setWeightsChart(state.barDynW, {});
+      setWeightsChart(state.barSavedW, {});
+      setupChart();
+      clearTopBars();
+      setStatus(\`Model “\${name}” cleared.\`);
+    };
+    els.btnExport.onclick = () => {
+      const key = MODEL_KEY();
+      const blob = new Blob([localStorage.getItem(key) || '{}'], {type:'application/json'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = \`cryModel_\${getModelName()}.json\`; a.click();
+      URL.revokeObjectURL(a.href);
+      log('ok',\`Exported cryModel_\${getModelName()}.json\`);
+    };
+
+    // Model name controls
+    els.btnModelUse.onclick = () => {
+      const name = els.MODEL_NAME.value.trim() || 'default';
+      localStorage.setItem('cryActiveModelName', name);
+      setModelName(name);
+      setStatus(\`Active model name set to “\${name}”. New training/recompute will persist there.\`);
+      const ignoreSaved = localStorage.getItem(IGNORE_KEY());
+      if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
+      const penaltySaved = localStorage.getItem(PENALTY_KEY());
+      if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
+    };
+    els.btnModelLoad.onclick = () => {
+      const name = els.MODEL_NAME.value.trim() || 'default';
+      setModelName(name);
+      const m = loadModel();
+      setWeightsChart(state.barSavedW, m.weights || {});
+      const preview = computeWeightsPreview(m);
+      setWeightsChart(state.barDynW, preview);
+      const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+      if (calib) log('ok', \`Loaded calibration for “\${name}”.\`, \`<div class="log-code">\${JSON.stringify(calib,null,2)}</div>\`);
+      const ignoreSaved = localStorage.getItem(IGNORE_KEY());
+      if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
+      const penaltySaved = localStorage.getItem(PENALTY_KEY());
+      if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
+      setStatus(\`Loaded model “\${name}”.\`);
+    };
+
+    // Persist knobs immediately + update preview/saved charts
+    ['TOP_K','K_PRIOR','HALF_LIFE_S'].forEach(id => {
+      document.getElementById(id).addEventListener('change', () => {
+        const m = loadModel();
+        if (id==='TOP_K') m.K = Number(els.TOP_K.value)||m.K;
+        if (id==='K_PRIOR') m.kPrior = Number(els.K_PRIOR.value)||m.kPrior;
+        if (id==='HALF_LIFE_S') m.halfLifeSec = Number(els.HALF_LIFE_S.value)||m.halfLifeSec;
+        saveModel(m);
+        log('info', \`Param updated: \${id} = \${document.getElementById(id).value} (saved in “\${getModelName()}”)\`);
+        const preview = computeWeightsPreview(m);
+        setWeightsChart(state.barDynW, preview);
+        setWeightsChart(state.barSavedW, m.weights || {});
+      });
+    });
+
+    // Persist ignore/penalty per model immediately
+    ['IGNORE_CLASSES','PENALTY_MAP'].forEach(id=>{
+      const el = document.getElementById(id);
+      if (!el) return;
+      const save = () => {
+        const key = (id==='IGNORE_CLASSES') ? IGNORE_KEY() : PENALTY_KEY();
+        localStorage.setItem(key, el.value);
+        log('info', \`\${id==='IGNORE_CLASSES'?'Ignore classes':'Penalty map'} updated for “\${getModelName()}”.\`);
+        if (state.mode==='idle') clearTopBars();
+      };
+      el.addEventListener('change', save);
+      el.addEventListener('blur', save);
+    });
+
+    /* ========= Boot ========= */
+    (function boot(){
+      const name = localStorage.getItem('cryActiveModelName') || 'default';
+      setModelName(name);
+
+      setupBars();
+      const ctx = els.chart.getContext('2d'); ctx && setupChart();
+
+      const m = loadModel();
+      setWeightsChart(state.barSavedW, m.weights || {});
+      const preview = computeWeightsPreview(m);
+      setWeightsChart(state.barDynW, preview);
+
+      const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+      if (calib) { state.thrOn=calib.thr_on; state.thrOff=calib.thr_off; log('ok',\`Loaded calibration for “\${name}”.\`, \`<div class="log-code">\${JSON.stringify(calib,null,2)}</div>\`); }
+
+      // Initialize cal slider text
+      syncCalOutput();
+
+      setStatus('Ready. Train (mic/file/folder) → Recompute Weights → Quiet Calibrate → Start Detect.');
+    })();
+  </script>
+</body>
+</html>
