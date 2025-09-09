@@ -146,7 +146,7 @@
 
       <div class="row status-row" style="margin-top:8px;">
         <div id="status" class="muted">Booting…</div>
-        <div id="statePill" class="pill" style="display:none"></div>
+        <div id="statePill" class="pill">idle</div>
       </div>
       <div class="meter" title="Input level (RMS)">
         <div id="rmsFill" class="fill"></div>
@@ -457,23 +457,12 @@
     ].map(x => [x, document.getElementById(x)])) )();
 
     function setStatus(s){ els.status.textContent = s; log('info', s); }
-    function setPill(text, active=false){
-      const p = els.statePill;
-      if (!p) return;
-      const isIdle = !active || !text || text.toLowerCase() === 'idle';
-    
-      if (isIdle) {
-        p.style.display = 'none';
-        p.textContent = '';
-        p.classList.remove('on');      // remove active styling
-        return;
-      }
-    
-      p.style.display = 'inline-block';
-      p.textContent = text;
-      p.classList.toggle('on', !!active);
+    function setPill(s, on=false){
+      els.statePill.textContent = s;
+      const busy = !!on; // treat "on" states as busy/doing-something
+      els.statePill.classList.toggle('on',   busy);
+      els.statePill.classList.toggle('busy', busy);
     }
-
 
     function clamp01(x){ return Math.max(0, Math.min(1, x)); }
     function emaStep(prev, x, a){ return prev + a * (x - prev); }
@@ -788,7 +777,7 @@
       if (!state.barDynW && els.barsDynW) {
         state.barDynW = new Chart(els.barsDynW.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1, barPercentage: 0.9, categoryPercentage: 0.8 }] },
+          data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
           options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{enabled: true} },
             scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
         });
@@ -796,7 +785,7 @@
       if (!state.barSavedW && els.barsSavedW) {
         state.barSavedW = new Chart(els.barsSavedW.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1, barPercentage: 0.9, categoryPercentage: 0.8 }] },
+          data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
           options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{enabled: true} },
             scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
         });
