@@ -9,7 +9,7 @@
     :root { color-scheme: dark; }
     html, body { margin:0; background:#000; color:#fff; font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
     #stage { padding:16px; box-sizing:border-box; display:flex; justify-content:center; }
-    .panel { width:min(100%,1100px); :#0b0b0b; border:1px solid #141414; border-radius:14px; padding:16px; margin:0 auto 24px; }
+    .panel { width:min(100%,1100px); background:#0b0b0b; border:1px solid #141414; border-radius:14px; padding:16px; margin:0 auto 24px; }
     h1 { margin:.2rem 0 .1rem; font-size:22px; }
     .muted { color:#aaa; font-size:12px; }
 
@@ -19,16 +19,17 @@
     .btn[disabled] { opacity:.6; cursor:default; }
     .small { padding:8px 10px; font-size:13px; border-radius:10px; }
 
-    /* Pair layout for aligned Start/Stop */
+    /* Pair layout */
     .btn-pair { display:flex; gap:10px; min-width:240px; }
     .btn-pair .btn { flex:1 1 0; min-width:120px; }
 
     /* Meter & state pill */
-    .status-row { display:flex; align-items:center; justify-content:space-between; }
+    .status-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
     .meter { height:10px; border-radius:8px; background:#0a0a0a; border:1px solid #222; overflow:hidden; }
     .fill { height:100%; width:0%; background:linear-gradient(to right, rgba(96,165,250,.9), rgba(239,68,68,.9)); transition:width 120ms linear; }
     .pill {
-      display:inline-flex; align-items:center; gap:8px;
+      display:none; /* hidden by default; shown only during training/calibration */
+      align-items:center; gap:8px;
       padding:6px 12px; border-radius:999px; border:1px solid #333;
       font-size:13px; font-weight:700;
     }
@@ -39,6 +40,9 @@
       background: currentColor; opacity:.7; margin-left:6px;
       animation: pillPulse .9s ease-in-out infinite alternate;
     }
+    /* tiny gap between the status row (pill) and the audio meter */
+    .status-row + .meter { margin-top: 6px; }  /* tweak 4–8px to taste */
+
     @keyframes pillPulse {
       from { transform: translateX(0) scale(0.8); opacity:.45; }
       to   { transform: translateX(4px) scale(1);   opacity:1;  }
@@ -48,7 +52,7 @@
     .card { background:#0a0a0a; border:1px solid #171717; border-radius:12px; padding:12px; margin-top:12px; }
     .card h2 { margin:0 0 8px 0; font-size:16px; }
     .subgroup { display:flex; gap:14px; align-items:center; padding:10px; border:1px dashed #1b1b1b; border-radius:10px; background:#0b0b0b; }
-    .subgroup strong { min-width:180px; }
+    .subgroup strong { min-width:150px; }
 
     /* Inputs */
     input[type="number"], input[type="text"] { padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; }
@@ -56,7 +60,7 @@
     select { padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; }
 
     /* Sliders */
-    .slider-wrap { display:flex; align-items:center; gap:10px; margin-left:auto; }
+    .slider-wrap { display:flex; align-items:center; gap:10px; }
     input[type="range"] { width:220px; }
 
     /* Charts */
@@ -70,7 +74,7 @@
 
     .legend { margin-top:6px; display:flex; gap:12px; font-size:12px; color:#ccc; flex-wrap:wrap; }
     .key { width:14px; height:3px; border-radius:2px; display:inline-block; margin-right:4px; vertical-align:middle; }
-    .blue { background:#60a5fa; } .red { background:#ef4444; } .or { background:#f97316; } .lo { background:#fb923c; } .green{ background:#22c55e; } .darkred { background:#991b1b; }
+    .blue { background:#60a5fa; } .red { background:#ef4444; } .green{ background:#22c55e; } .darkred { background:#991b1b; }
 
     .weights-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; align-items:start; }
     @media (max-width: 820px) { .weights-grid { grid-template-columns: 1fr; } }
@@ -90,7 +94,7 @@
     .log-code { display:block; background:#0b0b0b; border:1px solid #1f2937; border-radius:8px; padding:6px; margin-top:4px; overflow:auto; }
 
     /* Top bar */
-    .topbar { display:flex; justify-content:space-between; align-items:center; }
+    .topbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
 
     /* Help + modal (unchanged styling) */
     .help-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:110;opacity:0;pointer-events:none;transition:opacity .2s ease;}
@@ -126,6 +130,18 @@
     .modal-head .close{appearance:none;border:none;background:transparent;color:#aaa;font-size:22px;cursor:pointer;padding:2px 6px;}
     .modal-head .close:active{transform:scale(0.98);}
     .modal{z-index:140;} .help-backdrop{z-index:180;} .help-sheet{z-index:190;}
+
+    /* Mobile tweaks */
+    @media (max-width: 560px) {
+      .btn-pair { min-width:auto; width:100%; }
+      .btn-pair .btn { min-width:0; flex:1; }
+      .subgroup { flex-direction:column; align-items:stretch; }
+      .subgroup strong { min-width:unset; }
+      .slider-wrap { width:100%; }
+      input[type="range"] { width:100%; }
+      .row { gap:8px; }
+      select, input[type="number"], input[type="text"] { width:100%; box-sizing:border-box; }
+    }
   </style>
 </head>
 <body>
@@ -148,38 +164,33 @@
 
       <!-- ===== Panels ===== -->
 
-      <!-- Training panel -->
+      <!-- Training panel (dropdown-based) -->
       <div class="card" id="cardTraining">
         <h2>Training</h2>
 
         <div class="subgroup">
-          <strong>Microphone</strong>
-          <div class="btn-pair">
-            <button id="btnStartTrainMic" class="btn">Start</button>
-            <button id="btnStopTrainMic" class="btn">Stop</button>
-          </div>
-          <span class="muted">Use 20–60s segments; then recompute weights.</span>
-        </div>
+          <strong>Source</strong>
+          <select id="TRAIN_SRC" style="min-width:220px;">
+            <option value="mic" selected>Microphone</option>
+            <option value="file">File</option>
+            <option value="folder">Folder</option>
+          </select>
 
-        <div class="subgroup">
-          <strong>File</strong>
-          <input id="fileInp" type="file" accept="audio/*" />
-          <div class="btn-pair">
-            <button id="btnTrainFile" class="btn">Start</button>
-            <button id="btnStopTrainFile" class="btn">Stop</button>
-          </div>
-        </div>
+          <div id="trainChooseWrap" class="row" style="margin-left:auto; gap:10px;">
+            <input id="fileInp" type="file" accept="audio/*" style="display:none" />
+            <button id="btnChooseFile" class="btn" style="display:none;">Choose file…</button>
 
-        <div class="subgroup">
-          <strong>Folder</strong>
-          <input id="folderInp" type="file" webkitdirectory directory multiple style="display:none" />
-          <button id="btnChooseFolder" class="btn">Choose Folder…</button>
-          <div class="btn-pair">
-            <button id="btnTrainFolder" class="btn">Start</button>
-            <button id="btnStopTrainFolder" class="btn">Stop</button>
+            <input id="folderInp" type="file" webkitdirectory directory multiple style="display:none" />
+            <button id="btnChooseFolder" class="btn" style="display:none;">Choose folder…</button>
           </div>
-          <span id="folderInfo" class="muted"></span>
+
+          <div class="btn-pair" style="margin-left:auto;">
+            <button id="btnTrainStart" class="btn">Start</button>
+            <button id="btnTrainStop" class="btn">Stop</button>
+          </div>
         </div>
+        <span id="trainInfo" class="muted"></span>
+        <div class="muted" style="margin-top:6px;">Use 20–60s segments; then recompute weights.</div>
       </div>
 
       <!-- Model panel -->
@@ -200,29 +211,35 @@
       <!-- Quiet calibration panel -->
       <div class="card" id="cardCal">
         <h2>Quiet calibration</h2>
+
+        <!-- Calibrate controls -->
         <div class="subgroup">
           <strong>Calibrate thresholds</strong>
           <div class="btn-pair">
             <button id="btnCal" class="btn">Start</button>
             <button id="btnCalStop" class="btn">Stop</button>
           </div>
+        </div>
+
+        <!-- Sliders STACKED: Duration first -->
+        <div class="subgroup">
+          <strong>Duration</strong>
           <div class="slider-wrap">
-            <span class="muted">Duration</span>
             <input id="CAL_DUR_SLIDER" type="range" min="5" max="120" step="1" value="20" />
             <span id="CAL_DUR_LABEL">20s</span>
           </div>
         </div>
 
-        <!-- NEW: live threshold sliders -->
+        <!-- Then Thresholds OFF and ON -->
         <div class="subgroup">
           <strong>Thresholds</strong>
           <div class="slider-wrap">
-            <span class="muted">OFF</span>
+            <span class="muted" style="min-width:28px;">OFF</span>
             <input id="THR_OFF_SLIDER" type="range" min="0" max="1" step="0.01" />
             <span id="THR_OFF_LABEL">0.25</span>
           </div>
           <div class="slider-wrap">
-            <span class="muted">ON</span>
+            <span class="muted" style="min-width:28px;">ON</span>
             <input id="THR_ON_SLIDER" type="range" min="0" max="1" step="0.01" />
             <span id="THR_ON_LABEL">0.35</span>
           </div>
@@ -450,24 +467,24 @@
       'CLASS_EMA_TAU_S','FUSED_EMA_TAU_S','ALERT_HOLD_MS',
       'CAL_SEC_SETTINGS','ALERT_OFF_DELTA','TOP_K','K_PRIOR','HALF_LIFE_S','MAX_RESULTS',
       'btnStartDetect','btnStop','btnCal','btnCalStop','CAL_DUR_SLIDER','CAL_DUR_LABEL',
-      'btnStartTrainMic','btnStopTrainMic',
-      'fileInp','btnTrainFile','btnStopTrainFile',
+      'fileInp','folderInp','btnChooseFolder','btnChooseFile',
       'btnRecompute','btnClear','btnExport',
       'trainAudio','chart','bars','barsDynW','barsSavedW',
-      'folderInp','btnChooseFolder','btnTrainFolder','btnStopTrainFolder','folderInfo',
-      'IGNORE_CLASSES','PENALTY_MAP',
-      'btnResetDefaults',
-      // NEW elements:
+      'IGNORE_CLASSES','PENALTY_MAP','btnResetDefaults',
       'THR_OFF_SLIDER','THR_OFF_LABEL','THR_ON_SLIDER','THR_ON_LABEL',
-      'MODEL_SELECT','CHART_WINDOW_S','cardLiveBars'
+      'MODEL_SELECT','CHART_WINDOW_S','cardLiveBars',
+      'TRAIN_SRC','btnTrainStart','btnTrainStop','trainInfo'
     ].map(x => [x, document.getElementById(x)])) )();
 
     function setStatus(s){ els.status.textContent = s; log('info', s); }
+
+    // Pill: only show during training or calibration
     function setPill(s, on=false){
+      const show = (s === 'training' || s === 'calibrating');
+      els.statePill.style.display = show ? 'inline-flex' : 'none';
       els.statePill.textContent = s;
-      const busy = !!on;
-      els.statePill.classList.toggle('on',   busy);
-      els.statePill.classList.toggle('busy', busy);
+      els.statePill.classList.toggle('on',   show && !!on);
+      els.statePill.classList.toggle('busy', show && !!on);
     }
 
     function clamp01(x){ return Math.max(0, Math.min(1, x)); }
@@ -605,7 +622,7 @@
         K: Number(els.TOP_K.value),
         kPrior: Number(els.K_PRIOR.value),
         classes: {},
-        weights: { "Baby cry, infant cry": 1.0 },
+        weights: { "Crying, sobbing": 49.3, "Baby cry, infant cry": 42.1, "Whimper": 8.6 },
         updatedAt: Date.now()
       };
     }
@@ -757,11 +774,10 @@
       frameCount: 0, asmLastLogTs: 0,
       calActive: false, calVals: [], calTimerId: null, scoreLastLogTs: 0,
       calCountdownId: null,
-      // New for time-windowed chart
+      // Time-windowed chart
       hopSec: 0.48,
       chartWindowSec: 30,
-      chartCap: 0,
-      chartPrimed: false
+      chartCap: 0
     };
 
     /* ====== Time-windowed chart helpers ====== */
@@ -778,7 +794,6 @@
       state.labels   = new Array(state.chartCap).fill('');
       state.fusedRaw = new Array(state.chartCap).fill(null);
       state.fusedSm  = new Array(state.chartCap).fill(null);
-      state.chartPrimed = false;
     }
 
     function setupChart(){
@@ -828,26 +843,26 @@
     }
 
     function pushChart(nowMs, raw, sm){
-      // Keep right-aligned fixed-length window with nulls on the left until filled.
-      const cap = computeChartCap();
-      if (cap !== state.chartCap) { setupChart(); } // window changed; rebuild
+      // Resize if window changed
+      const capNow = computeChartCap();
+      if (capNow !== state.chartCap) { setupChart(); }
 
-      // Shift left, append newest at the end
+      // Fixed-length, right-aligned: shift left, append newest
       state.fusedRaw.shift(); state.fusedRaw.push(raw);
       state.fusedSm.shift();  state.fusedSm.push(sm);
 
-      // Labels show hh:mm:ss for each slot across the fixed window
+      // Labels: local hh:mm:ss across the window
       const dt = state.hopSec * 1000;
       for (let i=0;i<state.chartCap;i++){
         const t = nowMs - (state.chartCap - 1 - i) * dt;
         state.labels[i] = hhmmss(t);
       }
 
-      // Threshold lines (fixed arrays)
+      // Threshold lines
       state.chart.data.datasets[2].data = new Array(state.chartCap).fill(state.thrOn);
       state.chart.data.datasets[3].data = new Array(state.chartCap).fill(state.thrOff);
 
-      // Apply to chart
+      // Apply
       state.chart.data.labels = state.labels.slice();
       state.chart.data.datasets[0].data = state.fusedRaw.slice();
       state.chart.data.datasets[1].data = state.fusedSm.slice();
@@ -862,7 +877,6 @@
     function showLiveBars(){
       if (els.cardLiveBars && els.cardLiveBars.style.display === 'none') {
         els.cardLiveBars.style.display = '';
-        // allow layout before resize for correct canvas sizing
         setTimeout(()=>{ state.barChart?.resize?.(); }, 0);
       }
     }
@@ -893,10 +907,7 @@
       if (!state.barDynW && els.barsDynW) {
         state.barDynW = new Chart(els.barsDynW.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{
-            label: 'weight', data: [], borderWidth:1,
-            barThickness: 10, maxBarThickness: 12, categoryPercentage: 0.5, barPercentage: 0.9
-          }]},
+          data: { labels: [], datasets: [{ label:'weight', data: [], borderWidth:1, barThickness:10, maxBarThickness:12, categoryPercentage:0.5, barPercentage:0.9 }]},
           options: {
             indexAxis:'y',
             responsive:true, maintainAspectRatio:false, animation:false,
@@ -908,10 +919,7 @@
       if (!state.barSavedW && els.barsSavedW) {
         state.barSavedW = new Chart(els.barsSavedW.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{
-            label: 'weight', data: [], borderWidth:1,
-            barThickness: 10, maxBarThickness: 12, categoryPercentage: 0.5, barPercentage: 0.9
-          }]},
+          data: { labels: [], datasets: [{ label:'weight', data: [], borderWidth:1, barThickness:10, maxBarThickness:12, categoryPercentage:0.5, barPercentage:0.9 }]},
           options: {
             indexAxis:'y',
             responsive:true, maintainAspectRatio:false, animation:false,
@@ -956,7 +964,6 @@
       state.barChart.data.datasets[0].borderColor = bd;
       state.barChart.update();
 
-      // Show only when actually filled
       if (labels.length > 0) showLiveBars();
     }
     function setWeightsChart(chart, weightsDict){
@@ -1008,7 +1015,7 @@
       else { if (sm >= state.thrOn) { state.alertUntil = nowMs + hold; return true; } return false; }
     }
 
-    /* ========= NEW: Threshold slider helpers ========= */
+    /* ========= Threshold slider helpers ========= */
     function setThrUI() {
       els.THR_OFF_SLIDER.value = String(state.thrOff.toFixed(2));
       els.THR_ON_SLIDER.value  = String(state.thrOn.toFixed(2));
@@ -1033,7 +1040,6 @@
       log('ok','Saved thresholds.', `<div class="log-code">${JSON.stringify(payload, null, 2)}</div>`);
     }
 
-    // User moves sliders (enabled only when not calibrating)
     els.THR_OFF_SLIDER.addEventListener('input', () => {
       state.thrOff = clamp01(parseFloat(els.THR_OFF_SLIDER.value) || 0);
       if (state.thrOn < state.thrOff) state.thrOn = state.thrOff;
@@ -1049,7 +1055,6 @@
       els.THR_ON_SLIDER.addEventListener(evt,  () => { if (!state.calActive) persistThresholds(); });
     });
 
-    // Live update during calibration (no persistence while active)
     function updateCalLiveThresholds() {
       if (!state.calActive || state.calVals.length < 2) return;
       const offDelta = Number(els.ALERT_OFF_DELTA.value) || 0.10;
@@ -1062,7 +1067,7 @@
     }
 
     /* ========= Quiet calibration ========= */
-    function updateCalDurLabel(){ els.CAL_DUR_LABEL.textContent = `${els.CAL_DUR_SLIDER.value}s`; }
+    function updateCalDurLabel(){ els.CAL_DUR_SLIDER.textContent = els.CAL_DUR_SLIDER.value; els.CAL_DUR_LABEL.textContent = `${els.CAL_DUR_SLIDER.value}s`; }
     els.CAL_DUR_SLIDER.addEventListener('input', updateCalDurLabel);
     updateCalDurLabel();
 
@@ -1148,7 +1153,7 @@
 
       const SR_TARGET = Number(els.SR_TARGET.value)||16000;
       const HOP_S = Number(els.HOP_S.value)||0.48;
-      state.hopSec = HOP_S; // keep in sync for window sizing
+      state.hopSec = HOP_S;
       const MAX_RESULTS = Number(els.MAX_RESULTS.value)||25;
       const task = await ensureAudioTask(MAX_RESULTS);
 
@@ -1207,7 +1212,6 @@
           if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; }
           else { state.thrOn = 0.35; state.thrOff = state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1); }
 
-          // Time-windowed push; do not pre-fill: chart starts with nulls on left
           pushChart(Date.now(), raw, sm);
 
           if (state.calActive) {
@@ -1230,8 +1234,8 @@
           }
 
           const on = applyHysteresis(sm, performance.now());
-          if (on && !state.alertOn) { setPill('CRYING', true); log('ok','ALERT ON (cry detected).'); }
-          if (!on && state.alertOn) { setPill('idle', false); log('warn','ALERT OFF.'); }
+          if (on && !state.alertOn) { log('ok','ALERT ON (cry detected).'); }
+          if (!on && state.alertOn) { log('warn','ALERT OFF.'); }
           state.alertOn = on;
         }
 
@@ -1286,8 +1290,9 @@
       }
       state.running = true;
       state.mode = mode;
+      // Pill only during training
       setPill(mode==='detect' ? 'idle' : 'training', mode!=='detect');
-      // Reset the time-window chart so it starts on the right
+      // Reset time-window chart so it starts from the right edge
       setupChart();
       log('ok', `Mic started in ${mode.toUpperCase()} mode.`);
     }
@@ -1472,30 +1477,64 @@
     els.btnCal.onclick = () => quietCalibrate();
     els.btnCalStop.onclick = () => stopCalibrationEarly();
 
-    // Training via MIC
-    els.btnStartTrainMic.onclick = () => startMic('train');
-    els.btnStopTrainMic.onclick = () => stopAll();
+    // Training source UI
+    function updateTrainingSourceUI(){
+      const v = els.TRAIN_SRC.value;
+      const showFile   = (v === 'file');
+      const showFolder = (v === 'folder');
 
-    // Training via FILE
-    els.btnTrainFile.onclick = async () => {
+      els.btnChooseFile.style.display   = showFile ? '' : 'none';
+      els.btnChooseFolder.style.display = showFolder ? '' : 'none';
+
+      // Info line
+      if (v === 'mic') els.trainInfo.textContent = 'Training from microphone.';
+      if (v === 'file') els.trainInfo.textContent = els.fileInp.files?.[0] ? `Selected file: ${els.fileInp.files[0].name}` : 'Choose a file to train.';
+      if (v === 'folder') {
+        const count = folderFiles.length;
+        els.trainInfo.textContent = count ? `${count} audio file(s) selected from “${describeCommonRoot(folderFiles)}”.` : 'Choose a folder with audio files.';
+      }
+    }
+    els.TRAIN_SRC.addEventListener('change', updateTrainingSourceUI);
+    updateTrainingSourceUI();
+
+    // Choose buttons
+    els.btnChooseFile.onclick = () => els.fileInp.click();
+    els.fileInp.onchange = () => {
       const f = els.fileInp.files?.[0];
-      if (!f) { setStatus('Pick an audio file first'); return; }
-      await startTrainingOnFile(f);
+      els.trainInfo.textContent = f ? `Selected file: ${f.name}` : 'Choose a file to train.';
+      log('info', els.trainInfo.textContent);
     };
-    els.btnStopTrainFile.onclick = () => stopFilePlayback();
 
-    // Folder training UI
     els.btnChooseFolder.onclick = () => els.folderInp.click();
     els.folderInp.onchange = () => {
       folderFiles = pickAudioFilesFromList(els.folderInp.files);
       const root = describeCommonRoot(folderFiles);
-      els.folderInfo.textContent = folderFiles.length
+      els.trainInfo.textContent = folderFiles.length
         ? `${folderFiles.length} audio file(s) selected from “${root}”.`
         : 'No audio files found in the chosen folder.';
-      log('info', els.folderInfo.textContent);
+      log('info', els.trainInfo.textContent);
     };
-    els.btnTrainFolder.onclick = () => startFolderTraining();
-    els.btnStopTrainFolder.onclick = () => stopFolderTraining();
+
+    // Training Start/Stop (based on source)
+    els.btnTrainStart.onclick = async () => {
+      const src = els.TRAIN_SRC.value;
+      if (src === 'mic') {
+        await startMic('train');
+      } else if (src === 'file') {
+        const f = els.fileInp.files?.[0];
+        if (!f) { els.btnChooseFile.click(); setStatus('Pick an audio file first'); return; }
+        await startTrainingOnFile(f);
+      } else if (src === 'folder') {
+        if (!folderFiles.length) { els.btnChooseFolder.click(); setStatus('Pick a folder first'); return; }
+        await startFolderTraining();
+      }
+    };
+    els.btnTrainStop.onclick = async () => {
+      const src = els.TRAIN_SRC.value;
+      if (src === 'mic') await stopAll();
+      else if (src === 'file') await stopFilePlayback();
+      else if (src === 'folder') await stopFolderTraining();
+    };
 
     // Recompute / Clear / Export
     els.btnRecompute.onclick = () => {
@@ -1533,7 +1572,7 @@
         const exists = listModelNames().includes(name);
         setModelName(name);
         if (!exists) {
-          const m = loadModel(); // creates default structure for this name
+          const m = loadModel();
           saveModel(m);
           log('ok', `Created model “${name}”.`);
         } else {
@@ -1589,7 +1628,7 @@
       const v = Math.max(5, Number(els.CHART_WINDOW_S.value) || 30);
       els.CHART_WINDOW_S.value = String(v);
       state.chartWindowSec = v;
-      setupChart(); // rebuild buffers for new window
+      setupChart();
       log('info', `Chart window set to ${v}s`);
     });
 
@@ -1638,7 +1677,6 @@
       const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
       const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
 
-      // Live top classes hidden until data arrives
       hideLiveBars();
 
       setStatus('Ready. Train (mic/file/folder) → Recompute Weights → Quiet Calibrate → Start detection.');
