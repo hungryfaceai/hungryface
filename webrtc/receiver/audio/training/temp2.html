@@ -245,7 +245,7 @@
           </div>
         </div>
 
-        <div class="muted" style="margin-top:6px;">Keep the room quiet. When running, the Start button shows a countdown and is disabled.</div>
+        <div class="muted" style="margin-top:6px;">Keep the room quiet.</div>
       </div>
 
       <!-- Live detection panel -->
@@ -1141,7 +1141,7 @@
       els.btnCal.disabled = false; els.btnCal.textContent = 'Start';
       enableThrSliders(true);
       setPill('idle', false);
-      setStatus('Calibration stopped.');
+      //setStatus('Calibration stopped.');
       stopAll();
     }
 
@@ -1268,18 +1268,19 @@
       state.srcNode = src; state.sinkNode = sink;
 
       try {
-        const workletCode =
-          'class Tap extends AudioWorkletProcessor {' +
+        const Code =
+          'class Tap extends AudioProcessor {' +
           '  process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }' +
           '}' +
           'registerProcessor("tap", Tap);';
-        const url = URL.createObjectURL(new Blob([workletCode], { type: 'application/javascript; charset=utf-8' }));
-        await ctx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
-        const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
+        const url = URL.createObjectURL(new Blob([Code], { type: 'application/javascript; charset=utf-8' }));
+        await ctx.audio.addModule(url); URL.revokeObjectURL(url);
+        const node = new AudioNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
         node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate, getParams(), mode);
         src.connect(node).connect(sink);
         state.procNode = node;
-        setStatus('AudioWorklet active @ '+ctx.sampleRate+' Hz');
+        //setStatus('Audio active @ '+ctx.sampleRate+' Hz');
+        log('info', 'AudioWorklet active @ '+ctx.sampleRate+' Hz');
       } catch (e) {
         const node = ctx.createScriptProcessor(4096,1,1);
         node.onaudioprocess = (ev)=> classifyChunk(new Float32Array(ev.inputBuffer.getChannelData(0)), ctx.sampleRate, getParams(), mode);
@@ -1287,6 +1288,7 @@
         state.procNode = node;
         setStatus('ScriptProcessor active @ '+ctx.sampleRate+' Hz');
         log('warn', 'AudioWorklet fell back: ' + (e?.message || e));
+        log('info', 'ScriptProcessor active @ '+ctx.sampleRate+' Hz');
       }
       state.running = true;
       state.mode = mode;
@@ -1295,6 +1297,7 @@
       // Reset time-window chart so it starts from the right edge
       setupChart();
       log('ok', `Mic started in ${mode.toUpperCase()} mode.`);
+      setStatus(mode==='detect' ? 'Detection started (mic).' : 'Training started (mic).');
     }
 
     async function stopAll(){
@@ -1534,6 +1537,7 @@
       if (src === 'mic') await stopAll();
       else if (src === 'file') await stopFilePlayback();
       else if (src === 'folder') await stopFolderTraining();
+      setStatus('Training stopped');
     };
 
     // Recompute / Clear / Export
@@ -1544,6 +1548,7 @@
       m.halfLifeSec = Number(els.HALF_LIFE_S.value)||m.halfLifeSec||3600;
       const w = recomputeWeights(m);
       setWeightsChart(state.barSavedW, w);
+      setStatus('Weights recomputed. Model updated.');
     };
     els.btnClear.onclick = () => {
       const name = getModelName();
