@@ -146,7 +146,7 @@
 
       <div class="row status-row" style="margin-top:8px;">
         <div id="status" class="muted">Booting…</div>
-        <div id="statePill" class="pill">idle</div>
+        <div id="statePill" class="pill" style="display:none"></div>
       </div>
       <div class="meter" title="Input level (RMS)">
         <div id="rmsFill" class="fill"></div>
@@ -457,12 +457,23 @@
     ].map(x => [x, document.getElementById(x)])) )();
 
     function setStatus(s){ els.status.textContent = s; log('info', s); }
-    function setPill(s, on=false){
-      els.statePill.textContent = s;
-      const busy = !!on; // treat "on" states as busy/doing-something
-      els.statePill.classList.toggle('on',   busy);
-      els.statePill.classList.toggle('busy', busy);
+    function setPill(text, active=false){
+      const p = els.statePill;
+      if (!p) return;
+      const isIdle = !active || !text || text.toLowerCase() === 'idle';
+    
+      if (isIdle) {
+        p.style.display = 'none';
+        p.textContent = '';
+        p.classList.remove('on');      // remove active styling
+        return;
+      }
+    
+      p.style.display = 'inline-block';
+      p.textContent = text;
+      p.classList.toggle('on', !!active);
     }
+
 
     function clamp01(x){ return Math.max(0, Math.min(1, x)); }
     function emaStep(prev, x, a){ return prev + a * (x - prev); }
