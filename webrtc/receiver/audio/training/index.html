@@ -190,7 +190,6 @@
           </div>
         </div>
         <span id="trainInfo" class="muted"></span>
-        <div class="muted" style="margin-top:6px;">Use 20–60s segments; then recompute weights.</div>
       </div>
 
       <!-- Model panel -->
@@ -245,7 +244,7 @@
           </div>
         </div>
 
-        <div class="muted" style="margin-top:6px;">Keep the room quiet. When running, the Start button shows a countdown and is disabled.</div>
+        <div class="muted" style="margin-top:6px;">Keep the room quiet.</div>
       </div>
 
       <!-- Live detection panel -->
@@ -622,7 +621,7 @@
         K: Number(els.TOP_K.value),
         kPrior: Number(els.K_PRIOR.value),
         classes: {},
-        weights: { "Crying, sobbing": 49.3, "Baby cry, infant cry": 42.1, "Whimper": 8.6 },
+        weights: { "Crying, sobbing": 0.493, "Baby cry, infant cry": 0.421, "Whimper": 0.086 },
         updatedAt: Date.now()
       };
     }
@@ -1084,6 +1083,8 @@
       enableThrSliders(false);
 
       await startMic('detect');
+      // keep the calibration status visible after mic boot
+      setStatus(`Quiet calibration for ${durSec}s… Please keep things quiet.`);
       setPill('calibrating', true);
 
       const startedAt = performance.now();
@@ -1141,7 +1142,7 @@
       els.btnCal.disabled = false; els.btnCal.textContent = 'Start';
       enableThrSliders(true);
       setPill('idle', false);
-      setStatus('Calibration stopped.');
+      //setStatus('Calibration stopped.');
       stopAll();
     }
 
@@ -1268,18 +1269,19 @@
       state.srcNode = src; state.sinkNode = sink;
 
       try {
-        const workletCode =
-          'class Tap extends AudioWorkletProcessor {' +
+        const Code =
+          'class Tap extends AudioProcessor {' +
           '  process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }' +
           '}' +
           'registerProcessor("tap", Tap);';
-        const url = URL.createObjectURL(new Blob([workletCode], { type: 'application/javascript; charset=utf-8' }));
-        await ctx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
-        const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
+        const url = URL.createObjectURL(new Blob([Code], { type: 'application/javascript; charset=utf-8' }));
+        await ctx.audio.addModule(url); URL.revokeObjectURL(url);
+        const node = new AudioNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
         node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate, getParams(), mode);
         src.connect(node).connect(sink);
         state.procNode = node;
-        setStatus('AudioWorklet active @ '+ctx.sampleRate+' Hz');
+        //setStatus('Audio active @ '+ctx.sampleRate+' Hz');
+        log('info', 'AudioWorklet active @ '+ctx.sampleRate+' Hz');
       } catch (e) {
         const node = ctx.createScriptProcessor(4096,1,1);
         node.onaudioprocess = (ev)=> classifyChunk(new Float32Array(ev.inputBuffer.getChannelData(0)), ctx.sampleRate, getParams(), mode);
@@ -1287,6 +1289,7 @@
         state.procNode = node;
         setStatus('ScriptProcessor active @ '+ctx.sampleRate+' Hz');
         log('warn', 'AudioWorklet fell back: ' + (e?.message || e));
+        log('info', 'ScriptProcessor active @ '+ctx.sampleRate+' Hz');
       }
       state.running = true;
       state.mode = mode;
@@ -1295,6 +1298,10 @@
       // Reset time-window chart so it starts from the right edge
       setupChart();
       log('ok', `Mic started in ${mode.toUpperCase()} mode.`);
+      // ↓ One final, readable status the user will actually see — but don't
+      //    overwrite calibration's status while it's running.
+      if (mode === 'train') setStatus('Training started (mic).');
+      else if (mode === 'detect' && !state.calActive) setStatus('Detection started (mic).');
     }
 
     async function stopAll(){
@@ -1370,6 +1377,7 @@
 
       state.mode = 'train_file';
       setPill('training', true);
+      setStatus(`Training started (file): ${file.name}`);
       log('ok', `Training started on file: ${file.name}`, `<span class="chip">${(file.size/1024/1024).toFixed(2)} MB</span>`);
 
       els.trainAudio.onended = async () => {
@@ -1388,6 +1396,9 @@
       els.trainAudio.onended = null;
       try { if (trainCtx && trainCtx.state !== 'suspended') await trainCtx.suspend(); } catch {}
       clearTopBars();
+      setPill('idle', false);
+      state.mode = 'idle';
+      setStatus('Training stopped.');   
     }
 
     /* ========= Folder training ========= */
@@ -1425,6 +1436,7 @@
       folderIdx = 0;
       state.mode = 'train_folder';
       setPill('training', true);
+      setStatus(`Training started (folder): ${folderFiles.length} file(s).`);
       log('ok', `Folder training queued: ${folderFiles.length} file(s) from “${describeCommonRoot(folderFiles)}”.`);
       await trainNextFileInFolder();
     }
@@ -1458,7 +1470,10 @@
       setPill('idle', false);
       state.mode = 'idle';
       clearTopBars();
-      if (!silent) log('warn','Stopped folder training.');
+      if (!silent) {
+        log('warn','Stopped folder training.');
+        setStatus('Training stopped.'); // ✅
+      }
     }
 
     /* ========= Params & UI wiring ========= */
@@ -1534,6 +1549,7 @@
       if (src === 'mic') await stopAll();
       else if (src === 'file') await stopFilePlayback();
       else if (src === 'folder') await stopFolderTraining();
+      setStatus('Training stopped');
     };
 
     // Recompute / Clear / Export
@@ -1544,6 +1560,7 @@
       m.halfLifeSec = Number(els.HALF_LIFE_S.value)||m.halfLifeSec||3600;
       const w = recomputeWeights(m);
       setWeightsChart(state.barSavedW, w);
+      setStatus('Weights recomputed. Model updated.');
     };
     els.btnClear.onclick = () => {
       const name = getModelName();
