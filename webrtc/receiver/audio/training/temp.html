@@ -29,7 +29,7 @@
     .small { padding:8px 10px; font-size:13px; border-radius:10px; } /* compact buttons */
 
     /* Status pill (bigger, right under Settings) */
-    .pill { display:inline-block; padding:8px 14px; border-radius:999px; border:1px solid #333; font-size:14px; font-weight:700; }
+    .pill { display:inline-block; padding:6px 12px; border-radius:999px; border:1px solid #333; font-size:13px; font-weight:700; }
     .pill.on { background:#310000; border-color:#a00; color:#ffb3b3; }
     .pill-wrap { margin-left:auto; }
 
@@ -198,6 +198,13 @@
         <div class="muted" style="margin-top:6px;">Mic training updates per-class stats live. Use 20–60s segments; then recompute weights.</div>
       </div>
 
+      <!-- Live top classes (moved ABOVE Model) -->
+      <div class="section">
+        <strong>Live top classes</strong>
+        <canvas id="bars"></canvas>
+        <div class="muted" style="margin-top:6px;">Uses the <b>Top-K</b> setting. Excluded classes are grey; we extend to show Top-K non-excluded.</div>
+      </div>
+
       <!-- MODEL -->
       <div class="section card">
         <h2>Model</h2>
@@ -249,13 +256,6 @@
           <button id="btnStartDetect" class="btn">Start</button>
           <button id="btnStop" class="btn">Stop</button>
         </div>
-      </div>
-
-      <!-- Live top classes -->
-      <div class="section">
-        <strong>Live top classes</strong>
-        <canvas id="bars"></canvas>
-        <div class="muted" style="margin-top:6px;">Uses the <b>Top-K</b> setting. Excluded classes are grey; we extend to show Top-K non-excluded.</div>
       </div>
 
       <!-- Fused score over time -->
@@ -381,15 +381,15 @@
       backdrop?.addEventListener('click', closeHelp);
       document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeHelp(); });
 
-      // Keep sheet open when clicking inside it
-      document.addEventListener('click', (e) => {
-        if (document.body.classList.contains('help-open')) {
-          const liveSheet = document.getElementById('helpSheet');
-          if (liveSheet?.contains(e.target)) e.stopPropagation();
+      // ✅ Robust close via delegation; no capture-phase blocking
+      sheet.addEventListener('click', (e) => {
+        if (e.target.closest('#helpClose, .help-header .close, [data-help-close]')) {
+          e.preventDefault();
+          closeHelp();
         }
-      }, true);
+      });
 
-      // Smooth scroll for TOC
+      // Smooth scroll for TOC (inside sheet)
       bodyEl?.addEventListener('click', (e) => {
         const a = e.target.closest('a[href^="#"]');
         if (!a) return;
@@ -418,7 +418,7 @@
       autoscroll: EL('LOG_AUTOSCROLL'),
       clearBtn: EL('LOG_CLEAR'),
       exportBtn: EL('LOG_EXPORT'),
-      maxLines: 1200,
+      maxLines: 250, // tighter cap so the page never grows
       lines: 0,
       records: []
     };
@@ -471,9 +471,8 @@
 
     // More sensitive RMS → meter mapping
     function rmsToMeter(rms){
-      // Emphasize quiet signals more: scale up & compress dynamic range
-      const scaled = Math.min(1, rms * 10);   // increased gain
-      const meter  = Math.pow(scaled, 0.5);   // stronger compression
+      const scaled = Math.min(1, rms * 6);      // scale up quiet signals
+      const meter  = Math.pow(scaled, 0.6);     // compress dynamic range
       return clamp01(meter);
     }
     function setRMS(x){ els.rmsFill.style.width = Math.round(rmsToMeter(x)*100)+'%'; }
@@ -553,7 +552,7 @@
           return _yamTask;
         } catch (e1) {
           const resp = await fetch(MODEL_URL + "?cb=" + Date.now(), { cache: "no-store" });
-          if (!resp.ok) throw new Error(`yamnet fetch ${resp.status}`);
+          if (!resp.ok) throw new Error(`yamnet fetch ${e.status}`);
           const buf = new Uint8Array(await resp.arrayBuffer());
           _yamTask = await AudioClassifier.createFromOptions(resolver, {
             baseOptions: { modelAssetBuffer: buf },
@@ -1324,14 +1323,20 @@
 
       try { await els.trainAudio.play(); } catch (e) { log('err', 'Failed to play file in folder: '+(e?.message||e)); folderIdx++; await trainNextFileInFolder(); }
     }
+
+    // ✅ Only stop folder playback if that mode is active
     async function stopFolderTraining(silent=false){
       folderActive = false;
       folderIdx = 0;
-      await stopFilePlayback();
-      setPill('idle', false);
-      state.mode = 'idle';
-      clearTopBars();
-      if (!silent) log('warn','Stopped folder training.');
+      if (state.mode === 'train_folder') {
+        await stopFilePlayback();
+        setPill('idle', false);
+        state.mode = 'idle';
+        clearTopBars();
+        if (!silent) log('warn','Stopped folder training.');
+      } else {
+        if (!silent) log('info','Cleared folder queue (no folder training was active).');
+      }
     }
 
     /* ========= Params & UI wiring ========= */
