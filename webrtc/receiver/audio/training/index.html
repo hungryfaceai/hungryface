@@ -9,7 +9,7 @@
     :root { color-scheme: dark; }
     html, body { margin:0; background:#000; color:#fff; font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
     #stage { padding:16px; box-sizing:border-box; display:flex; justify-content:center; }
-    .panel { width:min(100%,1100px); background:#0b0b0b; border:1px solid #141414; border-radius:14px; padding:16px; margin:0 auto 24px; }
+    .panel { width:min(100%,1100px); :#0b0b0b; border:1px solid #141414; border-radius:14px; padding:16px; margin:0 auto 24px; }
     h1 { margin:.2rem 0 .1rem; font-size:22px; }
     .muted { color:#aaa; font-size:12px; }
 
@@ -24,10 +24,28 @@
     .btn-pair .btn { flex:1 1 0; min-width:120px; }
 
     /* Meter & state pill */
+    /* Right-aligned status row (status left, pill hard-right) */
+    .status-row { display:flex; align-items:center; justify-content:space-between; }
     .meter { height:10px; border-radius:8px; background:#0a0a0a; border:1px solid #222; overflow:hidden; }
     .fill { height:100%; width:0%; background:linear-gradient(to right, rgba(96,165,250,.9), rgba(239,68,68,.9)); transition:width 120ms linear; }
-    .pill { display:inline-block; padding:4px 8px; border-radius:999px; border:1px solid #333; font-size:12px; margin-left:6px; }
+    .pill {
+      display:inline-flex; align-items:center; gap:8px;
+      padding:6px 12px; border-radius:999px; border:1px solid #333;
+      font-size:13px; font-weight:700;
+    }
     .pill.on { background:#310000; border-color:#a00; color:#ffb3b3; }
+    
+    /* "Doing something" animation when busy */
+    .pill.busy { position:relative; }
+    .pill.busy::after {
+      content:''; width:8px; height:8px; border-radius:50%;
+      background: currentColor; opacity:.7; margin-left:6px;
+      animation: pillPulse .9s ease-in-out infinite alternate;
+    }
+    @keyframes pillPulse {
+      from { transform: translateX(0) scale(0.8); opacity:.45; }
+      to   { transform: translateX(4px) scale(1);   opacity:1;  }
+    }
 
     /* Carded sections */
     .card { background:#0a0a0a; border:1px solid #171717; border-radius:12px; padding:12px; margin-top:12px; }
@@ -38,16 +56,24 @@
     /* Inputs */
     input[type="number"], input[type="text"] { padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; }
     input[type="file"] { font-size:13px; }
+    select { padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; }
 
     /* Sliders */
     .slider-wrap { display:flex; align-items:center; gap:10px; margin-left:auto; }
     input[type="range"] { width:220px; }
 
     /* Charts */
-    canvas { display:block; width:100%; height:160px; background:#0a0a0a; border-radius:10px; }
+    .chart-wrap { position: relative; }
+    .chart-wrap > canvas {
+      position: absolute; inset: 0;
+      width: 100% !important; height: 100% !important;
+      display: block; background:#0a0a0a; border-radius:10px;
+    }
+    .h160{height:160px;} .h170{height:170px;} .h180{height:180px;} .h320{height:320px;}
+
     .legend { margin-top:6px; display:flex; gap:12px; font-size:12px; color:#ccc; flex-wrap:wrap; }
     .key { width:14px; height:3px; border-radius:2px; display:inline-block; margin-right:4px; vertical-align:middle; }
-    .blue { background:#60a5fa; } .red { background:#ef4444; } .or { background:#f97316; } .lo { background:#fb923c; }
+    .blue { background:#60a5fa; } .red { background:#ef4444; } .or { background:#f97316; } .lo { background:#fb923c; } .green{ background:#22c55e; } .darkred { background:#991b1b; }
 
     .weights-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; align-items:start; }
     @media (max-width: 820px) { .weights-grid { grid-template-columns: 1fr; } }
@@ -103,63 +129,17 @@
     details.learn-more > summary { cursor: pointer; list-style: none; font-weight: 700; color: #fff; }
     details.learn-more > summary::-webkit-details-marker { display: none; }
     details.learn-more[open] { background: rgba(255,255,255,0.06); }
-    .codeblock { background: #0e0e0e; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #d7eaff; font-size: 12px; overflow-x: auto; }
 
     /* Settings modal (restored) */
-    .modal {
-      position: fixed;
-      inset: 0;
-      display: none;                 /* hidden by default */
-      align-items: center;
-      justify-content: center;
-      background: rgba(0,0,0,.6);
-      z-index: 140;                  /* above help drawer (which is 120) */
-    }
+    .modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 140; }
     .modal.show { display: flex; }
-    
-    .modal-card {
-      width: min(96%, 1000px);
-      max-height: 90vh;
-      overflow-y: auto;
-      background: #0b0b0b;
-      border: 1px solid #242424;
-      border-radius: 14px;
-    }
-    
-    .modal-head {
-      position: sticky;
-      top: 0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 12px;
-      border-bottom: 1px solid #1a1a1a;
-      background: #0d0d0d;
-      border-top-left-radius: 14px;
-      border-top-right-radius: 14px;
-    }
-    
+    .modal-card { width: min(96%, 1000px); max-height: 90vh; overflow-y: auto; background: #0b0b0b; border: 1px solid #242424; border-radius: 14px; }
+    .modal-head { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid #1a1a1a; background: #0d0d0d; border-top-left-radius: 14px; border-top-right-radius: 14px; }
     .modal-actions { display: flex; gap: 8px; align-items: center; }
     .modal-body { padding: 12px; }
-    
-    /* Cross button in Settings header */
-    .modal-head .close {
-      appearance: none;
-      border: none;
-      background: transparent;
-      color: #aaa;
-      font-size: 22px;
-      cursor: pointer;
-      padding: 2px 6px;
-    }
+    .modal-head .close { appearance: none; border: none; background: transparent; color: #aaa; font-size: 22px; cursor: pointer; padding: 2px 6px; }
     .modal-head .close:active { transform: scale(0.98); }
-    /* --- Layering fix: put Help above the Settings modal --- */
-    .modal { z-index: 140; }              /* keep modal high */
-    .help-backdrop { z-index: 180; }      /* higher than modal */
-    .help-sheet { z-index: 190; }         /* highest so it's fully readable */
-
-    
+    .modal { z-index: 140; } .help-backdrop { z-index: 180; } .help-sheet { z-index: 190; }
   </style>
 </head>
 <body>
@@ -172,7 +152,7 @@
         </div>
       </header>
 
-      <div class="row" style="margin-top:8px;">
+      <div class="row status-row" style="margin-top:8px;">
         <div id="status" class="muted">Booting…</div>
         <div id="statePill" class="pill">idle</div>
       </div>
@@ -221,16 +201,14 @@
         <h2>Model</h2>
         <div class="row" style="gap:8px 10px;">
           <label style="display:flex;align-items:center;gap:8px;">
-            <span>Model name</span>
-            <input id="MODEL_NAME" type="text" placeholder="default" style="width:180px;">
+            <span>Model</span>
+            <select id="MODEL_SELECT" style="width:220px;"></select>
           </label>
-          <button id="btnModelUse" class="btn">Use Name</button>
-          <button id="btnModelLoad" class="btn">Load</button>
           <button id="btnRecompute" class="btn">Recompute Weights</button>
           <button id="btnClear" class="btn">Clear Model</button>
           <button id="btnExport" class="btn">Export Model</button>
         </div>
-        <div class="muted" style="margin-top:6px;">Mic/file/folder training updates class stats live; then click “Recompute Weights”.</div>
+        <div class="muted" style="margin-top:6px;">Pick an existing model or choose “New…” to create one. Train (mic/file/folder), then click “Recompute Weights”.</div>
       </div>
 
       <!-- Quiet calibration panel -->
@@ -248,6 +226,22 @@
             <span id="CAL_DUR_LABEL">20s</span>
           </div>
         </div>
+
+        <!-- NEW: live threshold sliders -->
+        <div class="subgroup">
+          <strong>Thresholds</strong>
+          <div class="slider-wrap">
+            <span class="muted">OFF</span>
+            <input id="THR_OFF_SLIDER" type="range" min="0" max="1" step="0.01" />
+            <span id="THR_OFF_LABEL">0.25</span>
+          </div>
+          <div class="slider-wrap">
+            <span class="muted">ON</span>
+            <input id="THR_ON_SLIDER" type="range" min="0" max="1" step="0.01" />
+            <span id="THR_ON_LABEL">0.35</span>
+          </div>
+        </div>
+
         <div class="muted" style="margin-top:6px;">Keep the room quiet. When running, the Start button shows a countdown and is disabled.</div>
       </div>
 
@@ -267,7 +261,9 @@
       <!-- Live bars -->
       <div class="card">
         <h2>Live top classes</h2>
-        <canvas id="bars" height="180"></canvas>
+        <div class="chart-wrap h160">
+          <canvas id="bars"></canvas>
+        </div>
         <div class="muted" style="margin-top:6px;">Uses the <b>Top-K</b> setting. Excluded classes are grey; we extend to show Top-K non-excluded.</div>
       </div>
 
@@ -277,12 +273,16 @@
         <div class="weights-grid">
           <div class="weights-card">
             <h3>Live dynamic weights (unsaved preview)</h3>
-            <canvas id="barsDynW" height="220"></canvas>
+            <div class="chart-wrap h170">
+              <canvas id="barsDynW"></canvas>
+            </div>
             <span class="muted">Top-K normalized weights recomputed on every training inference. Not stored.</span>
           </div>
           <div class="weights-card">
             <h3>Active model weights (Top-K, normalized)</h3>
-            <canvas id="barsSavedW" height="220"></canvas>
+            <div class="chart-wrap h170">
+              <canvas id="barsSavedW"></canvas>
+            </div>
             <span class="muted">What detection uses (until you click “Recompute Weights”).</span>
           </div>
         </div>
@@ -291,12 +291,14 @@
       <!-- Fused score chart -->
       <div class="card">
         <h2>Fused score over time</h2>
-        <canvas id="chart" height="160"></canvas>
+        <div class="chart-wrap h320">
+          <canvas id="chart"></canvas>
+        </div>
         <div class="legend">
-          <span class="key blue"></span> fused (raw, histogram)
-          <span class="key red"></span> fused (EMA, curve)
-          <span class="key or"></span> thresh ON
-          <span class="key lo"></span> thresh OFF
+          <span class="key blue"></span> fused (raw)
+          <span class="key red"></span> fused (EMA)
+          <span class="key darkred"></span> thresh ON
+          <span class="key green"></span> thresh OFF
         </div>
       </div>
 
@@ -353,7 +355,7 @@
             <input id="IGNORE_CLASSES" type="text" value="Silence, Inside, Outside, Vehicle, Noise" placeholder="Silence, Background noise, White noise">
           </label>
           <label style="display:grid; gap:6px; min-width:320px;"><span>Penalty map (inference)</span>
-            <input id="PENALTY_MAP" type="text" value="Silence:-0.45, White noise:-0.2" placeholder="Silence:-0.4, White noise:-0.2">
+            <input id="PENALTY_MAP" type="text" value="Silence:-0.01, White noise:-0.01" placeholder="Silence:-0.4, White noise:-0.2">
           </label>
         </div>
         <div class="row" style="margin-top:12px; justify-content:flex-end;">
@@ -460,18 +462,32 @@
       'fileInp','btnTrainFile','btnStopTrainFile',
       'btnRecompute','btnClear','btnExport',
       'trainAudio','chart','bars','barsDynW','barsSavedW',
-      'MODEL_NAME','btnModelUse','btnModelLoad',
       'folderInp','btnChooseFolder','btnTrainFolder','btnStopTrainFolder','folderInfo',
       'IGNORE_CLASSES','PENALTY_MAP',
-      'btnResetDefaults'
+      'btnResetDefaults',
+      // NEW elements:
+      'THR_OFF_SLIDER','THR_OFF_LABEL','THR_ON_SLIDER','THR_ON_LABEL',
+      'MODEL_SELECT'
     ].map(x => [x, document.getElementById(x)])) )();
 
     function setStatus(s){ els.status.textContent = s; log('info', s); }
-    function setPill(s, on=false){ els.statePill.textContent=s; els.statePill.classList.toggle('on', !!on); }
+    function setPill(s, on=false){
+      els.statePill.textContent = s;
+      const busy = !!on; // treat "on" states as busy/doing-something
+      els.statePill.classList.toggle('on',   busy);
+      els.statePill.classList.toggle('busy', busy);
+    }
+
     function clamp01(x){ return Math.max(0, Math.min(1, x)); }
     function emaStep(prev, x, a){ return prev + a * (x - prev); }
+    function rmsToMeter(rms){
+      const db = 20 * Math.log10(Math.max(1e-8, rms));
+      const FLOOR_DB = -85;
+      const norm = (db - FLOOR_DB) / (0 - FLOOR_DB);
+      return clamp01(norm);
+    }
     function alphaForTau(dt, tau){ return 1 - Math.exp(-dt / Math.max(1e-3, tau)); }
-    function setRMS(x){ els.rmsFill.style.width = Math.round(clamp01(x)*100)+'%'; }
+    function setRMS(x){ els.rmsFill.style.width = Math.round(rmsToMeter(x)*100)+'%'; }
     function resampleLinear(x, fromSr, toSr){
       if (fromSr === toSr) return x;
       const ratio = toSr / fromSr, n = Math.max(1, Math.round(x.length * ratio)), out = new Float32Array(n);
@@ -577,8 +593,11 @@
 
     /* ========= Model persistence ========= */
     const ACTIVE_MODEL_NAME_KEY = 'cryActiveModelName';
-    function getModelName(){ return els.MODEL_NAME?.value?.trim() || localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default'; }
-    function setModelName(name){ els.MODEL_NAME.value = name; localStorage.setItem(ACTIVE_MODEL_NAME_KEY, name); }
+    function getModelName(){ return els.MODEL_SELECT?.value || localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default'; }
+    function setModelName(name){
+      localStorage.setItem(ACTIVE_MODEL_NAME_KEY, name);
+      if (els.MODEL_SELECT) els.MODEL_SELECT.value = name;
+    }
     function MODEL_KEY(){ return `cryModelV1_${getModelName()}`; }
     function CALIB_KEY(){ return `cryCalibV1_${getModelName()}`; }
     function IGNORE_KEY(){ return `cryIgnore_${getModelName()}`; }
@@ -605,6 +624,34 @@
       localStorage.removeItem(IGNORE_KEY());
       localStorage.removeItem(PENALTY_KEY());
       log('warn',`Cleared model “${getModelName()}” + its calibration & ignore/penalty settings.`);
+    }
+
+    /* List & select models */
+    const NEW_MODEL_VALUE = '__NEW__';
+    function listModelNames(){
+      const names = [];
+      for (let i=0;i<localStorage.length;i++){
+        const k = localStorage.key(i);
+        if (k && k.startsWith('cryModelV1_')) names.push(k.replace('cryModelV1_',''));
+      }
+      if (!names.includes('default')) names.push('default');
+      names.sort((a,b)=>a.localeCompare(b));
+      return names;
+    }
+    function refreshModelSelect(activeName){
+      const sel = els.MODEL_SELECT;
+      if (!sel) return;
+      const names = listModelNames();
+      sel.innerHTML = '';
+      for (const n of names){
+        const opt = document.createElement('option');
+        opt.value = n; opt.textContent = n;
+        sel.appendChild(opt);
+      }
+      const optNew = document.createElement('option');
+      optNew.value = NEW_MODEL_VALUE; optNew.textContent = 'New…';
+      sel.appendChild(optNew);
+      sel.value = names.includes(activeName) ? activeName : (localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default');
     }
 
     /* ========= Ignore / Penalty ========= */
@@ -645,7 +692,7 @@
       els.HALF_LIFE_S.value      = 3600;
       els.MAX_RESULTS.value      = 25;
       els.IGNORE_CLASSES.value   = 'Silence, Inside, Outside, Vehicle, Noise';
-      els.PENALTY_MAP.value      = 'Silence:-0.45, White noise:-0.2';
+      els.PENALTY_MAP.value      = 'Silence:-0.01, White noise:-0.01';
       localStorage.setItem(IGNORE_KEY(), els.IGNORE_CLASSES.value);
       localStorage.setItem(PENALTY_KEY(), els.PENALTY_MAP.value);
 
@@ -724,14 +771,19 @@
       state.chart?.destroy?.();
       const ctx = els.chart.getContext('2d');
       state.chart = new Chart(ctx, {
-        type: 'bar', /* bars for raw */
-        data: { labels: [], datasets: [
-          { label:'fused(raw)', data:[], borderWidth:0, pointRadius:0, barPercentage:1.0, categoryPercentage:1.0 },
-          { label:'fused(EMA)', data:[], borderWidth:2, pointRadius:0, tension:0.15, type:'line' },
-          { label:'thr ON', data:[], borderWidth:1, pointRadius:0, borderDash:[6,4], type:'line' },
-          { label:'thr OFF', data:[], borderWidth:1, pointRadius:0, borderDash:[2,2], type:'line' },
-        ]},
+        type: 'bar',
+        data: {
+          labels: [],
+          datasets: [
+            { label:'fused(raw)', data:[], borderWidth:0, pointRadius:0, barPercentage:1.0, categoryPercentage:1.0 },
+            { label:'fused(EMA)', data:[], borderWidth:2, pointRadius:0, tension:0.15, type:'line' },
+            { label:'thr ON',  data:[], type:'line', borderWidth:1, pointRadius:0, borderDash:[6,4],  borderColor:'rgba(153,27,27,1)' }, // DARK RED
+            { label:'thr OFF', data:[], type:'line', borderWidth:1, pointRadius:0, borderDash:[2,2],  borderColor:'rgba(34,197,94,1)' }  // GREEN
+          ]
+        },
         options: {
+          responsive: true,
+          maintainAspectRatio: false,
           animation:false,
           plugins:{ legend:{ display:false } },
           scales:{
@@ -750,8 +802,8 @@
       if (state.labels.length > N) { state.labels.shift(); state.fusedRaw.shift(); state.fusedSm.shift(); }
       const thrOn = state.thrOn, thrOff = state.thrOff;
       state.chart.data.labels = state.labels;
-      state.chart.data.datasets[0].data = state.fusedRaw;   // bars
-      state.chart.data.datasets[1].data = state.fusedSm;    // line
+      state.chart.data.datasets[0].data = state.fusedRaw;
+      state.chart.data.datasets[1].data = state.fusedSm;
       state.chart.data.datasets[2].data = new Array(state.labels.length).fill(thrOn);
       state.chart.data.datasets[3].data = new Array(state.labels.length).fill(thrOff);
       const all = state.fusedRaw.concat(state.fusedSm, [thrOn, thrOff]);
@@ -763,25 +815,50 @@
       if (!state.barChart && els.bars) {
         state.barChart = new Chart(els.bars.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{ label: 'score', data: [], borderWidth: 1, backgroundColor: [], borderColor: [] }] },
-          options: { indexAxis: 'y', animation: false, plugins: { legend: { display:false } },
-            scales: { x: { min: 0, max: 1, title: { display:true, text:'score' } }, y: { ticks: { autoSkip: false } } } }
+          data: { labels: [], datasets: [{
+            label: 'score', data: [],
+            borderWidth: 1, backgroundColor: [], borderColor: [],
+            barThickness: 12, maxBarThickness: 14, categoryPercentage: 0.55, barPercentage: 0.9
+          }]},
+          options: {
+            indexAxis: 'y',
+            responsive: true, maintainAspectRatio: false, animation: false,
+            plugins: { legend: { display:false } },
+            scales: {
+              x: { min: 0, max: 1, title: { display:true, text:'score' }, ticks: { font: { size: 11 } } },
+              y: { ticks: { autoSkip: false, font: { size: 11 } } }
+            }
+          }
         });
       }
       if (!state.barDynW && els.barsDynW) {
         state.barDynW = new Chart(els.barsDynW.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
-          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{enabled: true} },
-            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
+          data: { labels: [], datasets: [{
+            label: 'weight', data: [], borderWidth:1,
+            barThickness: 10, maxBarThickness: 12, categoryPercentage: 0.5, barPercentage: 0.9
+          }]},
+          options: {
+            indexAxis:'y',
+            responsive:true, maintainAspectRatio:false, animation:false,
+            plugins:{ legend:{display:false}, pctLabel:{enabled: true, font:'11px system-ui', color:'#bbb'} },
+            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}, ticks:{ font:{ size:11 } } }, y:{ ticks:{ autoSkip:false, font:{ size:11 } } } }
+          }
         });
       }
       if (!state.barSavedW && els.barsSavedW) {
         state.barSavedW = new Chart(els.barsSavedW.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{ label: 'weight', data: [], borderWidth:1 }] },
-          options: { indexAxis:'y', animation:false, plugins:{ legend:{display:false}, pctLabel:{enabled: true} },
-            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}}, y:{ ticks:{ autoSkip:false } } } }
+          data: { labels: [], datasets: [{
+            label: 'weight', data: [], borderWidth:1,
+            barThickness: 10, maxBarThickness: 12, categoryPercentage: 0.5, barPercentage: 0.9
+          }]},
+          options: {
+            indexAxis:'y',
+            responsive:true, maintainAspectRatio:false, animation:false,
+            plugins:{ legend:{display:false}, pctLabel:{enabled: true, font:'11px system-ui', color:'#bbb'} },
+            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}, ticks:{ font:{ size:11 } } }, y:{ ticks:{ autoSkip:false, font:{ size:11 } } } }
+          }
         });
       }
     }
@@ -868,6 +945,59 @@
       else { if (sm >= state.thrOn) { state.alertUntil = nowMs + hold; return true; } return false; }
     }
 
+    /* ========= NEW: Threshold slider helpers ========= */
+    function setThrUI() {
+      els.THR_OFF_SLIDER.value = String(state.thrOff.toFixed(2));
+      els.THR_ON_SLIDER.value  = String(state.thrOn.toFixed(2));
+      els.THR_OFF_LABEL.textContent = state.thrOff.toFixed(2);
+      els.THR_ON_LABEL.textContent  = state.thrOn.toFixed(2);
+    }
+    function enableThrSliders(on) {
+      els.THR_OFF_SLIDER.disabled = !on;
+      els.THR_ON_SLIDER.disabled  = !on;
+    }
+    function persistThresholds(extra={}) {
+      const prev = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null') || {};
+      const payload = {
+        ...prev,
+        version: 1,
+        thr_on: state.thrOn,
+        thr_off: state.thrOff,
+        at: new Date().toISOString(),
+        ...extra
+      };
+      localStorage.setItem(CALIB_KEY(), JSON.stringify(payload));
+      log('ok','Saved thresholds.', `<div class="log-code">${JSON.stringify(payload, null, 2)}</div>`);
+    }
+
+    // User moves sliders (enabled only when not calibrating)
+    els.THR_OFF_SLIDER.addEventListener('input', () => {
+      state.thrOff = clamp01(parseFloat(els.THR_OFF_SLIDER.value) || 0);
+      if (state.thrOn < state.thrOff) state.thrOn = state.thrOff;
+      setThrUI();
+    });
+    els.THR_ON_SLIDER.addEventListener('input', () => {
+      state.thrOn = clamp01(parseFloat(els.THR_ON_SLIDER.value) || 0);
+      if (state.thrOn < state.thrOff) state.thrOff = state.thrOn;
+      setThrUI();
+    });
+    ['change','blur'].forEach(evt => {
+      els.THR_OFF_SLIDER.addEventListener(evt, () => { if (!state.calActive) persistThresholds(); });
+      els.THR_ON_SLIDER.addEventListener(evt,  () => { if (!state.calActive) persistThresholds(); });
+    });
+
+    // Live update during calibration (no persistence while active)
+    function updateCalLiveThresholds() {
+      if (!state.calActive || state.calVals.length < 2) return;
+      const offDelta = Number(els.ALERT_OFF_DELTA.value) || 0.10;
+      const p99 = quantile(state.calVals, 0.995);
+      const thr_off = Math.min(0.95, p99 + 0.02);
+      const thr_on  = Math.min(0.99, thr_off + offDelta);
+      state.thrOff = thr_off;
+      state.thrOn  = Math.max(thr_on, state.thrOff);
+      setThrUI();
+    }
+
     /* ========= Quiet calibration ========= */
     function updateCalDurLabel(){ els.CAL_DUR_LABEL.textContent = `${els.CAL_DUR_SLIDER.value}s`; }
     els.CAL_DUR_SLIDER.addEventListener('input', updateCalDurLabel);
@@ -882,6 +1012,8 @@
       state.calActive = true;
       state.calVals = [];
       setStatus(`Quiet calibration for ${durSec}s… Please keep things quiet.`);
+
+      enableThrSliders(false);
 
       await startMic('detect');
       setPill('calibrating', true);
@@ -908,6 +1040,8 @@
           const thr_off = Math.max(0, thr_on - offDelta);
           localStorage.setItem(CALIB_KEY(), JSON.stringify({ version: 1, thr_on, thr_off, n: 0, at: new Date().toISOString() }));
           state.thrOn = thr_on; state.thrOff = thr_off;
+          setThrUI();
+          enableThrSliders(true);
           await stopAll();
           setPill('idle', false);
           log('warn', 'Calibration captured 0 frames; using defaults.');
@@ -917,14 +1051,18 @@
         const p99 = quantile(vals, 0.995);
         const thr_off = Math.min(0.95, p99 + 0.02);
         const thr_on  = Math.min(0.99, thr_off + offDelta);
+        state.thrOff = thr_off; state.thrOn = thr_on;
+
         const payload = { version: 1, thr_on, thr_off, n: vals.length, p99, off_delta: offDelta, dur_s: durSec, at: new Date().toISOString() };
         localStorage.setItem(CALIB_KEY(), JSON.stringify(payload));
-        state.thrOn = thr_on; state.thrOff = thr_off;
         log('ok', 'Quiet calibration complete.', `<div class="log-code">${JSON.stringify(payload, null, 2)}</div>`);
+
+        setThrUI();
+        enableThrSliders(true);
 
         await stopAll();
         setPill('idle', false);
-        setStatus('Calibration done. Start detection to use the new thresholds.');
+        setStatus('Calibration done. Adjust thresholds if needed, then start detection.');
       }, durSec * 1000);
     }
     function stopCalibrationEarly(){
@@ -933,6 +1071,7 @@
       if (state.calTimerId) { clearTimeout(state.calTimerId); state.calTimerId = null; }
       if (state.calCountdownId) { clearInterval(state.calCountdownId); state.calCountdownId = null; }
       els.btnCal.disabled = false; els.btnCal.textContent = 'Start';
+      enableThrSliders(true);
       setPill('idle', false);
       setStatus('Calibration stopped.');
       stopAll();
@@ -1004,9 +1143,12 @@
           if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; }
           else { state.thrOn = 0.35; state.thrOff = state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1); }
 
-          pushChart(performance.now(), raw, sm);
+          pushChart(Date.now(), raw, sm);
 
-          if (state.calActive) { state.calVals.push(sm); }
+          if (state.calActive) {
+            state.calVals.push(sm);
+            updateCalLiveThresholds();
+          }
 
           if (LOGS.enable.checked) {
             const nowTs = performance.now();
@@ -1305,6 +1447,7 @@
       setupChart();
       clearTopBars();
       setStatus(`Model “${name}” cleared.`);
+      refreshModelSelect(getModelName());
     };
     els.btnExport.onclick = () => {
       const key = MODEL_KEY();
@@ -1314,27 +1457,49 @@
       log('ok',`Exported cryModel_${getModelName()}.json`);
     };
 
-    // Model name controls
-    els.btnModelUse.onclick = () => {
-      const name = els.MODEL_NAME.value.trim() || 'default';
-      localStorage.setItem('cryActiveModelName', name);
-      setModelName(name);
-      setStatus(`Active model name set to “${name}”. New training/recompute will persist there.`);
-      const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
-      const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
-    };
-    els.btnModelLoad.onclick = () => {
-      const name = els.MODEL_NAME.value.trim() || 'default';
-      setModelName(name);
-      const m = loadModel();
-      setWeightsChart(state.barSavedW, m.weights || {});
-      setWeightsChart(state.barDynW, computeWeightsPreview(m));
-      const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
-      if (calib) log('ok', `Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
-      const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
-      const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
-      setStatus(`Loaded model “${name}”.`);
-    };
+    /* Dropdown behavior */
+    els.MODEL_SELECT.addEventListener('change', () => {
+      const v = els.MODEL_SELECT.value;
+      if (v === NEW_MODEL_VALUE) {
+        // prompt for name
+        const name = (prompt('New model name:', '').trim() || '').replace(/[^\w \-().,]/g,'').trim();
+        if (!name) { refreshModelSelect(getModelName()); return; }
+        // if it already exists, just select it
+        const exists = listModelNames().includes(name);
+        setModelName(name);
+        if (!exists) {
+          const m = loadModel(); // creates default structure for this name
+          saveModel(m);
+          log('ok', `Created model “${name}”.`);
+        } else {
+          log('info', `Switched to existing model “${name}”.`);
+        }
+        refreshModelSelect(name);
+        // load state for this model
+        const m2 = loadModel();
+        setWeightsChart(state.barSavedW, m2.weights || {});
+        setWeightsChart(state.barDynW, computeWeightsPreview(m2));
+        const calib2 = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+        if (calib2) {
+          state.thrOn = calib2.thr_on; state.thrOff = calib2.thr_off; setThrUI();
+          log('ok', `Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib2,null,2)}</div>`);
+        }
+        const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
+        const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
+        setStatus(`Active model set to “${name}”.`);
+      } else {
+        // switch model
+        setModelName(v);
+        const m = loadModel();
+        setWeightsChart(state.barSavedW, m.weights || {});
+        setWeightsChart(state.barDynW, computeWeightsPreview(m));
+        const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+        if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; setThrUI(); log('ok', `Loaded calibration for “${v}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`); }
+        const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
+        const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
+        setStatus(`Loaded model “${v}”.`);
+      }
+    });
 
     // Persist knobs + update preview/saved charts
     ['TOP_K','K_PRIOR','HALF_LIFE_S'].forEach(id => {
@@ -1374,14 +1539,23 @@
 
     /* ========= Boot ========= */
     (function boot(){
-      const name = localStorage.getItem('cryActiveModelName') || 'default';
-      setModelName(name);
+      const active = localStorage.getItem('cryActiveModelName') || 'default';
+      refreshModelSelect(active);
+      setModelName(active);
 
       setupAllBars();
       els.chart.getContext && setupChart();
 
       const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
-      if (calib) { state.thrOn=calib.thr_on; state.thrOff=calib.thr_off; log('ok',`Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`); }
+      if (calib) {
+        state.thrOn=calib.thr_on; state.thrOff=calib.thr_off;
+        log('ok',`Loaded calibration for “${getModelName()}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
+      } else {
+        const offDelta = Number(els.ALERT_OFF_DELTA.value) || 0.10;
+        state.thrOn = 0.35; state.thrOff = Math.max(0, state.thrOn - offDelta);
+      }
+      setThrUI();
+      enableThrSliders(true);
 
       const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
       const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
