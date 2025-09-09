@@ -1301,9 +1301,8 @@
       log('ok', `Mic started in ${mode.toUpperCase()} mode.`);
       // ↓ One final, readable status the user will actually see — but don't
       //    overwrite calibration's status while it's running.
-      if (!(state.calActive && mode === 'detect')) {
-        setStatus(mode === 'detect' ? 'Detection started (mic).' : 'Training started (mic).');
-}
+      if (mode === 'train') setStatus('Training started (mic).');
+      else if (mode === 'detect' && !state.calActive) setStatus('Detection started (mic).');
     }
 
     async function stopAll(){
@@ -1379,6 +1378,7 @@
 
       state.mode = 'train_file';
       setPill('training', true);
+      setStatus(`Training started (file): ${file.name}`);
       log('ok', `Training started on file: ${file.name}`, `<span class="chip">${(file.size/1024/1024).toFixed(2)} MB</span>`);
 
       els.trainAudio.onended = async () => {
@@ -1397,6 +1397,9 @@
       els.trainAudio.onended = null;
       try { if (trainCtx && trainCtx.state !== 'suspended') await trainCtx.suspend(); } catch {}
       clearTopBars();
+      setPill('idle', false);
+      state.mode = 'idle';
+      setStatus('Training stopped.');   
     }
 
     /* ========= Folder training ========= */
@@ -1434,6 +1437,7 @@
       folderIdx = 0;
       state.mode = 'train_folder';
       setPill('training', true);
+      setStatus(`Training started (folder): ${folderFiles.length} file(s).`);
       log('ok', `Folder training queued: ${folderFiles.length} file(s) from “${describeCommonRoot(folderFiles)}”.`);
       await trainNextFileInFolder();
     }
@@ -1467,7 +1471,10 @@
       setPill('idle', false);
       state.mode = 'idle';
       clearTopBars();
-      if (!silent) log('warn','Stopped folder training.');
+      if (!silent) {
+        log('warn','Stopped folder training.');
+        setStatus('Training stopped.'); // ✅
+      }
     }
 
     /* ========= Params & UI wiring ========= */
