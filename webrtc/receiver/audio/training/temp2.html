@@ -192,6 +192,13 @@
       <div class="card" id="cardModel">
         <h2>Model</h2>
         <div class="row" style="gap:8px 10px;">
+
+          <!-- NEW: models dropdown -->
+          <label style="display:flex;align-items:center;gap:8px;">
+            <span>Models</span>
+            <select id="MODEL_DROPDOWN" style="padding:10px 12px;border-radius:10px;border:1px solid #222;background:#0b0b0b;color:#ddd;min-width:160px;"></select>
+          </label>
+
           <label style="display:flex;align-items:center;gap:8px;">
             <span>Model name</span>
             <input id="MODEL_NAME" type="text" placeholder="default" style="width:180px;">
@@ -453,7 +460,8 @@
       'IGNORE_CLASSES','PENALTY_MAP',
       'btnResetDefaults',
       // NEW elements:
-      'THR_OFF_SLIDER','THR_OFF_LABEL','THR_ON_SLIDER','THR_ON_LABEL'
+      'THR_OFF_SLIDER','THR_OFF_LABEL','THR_ON_SLIDER','THR_ON_LABEL',
+      'MODEL_DROPDOWN'
     ].map(x => [x, document.getElementById(x)])) )();
 
     function setStatus(s){ els.status.textContent = s; log('info', s); }
@@ -469,7 +477,7 @@
     function rmsToMeter(rms){
       // Convert amplitude RMS (≈0..1) to dBFS and map [-85 dB … 0 dB] → [0 … 1]
       const db = 20 * Math.log10(Math.max(1e-8, rms));
-      const FLOOR_DB = -85;                 // make more negative (e.g. -90) to show even lower noise
+      const FLOOR_DB = -85;
       const norm = (db - FLOOR_DB) / (0 - FLOOR_DB);
       return clamp01(norm);
     }
@@ -816,9 +824,8 @@
 
       const labels = display.map(d => d.name);
       const values = display.map(d => d.v);
-      const bg = display.map(d => d.excluded ? 'rgba(107,114,128,0.85)' : 'rgba(96,165,250,0.85)');
+      const bg = display.map(d => d.excluded ? 'rgba(107,114,128,0.85)' : 'rgba(96,165,250,0.85)';
       const bd = display.map(d => d.excluded ? 'rgba(75,85,99,1)' : 'rgba(59,130,246,1)');
-
 
       state.barChart.data.labels = labels;
       state.barChart.data.datasets[0].data = values;
@@ -903,7 +910,6 @@
     // User moves sliders (enabled only when not calibrating)
     els.THR_OFF_SLIDER.addEventListener('input', () => {
       state.thrOff = clamp01(parseFloat(els.THR_OFF_SLIDER.value) || 0);
-      // keep ON >= OFF
       if (state.thrOn < state.thrOff) state.thrOn = state.thrOff;
       setThrUI();
     });
@@ -925,8 +931,8 @@
       const thr_off = Math.min(0.95, p99 + 0.02);
       const thr_on  = Math.min(0.99, thr_off + offDelta);
       state.thrOff = thr_off;
-      state.thrOn  = Math.max(thr_on, state.thrOff); // guard
-      setThrUI(); // reflect in sliders (disabled but live)
+      state.thrOn  = Math.max(thr_on, state.thrOff);
+      setThrUI();
     }
 
     /* ========= Quiet calibration ========= */
@@ -944,7 +950,6 @@
       state.calVals = [];
       setStatus(`Quiet calibration for ${durSec}s… Please keep things quiet.`);
 
-      // lock sliders but keep them updating live
       enableThrSliders(false);
 
       await startMic('detect');
@@ -1003,7 +1008,7 @@
       if (state.calTimerId) { clearTimeout(state.calTimerId); state.calTimerId = null; }
       if (state.calCountdownId) { clearInterval(state.calCountdownId); state.calCountdownId = null; }
       els.btnCal.disabled = false; els.btnCal.textContent = 'Start';
-      enableThrSliders(true); // allow manual tuning after stop
+      enableThrSliders(true);
       setPill('idle', false);
       setStatus('Calibration stopped.');
       stopAll();
@@ -1075,11 +1080,11 @@
           if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; }
           else { state.thrOn = 0.35; state.thrOff = state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1); }
 
-          pushChart(performance.now(), raw, sm);
+          pushChart(Date.now(), raw, sm);
 
           if (state.calActive) {
             state.calVals.push(sm);
-            updateCalLiveThresholds(); // <— live slider updates while calibrating
+            updateCalLiveThresholds();
           }
 
           if (LOGS.enable.checked) {
@@ -1370,6 +1375,7 @@
       m.halfLifeSec = Number(els.HALF_LIFE_S.value)||m.halfLifeSec||3600;
       const w = recomputeWeights(m);
       setWeightsChart(state.barSavedW, w);
+      populateModelDropdown(); // refresh list in case this was a new model
     };
     els.btnClear.onclick = () => {
       const name = getModelName();
@@ -1379,6 +1385,7 @@
       setupChart();
       clearTopBars();
       setStatus(`Model “${name}” cleared.`);
+      populateModelDropdown(); // reflect deletion
     };
     els.btnExport.onclick = () => {
       const key = MODEL_KEY();
@@ -1396,6 +1403,7 @@
       setStatus(`Active model name set to “${name}”. New training/recompute will persist there.`);
       const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
       const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
+      populateModelDropdown(name);
     };
     els.btnModelLoad.onclick = () => {
       const name = els.MODEL_NAME.value.trim() || 'default';
@@ -1408,8 +1416,8 @@
       const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
       const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
       setStatus(`Loaded model “${name}”.`);
-      // refresh threshold UI from loaded calibration
       if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; setThrUI(); }
+      populateModelDropdown(name);
     };
 
     // Persist knobs + update preview/saved charts
@@ -1440,6 +1448,70 @@
       el.addEventListener('blur', save);
     });
 
+    /* ========= NEW: Models dropdown helpers ========= */
+    function listExistingModels(){
+      const prefix = 'cryModelV1_';
+      const names = [];
+      for (let i=0;i<localStorage.length;i++){
+        const k = localStorage.key(i);
+        if (k && k.startsWith(prefix)) {
+          const n = k.slice(prefix.length);
+          if (n) names.push(n);
+        }
+      }
+      const active = localStorage.getItem('cryActiveModelName') || 'default';
+      if (active && !names.includes(active)) names.push(active);
+      names.sort((a,b)=>a.localeCompare(b));
+      return names;
+    }
+    function populateModelDropdown(selectName){
+      const sel = els.MODEL_DROPDOWN;
+      if (!sel) return;
+      const names = listExistingModels();
+      sel.innerHTML = '';
+      for (const n of names){
+        const opt = document.createElement('option');
+        opt.value = n; opt.textContent = n;
+        sel.appendChild(opt);
+      }
+      const optNew = document.createElement('option');
+      optNew.value = '__new__'; optNew.textContent = 'New…';
+      sel.appendChild(optNew);
+      const target = selectName || getModelName();
+      if ([...sel.options].some(o => o.value === target)) sel.value = target;
+      else if (names.length) sel.value = names[0];
+      else sel.value = '__new__';
+    }
+    els.MODEL_DROPDOWN?.addEventListener('change', () => {
+      const v = els.MODEL_DROPDOWN.value;
+      if (v === '__new__') {
+        const suggested = `model-${new Date().toISOString().slice(0,16).replace(/[T:]/g,'')}`;
+        const name = (prompt('Enter a new model name:', suggested) || '').trim();
+        if (!name) { populateModelDropdown(getModelName()); return; }
+        setModelName(name);
+        // create and persist a fresh model skeleton
+        const m = loadModel(); // returns skeleton if none
+        saveModel(m);
+        setWeightsChart(state.barSavedW, m.weights || {});
+        setWeightsChart(state.barDynW, computeWeightsPreview(m));
+        const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+        if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; setThrUI(); }
+        setStatus(`Created & activated model “${name}”.`);
+        populateModelDropdown(name);
+      } else {
+        setModelName(v);
+        const m = loadModel();
+        setWeightsChart(state.barSavedW, m.weights || {});
+        setWeightsChart(state.barDynW, computeWeightsPreview(m));
+        const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+        if (calib) log('ok', `Loaded calibration for “${v}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
+        const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
+        const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
+        if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; setThrUI(); }
+        setStatus(`Loaded model “${v}”.`);
+      }
+    });
+
     /* ========= Bars setup ========= */
     function setupAllBars(){
       setupBars();
@@ -1453,6 +1525,8 @@
       const name = localStorage.getItem('cryActiveModelName') || 'default';
       setModelName(name);
 
+      populateModelDropdown(name);  // <-- NEW (initial fill)
+
       setupAllBars();
       els.chart.getContext && setupChart();
 
@@ -1461,7 +1535,6 @@
         state.thrOn=calib.thr_on; state.thrOff=calib.thr_off;
         log('ok',`Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
       } else {
-        // fallback defaults
         const offDelta = Number(els.ALERT_OFF_DELTA.value) || 0.10;
         state.thrOn = 0.35; state.thrOff = Math.max(0, state.thrOn - offDelta);
       }
