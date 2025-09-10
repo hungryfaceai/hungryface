@@ -633,7 +633,14 @@
     videoOn.addEventListener('change', applyVideoToggle);
     audioOn.addEventListener('change', async () => {
       await applyAudioToggle();
-      applyAudioUI();
+      //applyAudioUI(); //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+      // force the AI loop to re-pick its source (tap vs separate)
+      if (audioAiOn?.checked && audioAiWhere?.value === 'sender') {
+        stopSenderAudioLoop();
+        await startSenderAudioLoop();
+      } else {
+        stopSenderAudioLoop();
+      }
     });
     cameraSel.addEventListener('change', () => { updateMirrorClass(); beginViewportSettle(); });
 
@@ -1287,6 +1294,7 @@
             //audioSource = makeSourceFromTrack(audioCtx, streamedTrack); //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
             // Clone so the AI graph lifecycle can’t affect the sender’s live track.
             aiTapTrack = streamedTrack.clone();
+            aiTapTrack.enabled = true;
             audioSource = makeSourceFromTrack(audioCtx, aiTapTrack);
             tapUsed = true;
             //originLabel = DEBUG_AUDIO.FORCE_TAP ? 'tap: streaming track (forced)' : 'tap: streaming track (fallback)'; //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
@@ -1463,7 +1471,8 @@
 
       audioLoopRunning = true;
       audioStarting = false;
-      lastAIMode = tapUsed ? (DEBUG_AUDIO.FORCE_TAP ? 'tap-forced' : 'tap-fallback') : 'separate';
+      //lastAIMode = tapUsed ? (DEBUG_AUDIO.FORCE_TAP ? 'tap-forced' : 'tap-fallback') : 'separate'; //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+      lastAIMode = tapUsed ? (DEBUG_AUDIO.FORCE_TAP ? 'tap-forced' : (preferTap ? 'tap-preferred' : 'tap-fallback')) : 'separate';
 
       // Try worklet for classification
       try {
@@ -1497,7 +1506,9 @@
       }
 
       // --- Parallel RMS monitor for the *streaming track* (always from localStream track)
-      if (streamedTrack) {
+      //if (streamedTrack) { //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+      const ENABLE_RMS_MONITOR = false; // set true when debugging
+      if (streamedTrack && ENABLE_RMS_MONITOR) 
         try {
           monSource = makeSourceFromTrack(audioCtx, streamedTrack);
           monProcessor = new AudioWorkletNode(audioCtx, 'rms-meter', {
