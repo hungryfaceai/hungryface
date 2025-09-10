@@ -10,10 +10,10 @@
     html, body { margin:0; background:#000; color:#fff; font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
     #stage { padding:16px; box-sizing:border-box; display:flex; justify-content:center; }
     .panel { width:min(100%,1100px); background:#0b0b0b; border:1px solid #141414; border-radius:14px; padding:16px; margin:0 auto 24px; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
     h1 { margin:.2rem 0 .1rem; font-size:22px; }
     .muted { color:#aaa; font-size:12px; }
     .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
-    .topbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
     .btn { padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.4); background:transparent; color:#fff; font-weight:600; cursor:pointer; }
     .btn:active { transform:scale(.98); }
     .btn[disabled] { opacity:.6; cursor:default; }
@@ -42,6 +42,15 @@
     .key { width:14px; height:3px; border-radius:2px; display:inline-block; margin-right:4px; vertical-align:middle; }
     .blue { background:#60a5fa; } .red { background:#ef4444; } .green{ background:#22c55e; } .darkred { background:#991b1b; }
 
+    /* Alerts badge (iOS-style) */
+    #btnOpenAlerts { position:relative; }
+    #alertsBadge {
+      display:inline-flex; align-items:center; justify-content:center;
+      min-width:18px; height:18px; padding:0 5px; border-radius:999px;
+      background:#ef4444; color:#fff; font-size:12px; line-height:1; font-weight:800;
+      margin-left:8px;
+    }
+
     @media (max-width:560px){
       .subgroup { flex-direction:column; align-items:stretch; }
       .subgroup strong { min-width:unset; }
@@ -52,7 +61,7 @@
     /* Hidden remote video host (for audio track) */
     #remote { position:absolute; width:1px; height:1px; left:-99999px; top:-99999px; }
 
-    /* Help + modal (keep help above settings) */
+    /* Help + modal (help above settings) */
     .help-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:180;opacity:0;pointer-events:none;transition:opacity .2s ease;}
     .help-backdrop.show{opacity:1;pointer-events:auto;}
     .help-sheet{position:fixed;right:0;top:0;height:100svh;width:min(92vw,420px);background:#121212;color:#f3f3f3;border-left:1px solid rgba(255,255,255,0.12);box-shadow:-12px 0 32px rgba(0,0,0,0.6);z-index:190;transform:translateX(100%);transition:transform .24s cubic-bezier(.2,.8,.2,1);display:flex;flex-direction:column;}
@@ -70,7 +79,7 @@
     .modal-body{padding:12px;}
     .modal-head .close{appearance:none;border:none;background:transparent;color:#aaa;font-size:22px;cursor:pointer;padding:2px 6px;}
 
-    /* Logs (mimic training page) */
+    /* Logs (match training page style) */
     .log-panel { margin-top:12px; background:#0a0a0a; border:1px solid #222; border-radius:12px; }
     .log-toolbar { display:flex; gap:10px; align-items:center; padding:8px 10px; border-bottom:1px solid #1a1a1a; font-size:12px; color:#ddd; flex-wrap:wrap; }
     .log-body { max-height:300px; overflow:auto; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; line-height:1.4; padding:10px; }
@@ -88,8 +97,14 @@
   <div id="stage">
     <div class="panel">
       <header class="topbar">
-        <h1>Weighted Top-K Audio – Live Detection</h1>
         <div class="row">
+          <h1>Weighted Top-K Audio – Live Detection</h1>
+          <!-- LEFT: Alerts with badge -->
+          <button id="btnOpenAlerts" class="btn">Alerts <span id="alertsBadge">0</span></button>
+        </div>
+        <!-- RIGHT: Help above Settings -->
+        <div class="row">
+          <button id="btnHelp" class="btn">Help</button>
           <button id="btnOpenSettings" class="btn">Settings</button>
         </div>
       </header>
@@ -102,9 +117,9 @@
         <div id="rmsFill" class="fill"></div>
       </div>
 
-      <!-- ===== Reordered panels ===== -->
+      <!-- ===== Reorganized layout ===== -->
 
-      <!-- 1) Fused score chart (TOP) -->
+      <!-- Top: Fused score chart -->
       <div class="card">
         <h2>Fused score over time</h2>
         <div class="subgroup" style="justify-content:flex-end">
@@ -124,7 +139,7 @@
         </div>
       </div>
 
-      <!-- 2) Start / Stop (below chart) -->
+      <!-- Below: Start/Stop -->
       <div class="card" id="cardDetect">
         <h2>Live audio detection</h2>
         <div class="subgroup">
@@ -137,7 +152,7 @@
         </div>
       </div>
 
-      <!-- 3) Thresholds -->
+      <!-- Below: Thresholds -->
       <div class="card" id="cardThr">
         <h2>Thresholds</h2>
         <div class="subgroup">
@@ -156,7 +171,7 @@
         </div>
       </div>
 
-      <!-- 4) Model -->
+      <!-- Below: Model -->
       <div class="card" id="cardModel">
         <h2>Model</h2>
         <div class="row" style="gap:8px 10px;">
@@ -168,7 +183,7 @@
         <div class="muted" style="margin-top:6px;">Select a previously trained model. Detection uses its saved <b>Top-K</b> and normalized weights.</div>
       </div>
 
-      <!-- 5) Source (moved below Model) -->
+      <!-- Below: Source -->
       <div class="card">
         <h2>Source</h2>
         <div class="subgroup">
@@ -181,7 +196,7 @@
         </div>
       </div>
 
-      <!-- 6) Live top classes (chart hidden until user clicks) -->
+      <!-- Below: Live top classes (chart hidden by default; appears on click) -->
       <div class="card" id="cardLiveBars">
         <div class="row" style="justify-content:space-between; align-items:center;">
           <h2 style="margin:0;">Live top classes</h2>
@@ -193,7 +208,7 @@
         <div class="muted" style="margin-top:6px;">Displays the model’s Top-K (non-excluded) classes. Scores are raw (not percentages).</div>
       </div>
 
-      <!-- 7) Active model weights (chart hidden until user clicks) -->
+      <!-- Below: Active model weights (chart hidden by default; appears on click) -->
       <div class="card">
         <div class="row" style="justify-content:space-between; align-items:center;">
           <h2 style="margin:0;">Active model weights</h2>
@@ -205,7 +220,7 @@
         <span class="muted">Normalized Top-K weights used by detection.</span>
       </div>
 
-      <!-- 8) Logs (bottom) -->
+      <!-- Below: Logs -->
       <div class="card">
         <div class="row" style="justify-content:space-between; width:100%;">
           <h2 style="margin:0;">Logs</h2>
@@ -226,6 +241,10 @@
     </div>
   </div>
 
+  <!-- Hosts for injected UI -->
+  <div id="audioBannerHost"></div>
+  <div id="alertsModalHost"></div>
+
   <!-- Hidden host for remote audio track -->
   <video id="remote" autoplay playsinline muted></video>
 
@@ -235,7 +254,6 @@
       <div class="modal-head">
         <strong>Settings</strong>
         <div class="modal-actions">
-          <button id="btnHelp" class="btn small" type="button" title="Open Help">Help</button>
           <button id="btnSettingsClose" class="close" type="button" title="Close" aria-label="Close">×</button>
         </div>
       </div>
@@ -265,6 +283,10 @@
   <script type="module" src="./help-sheet.js"></script>
 
   <script type="module">
+    /* ========= Imports for banner + drawer ========= */
+    import { setupAudioBanner, showAudioBanner, hideAudioBanner, saveAlertRecord } from './alert-banner.js';
+    import { setupAlertsDrawer, refreshAlertsBadge } from './alerts-drawer.js';
+
     /* ========= WebRTC (ReceiverCore) ========= */
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
@@ -277,12 +299,13 @@
     const EL = id => document.getElementById(id);
     const ASM_LOG_MS = 2000, SCORE_LOG_MS = 800;
 
+    // Top-level buttons
     const _modal = EL('settingsModal');
     EL('btnOpenSettings').onclick = () => { _modal.classList.add('show'); _modal.setAttribute('aria-hidden','false'); };
     EL('btnSettingsClose').onclick = () => { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); };
     _modal.addEventListener('click', (e) => { if (e.target === _modal) { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); }});
 
-    // Help wiring (kept)
+    // Help wiring (drawer/sheet; above settings)
     function wireHelpOnce() {
       const sheet = document.getElementById('helpSheet');
       const backdrop = document.getElementById('helpBackdrop');
@@ -307,7 +330,7 @@
     document.addEventListener('help:ready', wireHelpOnce);
     if (document.getElementById('helpSheet')) wireHelpOnce();
 
-    // Logs toggle (training style)
+    // Logs toggle
     const btnToggleLogs = EL('btnToggleLogs');
     const logsContainer = EL('logsContainer');
     btnToggleLogs.onclick = () => {
@@ -353,7 +376,7 @@
       'CLASS_EMA_TAU_S','FUSED_EMA_TAU_S','ALERT_HOLD_MS','ALERT_OFF_DELTA','MAX_RESULTS',
       'btnStartDetect','btnStop','chart','bars','barsSavedW','PENALTY_MAP',
       'THR_OFF_SLIDER','THR_OFF_LABEL','THR_ON_SLIDER','THR_ON_LABEL',
-      'MODEL_SELECT','CHART_WINDOW_S','cardLiveBars','TRAIN_SRC','trainInfo',
+      'MODEL_SELECT','CHART_WINDOW_S','TRAIN_SRC','trainInfo',
       'btnToggleLiveBars','btnToggleSavedW','liveBarsWrap','savedWWrap'
     ].map(x => [x, document.getElementById(x)])) )();
 
@@ -549,6 +572,8 @@
       ring: new Float32Array(0), lastPos: 0,
       perClassEma: new Map(), fusedEma: 0,
       alertOn: false, alertUntil: 0,
+      // alert episode accumulation
+      alertStartMs: 0, alertSum: 0, alertCount: 0,
       chart: null, barChart: null, barSavedW: null,
       labels: [], fusedRaw: [], fusedSm: [],
       thrOn: 0.35, thrOff: 0.25,
@@ -556,7 +581,7 @@
       hopSec: 0.48, chartWindowSec: 30, chartCap: 0
     };
 
-    // User-controlled visibility for charts
+    // Live chart vis toggles
     let liveBarsUserVisible = false;
     let savedWUserVisible   = false;
 
@@ -617,10 +642,8 @@
 
     // Bars
     function showLiveBars(){
-      if (liveBarsUserVisible) {
-        els.liveBarsWrap.style.display = '';
-        setTimeout(()=>{ state.barChart?.resize?.(); }, 0);
-      }
+      els.liveBarsWrap.style.display = '';
+      setTimeout(()=>{ state.barChart?.resize?.(); }, 0);
     }
     function hideLiveBars(){ els.liveBarsWrap.style.display = 'none'; }
     function setupBars(){
@@ -654,13 +677,13 @@
       state.barChart.data.datasets[0].backgroundColor = [];
       state.barChart.data.datasets[0].borderColor = [];
       state.barChart.update();
-      // Do not auto-show; visibility controlled by user toggle
+      hideLiveBars();
     }
     function updateTopBars(cats){
       if (!els.bars) return;
       setupBars();
       const model = loadModel();
-      const K = Math.max(1, Number(model.K) || 6); // display Top-K from model for consistency
+      const K = Math.max(1, Number(model.K) || 6);
       const sorted = [...cats].sort((a,b)=> (b.score||0)-(a.score||0));
       const display = sorted.slice(0, K).map(c => ({ name: c.categoryName || '(unnamed)', v: c.score || 0 }));
       state.barChart.data.labels = display.map(d => d.name);
@@ -670,8 +693,7 @@
       state.barChart.data.datasets[0].backgroundColor = bg;
       state.barChart.data.datasets[0].borderColor = bd;
       state.barChart.update();
-      // Only show if user chose to
-      if (display.length > 0) showLiveBars();
+      if (display.length > 0 && liveBarsUserVisible) showLiveBars();
     }
     function setWeightsChart(weightsDict){
       setupBars();
@@ -689,12 +711,10 @@
         const prev = state.perClassEma.get(name) || 0;
         state.perClassEma.set(name, emaStep(prev, c.score || 0, a));
       }
-      // weighted sum over trained weights
       let fused = 0;
       for (const [name, w] of Object.entries(weights || {})) {
         fused += (w || 0) * (state.perClassEma.get(name) || 0);
       }
-      // penalties (negative weights on tokens)
       const pmap = getPenaltyMap();
       if (Object.keys(pmap).length) {
         for (const [tok, pen] of Object.entries(pmap)) {
@@ -775,8 +795,38 @@
       }
 
       const on = applyHysteresis(sm, performance.now());
-      if (on && !state.alertOn) { log('ok','ALERT ON (cry detected).'); }
-      if (!on && state.alertOn) { log('warn','ALERT OFF.'); }
+
+      // OFF -> ON
+      if (on && !state.alertOn) {
+        state.alertStartMs = Date.now();
+        state.alertSum = 0;
+        state.alertCount = 0;
+        showAudioBanner(state.alertStartMs);
+        log('ok','ALERT ON (cry detected).');
+      }
+      // Accumulate while ON
+      if (on) {
+        state.alertSum += sm;
+        state.alertCount++;
+      }
+      // ON -> OFF
+      if (!on && state.alertOn) {
+        const startAt = state.alertStartMs || Date.now();
+        const endAt   = Date.now();
+        const avg     = state.alertCount > 0 ? (state.alertSum / state.alertCount) : sm;
+        hideAudioBanner();
+        const record = {
+          type: 'audio detection',
+          startAt: new Date(startAt).toISOString(),
+          endAt:   new Date(endAt).toISOString(),
+          avgScore: Number(avg.toFixed(4))
+        };
+        saveAlertRecord(record);
+        log('warn','ALERT OFF.', `<div class="log-code">${JSON.stringify(record, null, 2)}</div>`);
+        state.alertStartMs = 0;
+        state.alertSum = 0;
+        state.alertCount = 0;
+      }
       state.alertOn = on;
     }
 
@@ -877,6 +927,25 @@
     }
 
     async function stopAll(){
+      // finalize open alert if any
+      if (state.alertOn && state.alertStartMs) {
+        const endAt = Date.now();
+        const avg   = state.alertCount > 0 ? (state.alertSum / state.alertCount) : 0;
+        const record = {
+          type: 'audio detection',
+          startAt: new Date(state.alertStartMs).toISOString(),
+          endAt:   new Date(endAt).toISOString(),
+          avgScore: Number(avg.toFixed(4))
+        };
+        try { await saveAlertRecord(record); } catch {}
+        hideAudioBanner();
+        log('warn', 'ALERT OFF (stop).', `<div class="log-code">${JSON.stringify(record, null, 2)}</div>`);
+        state.alertOn = false;
+        state.alertStartMs = 0;
+        state.alertSum = 0;
+        state.alertCount = 0;
+      }
+
       const wasRunning = state.running || state.mode!=='idle';
       state.running=false; state.mode='idle';
       await stopMicOnly();
@@ -934,8 +1003,7 @@
             }
     
           } else if (msg.type === 'audio') {
-            // Sender is pushing scores (inference @ sender)
-            setInferWhere('sender'); // make UI suffix correct
+            setInferWhere('sender');
             if (els.TRAIN_SRC.value === 'sender' && state.mode === 'detect') {
               setStatus('Connected to sender');
               const categories = (msg.categories || []).map(c => ({
@@ -1041,7 +1109,7 @@
     els.btnStop.onclick = async () => {
       await stopAll();
       setStatus('Detection stopped.');
-      els.btnStartDetect.disabled = false;  // re-enable Start after stop
+      els.btnStartDetect.disabled = false; // re-enable Start after stop
     };
 
     // Live bars / Saved weights toggles
@@ -1104,11 +1172,15 @@
 
     /* ========= Boot ========= */
     (function boot(){
+      // Inject external UI & styles
+      setupAudioBanner();
+      setupAlertsDrawer();
+
       const active = localStorage.getItem('cryActiveModelName') || 'default';
       refreshModelSelect(active);
       setModelName(active);
 
-      // Defer chart canvases until visible; still set up fused chart
+      setupBars();
       els.chart.getContext && setupChart();
 
       const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
@@ -1123,17 +1195,19 @@
 
       const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
 
-      // Ensure live bars chart area hidden by default
+      // Hidden by default
       hideLiveBars();
+      els.savedWWrap.style.display = 'none';
+
       updateSourceUI();
 
-      // Seed saved weights only when user shows it (lazy).
+      // Badge
+      refreshAlertsBadge();
 
       setStatus('Ready. Detection will auto-start…');
-
-      // === AUTO START DETECTION ===
-      els.btnStartDetect.disabled = true;    // grey out Start
-      startDetectBasedOnSource();            // auto-start detection
+      // === AUTO-START DETECTION ===
+      els.btnStartDetect.disabled = true; // greyed out while running
+      startDetectBasedOnSource();
     })();
   </script>
 </body>
