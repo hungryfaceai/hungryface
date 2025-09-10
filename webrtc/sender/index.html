@@ -419,6 +419,9 @@
 
     let ws = null, localStream = null;
     let started = false, hideUITimer = null;
+    let wsHeartbeat = null;
+    let wsReconnectTimer = null;
+
 
     // One RTCPeerConnection per receiver
     const peers = new Map();
@@ -579,8 +582,16 @@
       window.visualViewport.addEventListener('resize', vpAlign, { passive: true });
       window.visualViewport.addEventListener('scroll',  vpAlign, { passive: true });
     }
+    
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) beginViewportSettle();
+      if (!document.hidden) {
+        beginViewportSettle();
+    
+        // 👉 If we were streaming and WS got closed while backgrounded, kick a reconnect.
+        if (started && (!ws || ws.readyState !== WebSocket.OPEN)) {
+          scheduleWSReconnect('tab-visible');
+        }
+      }
     });
 
     async function getMedia() {
@@ -663,13 +674,38 @@
           setStatus('Signaling: connected');
           send({ type: 'join', room, role: 'sender' });
           send({ type: 'need-offer' }); // nudge any already-open receivers
+          startWSHeartbeat();
           resolve();
         };
         sock.onmessage = onSignal;
-        sock.onerror = (e) => { console.warn('[WS error]', e); };
-        sock.onclose  = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); };
+        sock.onerror = (e) => { console.warn('[WS error]', e); scheduleWSReconnect();};
+        sock.onclose = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); stopWSHeartbeat(); scheduleWSReconnect();};
       });
     }
+
+    function startWSHeartbeat() {
+      stopWSHeartbeat();
+      wsHeartbeat = setInterval(() => { send({ type: 'keepalive' }); }, 25000);
+    }
+    function stopWSHeartbeat() {
+      if (wsHeartbeat) { clearInterval(wsHeartbeat); wsHeartbeat = null; }
+    }
+    function scheduleWSReconnect() {
+      if (!started) return;                 // only while streaming
+      if (wsReconnectTimer) return;         // already queued
+      wsReconnectTimer = setTimeout(async () => {
+        wsReconnectTimer = null;
+        try {
+          await connectWS(currentRoom());   // rejoin room
+          send({ type: 'need-offer' });     // nudge any receivers
+        } catch (e) {
+          // backoff and try again
+          scheduleWSReconnect();
+        }
+      }, 1500);
+    }
+
+    
     const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
     function getOrCreatePC(peerId) {
@@ -985,6 +1021,9 @@
 
     async function stopStreaming() {
       try { send({ type: 'bye' }); } catch {}
+      started = false;                        // so scheduleWSReconnect() bails out
+      stopWSHeartbeat();
+      if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
 
       if (previewTimer)  clearTimeout(previewTimer);
       if (previewTicker) clearInterval(previewTicker);
@@ -1029,7 +1068,7 @@
       try { ws = null; } catch {}
       try { if (typeof pc !== 'undefined') pc = null; } catch {}
 
-      started = false;
+      //started = false;
 
       document.body.classList.remove('previewing','streaming','ui-visible');
       document.body.classList.add('blackout');
