@@ -57,9 +57,6 @@ export function setupAlertsDrawer() {
           </div>
         </div>
         <div class="modal-body">
-          <div class="alerts-toolbar muted">
-            Saved episodes are stored in your browser (IndexedDB).
-          </div>
           <div style="overflow:auto">
             <table class="table" id="alertsTable">
               <thead>
