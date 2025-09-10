@@ -76,6 +76,8 @@
       <header class="topbar">
         <h1>Weighted Top-K Audio – Live Detection</h1>
         <div class="row">
+          <!-- NEW: Alerts button with badge -->
+          <button id="btnOpenAlerts" class="btn">Alerts <span id="alertsBadge" class="">0</span></button>
           <button id="btnOpenSettings" class="btn">Settings</button>
         </div>
       </header>
@@ -204,6 +206,10 @@
     </div>
   </div>
 
+  <!-- Hosts for injected UI -->
+  <div id="audioBannerHost"></div>
+  <div id="alertsModalHost"></div>
+
   <!-- Hidden host for remote audio track -->
   <video id="remote" autoplay playsinline muted></video>
 
@@ -243,6 +249,10 @@
   <script type="module" src="./help-sheet.js"></script>
 
   <script type="module">
+    /* ========= Imports for banner + drawer ========= */
+    import { setupAudioBanner, showAudioBanner, hideAudioBanner, saveAlertRecord } from './alert-banner.js';
+    import { setupAlertsDrawer, refreshAlertsBadge } from './alerts-drawer.js';
+
     /* ========= WebRTC (ReceiverCore) ========= */
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
@@ -526,6 +536,8 @@
       ring: new Float32Array(0), lastPos: 0,
       perClassEma: new Map(), fusedEma: 0,
       alertOn: false, alertUntil: 0,
+      // NEW: alert episode accumulation
+      alertStartMs: 0, alertSum: 0, alertCount: 0,
       chart: null, barChart: null, barSavedW: null,
       labels: [], fusedRaw: [], fusedSm: [],
       thrOn: 0.35, thrOff: 0.25,
@@ -741,9 +753,45 @@
         }
       }
 
+      // === NEW: banner + persistence transitions ===
       const on = applyHysteresis(sm, performance.now());
-      if (on && !state.alertOn) { log('ok','ALERT ON (cry detected).'); }
-      if (!on && state.alertOn) { log('warn','ALERT OFF.'); }
+
+      // OFF -> ON
+      if (on && !state.alertOn) {
+        state.alertStartMs = Date.now();   // wall clock for persistence/UI
+        state.alertSum = 0;
+        state.alertCount = 0;
+        showAudioBanner(state.alertStartMs);
+        log('ok','ALERT ON (cry detected).');
+      }
+
+      // Accumulate while ON
+      if (on) {
+        state.alertSum += sm;
+        state.alertCount++;
+      }
+
+      // ON -> OFF
+      if (!on && state.alertOn) {
+        const startAt = state.alertStartMs || Date.now();
+        const endAt   = Date.now();
+        const avg     = state.alertCount > 0 ? (state.alertSum / state.alertCount) : sm;
+        hideAudioBanner();
+
+        const record = {
+          type: 'audio detection',
+          startAt: new Date(startAt).toISOString(),
+          endAt:   new Date(endAt).toISOString(),
+          avgScore: Number(avg.toFixed(4))
+        };
+        saveAlertRecord(record);
+        log('warn','ALERT OFF.', `<div class="log-code">${JSON.stringify(record, null, 2)}</div>`);
+
+        state.alertStartMs = 0;
+        state.alertSum = 0;
+        state.alertCount = 0;
+      }
+
       state.alertOn = on;
     }
 
@@ -844,6 +892,25 @@
     }
 
     async function stopAll(){
+      // NEW: finalize open alert if any
+      if (state.alertOn && state.alertStartMs) {
+        const endAt = Date.now();
+        const avg   = state.alertCount > 0 ? (state.alertSum / state.alertCount) : 0;
+        const record = {
+          type: 'audio detection',
+          startAt: new Date(state.alertStartMs).toISOString(),
+          endAt:   new Date(endAt).toISOString(),
+          avgScore: Number(avg.toFixed(4))
+        };
+        try { await saveAlertRecord(record); } catch {}
+        hideAudioBanner();
+        log('warn', 'ALERT OFF (stop).', `<div class="log-code">${JSON.stringify(record, null, 2)}</div>`);
+        state.alertOn = false;
+        state.alertStartMs = 0;
+        state.alertSum = 0;
+        state.alertCount = 0;
+      }
+
       const wasRunning = state.running || state.mode!=='idle';
       state.running=false; state.mode='idle';
       await stopMicOnly();
@@ -1058,6 +1125,10 @@
 
     /* ========= Boot ========= */
     (function boot(){
+      // Inject external UI & styles
+      setupAudioBanner();
+      setupAlertsDrawer();
+
       const active = localStorage.getItem('cryActiveModelName') || 'default';
       refreshModelSelect(active);
       setModelName(active);
@@ -1083,6 +1154,9 @@
       // Seed weights chart
       setWeightsChart(loadModel().weights || {});
       setStatus('Ready. Pick source → Start detection.');
+
+      // Badge
+      refreshAlertsBadge();
     })();
   </script>
 </body>
