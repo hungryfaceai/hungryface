@@ -313,12 +313,22 @@
     const faceOn       = document.getElementById('faceOn');
     const faceWhere    = document.getElementById('faceWhere');
 
-    elDbgToggle.addEventListener('click', () => {
-      elDbgPanel.style.display = (elDbgPanel.style.display === 'block') ? 'none' : 'block';
-    });
-    window.addEventListener('keydown', (e) => {
-      if (e.key.toLowerCase() === 'd') elDbgToggle.click();
-    });
+    // === Debug UI master switch ===
+    const DEBUG_UI = false; // <- keep false to hide permanently
+    
+    if (DEBUG_UI) {
+      elDbgToggle.addEventListener('click', () => {
+        elDbgPanel.style.display = (elDbgPanel.style.display === 'block') ? 'none' : 'block';
+      });
+      window.addEventListener('keydown', (e) => {
+        if (e.key.toLowerCase() === 'd') elDbgToggle.click();
+      });
+    } else {
+      // hide the controls completely
+      elDbgPanel.style.display = 'none';
+      elDbgToggle.style.display = 'none';
+    }
+
 
     function getLocalAudioTrack() {
       return localStream?.getAudioTracks?.()[0] || null;
@@ -1010,7 +1020,7 @@
         }
 
         // turn on debug panel by default when starting, can be toggled
-        elDbgPanel.style.display = 'block';
+        if (DEBUG_UI) elDbgPanel.style.display = 'block';
 
       } catch (err) {
         console.error(err);
@@ -1290,7 +1300,7 @@
       elDbgRTC.textContent = `WebRTC send\n${lastRTCStats}`;
       elDbgTop.textContent = `Top categories\n${lastTopCats}`;
     }
-    setInterval(updateDebugUI, 500);
+    if (DEBUG_UI) setInterval(updateDebugUI, 500);
 
     async function pollRTCStats() {
       for (const [, rec] of peers) {
@@ -1312,7 +1322,7 @@
         }
       }
     }
-    setInterval(pollRTCStats, 1500);
+    if (DEBUG_UI) setInterval(pollRTCStats, 1500)
 
     async function startSenderAudioLoop() {
       if (!started || !audioAiOn?.checked || audioAiWhere?.value !== 'sender') return;
