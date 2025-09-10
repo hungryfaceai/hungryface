@@ -1239,9 +1239,15 @@
       const streamedTrack = getLocalAudioTrack();
       const canTap = !!(streamedTrack && streamedTrack.readyState === 'live' && streamedTrack.enabled);
 
-      let originLabel = 'separate mic';
+      //let originLabel = 'separate mic'; //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+      //let tapUsed = false;
+      //let useSeparateMic = !DEBUG_AUDIO.FORCE_TAP; // default: prefer separate RAW mic
+      //let openedSeparate = false;
+      const sendingAudio = !!(getLocalAudioTrack()?.enabled);
+      // If we're sending audio, avoid a second hardware capture.
+      const preferTap = DEBUG_AUDIO.FORCE_TAP || sendingAudio;
+      let originLabel = preferTap ? 'tap: streaming track' : 'separate mic';
       let tapUsed = false;
-      let useSeparateMic = !DEBUG_AUDIO.FORCE_TAP; // default: prefer separate RAW mic
       let openedSeparate = false;
 
       // Build muted sink
@@ -1252,8 +1258,10 @@
       const blackhole = audioCtx.createMediaStreamDestination();
       sink.connect(blackhole);
 
-      // Try separate RAW mic first (AEC/NS/AGC OFF), unless FORCE_TAP
-      if (useSeparateMic) {
+      // Try separate RAW mic first (AEC/NS/AGC OFF), unless FORCE_TAP //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+      //if (useSeparateMic) {
+      // Only open a second capture when we are NOT already sending audio
+      if (!preferTap) {
         try {
           aiMicStream = await navigator.mediaDevices.getUserMedia({
             audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
@@ -1270,14 +1278,19 @@
 
       // Fallback or FORCE_TAP → tap the processed streaming track
       if (!openedSeparate) {
-        if (DEBUG_AUDIO.FORCE_TAP && !canTap) {
+        //if (DEBUG_AUDIO.FORCE_TAP && !canTap) { //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+        if (preferTap && !canTap) {
           console.warn('[AUDIO][sender] FORCE_TAP requested but no live enabled streaming track to tap.');
         }
         if (canTap) {
           try {
-            audioSource = makeSourceFromTrack(audioCtx, streamedTrack);
+            //audioSource = makeSourceFromTrack(audioCtx, streamedTrack); //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+            // Clone so the AI graph lifecycle can’t affect the sender’s live track.
+            aiTapTrack = streamedTrack.clone();
+            audioSource = makeSourceFromTrack(audioCtx, aiTapTrack);
             tapUsed = true;
-            originLabel = DEBUG_AUDIO.FORCE_TAP ? 'tap: streaming track (forced)' : 'tap: streaming track (fallback)';
+            //originLabel = DEBUG_AUDIO.FORCE_TAP ? 'tap: streaming track (forced)' : 'tap: streaming track (fallback)'; //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+            originLabel = preferTap ? 'tap: streaming track (preferred)' : 'tap: streaming track (fallback)';
           } catch (e) {
             console.warn('[AUDIO][sender] unable to tap streamed track:', e);
           }
