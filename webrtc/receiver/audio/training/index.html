@@ -27,26 +27,12 @@
     .status-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
     .meter { height:10px; border-radius:8px; background:#0a0a0a; border:1px solid #222; overflow:hidden; }
     .fill { height:100%; width:0%; background:linear-gradient(to right, rgba(96,165,250,.9), rgba(239,68,68,.9)); transition:width 120ms linear; }
-    .pill {
-      display:none; /* hidden by default; shown only during training/calibration */
-      align-items:center; gap:8px;
-      padding:6px 12px; border-radius:999px; border:1px solid #333;
-      font-size:13px; font-weight:700;
-    }
+    .pill { display:none; align-items:center; gap:8px; padding:6px 12px; border-radius:999px; border:1px solid #333; font-size:13px; font-weight:700; }
     .pill.on { background:#310000; border-color:#a00; color:#ffb3b3; }
     .pill.busy { position:relative; }
-    .pill.busy::after {
-      content:''; width:8px; height:8px; border-radius:50%;
-      background: currentColor; opacity:.7; margin-left:6px;
-      animation: pillPulse .9s ease-in-out infinite alternate;
-    }
-    /* tiny gap between the status row (pill) and the audio meter */
-    .status-row + .meter { margin-top: 6px; }  /* tweak 4–8px to taste */
-
-    @keyframes pillPulse {
-      from { transform: translateX(0) scale(0.8); opacity:.45; }
-      to   { transform: translateX(4px) scale(1);   opacity:1;  }
-    }
+    .pill.busy::after { content:''; width:8px; height:8px; border-radius:50%; background: currentColor; opacity:.7; margin-left:6px; animation: pillPulse .9s ease-in-out infinite alternate; }
+    .status-row + .meter { margin-top: 6px; }
+    @keyframes pillPulse { from { transform: translateX(0) scale(0.8); opacity:.45; } to { transform: translateX(4px) scale(1); opacity:1; } }
 
     /* Carded sections */
     .card { background:#0a0a0a; border:1px solid #171717; border-radius:12px; padding:12px; margin-top:12px; }
@@ -65,13 +51,8 @@
 
     /* Charts */
     .chart-wrap { position: relative; }
-    .chart-wrap > canvas {
-      position: absolute; inset: 0;
-      width: 100% !important; height: 100% !important;
-      display: block; background:#0a0a0a; border-radius:10px;
-    }
+    .chart-wrap > canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; display: block; background:#0a0a0a; border-radius:10px; }
     .h160{height:160px;} .h170{height:170px;} .h180{height:180px;} .h320{height:320px;}
-
     .legend { margin-top:6px; display:flex; gap:12px; font-size:12px; color:#ccc; flex-wrap:wrap; }
     .key { width:14px; height:3px; border-radius:2px; display:inline-block; margin-right:4px; vertical-align:middle; }
     .blue { background:#60a5fa; } .red { background:#ef4444; } .green{ background:#22c55e; } .darkred { background:#991b1b; }
@@ -96,7 +77,7 @@
     /* Top bar */
     .topbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
 
-    /* Help + modal (unchanged styling) */
+    /* Help + modal */
     .help-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:110;opacity:0;pointer-events:none;transition:opacity .2s ease;}
     .help-backdrop.show{opacity:1;pointer-events:auto;}
     .help-sheet{position:fixed;right:0;top:0;height:100svh;width:min(92vw,420px);background:#121212;color:#f3f3f3;border-left:1px solid rgba(255,255,255,0.12);box-shadow:-12px 0 32px rgba(0,0,0,0.6);z-index:120;transform:translateX(100%);transition:transform .24s cubic-bezier(.2,.8,.2,1);display:flex;flex-direction:column;}
@@ -142,6 +123,9 @@
       .row { gap:8px; }
       select, input[type="number"], input[type="text"] { width:100%; box-sizing:border-box; }
     }
+
+    /* Hidden remote video host (for audio track) */
+    #remote { position:absolute; width:1px; height:1px; left:-99999px; top:-99999px; }
   </style>
 </head>
 <body>
@@ -171,7 +155,8 @@
         <div class="subgroup">
           <strong>Source</strong>
           <select id="TRAIN_SRC" style="min-width:220px;">
-            <option value="mic" selected>Microphone</option>
+            <option value="sender" selected>Sender (WebRTC)</option>
+            <option value="mic">Microphone (Receiver)</option>
             <option value="file">File</option>
             <option value="folder">Folder</option>
           </select>
@@ -204,7 +189,7 @@
           <button id="btnClear" class="btn">Clear Model</button>
           <button id="btnExport" class="btn">Export Model</button>
         </div>
-        <div class="muted" style="margin-top:6px;">Pick an existing model or choose “New…” to create one. Train (mic/file/folder), then click “Recompute Weights”.</div>
+        <div class="muted" style="margin-top:6px;">Pick an existing model or choose “New…” to create one. Train (mic/file/folder/sender), then click “Recompute Weights”.</div>
       </div>
 
       <!-- Quiet calibration panel -->
@@ -244,19 +229,19 @@
           </div>
         </div>
 
-        <div class="muted" style="margin-top:6px;">Keep the room quiet.</div>
+        <div class="muted" style="margin-top:6px;">Keep the room quiet. (Uses the selected source: Mic or Sender.)</div>
       </div>
 
       <!-- Live detection panel -->
       <div class="card" id="cardDetect">
-        <h2>Live audio detection (Mic)</h2>
+        <h2>Live audio detection</h2>
         <div class="subgroup">
           <strong>Detection</strong>
           <div class="btn-pair">
             <button id="btnStartDetect" class="btn">Start</button>
             <button id="btnStop" class="btn">Stop</button>
           </div>
-          <span class="muted">Uses the active model & thresholds.</span>
+          <span class="muted">Uses the active model & thresholds and the selected source (Mic or Sender).</span>
         </div>
       </div>
 
@@ -331,6 +316,9 @@
     </div>
   </div>
 
+  <!-- Hidden host for remote audio track -->
+  <video id="remote" autoplay playsinline muted></video>
+
   <!-- Settings modal -->
   <div id="settingsModal" class="modal" aria-hidden="true">
     <div class="modal-card">
@@ -380,7 +368,26 @@
   <script type="module" src="./help-sheet.js"></script>
 
   <script type="module">
-    /* ========= Helpers & UI ========= */
+    /* ========= NEW: WebRTC (ReceiverCore) ========= */
+    import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
+
+    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const room = new URLSearchParams(location.search).get("room") || "Baby";
+
+    // WebRTC holder
+    const wrtc = {
+      core: null,
+      dc: null,
+      stream: null,
+      // Remote audio tap graph
+      ctx: null, src: null, sink: null, node: null,
+      audioEnabled: true,
+      where: 'sender', // 'sender' (scores via DC) | 'receiver' (audio streamed; classify here)
+      visualMeterFromTap: false, // we reuse existing RMS from classifyChunk
+      connected: false,
+    };
+
+    /* ========= Helpers & UI (existing) ========= */
     const EL = id => document.getElementById(id);
     const ASM_LOG_MS = 2000;
     const SCORE_LOG_MS = 800;
@@ -391,7 +398,7 @@
     EL('btnSettingsClose').onclick = () => { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); };
     _modal.addEventListener('click', (e) => { if (e.target === _modal) { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); }});
 
-    /* Help side-sheet wiring (if help-sheet injects it) */
+    /* Help side-sheet wiring (unchanged) */
     function wireHelpOnce() {
       const sheet = document.getElementById('helpSheet');
       const backdrop = document.getElementById('helpBackdrop');
@@ -475,7 +482,30 @@
       'TRAIN_SRC','btnTrainStart','btnTrainStop','trainInfo'
     ].map(x => [x, document.getElementById(x)])) )();
 
-    function setStatus(s){ els.status.textContent = s; log('info', s); }
+    // Persist/consult who is doing inference when using Sender (WebRTC). //https://chatgpt.com/c/68c0b810-7a90-8325-abde-e96235904c27
+    // WebRTC glue code can call setInferWhere('sender'|'receiver') whenever the mode changes.
+    function setInferWhere(where){
+      localStorage.setItem('cryInferWhere', (where === 'receiver') ? 'receiver' : 'sender');
+    }
+    function getInferWhere(){
+      return localStorage.getItem('cryInferWhere') || 'sender'; // default: sender-side scores
+    }
+    
+    function setStatus(s){
+      let msg = s;
+    
+      // Only annotate when training source is "Sender (WebRTC)"
+      if (els.TRAIN_SRC?.value === 'sender') {
+        const where = getInferWhere();
+        const tag = (where === 'receiver')
+          ? 'WebRTC: streamed audio → inference @ receiver'
+          : 'WebRTC: sender scores → inference @ sender';
+        msg = `${s}  •  ${tag}`;
+      }
+    
+      els.status.textContent = msg;
+      log('info', msg);
+    }
 
     // Pill: only show during training or calibration
     function setPill(s, on=false){
@@ -514,29 +544,22 @@
     }
 
     /* ========= Chart labels plugin (percent) ========= */
-    const pctLabelPlugin = {
-      id: 'pctLabel',
-      afterDatasetsDraw(chart, args, options) {
-        if (!options || options.enabled !== true) return;
-        if (chart.config.type !== 'bar') return;
-        const ds = chart.data.datasets?.[0];
-        if (!ds) return;
-        const { ctx } = chart;
-        const meta = chart.getDatasetMeta(0);
-        ctx.save();
-        ctx.font = (options?.font) || '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-        ctx.fillStyle = options?.color || '#ddd';
-        const data = ds.data || [];
-        meta.data.forEach((bar, i) => {
-          const v = Number(data[i]) || 0;
-          const txt = `${Math.round(v * 100)}%`;
-          const x = bar.x + 6;
-          const y = bar.y + 4;
-          ctx.fillText(txt, x, y);
-        });
-        ctx.restore();
-      }
-    };
+    const pctLabelPlugin = { id:'pctLabel', afterDatasetsDraw(chart, args, options) {
+      if (!options || options.enabled !== true) return;
+      if (chart.config.type !== 'bar') return;
+      const ds = chart.data.datasets?.[0]; if (!ds) return;
+      const { ctx } = chart; const meta = chart.getDatasetMeta(0);
+      ctx.save(); ctx.font = (options?.font) || '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.fillStyle = options?.color || '#ddd';
+      const data = ds.data || [];
+      meta.data.forEach((bar, i) => {
+        const v = Number(data[i]) || 0;
+        const txt = `${Math.round(v * 100)}%`;
+        const x = bar.x + 6; const y = bar.y + 4;
+        ctx.fillText(txt, x, y);
+      });
+      ctx.restore();
+    }};
     Chart.register(pctLabelPlugin);
 
     /* ========= MediaPipe (Audio) ========= */
@@ -773,7 +796,6 @@
       frameCount: 0, asmLastLogTs: 0,
       calActive: false, calVals: [], calTimerId: null, scoreLastLogTs: 0,
       calCountdownId: null,
-      // Time-windowed chart
       hopSec: 0.48,
       chartWindowSec: 30,
       chartCap: 0
@@ -804,68 +826,35 @@
         data: {
           labels: state.labels,
           datasets: [
-            { // fused(raw) — blue bars
-              label:'fused(raw)',
-              data: state.fusedRaw,
-              type:'bar',
-              borderWidth:0,
-              pointRadius:0,
-              barPercentage:1.0,
-              categoryPercentage:1.0,
-              backgroundColor:'rgba(96,165,250,0.55)',
-            },
-            { // fused(EMA) — red line
-              label:'fused(EMA)',
-              data: state.fusedSm,
-              type:'line',
-              borderWidth:2,
-              pointRadius:0,
-              tension:0.15,
-              borderColor:'rgba(239,68,68,0.95)',
-              spanGaps:true
-            },
+            { label:'fused(raw)', data: state.fusedRaw, type:'bar', borderWidth:0, pointRadius:0, barPercentage:1.0, categoryPercentage:1.0, backgroundColor:'rgba(96,165,250,0.55)' },
+            { label:'fused(EMA)', data: state.fusedSm, type:'line', borderWidth:2, pointRadius:0, tension:0.15, borderColor:'rgba(239,68,68,0.95)', spanGaps:true },
             { label:'thr ON',  data:new Array(state.chartCap).fill(state.thrOn), type:'line', borderWidth:1, pointRadius:0, borderDash:[6,4],  borderColor:'rgba(153,27,27,1)', spanGaps:true },
             { label:'thr OFF', data:new Array(state.chartCap).fill(state.thrOff), type:'line', borderWidth:1, pointRadius:0, borderDash:[2,2],  borderColor:'rgba(34,197,94,1)', spanGaps:true }
           ]
         },
         options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation:false,
-          plugins:{ legend:{ display:false } },
-          scales:{
-            x:{ title:{display:true, text:'time (local)'}, ticks:{ maxRotation:0, autoSkip:true } },
-            y:{ title:{display:true, text:'score'}, min:0, max:1.2, grid:{ color:'rgba(255,255,255,0.08)' } }
-          }
+          responsive: true, maintainAspectRatio: false, animation:false, plugins:{ legend:{ display:false } },
+          scales:{ x:{ title:{display:true, text:'time (local)'}, ticks:{ maxRotation:0, autoSkip:true } },
+                  y:{ title:{display:true, text:'score'}, min:0, max:1.2, grid:{ color:'rgba(255,255,255,0.08)' } } }
         }
       });
     }
 
     function pushChart(nowMs, raw, sm){
-      // Resize if window changed
       const capNow = computeChartCap();
       if (capNow !== state.chartCap) { setupChart(); }
-
-      // Fixed-length, right-aligned: shift left, append newest
       state.fusedRaw.shift(); state.fusedRaw.push(raw);
       state.fusedSm.shift();  state.fusedSm.push(sm);
-
-      // Labels: local hh:mm:ss across the window
       const dt = state.hopSec * 1000;
       for (let i=0;i<state.chartCap;i++){
         const t = nowMs - (state.chartCap - 1 - i) * dt;
         state.labels[i] = hhmmss(t);
       }
-
-      // Threshold lines
       state.chart.data.datasets[2].data = new Array(state.chartCap).fill(state.thrOn);
       state.chart.data.datasets[3].data = new Array(state.chartCap).fill(state.thrOff);
-
-      // Apply
       state.chart.data.labels = state.labels.slice();
       state.chart.data.datasets[0].data = state.fusedRaw.slice();
       state.chart.data.datasets[1].data = state.fusedSm.slice();
-
       const nums = [...state.fusedRaw, ...state.fusedSm].filter(v => typeof v === 'number' && isFinite(v));
       const ymax = nums.length ? Math.max(...nums, state.thrOn, state.thrOff) + 0.05 : 1.0;
       state.chart.options.scales.y.max = Math.max(0.6, Math.min(1.5, ymax));
@@ -879,27 +868,17 @@
         setTimeout(()=>{ state.barChart?.resize?.(); }, 0);
       }
     }
-    function hideLiveBars(){
-      if (els.cardLiveBars) els.cardLiveBars.style.display = 'none';
-    }
+    function hideLiveBars(){ if (els.cardLiveBars) els.cardLiveBars.style.display = 'none'; }
 
     function setupBars(){
       if (!state.barChart && els.bars) {
         state.barChart = new Chart(els.bars.getContext('2d'), {
           type: 'bar',
-          data: { labels: [], datasets: [{
-            label: 'score', data: [],
-            borderWidth: 1, backgroundColor: [], borderColor: [],
-            barThickness: 12, maxBarThickness: 14, categoryPercentage: 0.55, barPercentage: 0.9
-          }]},
+          data: { labels: [], datasets: [{ label: 'score', data: [], borderWidth: 1, backgroundColor: [], borderColor: [], barThickness: 12, maxBarThickness: 14, categoryPercentage: 0.55, barPercentage: 0.9 }]},
           options: {
-            indexAxis: 'y',
-            responsive: true, maintainAspectRatio: false, animation: false,
-            plugins: { legend: { display:false } },
-            scales: {
-              x: { min: 0, max: 1, title: { display:true, text:'score' }, ticks: { font: { size: 11 } } },
-              y: { ticks: { autoSkip: false, font: { size: 11 } } }
-            }
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display:false } },
+            scales: { x: { min: 0, max: 1, title: { display:true, text:'score' }, ticks: { font: { size: 11 } } },
+                      y: { ticks: { autoSkip: false, font: { size: 11 } } } }
           }
         });
       }
@@ -908,8 +887,7 @@
           type: 'bar',
           data: { labels: [], datasets: [{ label:'weight', data: [], borderWidth:1, barThickness:10, maxBarThickness:12, categoryPercentage:0.5, barPercentage:0.9 }]},
           options: {
-            indexAxis:'y',
-            responsive:true, maintainAspectRatio:false, animation:false,
+            indexAxis:'y', responsive:true, maintainAspectRatio:false, animation:false,
             plugins:{ legend:{display:false}, pctLabel:{enabled: true, font:'11px system-ui', color:'#bbb'} },
             scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}, ticks:{ font:{ size:11 } } }, y:{ ticks:{ autoSkip:false, font:{ size:11 } } } }
           }
@@ -920,8 +898,7 @@
           type: 'bar',
           data: { labels: [], datasets: [{ label:'weight', data: [], borderWidth:1, barThickness:10, maxBarThickness:12, categoryPercentage:0.5, barPercentage:0.9 }]},
           options: {
-            indexAxis:'y',
-            responsive:true, maintainAspectRatio:false, animation:false,
+            indexAxis:'y', responsive:true, maintainAspectRatio:false, animation:false,
             plugins:{ legend:{display:false}, pctLabel:{enabled: true, font:'11px system-ui', color:'#bbb'} },
             scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}, ticks:{ font:{ size:11 } } }, y:{ ticks:{ autoSkip:false, font:{ size:11 } } } }
           }
@@ -942,27 +919,22 @@
       setupBars();
       const K = Math.max(1, Number(els.TOP_K.value) || 6);
       const sorted = [...cats].sort((a,b)=> (b.score||0)-(a.score||0));
-
       const display = [];
       let kept = 0, i = 0;
       while (i < sorted.length && kept < K) {
-        const c = sorted[i++];
-        const excluded = shouldIgnore(c.categoryName);
+        const c = sorted[i++]; const excluded = shouldIgnore(c.categoryName);
         display.push({ name: c.categoryName || '(unnamed)', v: c.score || 0, excluded });
         if (!excluded) kept++;
       }
-
       const labels = display.map(d => d.name);
       const values = display.map(d => d.v);
       const bg = display.map(d => d.excluded ? 'rgba(107,114,128,0.85)' : 'rgba(96,165,250,0.85)');
       const bd = display.map(d => d.excluded ? 'rgba(75,85,99,1)' : 'rgba(59,130,246,1)');
-
       state.barChart.data.labels = labels;
       state.barChart.data.datasets[0].data = values;
       state.barChart.data.datasets[0].backgroundColor = bg;
       state.barChart.data.datasets[0].borderColor = bd;
       state.barChart.update();
-
       if (labels.length > 0) showLiveBars();
     }
     function setWeightsChart(chart, weightsDict){
@@ -987,23 +959,19 @@
         state.perClassEma.set(name, emaStep(prev, c.score || 0, a));
       }
       ensurePerClassEma(weights);
-
       let fused = 0;
       for (const [name, w] of Object.entries(weights || {})) {
         fused += (w || 0) * (state.perClassEma.get(name) || 0);
       }
-
       const pmap = getPenaltyMap();
       if (Object.keys(pmap).length) {
         for (const [tok, pen] of Object.entries(pmap)) {
-          const token = String(tok || '').toLowerCase();
-          if (!token) continue;
+          const token = String(tok || '').toLowerCase(); if (!token) continue;
           for (const [nm, ema] of state.perClassEma.entries()) {
             if (nm.toLowerCase().includes(token)) fused += (pen || 0) * (ema || 0);
           }
         }
       }
-
       fused = clamp01(fused);
       state.fusedEma = emaStep(state.fusedEma, fused, alphaForTau(dt, Number(els.FUSED_EMA_TAU_S.value) || 0.8));
       return { raw: fused, sm: state.fusedEma };
@@ -1021,20 +989,10 @@
       els.THR_OFF_LABEL.textContent = state.thrOff.toFixed(2);
       els.THR_ON_LABEL.textContent  = state.thrOn.toFixed(2);
     }
-    function enableThrSliders(on) {
-      els.THR_OFF_SLIDER.disabled = !on;
-      els.THR_ON_SLIDER.disabled  = !on;
-    }
+    function enableThrSliders(on) { els.THR_OFF_SLIDER.disabled = !on; els.THR_ON_SLIDER.disabled  = !on; }
     function persistThresholds(extra={}) {
       const prev = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null') || {};
-      const payload = {
-        ...prev,
-        version: 1,
-        thr_on: state.thrOn,
-        thr_off: state.thrOff,
-        at: new Date().toISOString(),
-        ...extra
-      };
+      const payload = { ...prev, version: 1, thr_on: state.thrOn, thr_off: state.thrOff, at: new Date().toISOString(), ...extra };
       localStorage.setItem(CALIB_KEY(), JSON.stringify(payload));
       log('ok','Saved thresholds.', `<div class="log-code">${JSON.stringify(payload, null, 2)}</div>`);
     }
@@ -1060,8 +1018,7 @@
       const p99 = quantile(state.calVals, 0.995);
       const thr_off = Math.min(0.95, p99 + 0.02);
       const thr_on  = Math.min(0.99, thr_off + offDelta);
-      state.thrOff = thr_off;
-      state.thrOn  = Math.max(thr_on, state.thrOff);
+      state.thrOff = thr_off; state.thrOn = Math.max(thr_on, state.thrOff);
       setThrUI();
     }
 
@@ -1069,6 +1026,69 @@
     function updateCalDurLabel(){ els.CAL_DUR_SLIDER.textContent = els.CAL_DUR_SLIDER.value; els.CAL_DUR_LABEL.textContent = `${els.CAL_DUR_SLIDER.value}s`; }
     els.CAL_DUR_SLIDER.addEventListener('input', updateCalDurLabel);
     updateCalDurLabel();
+
+    // NEW: common categories handler (used by both local classify and DC stream)
+    function onCategories(cats, mode) {
+      const HOP_S = Number(els.HOP_S.value)||0.48;
+      if (state.calActive) { updateTopBars(cats); }
+
+      if (LOGS.enable.checked) {
+        const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
+        const items = [...cats].sort((a,b)=>(b.score||0)-(a.score||0)).slice(0, LOGS.all.checked ? cats.length : topN)
+                          .map(c => `${c.categoryName || '(unnamed)'}:${(c.score||0).toFixed(3)}`);
+        const msg  = `Inf#${++state.frameCount} [${mode}] cats=${cats.length}`;
+        log('inf', msg, `<div class="log-code"><strong>Top ${LOGS.all.checked ? cats.length : topN}</strong>:\n${items.join('\n')}</div>`, { mode, frame: state.frameCount, cats });
+      }
+
+      const trainingActive = (mode === 'train' || mode === 'train_file' || mode === 'train_folder') && (state.mode === mode);
+
+      if (trainingActive) {
+        updateTopBars(cats);
+        const model = loadModel();
+        model.halfLifeSec = Number(els.HALF_LIFE_S.value) || 3600;
+        model.kPrior = Number(els.K_PRIOR.value) || 50;
+        model.K = Number(els.TOP_K.value) || 6;
+        updateStats(model, cats, HOP_S);
+        saveModel(model);
+        setWeightsChart(state.barDynW, computeWeightsPreview(model));
+      } else if (mode === 'detect' && state.mode === 'detect') {
+        updateTopBars(cats);
+        const model = loadModel();
+        model.K = Number(els.TOP_K.value) || model.K || 6;
+        const weights = model.weights || {"Baby cry, infant cry":1};
+        const { raw, sm } = fusedScoreFromCategories(cats, weights, HOP_S);
+
+        const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+        if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; }
+        else { state.thrOn = 0.35; state.thrOff = state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1); }
+
+        pushChart(Date.now(), raw, sm);
+
+        if (state.calActive) {
+          state.calVals.push(sm);
+          updateCalLiveThresholds();
+        }
+
+        if (LOGS.enable.checked) {
+          const nowTs = performance.now();
+          if (nowTs - state.scoreLastLogTs >= SCORE_LOG_MS) {
+            const nextOn = (() => {
+              const hold = Number(els.ALERT_HOLD_MS.value) || 0;
+              if (state.alertOn) return (nowTs < state.alertUntil) ? true : (sm >= state.thrOff);
+              return sm >= state.thrOn;
+            })();
+            const tag = state.calActive ? 'cal' : 'run';
+            log('inf', `[${tag}] score raw=${raw.toFixed(3)} sm=${sm.toFixed(3)} | thrOn=${state.thrOn.toFixed(3)} thrOff=${state.thrOff.toFixed(3)} | alert=${nextOn ? 'ON' : 'off'}`);
+            state.scoreLastLogTs = nowTs;
+          }
+        }
+
+        const on = applyHysteresis(sm, performance.now());
+        if (on && !state.alertOn) { log('ok','ALERT ON (cry detected).'); }
+        if (!on && state.alertOn) { log('warn','ALERT OFF.'); }
+        state.alertOn = on;
+      }
+    }
 
     async function quietCalibrate(){
       if (state.calActive) return;
@@ -1079,11 +1099,9 @@
       state.calActive = true;
       state.calVals = [];
       setStatus(`Quiet calibration for ${durSec}s… Please keep things quiet.`);
-
       enableThrSliders(false);
 
-      await startMic('detect');
-      // keep the calibration status visible after mic boot
+      await startInputForMode('detect'); // Mic or Sender
       setStatus(`Quiet calibration for ${durSec}s… Please keep things quiet.`);
       setPill('calibrating', true);
 
@@ -1142,7 +1160,6 @@
       els.btnCal.disabled = false; els.btnCal.textContent = 'Start';
       enableThrSliders(true);
       setPill('idle', false);
-      //setStatus('Calibration stopped.');
       stopAll();
     }
 
@@ -1179,67 +1196,7 @@
         const res = await classifyMP(task, w, SR_TARGET);
         const cats = extractCategories(res);
 
-        if (state.calActive) { updateTopBars(cats); }
-
-        if (LOGS.enable.checked) {
-          const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
-          const items = [...cats].sort((a,b)=>(b.score||0)-(a.score||0)).slice(0, LOGS.all.checked ? cats.length : topN)
-                                .map(c => `${c.categoryName || '(unnamed)'}:${(c.score||0).toFixed(3)}`);
-          const msg  = `Inf#${++state.frameCount} [${mode}] cats=${cats.length}`;
-          log('inf', msg, `<div class="log-code"><strong>Top ${LOGS.all.checked ? cats.length : topN}</strong>:\n${items.join('\n')}</div>`, { mode, frame: state.frameCount, cats });
-          if (!res) log('warn', 'Inference returned null result (classify failed).');
-          else if (!cats.length) log('warn', 'Inference returned 0 categories.');
-        }
-
-        const trainingActive = (mode === 'train' || mode === 'train_file' || mode === 'train_folder') && (state.mode === mode);
-
-        if (trainingActive) {
-          updateTopBars(cats);
-          const model = loadModel();
-          model.halfLifeSec = Number(els.HALF_LIFE_S.value) || 3600;
-          model.kPrior = Number(els.K_PRIOR.value) || 50;
-          model.K = Number(els.TOP_K.value) || 6;
-          updateStats(model, cats, HOP_S);
-          saveModel(model);
-          setWeightsChart(state.barDynW, computeWeightsPreview(model));
-        } else if (mode === 'detect' && state.mode === 'detect') {
-          updateTopBars(cats);
-          const model = loadModel();
-          model.K = Number(els.TOP_K.value) || model.K || 6;
-          const weights = model.weights || {"Baby cry, infant cry":1};
-          const { raw, sm } = fusedScoreFromCategories(cats, weights, HOP_S);
-
-          const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
-          if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; }
-          else { state.thrOn = 0.35; state.thrOff = state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1); }
-
-          pushChart(Date.now(), raw, sm);
-
-          if (state.calActive) {
-            state.calVals.push(sm);
-            updateCalLiveThresholds();
-          }
-
-          if (LOGS.enable.checked) {
-            const nowTs = performance.now();
-            if (nowTs - state.scoreLastLogTs >= SCORE_LOG_MS) {
-              const nextOn = (() => {
-                const hold = Number(els.ALERT_HOLD_MS.value) || 0;
-                if (state.alertOn) return (nowTs < state.alertUntil) ? true : (sm >= state.thrOff);
-                return sm >= state.thrOn;
-              })();
-              const tag = state.calActive ? 'cal' : 'run';
-              log('inf', `[${tag}] score raw=${raw.toFixed(3)} sm=${sm.toFixed(3)} | thrOn=${state.thrOn.toFixed(3)} thrOff=${state.thrOff.toFixed(3)} | alert=${nextOn ? 'ON' : 'off'}`);
-              state.scoreLastLogTs = nowTs;
-            }
-          }
-
-          const on = applyHysteresis(sm, performance.now());
-          if (on && !state.alertOn) { log('ok','ALERT ON (cry detected).'); }
-          if (!on && state.alertOn) { log('warn','ALERT OFF.'); }
-          state.alertOn = on;
-        }
-
+        onCategories(cats, mode);
         state.lastPos += hop;
         if (state.lastPos > fram * 4) {
           const cut = state.lastPos - fram;
@@ -1253,7 +1210,8 @@
     async function startMic(mode) {
       await stopFolderTraining();
       await stopFilePlayback();
-      await stopAll();
+      await stopRemoteAudioTap(); // ensure remote tap is off
+      await stopMicOnly();
       setStatus(mode==='detect' ? 'Starting microphone (detect)…' : 'Starting microphone (train)…');
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
       state.micCtx = ctx;
@@ -1270,17 +1228,16 @@
 
       try {
         const Code =
-          'class Tap extends AudioProcessor {' +
+          'class Tap extends AudioWorkletProcessor {' +
           '  process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }' +
           '}' +
           'registerProcessor("tap", Tap);';
         const url = URL.createObjectURL(new Blob([Code], { type: 'application/javascript; charset=utf-8' }));
-        await ctx.audio.addModule(url); URL.revokeObjectURL(url);
-        const node = new AudioNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
+        await ctx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
+        const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
         node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate, getParams(), mode);
         src.connect(node).connect(sink);
         state.procNode = node;
-        //setStatus('Audio active @ '+ctx.sampleRate+' Hz');
         log('info', 'AudioWorklet active @ '+ctx.sampleRate+' Hz');
       } catch (e) {
         const node = ctx.createScriptProcessor(4096,1,1);
@@ -1293,30 +1250,30 @@
       }
       state.running = true;
       state.mode = mode;
-      // Pill only during training
       setPill(mode==='detect' ? 'idle' : 'training', mode!=='detect');
-      // Reset time-window chart so it starts from the right edge
       setupChart();
       log('ok', `Mic started in ${mode.toUpperCase()} mode.`);
-      // ↓ One final, readable status the user will actually see — but don't
-      //    overwrite calibration's status while it's running.
       if (mode === 'train') setStatus('Training started (mic).');
       else if (mode === 'detect' && !state.calActive) setStatus('Detection started (mic).');
     }
 
-    async function stopAll(){
-      const wasRunning = state.running || state.mode!=='idle';
-      state.running=false; state.mode='idle';
+    async function stopMicOnly(){
       try { state.procNode?.disconnect(); } catch {}
       try { state.srcNode?.disconnect(); } catch {}
       try { state.sinkNode?.disconnect(); } catch {}
       try { state.micCtx && state.micCtx.state!=='closed' && state.micCtx.close(); } catch {}
       state.procNode=null; state.srcNode=null; state.sinkNode=null; state.micCtx=null;
+    }
+
+    async function stopAll(){
+      const wasRunning = state.running || state.mode!=='idle';
+      state.running=false; state.mode='idle';
+      await stopMicOnly();
+      await stopRemoteAudioTap();
       state.ring=new Float32Array(0); state.lastPos=0; state.perClassEma.clear(); state.fusedEma=0; state.frameCount=0;
-      state.asmLastLogTs = 0;
-      state.scoreLastLogTs = 0;
+      state.asmLastLogTs = 0; state.scoreLastLogTs = 0;
       setPill('idle', false); setRMS(0);
-      clearTopBars();
+      clearTopBars(); setupChart();
       if (wasRunning) log('warn','Stopped audio graph.');
     }
 
@@ -1391,14 +1348,18 @@
       try { await els.trainAudio.play(); } catch {}
     }
 
-    async function stopFilePlayback(){
+    async function stopFilePlayback(silent = false){
+      const wasTraining =
+        state.mode === 'train_file' || state.mode === 'train_folder' || !els.trainAudio.paused;
+    
       try { els.trainAudio.pause(); } catch {}
       els.trainAudio.onended = null;
       try { if (trainCtx && trainCtx.state !== 'suspended') await trainCtx.suspend(); } catch {}
       clearTopBars();
       setPill('idle', false);
-      state.mode = 'idle';
-      setStatus('Training stopped.');   
+    
+      if (wasTraining) state.mode = 'idle';
+      if (!silent && wasTraining) setStatus('Training stopped.');
     }
 
     /* ========= Folder training ========= */
@@ -1466,13 +1427,13 @@
     async function stopFolderTraining(silent=false){
       folderActive = false;
       folderIdx = 0;
-      await stopFilePlayback();
+      await stopFilePlayback(true); // <- silent
       setPill('idle', false);
       state.mode = 'idle';
       clearTopBars();
       if (!silent) {
         log('warn','Stopped folder training.');
-        setStatus('Training stopped.'); // ✅
+        setStatus('Training stopped.');
       }
     }
 
@@ -1487,8 +1448,13 @@
     }
 
     // Detect / Calibrate
-    els.btnStartDetect.onclick = () => startMic('detect');
-    els.btnStop.onclick = async () => { await stopFolderTraining(true); await stopFilePlayback(); await stopAll(); };
+    els.btnStartDetect.onclick = () => startDetectBasedOnSource();
+    els.btnStop.onclick = async () => {
+      await stopFolderTraining(true); // silent stop if folder training was active
+      //await stopFilePlayback();
+      await stopAll();
+      setStatus('Detection stopped.');
+    };
     els.btnCal.onclick = () => quietCalibrate();
     els.btnCalStop.onclick = () => stopCalibrationEarly();
 
@@ -1501,12 +1467,20 @@
       els.btnChooseFile.style.display   = showFile ? '' : 'none';
       els.btnChooseFolder.style.display = showFolder ? '' : 'none';
 
-      // Info line
       if (v === 'mic') els.trainInfo.textContent = 'Training from microphone.';
       if (v === 'file') els.trainInfo.textContent = els.fileInp.files?.[0] ? `Selected file: ${els.fileInp.files[0].name}` : 'Choose a file to train.';
       if (v === 'folder') {
         const count = folderFiles.length;
         els.trainInfo.textContent = count ? `${count} audio file(s) selected from “${describeCommonRoot(folderFiles)}”.` : 'Choose a folder with audio files.';
+      }
+      if (v === 'sender') {
+        //els.trainInfo.textContent = `Sender mode. Room “${room}”. Waiting for stream or scores…`;
+        // Read current “where” (sender|receiver); default to sender
+        const where = (localStorage.getItem('cryInferWhere') || 'sender') === 'receiver'
+          ? 'receiver (from streamed audio)'
+          : 'sender (scores via data channel)';
+        els.trainInfo.textContent = `WebRTC source (Sender). Inference @ ${where}. Room “${room}”.`;
+        ensureCoreStarted();
       }
     }
     els.TRAIN_SRC.addEventListener('change', updateTrainingSourceUI);
@@ -1542,6 +1516,15 @@
       } else if (src === 'folder') {
         if (!folderFiles.length) { els.btnChooseFolder.click(); setStatus('Pick a folder first'); return; }
         await startFolderTraining();
+      } else if (src === 'sender') {
+        ensureCoreStarted();
+        state.mode = 'train';
+        setPill('training', true);
+        setStatus('Training started (sender).');
+        // If sender selected "receiver" path, we classify the remote audio here:
+        if (wrtc.where === 'receiver' && wrtc.stream) {
+          await startRemoteAudioTap('train');
+        }
       }
     };
     els.btnTrainStop.onclick = async () => {
@@ -1549,6 +1532,7 @@
       if (src === 'mic') await stopAll();
       else if (src === 'file') await stopFilePlayback();
       else if (src === 'folder') await stopFolderTraining();
+      else if (src === 'sender') { await stopAll(); }
       setStatus('Training stopped');
     };
 
@@ -1588,22 +1572,14 @@
         if (!name) { refreshModelSelect(getModelName()); return; }
         const exists = listModelNames().includes(name);
         setModelName(name);
-        if (!exists) {
-          const m = loadModel();
-          saveModel(m);
-          log('ok', `Created model “${name}”.`);
-        } else {
-          log('info', `Switched to existing model “${name}”.`);
-        }
+        if (!exists) { const m = loadModel(); saveModel(m); log('ok', `Created model “${name}”.`); }
+        else { log('info', `Switched to existing model “${name}”.`); }
         refreshModelSelect(name);
         const m2 = loadModel();
         setWeightsChart(state.barSavedW, m2.weights || {});
         setWeightsChart(state.barDynW, computeWeightsPreview(m2));
         const calib2 = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
-        if (calib2) {
-          state.thrOn = calib2.thr_on; state.thrOff = calib2.thr_off; setThrUI();
-          log('ok', `Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib2,null,2)}</div>`);
-        }
+        if (calib2) { state.thrOn = calib2.thr_on; state.thrOff = calib2.thr_off; setThrUI(); log('ok', `Loaded calibration for “${name}”.`, `<div class="log-code">${JSON.stringify(calib2,null,2)}</div>`); }
         const ignoreSaved = localStorage.getItem(IGNORE_KEY()); if (ignoreSaved) els.IGNORE_CLASSES.value = ignoreSaved;
         const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
         setStatus(`Active model set to “${name}”.`);
@@ -1651,8 +1627,7 @@
 
     // Persist ignore/penalty immediately
     ['IGNORE_CLASSES','PENALTY_MAP'].forEach(id=>{
-      const el = document.getElementById(id);
-      if (!el) return;
+      const el = document.getElementById(id); if (!el) return;
       const save = () => {
         const key = (id==='IGNORE_CLASSES') ? IGNORE_KEY() : PENALTY_KEY();
         localStorage.setItem(key, el.value);
@@ -1669,6 +1644,163 @@
       const m = loadModel();
       setWeightsChart(state.barSavedW, m.weights || {});
       setWeightsChart(state.barDynW, computeWeightsPreview(m));
+    }
+
+    /* ========= NEW: WebRTC integration ========= */
+    function ensureCoreStarted(){
+      if (wrtc.core) return;
+      wrtc.core = new ReceiverCore({
+        wsEndpoint: WS_ENDPOINT,
+        room,
+        onStatus: (msg) => { log('info', `[RTC] ${msg}`); },
+        onStream: (stream) => {
+          if (EL('remote').srcObject !== stream) {
+            EL('remote').srcObject = stream;
+          }
+          wrtc.stream = stream;
+          log('ok', `[RTC] Remote stream: tracks=${stream.getTracks().map(t=>t.kind).join(',')}`);
+          if (state.mode !== 'idle' && wrtc.audioEnabled && wrtc.where === 'receiver') {
+            startRemoteAudioTap(state.mode).catch(()=>{});
+          }
+        },
+        onIceState: (s) => log('info', `[RTC] ICE: ${s}`),
+        onBye: () => log('warn', '[RTC] bye'),
+        onCreatePC: (pc) => {
+          const ch = pc.createDataChannel('pose');
+          ch.onopen  = () => { log('ok','[RTC] DC open'); try { ch.send(JSON.stringify({ type: 'need-modes' })); } catch{} };
+          ch.onclose = () => log('warn','[RTC] DC close');
+          ch.onerror = (e) => log('err', `[RTC] DC error: ${e?.message||e}`);
+
+          ch.onmessage = (ev) => {
+            let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+            if (!msg || !msg.type) return;
+          
+            if (msg.type === 'audio-mode') {
+              // sender tells us whether to stream audio or send scores
+              wrtc.audioEnabled = !!msg.enabled;
+              wrtc.where        = msg.where || 'sender';
+          
+              // NEW: persist & reflect who runs inference //https://chatgpt.com/c/68c0b810-7a90-8325-abde-e96235904c27
+              if (msg.where) setInferWhere(msg.where);              // 'sender' | 'receiver'
+              setStatus('Connected to sender');                     // setStatus appends proper WebRTC suffix
+          
+              log('info', `[RTC] audio-mode: enabled=${wrtc.audioEnabled} where=${wrtc.where}`);
+          
+              if (!wrtc.audioEnabled) {
+                stopRemoteAudioTap();
+              } else if (wrtc.where === 'receiver' && wrtc.stream && state.mode !== 'idle') {
+                startRemoteAudioTap(state.mode);
+              }
+          
+            } else if (msg.type === 'ai-modes' && msg.audio) {
+              // some senders bundle audio settings under ai-modes
+              wrtc.audioEnabled = !!msg.audio.enabled;
+              wrtc.where        = msg.audio.where || 'sender';
+          
+              // NEW: persist & reflect who runs inference
+              if (msg.audio.where) setInferWhere(msg.audio.where);
+              setStatus('Connected to sender');
+          
+              log('info', `[RTC] ai-modes: enabled=${wrtc.audioEnabled} where=${wrtc.where}`);
+          
+              if (!wrtc.audioEnabled) {
+                stopRemoteAudioTap();
+              } else if (wrtc.where === 'receiver' && wrtc.stream && state.mode !== 'idle') {
+                startRemoteAudioTap(state.mode);
+              }
+          
+            } else if (msg.type === 'audio') {
+              // sender is pushing categories (so inference is on the sender)
+              setInferWhere('sender');                               // NEW
+              if (els.TRAIN_SRC.value === 'sender') {
+                const categories = (msg.categories || []).map(c => ({
+                  categoryName: (c.displayName || c.categoryName || '').trim(),
+                  score: c.score || 0
+                }));
+                const mode = state.mode; // 'train' or 'detect'
+                if (mode === 'train' || mode === 'detect') {
+                  setStatus('Connected to sender');                  // NEW (suffix will say “sender scores”)
+                  onCategories(categories, mode);
+                }
+              }
+            }
+          };
+
+          wrtc.dc = ch;
+        },
+        onDataChannel: (e) => log('info', `[RTC] inbound DC: ${e.channel?.label}`)
+      });
+      wrtc.core.start().then(()=>{ wrtc.connected = true; log('ok', `[RTC] Connected to room “${room}”.`); }).catch(e => log('err', `[RTC] start error: ${e?.message||e}`));
+    }
+
+    async function startRemoteAudioTap(mode){
+      if (!wrtc.stream) { log('warn','[RTC] No remote stream yet.'); return; }
+      await stopRemoteAudioTap();
+      const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
+      wrtc.ctx = ctx; await ctx.resume().catch(()=>{});
+      const src = ctx.createMediaStreamSource(wrtc.stream);
+      const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
+      wrtc.src = src; wrtc.sink = sink;
+
+      try {
+        const workletURL = URL.createObjectURL(new Blob([`
+          class Tap extends AudioWorkletProcessor {
+            process(inputs) {
+              const i = inputs[0]; if (i && i[0]) this.port.postMessage(i[0].slice(0)); return true;
+            }
+          }
+          registerProcessor('tap', Tap);
+        `], { type: 'application/javascript' }));
+        await ctx.audioWorklet.addModule(workletURL); URL.revokeObjectURL(workletURL);
+        const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
+        node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate, getParams(), mode);
+        src.connect(node).connect(sink);
+        wrtc.node = node;
+        log('info','[RTC] Remote tap (worklet) active.');
+      } catch (e) {
+        const node = ctx.createScriptProcessor(4096,1,1);
+        node.onaudioprocess = (ev)=> classifyChunk(new Float32Array(ev.inputBuffer.getChannelData(0)), ctx.sampleRate, getParams(), mode);
+        src.connect(node).connect(sink);
+        wrtc.node = node;
+        log('warn','[RTC] Worklet failed; using ScriptProcessor.');
+      }
+      state.running = true;
+      state.mode = mode;
+      setupChart();
+      if (mode === 'train') setStatus('Training started (sender audio → local inference).');
+      if (mode === 'detect' && !state.calActive) setStatus('Detection started (sender audio → local inference).');
+    }
+
+    async function stopRemoteAudioTap(){
+      try { wrtc.node?.disconnect?.(); } catch {}
+      try { wrtc.src?.disconnect?.(); } catch {}
+      try { wrtc.sink?.disconnect?.(); } catch {}
+      try { wrtc.ctx && wrtc.ctx.state!=='closed' && wrtc.ctx.close(); } catch {}
+      wrtc.node = null; wrtc.src = null; wrtc.sink = null; wrtc.ctx = null;
+    }
+
+    /* ========= Mode selection helpers ========= */
+    async function startInputForMode(mode){
+      const src = els.TRAIN_SRC.value;
+      if (src === 'mic') return startMic(mode);
+      if (src === 'sender') {
+        ensureCoreStarted();
+        // If sender wants receiver to classify, start tap:
+        if (wrtc.where === 'receiver') await startRemoteAudioTap(mode);
+        state.mode = mode;
+        if (mode === 'detect' && !state.calActive) setStatus('Detection started (sender).');
+        if (mode === 'train') setStatus('Training started (sender).');
+        return;
+      }
+      // file/folder not applicable here
+      setStatus('Select Mic or Sender for this action.');
+    }
+
+    async function startDetectBasedOnSource(){
+      await stopFolderTraining(true);
+      await stopFilePlayback();
+      await startInputForMode('detect');
+      setPill('idle', false);
     }
 
     /* ========= Boot ========= */
@@ -1695,8 +1827,7 @@
       const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
 
       hideLiveBars();
-
-      setStatus('Ready. Train (mic/file/folder) → Recompute Weights → Quiet Calibrate → Start detection.');
+      setStatus('Ready. Train (mic/file/folder/sender) → Recompute Weights → Quiet Calibrate → Start detection.');
     })();
   </script>
 </body>
