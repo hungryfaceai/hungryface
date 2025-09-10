@@ -425,6 +425,8 @@
 
     let previewTimer = null, previewTicker = null, previewEnd = 0;
     const poseDCs = new Set();
+    // Cache the most recent audio score payload so late-joining receivers get one instantly. //https://chatgpt.com/c/68c1d349-17d8-832f-9534-fcb6826946a4
+    let lastAudioPayload = null;
 
     let PoseLandmarker, FilesetResolver, DrawingUtils;
     let poseTask = null, poseLoopRunning = false;
@@ -691,7 +693,7 @@
         });
       }
 
-      pc.ondatachannel = (ev) => {
+      /*pc.ondatachannel = (ev) => {
         if (ev.channel?.label === 'pose') {
           const ch = ev.channel;
           if (LOG.dc) console.log('[DC][sender] ondatachannel: pose from', peerId);
@@ -699,6 +701,54 @@
           ch.onclose = () => { if (LOG.dc) console.log('[POSE][sender] DC close', peerId); poseDCs.delete(ch); };
           ch.onerror = (e) => { if (LOG.dc) console.log('[POSE][sender] DC error', peerId, e); };
           ch.onmessage = onPoseMessageFromReceiver;
+        }
+      };*/ //https://chatgpt.com/c/68c1d349-17d8-832f-9534-fcb6826946a4
+      pc.ondatachannel = (ev) => {
+        if (ev.channel?.label === 'pose') {
+          const ch = ev.channel;
+          if (LOG.dc) console.log('[DC][sender] ondatachannel: pose from', peerId);
+      
+          ch.onopen  = () => {
+            if (LOG.dc) console.log('[POSE][sender] DC open', peerId);
+            poseDCs.add(ch);
+            // Tell late joiners what modes are active
+            announceAIModes();
+            // Immediately replay the latest score so the receiver doesn't wait a whole window
+            if (lastAudioPayload) {
+              try { ch.send(lastAudioPayload); } catch {}
+            }
+          };
+      
+          ch.onclose = () => {
+            if (LOG.dc) console.log('[POSE][sender] DC close', peerId);
+            poseDCs.delete(ch);
+          };
+      
+          ch.onerror = (e) => {
+            if (LOG.dc) console.log('[POSE][sender] DC error', peerId, e);
+          };
+      
+          ch.onmessage = (ev2) => {
+            let msg;
+            try { msg = JSON.parse(ev2.data); } catch { return; }
+            if (!msg || !msg.type) return;
+      
+            if (msg.type === 'need-modes') {
+              // Receiver is asking for the current AI modes after it opens
+              announceAIModes();
+              // Also push a fresh score if we have one and audio is running on the sender
+              if (lastAudioPayload && audioAiOn?.checked && audioAiWhere?.value === 'sender') {
+                try { ch.send(lastAudioPayload); } catch {}
+              }
+              return;
+            }
+      
+            if (msg.type === 'pose') {
+              // Existing echo path used for overlay/debug
+              onPoseMessageFromReceiver(ev2);
+              return;
+            }
+          };
         }
       };
 
@@ -1455,6 +1505,8 @@
             }
 
             const payload = JSON.stringify({ type:'audio', categories: classifications, ts: performance.now() });
+            // Remember the last payload so new data channels get an immediate score //https://chatgpt.com/c/68c1d349-17d8-832f-9534-fcb6826946a4
+            lastAudioPayload = payload;
             let sent = 0;
             for (const ch of poseDCs) if (ch.readyState === 'open') { ch.send(payload); sent++; }
             if (sent === 0 && LOG.dc) console.log('[AUDIO][sender] no open DCs to send scores');
