@@ -155,10 +155,10 @@
         <div class="subgroup">
           <strong>Source</strong>
           <select id="TRAIN_SRC" style="min-width:220px;">
-            <option value="mic" selected>Microphone (Receiver)</option>
+            <option value="sender" selected>Sender (WebRTC)</option>
+            <option value="mic">Microphone (Receiver)</option>
             <option value="file">File</option>
             <option value="folder">Folder</option>
-            <option value="sender">Sender (WebRTC)</option>
           </select>
 
           <div id="trainChooseWrap" class="row" style="margin-left:auto; gap:10px;">
@@ -482,7 +482,30 @@
       'TRAIN_SRC','btnTrainStart','btnTrainStop','trainInfo'
     ].map(x => [x, document.getElementById(x)])) )();
 
-    function setStatus(s){ els.status.textContent = s; log('info', s); }
+    // Persist/consult who is doing inference when using Sender (WebRTC). //https://chatgpt.com/c/68c0b810-7a90-8325-abde-e96235904c27
+    // WebRTC glue code can call setInferWhere('sender'|'receiver') whenever the mode changes.
+    function setInferWhere(where){
+      localStorage.setItem('cryInferWhere', (where === 'receiver') ? 'receiver' : 'sender');
+    }
+    function getInferWhere(){
+      return localStorage.getItem('cryInferWhere') || 'sender'; // default: sender-side scores
+    }
+    
+    function setStatus(s){
+      let msg = s;
+    
+      // Only annotate when training source is "Sender (WebRTC)"
+      if (els.TRAIN_SRC?.value === 'sender') {
+        const where = getInferWhere();
+        const tag = (where === 'receiver')
+          ? 'WebRTC: streamed audio → inference @ receiver'
+          : 'WebRTC: sender scores → inference @ sender';
+        msg = `${s}  •  ${tag}`;
+      }
+    
+      els.status.textContent = msg;
+      log('info', msg);
+    }
 
     // Pill: only show during training or calibration
     function setPill(s, on=false){
@@ -1442,7 +1465,12 @@
         els.trainInfo.textContent = count ? `${count} audio file(s) selected from “${describeCommonRoot(folderFiles)}”.` : 'Choose a folder with audio files.';
       }
       if (v === 'sender') {
-        els.trainInfo.textContent = `Sender mode. Room “${room}”. Waiting for stream or scores…`;
+        //els.trainInfo.textContent = `Sender mode. Room “${room}”. Waiting for stream or scores…`;
+        // Read current “where” (sender|receiver); default to sender
+        const where = (localStorage.getItem('cryInferWhere') || 'sender') === 'receiver'
+          ? 'receiver (from streamed audio)'
+          : 'sender (scores via data channel)';
+        els.trainInfo.textContent = `WebRTC source (Sender). Inference @ ${where}. Room “${room}”.`;
         ensureCoreStarted();
       }
     }
@@ -1633,34 +1661,62 @@
           ch.onopen  = () => { log('ok','[RTC] DC open'); try { ch.send(JSON.stringify({ type: 'need-modes' })); } catch{} };
           ch.onclose = () => log('warn','[RTC] DC close');
           ch.onerror = (e) => log('err', `[RTC] DC error: ${e?.message||e}`);
+
           ch.onmessage = (ev) => {
             let msg; try { msg = JSON.parse(ev.data); } catch { return; }
             if (!msg || !msg.type) return;
-
+          
             if (msg.type === 'audio-mode') {
+              // sender tells us whether to stream audio or send scores
               wrtc.audioEnabled = !!msg.enabled;
-              wrtc.where       = msg.where || 'sender';
+              wrtc.where        = msg.where || 'sender';
+          
+              // NEW: persist & reflect who runs inference //https://chatgpt.com/c/68c0b810-7a90-8325-abde-e96235904c27
+              if (msg.where) setInferWhere(msg.where);              // 'sender' | 'receiver'
+              setStatus('Connected to sender');                     // setStatus appends proper WebRTC suffix
+          
               log('info', `[RTC] audio-mode: enabled=${wrtc.audioEnabled} where=${wrtc.where}`);
-              if (!wrtc.audioEnabled) { stopRemoteAudioTap(); }
-              else if (wrtc.where === 'receiver' && wrtc.stream && state.mode !== 'idle') startRemoteAudioTap(state.mode);
+          
+              if (!wrtc.audioEnabled) {
+                stopRemoteAudioTap();
+              } else if (wrtc.where === 'receiver' && wrtc.stream && state.mode !== 'idle') {
+                startRemoteAudioTap(state.mode);
+              }
+          
             } else if (msg.type === 'ai-modes' && msg.audio) {
+              // some senders bundle audio settings under ai-modes
               wrtc.audioEnabled = !!msg.audio.enabled;
-              wrtc.where       = msg.audio.where || 'sender';
+              wrtc.where        = msg.audio.where || 'sender';
+          
+              // NEW: persist & reflect who runs inference
+              if (msg.audio.where) setInferWhere(msg.audio.where);
+              setStatus('Connected to sender');
+          
               log('info', `[RTC] ai-modes: enabled=${wrtc.audioEnabled} where=${wrtc.where}`);
-              if (!wrtc.audioEnabled) { stopRemoteAudioTap(); }
-              else if (wrtc.where === 'receiver' && wrtc.stream && state.mode !== 'idle') startRemoteAudioTap(state.mode);
+          
+              if (!wrtc.audioEnabled) {
+                stopRemoteAudioTap();
+              } else if (wrtc.where === 'receiver' && wrtc.stream && state.mode !== 'idle') {
+                startRemoteAudioTap(state.mode);
+              }
+          
             } else if (msg.type === 'audio') {
-              // Categories directly from sender
-              const categories = (msg.categories || []).map(c => ({
-                categoryName: (c.displayName || c.categoryName || '').trim(),
-                score: c.score || 0
-              }));
+              // sender is pushing categories (so inference is on the sender)
+              setInferWhere('sender');                               // NEW
               if (els.TRAIN_SRC.value === 'sender') {
+                const categories = (msg.categories || []).map(c => ({
+                  categoryName: (c.displayName || c.categoryName || '').trim(),
+                  score: c.score || 0
+                }));
                 const mode = state.mode; // 'train' or 'detect'
-                if (mode === 'train' || mode === 'detect') onCategories(categories, mode);
+                if (mode === 'train' || mode === 'detect') {
+                  setStatus('Connected to sender');                  // NEW (suffix will say “sender scores”)
+                  onCategories(categories, mode);
+                }
               }
             }
           };
+
           wrtc.dc = ch;
         },
         onDataChannel: (e) => log('info', `[RTC] inbound DC: ${e.channel?.label}`)
