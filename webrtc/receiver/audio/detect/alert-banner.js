@@ -1,7 +1,7 @@
 // alert-banner.js
 // Renders/dismisses the Cry Alert banner and provides IndexedDB helpers.
 
-const AUDIO_DISMISS_SUPPRESS_MS = 10 * 60 * 1000; // 10 minutes
+const AUDIO_DISMISS_SUPPRESS_MS = 1 * 60 * 1000; // 1 minute
 
 let audioBanner = null;
 let audioBannerTime = null;
