@@ -51,6 +51,22 @@
     /* Hidden remote video host (for audio track) */
     #remote { position:absolute; width:1px; height:1px; left:-99999px; top:-99999px; }
 
+    /* Top bar (align Settings to the right like the example) */
+    .topbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+
+    /* Logs (copied to match the training page) */
+    .log-panel { margin-top:12px; background:#0a0a0a; border:1px solid #222; border-radius:12px; }
+    .log-toolbar { display:flex; gap:10px; align-items:center; padding:8px 10px; border-bottom:1px solid #1a1a1a; font-size:12px; color:#ddd; flex-wrap:wrap; }
+    .log-body { max-height:300px; overflow:auto; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; line-height:1.4; padding:10px; }
+    .log-line { white-space:pre-wrap; margin:0; padding:2px 0; border-bottom:1px dotted #111; }
+    .log-time { color:#9ca3af; }
+    .log-kind-info { color:#e5e7eb; }
+    .log-kind-ok   { color:#86efac; }
+    .log-kind-warn { color:#fbbf24; }
+    .log-kind-err  { color:#fca5a5; }
+    .log-kind-inf  { color:#93c5fd; }
+    .log-code { display:block; background:#0b0b0b; border:1px solid #1f2937; border-radius:8px; padding:6px; margin-top:4px; overflow:auto; }
+
     /* Help + modal (unchanged skeleton) */
     .help-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:110;opacity:0;pointer-events:none;transition:opacity .2s ease;}
     .help-backdrop.show{opacity:1;pointer-events:auto;}
@@ -68,6 +84,9 @@
     .modal-actions{display:flex;gap:8px;align-items:center;}
     .modal-body{padding:12px;}
     .modal-head .close{appearance:none;border:none;background:transparent;color:#aaa;font-size:22px;cursor:pointer;padding:2px 6px;}
+
+    /* Ensure Help sits on top of Settings (like the example) */
+    .modal{z-index:140;} .help-backdrop{z-index:180;} .help-sheet{z-index:190;}
   </style>
 </head>
 <body>
@@ -76,8 +95,6 @@
       <header class="topbar">
         <h1>Weighted Top-K Audio – Live Detection</h1>
         <div class="row">
-          <!-- NEW: Alerts button with badge -->
-          <button id="btnOpenAlerts" class="btn">Alerts <span id="alertsBadge" class="">0</span></button>
           <button id="btnOpenSettings" class="btn">Settings</button>
         </div>
       </header>
@@ -206,10 +223,6 @@
     </div>
   </div>
 
-  <!-- Hosts for injected UI -->
-  <div id="audioBannerHost"></div>
-  <div id="alertsModalHost"></div>
-
   <!-- Hidden host for remote audio track -->
   <video id="remote" autoplay playsinline muted></video>
 
@@ -249,10 +262,6 @@
   <script type="module" src="./help-sheet.js"></script>
 
   <script type="module">
-    /* ========= Imports for banner + drawer ========= */
-    import { setupAudioBanner, showAudioBanner, hideAudioBanner, saveAlertRecord } from './alert-banner.js';
-    import { setupAlertsDrawer, refreshAlertsBadge } from './alerts-drawer.js';
-
     /* ========= WebRTC (ReceiverCore) ========= */
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
@@ -266,7 +275,7 @@
     const ASM_LOG_MS = 2000, SCORE_LOG_MS = 800;
 
     const _modal = EL('settingsModal');
-    EL('btnOpenSettings').onclick = () => { _modal.classList.add('show'); _modal.setAttribute('aria-hidden','false'); };
+    EL('btnOpenSettings').onclick = () => { _modal.classList.add('show'); _modal.setAttribute('aria-hidden','false'); _modal.querySelector('.modal-card')?.focus?.(); };
     EL('btnSettingsClose').onclick = () => { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); };
     _modal.addEventListener('click', (e) => { if (e.target === _modal) { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); }});
 
@@ -536,8 +545,6 @@
       ring: new Float32Array(0), lastPos: 0,
       perClassEma: new Map(), fusedEma: 0,
       alertOn: false, alertUntil: 0,
-      // NEW: alert episode accumulation
-      alertStartMs: 0, alertSum: 0, alertCount: 0,
       chart: null, barChart: null, barSavedW: null,
       labels: [], fusedRaw: [], fusedSm: [],
       thrOn: 0.35, thrOff: 0.25,
@@ -753,45 +760,9 @@
         }
       }
 
-      // === NEW: banner + persistence transitions ===
       const on = applyHysteresis(sm, performance.now());
-
-      // OFF -> ON
-      if (on && !state.alertOn) {
-        state.alertStartMs = Date.now();   // wall clock for persistence/UI
-        state.alertSum = 0;
-        state.alertCount = 0;
-        showAudioBanner(state.alertStartMs);
-        log('ok','ALERT ON (cry detected).');
-      }
-
-      // Accumulate while ON
-      if (on) {
-        state.alertSum += sm;
-        state.alertCount++;
-      }
-
-      // ON -> OFF
-      if (!on && state.alertOn) {
-        const startAt = state.alertStartMs || Date.now();
-        const endAt   = Date.now();
-        const avg     = state.alertCount > 0 ? (state.alertSum / state.alertCount) : sm;
-        hideAudioBanner();
-
-        const record = {
-          type: 'audio detection',
-          startAt: new Date(startAt).toISOString(),
-          endAt:   new Date(endAt).toISOString(),
-          avgScore: Number(avg.toFixed(4))
-        };
-        saveAlertRecord(record);
-        log('warn','ALERT OFF.', `<div class="log-code">${JSON.stringify(record, null, 2)}</div>`);
-
-        state.alertStartMs = 0;
-        state.alertSum = 0;
-        state.alertCount = 0;
-      }
-
+      if (on && !state.alertOn) { log('ok','ALERT ON (cry detected).'); }
+      if (!on && state.alertOn) { log('warn','ALERT OFF.'); }
       state.alertOn = on;
     }
 
@@ -892,25 +863,6 @@
     }
 
     async function stopAll(){
-      // NEW: finalize open alert if any
-      if (state.alertOn && state.alertStartMs) {
-        const endAt = Date.now();
-        const avg   = state.alertCount > 0 ? (state.alertSum / state.alertCount) : 0;
-        const record = {
-          type: 'audio detection',
-          startAt: new Date(state.alertStartMs).toISOString(),
-          endAt:   new Date(endAt).toISOString(),
-          avgScore: Number(avg.toFixed(4))
-        };
-        try { await saveAlertRecord(record); } catch {}
-        hideAudioBanner();
-        log('warn', 'ALERT OFF (stop).', `<div class="log-code">${JSON.stringify(record, null, 2)}</div>`);
-        state.alertOn = false;
-        state.alertStartMs = 0;
-        state.alertSum = 0;
-        state.alertCount = 0;
-      }
-
       const wasRunning = state.running || state.mode!=='idle';
       state.running=false; state.mode='idle';
       await stopMicOnly();
@@ -1125,10 +1077,6 @@
 
     /* ========= Boot ========= */
     (function boot(){
-      // Inject external UI & styles
-      setupAudioBanner();
-      setupAlertsDrawer();
-
       const active = localStorage.getItem('cryActiveModelName') || 'default';
       refreshModelSelect(active);
       setModelName(active);
@@ -1154,9 +1102,6 @@
       // Seed weights chart
       setWeightsChart(loadModel().weights || {});
       setStatus('Ready. Pick source → Start detection.');
-
-      // Badge
-      refreshAlertsBadge();
     })();
   </script>
 </body>
