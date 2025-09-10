@@ -615,7 +615,7 @@
         options: {
           responsive: true, maintainAspectRatio: false, animation:false, plugins:{ legend:{ display:false } },
           scales:{ x:{ title:{display:true, text:'time (local)'}, ticks:{ maxRotation:0, autoSkip:true } },
-                  y:{ title:{display:true, text:'score'}, min:0, max:1.2, grid:{ color:'rgba(255,255,255,0.08)' } } }
+                  y:{ title:{display:true, text:'score'}, min:0, grid:{ color:'rgba(255,255,255,0.08)' } } }
         }
       });
     }
@@ -634,9 +634,22 @@
       state.chart.data.labels = state.labels.slice();
       state.chart.data.datasets[0].data = state.fusedRaw.slice();
       state.chart.data.datasets[1].data = state.fusedSm.slice();
-      const nums = [...state.fusedRaw, ...state.fusedSm].filter(v => typeof v === 'number' && isFinite(v));
+      
+      /*const nums = [...state.fusedRaw, ...state.fusedSm].filter(v => typeof v === 'number' && isFinite(v));
       const ymax = nums.length ? Math.max(...nums, state.thrOn, state.thrOff) + 0.05 : 1.0;
-      state.chart.options.scales.y.max = Math.max(0.6, Math.min(1.5, ymax));
+      state.chart.options.scales.y.max = Math.max(0.6, Math.min(1.5, ymax));*/ //https://chatgpt.com/c/68c1d208-4b84-832c-a6dc-a9652ef0fba8
+      function niceCeil(x, step=0.02){ return Math.ceil(x/step)*step; }
+      const nums = [...state.fusedRaw, ...state.fusedSm].filter(v => Number.isFinite(v));
+      let ymax = nums.length ? Math.max(...nums, state.thrOn, state.thrOff) : 1.0;
+      
+      // Add a little headroom so the line doesn’t kiss the top
+      const pad = Math.max(0.02, ymax * 0.08);   // 8% or at least 0.02
+      ymax = niceCeil(Math.min(1.5, ymax + pad), 0.02);
+      
+      state.chart.options.scales.y.min = 0;
+      state.chart.options.scales.y.max = ymax;
+
+      
       state.chart.update();
     }
 
