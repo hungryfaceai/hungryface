@@ -1,5 +1,5 @@
 // alert-banner.js
-// Renders/dismisses the Cry Alert banner and provides IndexedDB helpers.
+// Renders/dismisses the Alert banner and provides IndexedDB helpers.
 
 const AUDIO_DISMISS_SUPPRESS_MS = 1 * 60 * 1000; // 1 minute
 
@@ -52,7 +52,7 @@ export function setupAudioBanner() {
   wrap.innerHTML = `
     <div id="audioBanner" class="alert-banner hidden" role="alert" aria-live="assertive">
       <div class="alert-banner__text">
-        Cry alert — Audio detection triggered at
+        Alert — Audio detection triggered at
         <span id="audioBannerTime">--:--</span>.
       </div>
       <div class="alert-banner__actions">
