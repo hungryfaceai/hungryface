@@ -679,7 +679,7 @@
         };
         sock.onmessage = onSignal;
         sock.onerror = (e) => { console.warn('[WS error]', e); scheduleWSReconnect();};
-        sock.onclose = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); stopWSHeartbeat(); scheduleWSReconnect();};
+        sock.onclose = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); stopWSHeartbeat(); ws = null; scheduleWSReconnect();};
       });
     }
 
@@ -690,9 +690,10 @@
     function stopWSHeartbeat() {
       if (wsHeartbeat) { clearInterval(wsHeartbeat); wsHeartbeat = null; }
     }
-    function scheduleWSReconnect() {
+    function scheduleWSReconnect(reason = 'retry') {
       if (!started) return;                 // only while streaming
       if (wsReconnectTimer) return;         // already queued
+      console.log('[WS] scheduling reconnect:', reason);
       wsReconnectTimer = setTimeout(async () => {
         wsReconnectTimer = null;
         try {
