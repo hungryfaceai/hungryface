@@ -980,6 +980,24 @@
     }
 
     /* ========= WebRTC integration ========= */
+    // Kick detection on first incoming sender score if auto-start raced.
+    function kickDetectIfIdle() {
+      if (els.TRAIN_SRC.value !== 'sender') return;      // only when using Sender as source
+    
+      if (state.mode !== 'detect') {
+        log('info', '[RUN] First score arrived; starting detection (sender).');
+        try { startDetectBasedOnSource(); } catch {}
+        if (els.btnStartDetect) els.btnStartDetect.disabled = true; // keep Start greyed out while running
+        return;
+      }
+    
+      // If we're supposed to infer at receiver and the audio tap isn't running yet, start it.
+      if (wrtc.where === 'receiver' && wrtc.stream && !wrtc.ctx) {
+        log('info', '[RUN] Starting remote audio tap (receiver infer).');
+        try { startRemoteAudioTap(); } catch {}
+      }
+    }
+
     function ensureCoreStarted(){
       if (wrtc.core) return;
     
@@ -1026,7 +1044,7 @@
             }
     
           } else if (msg.type === 'audio') {
-            setInferWhere('sender');
+            /*setInferWhere('sender');
             if (els.TRAIN_SRC.value === 'sender' && state.mode === 'detect') {
               setStatus('Connected to sender');
               const categories = (msg.categories || []).map(c => ({
@@ -1034,7 +1052,19 @@
                 score: c.score || 0
               }));
               onCategories(categories);
-            }
+              }*/
+              // Force sender mode on first score and make sure detection is actually running.
+              setInferWhere('sender');
+              if (els.TRAIN_SRC.value !== 'sender') return;
+            
+              kickDetectIfIdle(); // <- ensures state.mode === 'detect' (and tap running if needed)
+            
+              setStatus('Connected to sender');
+              const categories = (msg.categories || []).map(c => ({
+                categoryName: (c.displayName || c.categoryName || '').trim(),
+                score: c.score || 0
+              }));
+              onCategories(categories);            
           }
         };
       }
