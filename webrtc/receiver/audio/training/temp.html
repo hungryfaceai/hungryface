@@ -1348,14 +1348,18 @@
       try { await els.trainAudio.play(); } catch {}
     }
 
-    async function stopFilePlayback(){
+    async function stopFilePlayback(silent = false){
+      const wasTraining =
+        state.mode === 'train_file' || state.mode === 'train_folder' || !els.trainAudio.paused;
+    
       try { els.trainAudio.pause(); } catch {}
       els.trainAudio.onended = null;
       try { if (trainCtx && trainCtx.state !== 'suspended') await trainCtx.suspend(); } catch {}
       clearTopBars();
       setPill('idle', false);
-      state.mode = 'idle';
-      setStatus('Training stopped.');
+    
+      if (wasTraining) state.mode = 'idle';
+      if (!silent && wasTraining) setStatus('Training stopped.');
     }
 
     /* ========= Folder training ========= */
@@ -1423,7 +1427,7 @@
     async function stopFolderTraining(silent=false){
       folderActive = false;
       folderIdx = 0;
-      await stopFilePlayback();
+      await stopFilePlayback(true); // <- silent
       setPill('idle', false);
       state.mode = 'idle';
       clearTopBars();
@@ -1445,7 +1449,12 @@
 
     // Detect / Calibrate
     els.btnStartDetect.onclick = () => startDetectBasedOnSource();
-    els.btnStop.onclick = async () => { await stopFolderTraining(true); await stopFilePlayback(); await stopAll(); };
+    els.btnStop.onclick = async () => {
+      await stopFolderTraining(true); // silent stop if folder training was active
+      //await stopFilePlayback();
+      await stopAll();
+      setStatus('Detection stopped.');
+    };
     els.btnCal.onclick = () => quietCalibrate();
     els.btnCalStop.onclick = () => stopCalibrationEarly();
 
