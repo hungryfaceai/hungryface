@@ -13,6 +13,7 @@
     h1 { margin:.2rem 0 .1rem; font-size:22px; }
     .muted { color:#aaa; font-size:12px; }
     .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .topbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
     .btn { padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.4); background:transparent; color:#fff; font-weight:600; cursor:pointer; }
     .btn:active { transform:scale(.98); }
     .btn[disabled] { opacity:.6; cursor:default; }
@@ -51,10 +52,10 @@
     /* Hidden remote video host (for audio track) */
     #remote { position:absolute; width:1px; height:1px; left:-99999px; top:-99999px; }
 
-    /* Help + modal (unchanged skeleton) */
-    .help-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:110;opacity:0;pointer-events:none;transition:opacity .2s ease;}
+    /* Help + modal (keep help above settings) */
+    .help-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:180;opacity:0;pointer-events:none;transition:opacity .2s ease;}
     .help-backdrop.show{opacity:1;pointer-events:auto;}
-    .help-sheet{position:fixed;right:0;top:0;height:100svh;width:min(92vw,420px);background:#121212;color:#f3f3f3;border-left:1px solid rgba(255,255,255,0.12);box-shadow:-12px 0 32px rgba(0,0,0,0.6);z-index:120;transform:translateX(100%);transition:transform .24s cubic-bezier(.2,.8,.2,1);display:flex;flex-direction:column;}
+    .help-sheet{position:fixed;right:0;top:0;height:100svh;width:min(92vw,420px);background:#121212;color:#f3f3f3;border-left:1px solid rgba(255,255,255,0.12);box-shadow:-12px 0 32px rgba(0,0,0,0.6);z-index:190;transform:translateX(100%);transition:transform .24s cubic-bezier(.2,.8,.2,1);display:flex;flex-direction:column;}
     .help-sheet.show{transform:translateX(0);}
     .help-header{position:sticky;top:0;z-index:1;background:rgba(18,18,18,0.96);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid rgba(255,255,255,0.08);}
     .help-header h3{margin:0;font-size:16px;font-weight:700;color:#fff;}
@@ -68,6 +69,19 @@
     .modal-actions{display:flex;gap:8px;align-items:center;}
     .modal-body{padding:12px;}
     .modal-head .close{appearance:none;border:none;background:transparent;color:#aaa;font-size:22px;cursor:pointer;padding:2px 6px;}
+
+    /* Logs (mimic training page) */
+    .log-panel { margin-top:12px; background:#0a0a0a; border:1px solid #222; border-radius:12px; }
+    .log-toolbar { display:flex; gap:10px; align-items:center; padding:8px 10px; border-bottom:1px solid #1a1a1a; font-size:12px; color:#ddd; flex-wrap:wrap; }
+    .log-body { max-height:300px; overflow:auto; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; line-height:1.4; padding:10px; }
+    .log-line { white-space:pre-wrap; margin:0; padding:2px 0; border-bottom:1px dotted #111; }
+    .log-time { color:#9ca3af; }
+    .log-kind-info { color:#e5e7eb; }
+    .log-kind-ok   { color:#86efac; }
+    .log-kind-warn { color:#fbbf24; }
+    .log-kind-err  { color:#fca5a5; }
+    .log-kind-inf  { color:#93c5fd; }
+    .log-code { display:block; background:#0b0b0b; border:1px solid #1f2937; border-radius:8px; padding:6px; margin-top:4px; overflow:auto; }
   </style>
 </head>
 <body>
@@ -76,8 +90,6 @@
       <header class="topbar">
         <h1>Weighted Top-K Audio – Live Detection</h1>
         <div class="row">
-          <!-- NEW: Alerts button with badge -->
-          <button id="btnOpenAlerts" class="btn">Alerts <span id="alertsBadge" class="">0</span></button>
           <button id="btnOpenSettings" class="btn">Settings</button>
         </div>
       </header>
@@ -90,82 +102,9 @@
         <div id="rmsFill" class="fill"></div>
       </div>
 
-      <!-- Source (Mic / Sender) -->
-      <div class="card">
-        <h2>Source</h2>
-        <div class="subgroup">
-          <strong>Audio input</strong>
-          <select id="TRAIN_SRC" style="min-width:220px;">
-            <option value="sender" selected>Sender (WebRTC)</option>
-            <option value="mic">Microphone (Receiver)</option>
-          </select>
-          <span id="trainInfo" class="muted" style="margin-left:auto;"></span>
-        </div>
-      </div>
+      <!-- ===== Reordered panels ===== -->
 
-      <!-- Model (picker only, read-only) -->
-      <div class="card" id="cardModel">
-        <h2>Model</h2>
-        <div class="row" style="gap:8px 10px;">
-          <label style="display:flex;align-items:center;gap:8px;">
-            <span>Active model</span>
-            <select id="MODEL_SELECT" style="width:220px;"></select>
-          </label>
-        </div>
-        <div class="muted" style="margin-top:6px;">Select a previously trained model. Detection uses its saved <b>Top-K</b> and normalized weights.</div>
-      </div>
-
-      <!-- Thresholds (manual; persisted per model) -->
-      <div class="card" id="cardThr">
-        <h2>Thresholds</h2>
-        <div class="subgroup">
-          <strong>Hysteresis</strong>
-          <div class="slider-wrap">
-            <span class="muted" style="min-width:28px;">OFF</span>
-            <input id="THR_OFF_SLIDER" type="range" min="0" max="1" step="0.01" />
-            <span id="THR_OFF_LABEL">0.25</span>
-          </div>
-          <div class="slider-wrap">
-            <span class="muted" style="min-width:28px;">ON</span>
-            <input id="THR_ON_SLIDER" type="range" min="0" max="1" step="0.01" />
-            <span id="THR_ON_LABEL">0.35</span>
-          </div>
-          <span class="muted">Adjust if needed; values are saved with the active model.</span>
-        </div>
-      </div>
-
-      <!-- Live detection controls -->
-      <div class="card" id="cardDetect">
-        <h2>Live audio detection</h2>
-        <div class="subgroup">
-          <strong>Detection</strong>
-          <div class="row" style="gap:10px;">
-            <button id="btnStartDetect" class="btn">Start</button>
-            <button id="btnStop" class="btn">Stop</button>
-          </div>
-          <span class="muted">Uses the active model’s weights & thresholds and the selected source.</span>
-        </div>
-      </div>
-
-      <!-- Live top classes -->
-      <div class="card" id="cardLiveBars" style="display:none">
-        <h2>Live top classes</h2>
-        <div class="chart-wrap h160">
-          <canvas id="bars"></canvas>
-        </div>
-        <div class="muted" style="margin-top:6px;">Displays the model’s Top-K (non-excluded) classes. Scores are raw (not percentages).</div>
-      </div>
-
-      <!-- Active model weights -->
-      <div class="card">
-        <h2>Active model weights</h2>
-        <div class="chart-wrap h170">
-          <canvas id="barsSavedW"></canvas>
-        </div>
-        <span class="muted">Normalized Top-K weights used by detection.</span>
-      </div>
-
-      <!-- Fused score chart -->
+      <!-- 1) Fused score chart (TOP) -->
       <div class="card">
         <h2>Fused score over time</h2>
         <div class="subgroup" style="justify-content:flex-end">
@@ -185,7 +124,88 @@
         </div>
       </div>
 
-      <!-- Logs -->
+      <!-- 2) Start / Stop (below chart) -->
+      <div class="card" id="cardDetect">
+        <h2>Live audio detection</h2>
+        <div class="subgroup">
+          <strong>Detection</strong>
+          <div class="row" style="gap:10px;">
+            <button id="btnStartDetect" class="btn">Start</button>
+            <button id="btnStop" class="btn">Stop</button>
+          </div>
+          <span class="muted">Uses the active model’s weights & thresholds and the selected source.</span>
+        </div>
+      </div>
+
+      <!-- 3) Thresholds -->
+      <div class="card" id="cardThr">
+        <h2>Thresholds</h2>
+        <div class="subgroup">
+          <strong>Hysteresis</strong>
+          <div class="slider-wrap">
+            <span class="muted" style="min-width:28px;">OFF</span>
+            <input id="THR_OFF_SLIDER" type="range" min="0" max="1" step="0.01" />
+            <span id="THR_OFF_LABEL">0.25</span>
+          </div>
+          <div class="slider-wrap">
+            <span class="muted" style="min-width:28px;">ON</span>
+            <input id="THR_ON_SLIDER" type="range" min="0" max="1" step="0.01" />
+            <span id="THR_ON_LABEL">0.35</span>
+          </div>
+          <span class="muted">Adjust if needed; values are saved with the active model.</span>
+        </div>
+      </div>
+
+      <!-- 4) Model -->
+      <div class="card" id="cardModel">
+        <h2>Model</h2>
+        <div class="row" style="gap:8px 10px;">
+          <label style="display:flex;align-items:center;gap:8px;">
+            <span>Active model</span>
+            <select id="MODEL_SELECT" style="width:220px;"></select>
+          </label>
+        </div>
+        <div class="muted" style="margin-top:6px;">Select a previously trained model. Detection uses its saved <b>Top-K</b> and normalized weights.</div>
+      </div>
+
+      <!-- 5) Source (moved below Model) -->
+      <div class="card">
+        <h2>Source</h2>
+        <div class="subgroup">
+          <strong>Audio input</strong>
+          <select id="TRAIN_SRC" style="min-width:220px;">
+            <option value="sender" selected>Sender (WebRTC)</option>
+            <option value="mic">Microphone (Receiver)</option>
+          </select>
+          <span id="trainInfo" class="muted" style="margin-left:auto;"></span>
+        </div>
+      </div>
+
+      <!-- 6) Live top classes (chart hidden until user clicks) -->
+      <div class="card" id="cardLiveBars">
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <h2 style="margin:0;">Live top classes</h2>
+          <button id="btnToggleLiveBars" class="btn small">Show chart</button>
+        </div>
+        <div id="liveBarsWrap" class="chart-wrap h160" style="display:none">
+          <canvas id="bars"></canvas>
+        </div>
+        <div class="muted" style="margin-top:6px;">Displays the model’s Top-K (non-excluded) classes. Scores are raw (not percentages).</div>
+      </div>
+
+      <!-- 7) Active model weights (chart hidden until user clicks) -->
+      <div class="card">
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <h2 style="margin:0;">Active model weights</h2>
+          <button id="btnToggleSavedW" class="btn small">Show chart</button>
+        </div>
+        <div id="savedWWrap" class="chart-wrap h170" style="display:none">
+          <canvas id="barsSavedW"></canvas>
+        </div>
+        <span class="muted">Normalized Top-K weights used by detection.</span>
+      </div>
+
+      <!-- 8) Logs (bottom) -->
       <div class="card">
         <div class="row" style="justify-content:space-between; width:100%;">
           <h2 style="margin:0;">Logs</h2>
@@ -205,10 +225,6 @@
       </div>
     </div>
   </div>
-
-  <!-- Hosts for injected UI -->
-  <div id="audioBannerHost"></div>
-  <div id="alertsModalHost"></div>
 
   <!-- Hidden host for remote audio track -->
   <video id="remote" autoplay playsinline muted></video>
@@ -249,10 +265,6 @@
   <script type="module" src="./help-sheet.js"></script>
 
   <script type="module">
-    /* ========= Imports for banner + drawer ========= */
-    import { setupAudioBanner, showAudioBanner, hideAudioBanner, saveAlertRecord } from './alert-banner.js';
-    import { setupAlertsDrawer, refreshAlertsBadge } from './alerts-drawer.js';
-
     /* ========= WebRTC (ReceiverCore) ========= */
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
@@ -295,7 +307,7 @@
     document.addEventListener('help:ready', wireHelpOnce);
     if (document.getElementById('helpSheet')) wireHelpOnce();
 
-    // Logs toggle
+    // Logs toggle (training style)
     const btnToggleLogs = EL('btnToggleLogs');
     const logsContainer = EL('logsContainer');
     btnToggleLogs.onclick = () => {
@@ -341,7 +353,8 @@
       'CLASS_EMA_TAU_S','FUSED_EMA_TAU_S','ALERT_HOLD_MS','ALERT_OFF_DELTA','MAX_RESULTS',
       'btnStartDetect','btnStop','chart','bars','barsSavedW','PENALTY_MAP',
       'THR_OFF_SLIDER','THR_OFF_LABEL','THR_ON_SLIDER','THR_ON_LABEL',
-      'MODEL_SELECT','CHART_WINDOW_S','cardLiveBars','TRAIN_SRC','trainInfo'
+      'MODEL_SELECT','CHART_WINDOW_S','cardLiveBars','TRAIN_SRC','trainInfo',
+      'btnToggleLiveBars','btnToggleSavedW','liveBarsWrap','savedWWrap'
     ].map(x => [x, document.getElementById(x)])) )();
 
     function setInferWhere(where){ localStorage.setItem('cryInferWhere', (where === 'receiver') ? 'receiver' : 'sender'); }
@@ -536,14 +549,16 @@
       ring: new Float32Array(0), lastPos: 0,
       perClassEma: new Map(), fusedEma: 0,
       alertOn: false, alertUntil: 0,
-      // NEW: alert episode accumulation
-      alertStartMs: 0, alertSum: 0, alertCount: 0,
       chart: null, barChart: null, barSavedW: null,
       labels: [], fusedRaw: [], fusedSm: [],
       thrOn: 0.35, thrOff: 0.25,
       frameCount: 0, asmLastLogTs: 0, scoreLastLogTs: 0,
       hopSec: 0.48, chartWindowSec: 30, chartCap: 0
     };
+
+    // User-controlled visibility for charts
+    let liveBarsUserVisible = false;
+    let savedWUserVisible   = false;
 
     // Charts
     function hhmmss(tMs){
@@ -601,8 +616,13 @@
     }
 
     // Bars
-    function showLiveBars(){ if (els.cardLiveBars && els.cardLiveBars.style.display === 'none') { els.cardLiveBars.style.display = ''; setTimeout(()=>{ state.barChart?.resize?.(); }, 0); } }
-    function hideLiveBars(){ if (els.cardLiveBars) els.cardLiveBars.style.display = 'none'; }
+    function showLiveBars(){
+      if (liveBarsUserVisible) {
+        els.liveBarsWrap.style.display = '';
+        setTimeout(()=>{ state.barChart?.resize?.(); }, 0);
+      }
+    }
+    function hideLiveBars(){ els.liveBarsWrap.style.display = 'none'; }
     function setupBars(){
       if (!state.barChart && els.bars) {
         state.barChart = new Chart(els.bars.getContext('2d'), {
@@ -634,7 +654,7 @@
       state.barChart.data.datasets[0].backgroundColor = [];
       state.barChart.data.datasets[0].borderColor = [];
       state.barChart.update();
-      hideLiveBars();
+      // Do not auto-show; visibility controlled by user toggle
     }
     function updateTopBars(cats){
       if (!els.bars) return;
@@ -650,6 +670,7 @@
       state.barChart.data.datasets[0].backgroundColor = bg;
       state.barChart.data.datasets[0].borderColor = bd;
       state.barChart.update();
+      // Only show if user chose to
       if (display.length > 0) showLiveBars();
     }
     function setWeightsChart(weightsDict){
@@ -753,45 +774,9 @@
         }
       }
 
-      // === NEW: banner + persistence transitions ===
       const on = applyHysteresis(sm, performance.now());
-
-      // OFF -> ON
-      if (on && !state.alertOn) {
-        state.alertStartMs = Date.now();   // wall clock for persistence/UI
-        state.alertSum = 0;
-        state.alertCount = 0;
-        showAudioBanner(state.alertStartMs);
-        log('ok','ALERT ON (cry detected).');
-      }
-
-      // Accumulate while ON
-      if (on) {
-        state.alertSum += sm;
-        state.alertCount++;
-      }
-
-      // ON -> OFF
-      if (!on && state.alertOn) {
-        const startAt = state.alertStartMs || Date.now();
-        const endAt   = Date.now();
-        const avg     = state.alertCount > 0 ? (state.alertSum / state.alertCount) : sm;
-        hideAudioBanner();
-
-        const record = {
-          type: 'audio detection',
-          startAt: new Date(startAt).toISOString(),
-          endAt:   new Date(endAt).toISOString(),
-          avgScore: Number(avg.toFixed(4))
-        };
-        saveAlertRecord(record);
-        log('warn','ALERT OFF.', `<div class="log-code">${JSON.stringify(record, null, 2)}</div>`);
-
-        state.alertStartMs = 0;
-        state.alertSum = 0;
-        state.alertCount = 0;
-      }
-
+      if (on && !state.alertOn) { log('ok','ALERT ON (cry detected).'); }
+      if (!on && state.alertOn) { log('warn','ALERT OFF.'); }
       state.alertOn = on;
     }
 
@@ -892,25 +877,6 @@
     }
 
     async function stopAll(){
-      // NEW: finalize open alert if any
-      if (state.alertOn && state.alertStartMs) {
-        const endAt = Date.now();
-        const avg   = state.alertCount > 0 ? (state.alertSum / state.alertCount) : 0;
-        const record = {
-          type: 'audio detection',
-          startAt: new Date(state.alertStartMs).toISOString(),
-          endAt:   new Date(endAt).toISOString(),
-          avgScore: Number(avg.toFixed(4))
-        };
-        try { await saveAlertRecord(record); } catch {}
-        hideAudioBanner();
-        log('warn', 'ALERT OFF (stop).', `<div class="log-code">${JSON.stringify(record, null, 2)}</div>`);
-        state.alertOn = false;
-        state.alertStartMs = 0;
-        state.alertSum = 0;
-        state.alertCount = 0;
-      }
-
       const wasRunning = state.running || state.mode!=='idle';
       state.running=false; state.mode='idle';
       await stopMicOnly();
@@ -925,10 +891,8 @@
     function ensureCoreStarted(){
       if (wrtc.core) return;
     
-      // NEW: single place to wire a DC, no matter who created it
       function wireDC(ch){
         if (!ch) return;
-        // Avoid double-wiring
         if (wrtc.dc && wrtc.dc === ch) return;
         wrtc.dc = ch;
     
@@ -997,19 +961,14 @@
           }
         },
         onIceState: (s) => log('info', `[RTC] ICE: ${s}`),
-    
-        // UPDATED: wire our *own* DC
         onCreatePC: (pc) => {
           const ch = pc.createDataChannel('pose');
           wireDC(ch);
         },
-    
-        // UPDATED: also wire *inbound* DC created by the sender
         onDataChannel: (e) => {
           log('info', `[RTC] inbound DC: ${e.channel?.label}`);
           wireDC(e.channel);
         },
-    
         onBye: () => log('warn', '[RTC] bye')
       });
     
@@ -1068,7 +1027,6 @@
         await startMic();
       } else if (src === 'sender') {
         ensureCoreStarted();
-        // If sender wants receiver to classify, start tap when stream is ready
         if (wrtc.where === 'receiver' && wrtc.stream) await startRemoteAudioTap();
         state.mode = 'detect';
         if (wrtc.where === 'sender') setStatus('Detection started (sender).');
@@ -1076,8 +1034,29 @@
     }
 
     /* ========= UI wiring ========= */
-    els.btnStartDetect.onclick = () => startDetectBasedOnSource();
-    els.btnStop.onclick = async () => { await stopAll(); setStatus('Detection stopped.'); };
+    els.btnStartDetect.onclick = async () => {
+      els.btnStartDetect.disabled = true;
+      await startDetectBasedOnSource();
+    };
+    els.btnStop.onclick = async () => {
+      await stopAll();
+      setStatus('Detection stopped.');
+      els.btnStartDetect.disabled = false;  // re-enable Start after stop
+    };
+
+    // Live bars / Saved weights toggles
+    els.btnToggleLiveBars.addEventListener('click', () => {
+      liveBarsUserVisible = !liveBarsUserVisible;
+      els.btnToggleLiveBars.textContent = liveBarsUserVisible ? 'Hide chart' : 'Show chart';
+      if (liveBarsUserVisible) { setupBars(); showLiveBars(); }
+      else { hideLiveBars(); }
+    });
+    els.btnToggleSavedW.addEventListener('click', () => {
+      savedWUserVisible = !savedWUserVisible;
+      els.btnToggleSavedW.textContent = savedWUserVisible ? 'Hide chart' : 'Show chart';
+      els.savedWWrap.style.display = savedWUserVisible ? '' : 'none';
+      if (savedWUserVisible) { setupBars(); setWeightsChart(loadModel().weights || {}); setTimeout(()=>state.barSavedW?.resize?.(),0); }
+    });
 
     function getParams(){
       return {
@@ -1116,7 +1095,7 @@
       const v = els.MODEL_SELECT.value;
       setModelName(v);
       const m = loadModel();
-      setWeightsChart(m.weights || {});
+      if (savedWUserVisible) setWeightsChart(m.weights || {});
       const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
       if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; setThrUI(); log('ok', `Loaded thresholds for “${v}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`); }
       const pen = localStorage.getItem(PENALTY_KEY()); if (pen) els.PENALTY_MAP.value = pen;
@@ -1125,15 +1104,11 @@
 
     /* ========= Boot ========= */
     (function boot(){
-      // Inject external UI & styles
-      setupAudioBanner();
-      setupAlertsDrawer();
-
       const active = localStorage.getItem('cryActiveModelName') || 'default';
       refreshModelSelect(active);
       setModelName(active);
 
-      setupBars();
+      // Defer chart canvases until visible; still set up fused chart
       els.chart.getContext && setupChart();
 
       const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
@@ -1148,15 +1123,17 @@
 
       const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
 
+      // Ensure live bars chart area hidden by default
       hideLiveBars();
       updateSourceUI();
 
-      // Seed weights chart
-      setWeightsChart(loadModel().weights || {});
-      setStatus('Ready. Pick source → Start detection.');
+      // Seed saved weights only when user shows it (lazy).
 
-      // Badge
-      refreshAlertsBadge();
+      setStatus('Ready. Detection will auto-start…');
+
+      // === AUTO START DETECTION ===
+      els.btnStartDetect.disabled = true;    // grey out Start
+      startDetectBasedOnSource();            // auto-start detection
     })();
   </script>
 </body>
