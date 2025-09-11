@@ -185,6 +185,37 @@
     .help-sheet .body { max-height: 70vh; overflow: auto; }
 
     /* Timer icon for Calibration */
+    /* Stopwatch badge — match Motion receiver look */
+    .icon.timer {
+      display: inline-grid;
+      place-items: center;
+      width: 18px;
+      height: 18px;
+      margin-right: 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.18);
+      box-shadow: inset 0 1px 1px rgba(0,0,0,0.25);
+      vertical-align: -2px; /* sits nicely with text */
+    }
+    .icon.timer svg { width: 12px; height: 12px; }
+    
+    /* Running state: subtle warm highlight like other “active” pills */
+    #calBtn.running .icon.timer {
+      background: rgba(255,180,0,0.10);
+      border-color: rgba(255,180,0,0.40);
+    }
+    
+    /* Optional: rotate the hand as we count down (we set --hand-rot in JS) */
+    .icon.timer .hand {
+      transform-origin: 12px 12px;
+      transform: rotate(var(--hand-rot, 0deg));
+      transition: transform 120ms linear;
+    }
+    
+    /* Keep your generic icon rule (can coexist) */
+    .icon { font-style: normal; margin-right: 6px; }
+
     .icon { font-style: normal; margin-right: 6px; }
   </style>
 </head>
@@ -231,7 +262,16 @@
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
     <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
-    <button id="calBtn" class="btn" type="button"><span class="icon">⏱</span>Calibration</button>
+    <button id="calBtn" class="btn" type="button">
+      <span class="icon timer" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="7" opacity=".9"/>
+          <path d="M12 12 L12 7" class="hand"/>
+          <path d="M9 3h6" />
+        </svg>
+      </span>
+      <span class="label">Calibration</span>
+    </button>
     <button id="settingsBtn" class="btn" type="button">Settings</button>
   </div>
 
@@ -519,16 +559,26 @@
     const calBtn = document.getElementById('calBtn');
 
     function setCalBtn(running, remainingSec = 0){
+      const label = calBtn.querySelector('.label');
+      const icon  = calBtn.querySelector('.icon.timer');
+      if (!label || !icon) return;
+    
       if (running){
-        calBtn.classList.add('muted');
-        calBtn.disabled = true;
-        calBtn.innerHTML = `<span class="icon">⏱</span>Calibrating… ${Math.max(0, Math.ceil(remainingSec))} s`;
+        const secs = Math.max(0, Math.ceil(remainingSec));
+        label.textContent = `Calibrating… ${secs} s`;
+        calBtn.classList.add('running');
+    
+        // Optional: sweep the hand around proportionally
+        const pct  = S.calDur > 0 ? (1 - (remainingSec / S.calDur)) : 0;
+        const deg  = Math.max(0, Math.min(1, pct)) * 360;
+        icon.style.setProperty('--hand-rot', deg + 'deg');
       } else {
-        calBtn.classList.remove('muted');
-        calBtn.disabled = false;
-        calBtn.innerHTML = `<span class="icon">⏱</span>Calibration`;
+        label.textContent = 'Calibration';
+        calBtn.classList.remove('running');
+        icon.style.removeProperty('--hand-rot');
       }
     }
+
 
     calBtn.addEventListener('click', () => {
       // Open settings and start calibration there
