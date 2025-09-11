@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Baby Monitor – Receiver (Face Landmarks)</title>
+  <title>Baby Monitor – Receiver (Face Landmarks + Prone Detection)</title>
   <link rel="icon" href="data:,">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 
@@ -38,6 +38,7 @@
       pointer-events: none;
     }
 
+    /* Buttons */
     .btn {
       padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
       background: transparent; color: #fff; font-size: 16px; font-weight: 600;
@@ -45,18 +46,13 @@
       text-shadow: 0 1px 2px rgba(0,0,0,0.6);
     }
     .btn:active { transform: scale(0.99); }
-    .btn.small { padding: 8px 10px; font-size: 13px; border-radius: 10px; }
+    .btn.muted { opacity: 0.6; pointer-events: none; }
 
     #controls {
       position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
       display: flex; align-items: center; gap: 12px; z-index: 6;
     }
     #enableAudioBtn, #disableAudioBtn { display: none; }
-
-    /* Top-left utility row (like training page) */
-    #utilityBar {
-      position: fixed; left: 12px; top: 12px; z-index: 7; display: flex; gap: 10px; flex-wrap: wrap;
-    }
 
     .overlay {
       position: fixed; inset: 0; display: flex;
@@ -71,34 +67,109 @@
     }
     .overlay.hidden { display: none; }
 
-    /* Settings modal (compact, training-page feel) */
-    .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);z-index:140;}
-    .modal.show{display:flex;}
-    .modal-card{width:min(96%,820px);max-height:90vh;overflow-y:auto;background:#0b0b0b;border:1px solid #242424;border-radius:14px;}
-    .modal-head{position:sticky;top:0;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #1a1a1a;background:#0d0d0d;border-top-left-radius:14px;border-top-right-radius:14px;}
-    .modal-actions{display:flex;gap:8px;align-items:center;}
-    .modal-body{padding:12px;}
-    .modal-head .close{appearance:none;border:none;background:transparent;color:#aaa;font-size:22px;cursor:pointer;padding:2px 6px;}
-
-    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;}
-    .card{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:12px;padding:12px;}
-    .card h3{margin:0 0 8px 0;font-size:16px}
-    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-    .muted{color:#aaa;font-size:12px}
-    input[type="number"]{padding:8px 10px;border-radius:10px;border:1px solid #222;background:#0b0b0b;color:#ddd;width:100%}
-    label.chk{display:flex;gap:8px;align-items:center}
-
-    /* Angle badge (top-right of canvas) */
-    #angleBadge {
-      position: absolute; right: 12px; top: 12px;
-      background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 10px; padding: 8px 10px; z-index: 3; font-size: 12px; line-height: 1.35;
-      pointer-events: none;
+    /* Settings drawer — match motion app transparency */
+    #settingsBtn { /* now lives beside Calibration in #controls */ }
+    #settingsDrawer {
+      position: fixed; right: max(12px, env(safe-area-inset-right)); bottom: 64px; z-index: 7;
+      width: min(92vw, 420px);
+      background: rgba(12,12,12,0.52);              /* translucent */
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);                   /* frosted glass */
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+      display: none;
     }
+    #settingsDrawer.open { display: block; }
+    .sd-head { position: sticky; top: 0; display:flex; align-items:center; gap:8px; justify-content:space-between; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,0.08);}
+    .sd-head h2 { margin:0; font-size:16px; }
+    .sd-head-right { display:flex; align-items:center; gap:8px; }
+    .sd-body { padding: 10px 14px; display: grid; gap: 12px; max-height: 70vh; overflow:auto; }
+    .sd-group { border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:10px; background: rgba(0,0,0,0.25); }
+    .sd-group h3 { margin:0 0 6px; font-size:14px; color:#ddd; }
+    .row { display:grid; grid-template-columns: 1fr auto; align-items:center; gap:10px; margin:6px 0; }
+    .row label { font-size:13px; color:#bbb; }
+    .row input[type="range"] { width: 180px; }
+    .row input[type="number"] { width:88px; background:#0a0a0a; color:#fff; border:1px solid #222; border-radius:8px; padding:6px 8px; }
+    .row input[type="checkbox"] { transform: translateY(1px); }
+    .subtle { color:#999; font-size:12px; }
+    .muted  { color:#aaa; }
+
+    /* Calibration progress bar */
+    .prog { height:8px; border-radius:999px; background:#111; border:1px solid #222; overflow:hidden; }
+    .prog > i { display:block; height:100%; width:0%; background:linear-gradient(90deg,#15c,#3df); }
+
+    /* HUD pill — move to left side and include alert pill inside */
+    .hud {
+      position: fixed;
+      left: max(12px, env(safe-area-inset-left));
+      top: max(12px, env(safe-area-inset-top));
+      z-index: 6;
+      padding: 10px 12px;
+      background: rgba(0,0,0,0.45);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      color:#ddd;
+      min-width: 220px;
+    }
+    .hud .lines { font: 12px/1.35 -apple-system, system-ui, Segoe UI, Roboto, sans-serif; white-space: pre; }
+    .hud .riskbar {
+      margin-top: 8px;
+      height: 8px; border-radius: 999px; background: rgba(255,255,255,0.10);
+      position: relative; overflow: hidden; border:1px solid rgba(255,255,255,0.12);
+    }
+    .hud .riskbar i {
+      position:absolute; left:0; top:0; height:100%; width:0%;
+      background: #9ae6b4;  /* will be green/orange/red */
+      transition: width 120ms linear, background-color 120ms linear;
+    }
+    .hud .riskbar .pct {
+      position:absolute; right:6px; top:50%; transform:translateY(-50%);
+      font-size:10px; color:#ddd;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+
+    /* Small alert pill INSIDE the HUD (top-right corner) */
+    #alertPill {
+      position: absolute; right: 8px; top: 8px; z-index: 1;
+      padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.06);
+      backdrop-filter: blur(6px);
+    }
+    #alertPill.prone-safe { color:#9ae6b4; border-color:#1f3b2a; background:rgba(25,60,35,0.45); }
+    #alertPill.prone-risk { color:#f6ad55; border-color:#4a321d; background:rgba(74,50,29,0.5); }
+    #alertPill.prone-on   { color:#fecaca; border-color:#5a1e1e; background:rgba(90,30,30,0.55); }
+    #alertPill::before, #alertPill::after { content:'' !important; }
+
+    /* Help overlay (separate HTML/JS) */
+    .help-overlay {
+      position: fixed; inset: 0; z-index: 8; display: none;
+      background: rgba(0,0,0,0.5);
+      -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    }
+    .help-overlay.open { display: block; }
+    .help-sheet {
+      position: absolute;
+      left: max(12px, env(safe-area-inset-left));
+      right: max(12px, env(safe-area-inset-right));
+      top: calc(env(safe-area-inset-top) + 20px);   /* not too close on iPhone */
+      margin: 0 auto;
+      max-width: 720px;
+      background: rgba(12,12,12,0.58);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+      overflow: hidden;
+    }
+    .help-sheet .body { max-height: 70vh; overflow: auto; }
+
+    /* Timer icon for Calibration */
+    .icon { font-style: normal; margin-right: 6px; }
   </style>
 </head>
 <body>
-  <!-- ⬇️ Inject shared sidebar markup and behavior -->
+  <!-- ⬇️ Shared sidebar -->
   <script type="module">
     (async () => {
       try {
@@ -121,89 +192,91 @@
     })();
   </script>
 
-  <!-- Utility bar -->
-  <div id="utilityBar">
-    <button id="btnOpenSettings" class="btn small" type="button">Settings</button>
+  <!-- HUD pill (now left side). Alert pill lives inside it. -->
+  <div id="hud" class="hud">
+    <div id="alertPill" class="prone-safe">Safe</div>
+    <div id="hudLines" class="lines">pitch↓: –°  •  risk: –</div>
+    <div class="riskbar" aria-label="Risk">
+      <i id="riskFill"></i><span id="riskPct" class="pct">0%</span>
+    </div>
   </div>
 
+  <!-- Bottom controls (Calibration + Settings added here) -->
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
     <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
+    <button id="calBtn" class="btn" type="button"><span class="icon">⏱</span>Calibration</button>
+    <button id="settingsBtn" class="btn" type="button">Settings</button>
+  </div>
+
+  <!-- Settings drawer -->
+  <div id="settingsDrawer" aria-label="Settings">
+    <div class="sd-head">
+      <h2>Prone detection settings</h2>
+      <div class="sd-head-right">
+        <button id="helpBtn" class="btn" type="button" style="padding:6px 10px;font-size:13px;">Help</button>
+        <button id="closeSettingsBtn" class="btn" type="button" title="Close" style="padding:6px 10px;font-size:16px;line-height:1;">×</button>
+      </div>
+    </div>
+    <div class="sd-body">
+      <div class="sd-group">
+        <h3>General</h3>
+        <div class="row"><label>Enable prone detection</label><input id="st-enabled" type="checkbox"></div>
+        <div class="row"><label>Show landmarks</label><input id="st-showLM" type="checkbox"></div>
+        <div class="row"><label>Show orientation arrow</label><input id="st-showOrient" type="checkbox"></div>
+        <div class="row"><label>Show 3D axes</label><input id="st-showAxes" type="checkbox"></div>
+        <div class="row"><label>Arrow length (×)</label><input id="st-arrowScale" type="number" min="0.5" max="3" step="0.1"></div>
+        <div class="row"><label>Flip pitch sign (if reversed)</label><input id="st-flipPitch" type="checkbox"></div>
+      </div>
+
+      <div class="sd-group">
+        <h3>Calibration (supine baseline)</h3>
+        <div class="row"><label>Duration (s)</label><input id="st-calDur" type="number" min="3" max="30" step="1"></div>
+        <div class="row">
+          <button id="calStartBtn" class="btn" type="button">Start</button>
+          <button id="calResetBtn" class="btn" type="button">Reset</button>
+        </div>
+        <div class="prog"><i id="calProg"></i></div>
+        <div class="subtle">Supine baseline (°): <span id="supineVal">–</span></div>
+      </div>
+
+      <div class="sd-group">
+        <h3>Smoothing & thresholds</h3>
+        <div class="row"><label>EMA τ (s)</label><input id="st-emaTau" type="number" min="0.2" max="10" step="0.1"></div>
+        <div class="row"><label>Pitch θ<sub>on</sub> (deg below supine)</label><input id="st-thetaOn" type="number" min="10" max="90" step="1"></div>
+        <div class="row"><label>Risk thr<sub>on</sub></label><input id="st-thrOn" type="number" min="0.1" max="1" step="0.05"></div>
+        <div class="row"><label>Risk thr<sub>off</sub></label><input id="st-thrOff" type="number" min="0.05" max="0.95" step="0.05"></div>
+        <div class="row"><label>Dwell on (s)</label><input id="st-dwellOn" type="number" min="1" max="60" step="1"></div>
+        <div class="row"><label>Dwell off (s)</label><input id="st-dwellOff" type="number" min="1" max="60" step="1"></div>
+      </div>
+
+      <div class="sd-group">
+        <h3>FaceLandmarker</h3>
+        <div class="row"><label>minFaceDetectionConfidence</label><input id="st-minDet" type="number" min="0" max="1" step="0.05"></div>
+        <div class="row"><label>minTrackingConfidence</label><input id="st-minTrack" type="number" min="0" max="1" step="0.05"></div>
+        <div class="row"><label>minFacePresenceConfidence</label><input id="st-minPres" type="number" min="0" max="1" step="0.05"></div>
+        <div class="row"><button id="reinitFaceBtn" class="btn" type="button">Apply to model</button></div>
+      </div>
+
+      <!-- Help details removed per request -->
+    </div>
+  </div>
+
+  <!-- Help overlay (loads separate page + js) -->
+  <div id="helpOverlay" class="help-overlay" aria-hidden="true">
+    <div id="helpSheet" class="help-sheet" role="dialog" aria-modal="true" aria-label="Help">
+      <div class="body" id="helpBody"><!-- populated from help-sheet.html --></div>
+    </div>
   </div>
 
   <div id="stage">
     <video id="remote" autoplay playsinline></video>
     <canvas id="faceCanvas"></canvas>
-    <div id="angleBadge" style="display:none">yaw 0°\npitch 0°\nroll 0°</div>
   </div>
 
   <div id="overlay" class="overlay">
     <div id="status" class="status">Idle</div>
-  </div>
-
-  <!-- Settings modal -->
-  <div id="settingsModal" class="modal" aria-hidden="true">
-    <div class="modal-card">
-      <div class="modal-head">
-        <strong>Face orientation – Settings</strong>
-        <div class="modal-actions">
-          <button id="btnSettingsClose" class="close" type="button" title="Close" aria-label="Close">×</button>
-        </div>
-      </div>
-      <div class="modal-body">
-        <div class="grid">
-          <div class="card">
-            <h3>Calibration</h3>
-            <div class="row">
-              <button id="btnCalibrate" class="btn small">Set neutral (Calibrate)</button>
-              <button id="btnResetCalib" class="btn small">Reset</button>
-            </div>
-            <div class="muted">Stand naturally facing the camera, then press Calibrate. We subtract that orientation from subsequent angles.</div>
-          </div>
-
-          <div class="card">
-            <h3>Smoothing</h3>
-            <label>Angle EMA τ (s) <input id="ANG_EMA_TAU" type="number" min="0" step="0.05" value="0.40"></label>
-            <div class="muted">Bigger τ = smoother but more lag.</div>
-          </div>
-
-          <div class="card">
-            <h3>Hysteresis</h3>
-            <label>Yaw ON (°) <input id="YAW_ON" type="number" min="0" step="1" value="15"></label>
-            <label>Yaw OFF delta (°) <input id="YAW_OFF_DELTA" type="number" min="0" step="1" value="5"></label>
-            <label>Pitch ON (°) <input id="PITCH_ON" type="number" min="0" step="1" value="12"></label>
-            <label>Pitch OFF delta (°) <input id="PITCH_OFF_DELTA" type="number" min="0" step="1" value="4"></label>
-            <label>Min ON hold (ms) <input id="HOLD_ON_MS" type="number" min="0" step="50" value="400"></label>
-            <div class="muted">Triggers when |yaw|≥YawON or |pitch|≥PitchON; turns OFF below (ON−delta). Hold prevents flicker.</div>
-          </div>
-
-          <div class="card">
-            <h3>“No face” rule</h3>
-            <label class="chk"><input id="NF_USE_MS" type="checkbox" checked> Use time-based (N ms)</label>
-            <label>N (ms) <input id="NF_MS" type="number" min="100" step="50" value="500"></label>
-            <label class="chk"><input id="NF_USE_FRAMES" type="checkbox" checked> Use frames-based (P missed)</label>
-            <label>P (frames) <input id="NF_FRAMES" type="number" min="1" step="1" value="5"></label>
-            <div class="muted">Sender mode is guarded by a watchdog that counts missed DC messages as frames.</div>
-          </div>
-
-          <div class="card">
-            <h3>Confidence</h3>
-            <label>Min face detection confidence <input id="FACE_MIN_DET" type="number" min="0" max="1" step="0.01" value="0.50"></label>
-            <label>Min tracking confidence <input id="FACE_MIN_TRK" type="number" min="0" max="1" step="0.01" value="0.50"></label>
-            <div class="muted">Affects the side that runs inference (receiver in this page).</div>
-          </div>
-
-          <div class="card">
-            <h3>Visuals</h3>
-            <label class="chk"><input id="SHOW_MESH" type="checkbox" checked> Show facial mesh</label>
-            <label class="chk"><input id="SHOW_GIZMO" type="checkbox" checked> Show 3-axis head gizmo</label>
-            <label>Gizmo length factor <input id="GIZMO_SCALE" type="number" min="0.2" max="2" step="0.05" value="0.8"></label>
-            <label class="chk"><input id="SHOW_BADGE" type="checkbox" checked> Show angle badge</label>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 
   <script type="module">
@@ -213,6 +286,9 @@
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
+    const LS_KEY = "naptio:face-prone-settings:v1.1";
+    const LS_SUPINE_KEY = "naptio:face-prone-supine:" + room;
+
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
     // MediaPipe assets
@@ -221,7 +297,6 @@
     const FACE_MODEL_URL =
       "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task";
 
-    // Video readyState helper
     const HAVE_CURRENT_DATA = 2;
 
     /* ---------- DOM ---------- */
@@ -229,7 +304,6 @@
     const remoteVideo = document.getElementById('remote');
     const faceCanvas = document.getElementById('faceCanvas');
     const faceCtx = faceCanvas.getContext('2d', { alpha: true });
-    const angleBadge = document.getElementById('angleBadge');
 
     const fsBtn = document.getElementById('fsBtn');
     const enableAudioBtn = document.getElementById('enableAudioBtn');
@@ -237,71 +311,245 @@
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
 
-    const settingsModal = document.getElementById('settingsModal');
-    document.getElementById('btnOpenSettings').onclick = () => {
-      settingsModal.classList.add('show'); settingsModal.setAttribute('aria-hidden','false');
+    const settingsBtn = document.getElementById('settingsBtn');
+    const settingsDrawer = document.getElementById('settingsDrawer');
+    const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+    const helpBtn = document.getElementById('helpBtn');
+
+    const alertPill = document.getElementById('alertPill');
+    const hud = document.getElementById('hud');
+    const hudLines = document.getElementById('hudLines');
+    const riskFill = document.getElementById('riskFill');
+    const riskPct = document.getElementById('riskPct');
+
+    const helpOverlay = document.getElementById('helpOverlay');
+    const helpBody = document.getElementById('helpBody');
+
+    // Muted axis colors (standard mapping kept)
+    const AXIS_STYLE = {
+      x: { stroke: 'rgba(200, 80, 80, 0.65)'  }, // X
+      y: { stroke: 'rgba( 40,155,135,0.90)'  }, // Y teal-leaning
+      z: { stroke: 'rgba( 90,120,210,0.95)'  }, // Z
+      width: 3.5
     };
-    document.getElementById('btnSettingsClose').onclick = () => {
-      settingsModal.classList.remove('show'); settingsModal.setAttribute('aria-hidden','true');
+
+    /* ---------- Settings state ---------- */
+    const defaults = {
+      enabled: true,
+      showLM: true,
+      showOrient: true,
+      showAxes: true,
+      arrowScale: 1.8,
+      flipPitch: false,
+      emaTau: 2.0,
+      thetaOn: 55,
+      thrOn: 0.70,
+      thrOff: 0.40,
+      dwellOn: 12,
+      dwellOff: 5,
+      minDet: 0.5,
+      minTrack: 0.5,
+      minPres: 0.5,
+      calDur: 10
     };
-    settingsModal.addEventListener('click', (e) => {
-      if (e.target === settingsModal) { settingsModal.classList.remove('show'); settingsModal.setAttribute('aria-hidden','true'); }
+    let S = loadSettings();
+    let pitchSupine = loadSupine();
+
+    /* ---------- UI wire-up (settings) ---------- */
+    const $ = (id) => document.getElementById(id);
+    const ui = {
+      enabled: $('st-enabled'),
+      showLM: $('st-showLM'),
+      showOrient: $('st-showOrient'),
+      showAxes: $('st-showAxes'),
+      arrowScale: $('st-arrowScale'),
+      flipPitch: $('st-flipPitch'),
+      emaTau: $('st-emaTau'),
+      thetaOn: $('st-thetaOn'),
+      thrOn: $('st-thrOn'),
+      thrOff: $('st-thrOff'),
+      dwellOn: $('st-dwellOn'),
+      dwellOff: $('st-dwellOff'),
+      minDet: $('st-minDet'),
+      minTrack: $('st-minTrack'),
+      minPres: $('st-minPres'),
+      calDur: $('st-calDur'),
+      calProg: $('calProg'),
+      supineVal: $('supineVal'),
+      calStartBtn: $('calStartBtn'),
+      calResetBtn: $('calResetBtn'),
+      reinitFaceBtn: $('reinitFaceBtn')
+    };
+
+    function applySettingsToUI(){
+      ui.enabled.checked = !!S.enabled;
+      ui.showLM.checked = !!S.showLM;
+      ui.showOrient.checked = !!S.showOrient;
+      ui.showAxes.checked = !!S.showAxes;
+      ui.arrowScale.value = S.arrowScale;
+      ui.flipPitch.checked = !!S.flipPitch;
+      ui.emaTau.value = S.emaTau;
+      ui.thetaOn.value = S.thetaOn;
+      ui.thrOn.value = S.thrOn;
+      ui.thrOff.value = S.thrOff;
+      ui.dwellOn.value = S.dwellOn;
+      ui.dwellOff.value = S.dwellOff;
+      ui.minDet.value = S.minDet;
+      ui.minTrack.value = S.minTrack;
+      ui.minPres.value = S.minPres;
+      ui.calDur.value = S.calDur;
+      ui.supineVal.textContent = Number.isFinite(pitchSupine) ? pitchSupine.toFixed(1) : '–';
+    }
+    function readSettingsFromUI(){
+      S.enabled = ui.enabled.checked;
+      S.showLM = ui.showLM.checked;
+      S.showOrient = ui.showOrient.checked;
+      S.showAxes = ui.showAxes.checked;
+      S.arrowScale = clampNum(parseFloat(ui.arrowScale.value), 0.5, 3);
+      S.flipPitch = ui.flipPitch.checked;
+      S.emaTau = clampNum(parseFloat(ui.emaTau.value), 0.1, 20);
+      S.thetaOn = clampNum(parseFloat(ui.thetaOn.value), 5, 120);
+      S.thrOn = clampNum(parseFloat(ui.thrOn.value), 0, 1);
+      S.thrOff = clampNum(parseFloat(ui.thrOff.value), 0, 1);
+      S.dwellOn = clampNum(parseFloat(ui.dwellOn.value), 0, 120);
+      S.dwellOff = clampNum(parseFloat(ui.dwellOff.value), 0, 120);
+      S.minDet = clampNum(parseFloat(ui.minDet.value), 0, 1);
+      S.minTrack = clampNum(parseFloat(ui.minTrack.value), 0, 1);
+      S.minPres = clampNum(parseFloat(ui.minPres.value), 0, 1);
+      S.calDur = clampNum(parseFloat(ui.calDur.value), 3, 60);
+      saveSettings();
+    }
+    function loadSettings(){
+      try { return {...defaults, ...(JSON.parse(localStorage.getItem(LS_KEY)||'{}'))}; }
+      catch { return {...defaults}; }
+    }
+    function saveSettings(){ localStorage.setItem(LS_KEY, JSON.stringify(S)); }
+    function loadSupine(){
+      const v = parseFloat(localStorage.getItem(LS_SUPINE_KEY)||'NaN');
+      return Number.isFinite(v) ? v : NaN;
+    }
+    function saveSupine(v){
+      pitchSupine = v;
+      localStorage.setItem(LS_SUPINE_KEY, String(v));
+      ui.supineVal.textContent = Number.isFinite(v) ? v.toFixed(1) : '–';
+    }
+
+    /* Settings open/close */
+    settingsBtn.addEventListener('click', () => {
+      settingsDrawer.classList.toggle('open');
+      applySettingsToUI();
+    });
+    closeSettingsBtn.addEventListener('click', () => settingsDrawer.classList.remove('open'));
+    settingsDrawer.addEventListener('change', (e) => { readSettingsFromUI(); });
+
+    ui.reinitFaceBtn.addEventListener('click', async () => {
+      readSettingsFromUI();
+      await recreateFaceTask();
+      showStatus('Face task reinitialized');
+    });
+    ui.calResetBtn.addEventListener('click', () => {
+      saveSupine(NaN);
+      showStatus('Supine baseline cleared');
     });
 
-    /* ---------- Settings elements ---------- */
-    const EL = id => document.getElementById(id);
-    const els = {
-      // calibration
-      btnCalib: EL('btnCalibrate'), btnReset: EL('btnResetCalib'),
-      // smoothing/hysteresis
-      tau: EL('ANG_EMA_TAU'),
-      yawOn: EL('YAW_ON'), yawOffDelta: EL('YAW_OFF_DELTA'),
-      pitchOn: EL('PITCH_ON'), pitchOffDelta: EL('PITCH_OFF_DELTA'),
-      holdOn: EL('HOLD_ON_MS'),
-      // no-face
-      nfUseMs: EL('NF_USE_MS'), nfMs: EL('NF_MS'), nfUseFrames: EL('NF_USE_FRAMES'), nfFrames: EL('NF_FRAMES'),
-      // confidence
-      minDet: EL('FACE_MIN_DET'), minTrk: EL('FACE_MIN_TRK'),
-      // visuals
-      showMesh: EL('SHOW_MESH'), showGizmo: EL('SHOW_GIZMO'), gizmoScale: EL('GIZMO_SCALE'), showBadge: EL('SHOW_BADGE'),
-    };
-    const clamp01 = (x) => Math.max(0, Math.min(1, Number(x)||0));
-    const SKEY = (k) => `facePage_${k}`;
-    const persist = () => {
-      try {
-        Object.entries({
-          tau: els.tau.value, yawOn: els.yawOn.value, yawOffDelta: els.yawOffDelta.value,
-          pitchOn: els.pitchOn.value, pitchOffDelta: els.pitchOffDelta.value, holdOn: els.holdOn.value,
-          nfUseMs: els.nfUseMs.checked ? '1':'0', nfMs: els.nfMs.value, nfUseFrames: els.nfUseFrames.checked ? '1':'0', nfFrames: els.nfFrames.value,
-          minDet: els.minDet.value, minTrk: els.minTrk.value,
-          showMesh: els.showMesh.checked ? '1':'0', showGizmo: els.showGizmo.checked ? '1':'0',
-          gizmoScale: els.gizmoScale.value, showBadge: els.showBadge.checked ? '1':'0',
-          calib: JSON.stringify(state.calib)
-        }).forEach(([k,v])=> localStorage.setItem(SKEY(k), v));
-      } catch {}
-    };
-    const restore = () => {
-      [
-        ['tau','num'], ['yawOn','num'], ['yawOffDelta','num'], ['pitchOn','num'], ['pitchOffDelta','num'], ['holdOn','num'],
-        ['nfMs','num'], ['nfFrames','num'], ['minDet','num'], ['minTrk','num'], ['gizmoScale','num']
-      ].forEach(([k])=>{ const v = localStorage.getItem(SKEY(k)); if (v!=null) els[k].value = v; });
-      [['nfUseMs'],['nfUseFrames'],['showMesh'],['showGizmo'],['showBadge']].forEach(([k])=>{
-        const v = localStorage.getItem(SKEY(k)); if (v!=null) els[k].checked = (v==='1');
-      });
-      try {
-        const c = localStorage.getItem(SKEY('calib')); if (c) state.calib = JSON.parse(c);
-      } catch {}
-      angleBadge.style.display = els.showBadge.checked ? '' : 'none';
-    };
-    ['change','blur','input'].forEach(ev => {
-      Object.values(els).forEach(el => el?.addEventListener(ev, persist));
+    /* Help: separate page + JS, open from Settings header; click main page closes */
+    helpBtn.addEventListener('click', openHelp);
+    helpOverlay.addEventListener('click', (e) => {
+      if (e.target === helpOverlay) closeHelp(); // backdrop click
     });
+    stage.addEventListener('click', () => { closeHelp(); }); // click main page closes help
+
+    async function openHelp(){
+      try {
+        const res = await fetch('help-sheet.html', { cache: 'no-cache' });
+        helpBody.innerHTML = await res.text();
+      } catch { helpBody.innerHTML = '<div style="padding:16px">Help unavailable.</div>'; }
+      // load associated JS once
+      if (!document.getElementById('helpSheetScript')) {
+        const s = document.createElement('script');
+        s.id = 'helpSheetScript';
+        s.src = 'help-sheet.js';
+        document.body.appendChild(s);
+      }
+      helpOverlay.classList.add('open');
+      helpOverlay.setAttribute('aria-hidden','false');
+    }
+    function closeHelp(){
+      helpOverlay.classList.remove('open');
+      helpOverlay.setAttribute('aria-hidden','true');
+    }
+
+    /* Calibration control (shared with main "Calibration" button) */
+    let calRunning = false, calStartTs = 0, calAccum = 0, calCount = 0, calUItimer = null;
+    const calBtn = document.getElementById('calBtn');
+
+    function setCalBtn(running, remainingSec = 0){
+      if (running){
+        calBtn.classList.add('muted');
+        calBtn.disabled = true;
+        calBtn.innerHTML = `<span class="icon">⏱</span>Calibrating… ${Math.max(0, Math.ceil(remainingSec))} s`;
+      } else {
+        calBtn.classList.remove('muted');
+        calBtn.disabled = false;
+        calBtn.innerHTML = `<span class="icon">⏱</span>Calibration`;
+      }
+    }
+
+    calBtn.addEventListener('click', () => {
+      // Open settings and start calibration there
+      if (!settingsDrawer.classList.contains('open')) {
+        settingsDrawer.classList.add('open');
+        applySettingsToUI();
+      }
+      if (!calRunning) {
+        // start
+        startCalibrationUI();
+      }
+    });
+
+    ui.calStartBtn.addEventListener('click', () => {
+      if (!calRunning) startCalibrationUI(); else finishCalibration(true);
+    });
+
+    function startCalibrationUI(){
+      readSettingsFromUI();
+      calRunning = true; calStartTs = performance.now(); calAccum = 0; calCount = 0;
+      ui.calProg.style.width = '0%';
+      ui.calStartBtn.textContent = 'Stop';
+      showStatus('Calibration started… Keep face-up / neutral');
+      // main button state + timer
+      clearInterval(calUItimer);
+      calUItimer = setInterval(() => {
+        const elapsed = (performance.now() - calStartTs)/1000;
+        const remaining = Math.max(0, S.calDur - elapsed);
+        setCalBtn(true, remaining);
+        if (remaining <= 0) { clearInterval(calUItimer); }
+      }, 250);
+      setCalBtn(true, S.calDur);
+    }
+
+    function finishCalibration(stopped=false){
+      if (!calRunning) return;
+      calRunning = false;
+      ui.calStartBtn.textContent = 'Start';
+      ui.calProg.style.width = '0%';
+      clearInterval(calUItimer);
+      setCalBtn(false, 0);
+      if (calCount >= 5) {
+        const baseline = calAccum / calCount;
+        saveSupine(baseline);
+        showStatus(`Calibration ${stopped?'stopped':'done'} • Supine = ${baseline.toFixed(1)}°`);
+      } else {
+        showStatus('Calibration not enough samples');
+      }
+    }
 
     /* ---------- Status overlay ---------- */
     let hideStatusTimer = null;
     function showStatus(msg) {
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
+      console.log('[STATUS]', msg);
       if (msg === 'Connected') {
         if (hideStatusTimer) clearTimeout(hideStatusTimer);
         hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
@@ -322,9 +570,13 @@
       }
     }
     enableAudioBtn.style.display = 'block';
+
     async function tryStartMuted() {
-      try { remoteVideo.muted = true; remoteVideo.volume = 1.0; await remoteVideo.play(); }
-      catch (e) { console.warn('autoplay (muted) blocked:', e); }
+      try {
+        remoteVideo.muted = true;
+        remoteVideo.volume = 1.0;
+        await remoteVideo.play();
+      } catch (e) { console.warn('autoplay (muted) blocked:', e); }
       updateAudioButtons();
     }
     enableAudioBtn.addEventListener('click', async (e) => {
@@ -335,7 +587,8 @@
     });
     disableAudioBtn.addEventListener('click', (e) => {
       e?.stopPropagation?.(); e?.preventDefault?.();
-      remoteVideo.muted = true; updateAudioButtons();
+      remoteVideo.muted = true;
+      updateAudioButtons();
     });
 
     /* ---------- Fullscreen ---------- */
@@ -357,8 +610,15 @@
       beginViewportSetle();
     });
 
-    remoteVideo.addEventListener('loadedmetadata', () => { beginViewportSettle(); });
-    remoteVideo.addEventListener('playing', () => { updateAudioButtons(); beginViewportSettle(); });
+    remoteVideo.addEventListener('loadedmetadata', () => {
+      console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
+      beginViewportSettle();
+    });
+    remoteVideo.addEventListener('playing', () => {
+      console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
+      updateAudioButtons();
+      beginViewportSettle();
+    });
     remoteVideo.addEventListener('resize', beginViewportSettle);
 
     /* ---------- Canvas alignment ---------- */
@@ -370,6 +630,7 @@
       const y = Math.floor((containerH - h) / 2);
       return { left:x, top:y, width:w, height:h };
     }
+
     function alignCanvasToVideo() {
       const stageBox = stage.getBoundingClientRect();
       const videoBox = remoteVideo.getBoundingClientRect();
@@ -391,10 +652,12 @@
       const needW = Math.max(1, Math.round(fit.width * dpr));
       const needH = Math.max(1, Math.round(fit.height * dpr));
       if (faceCanvas.width !== needW || faceCanvas.height !== needH) {
-        faceCanvas.width = needW; faceCanvas.height = needH;
+        faceCanvas.width = needW;
+        faceCanvas.height = needH;
       }
       faceCtx.setTransform(1,0,0,1,0,0);
     }
+
     let settleRAF = 0, settleUntil = 0;
     function beginViewportSettle(durationMs = 1200) {
       settleUntil = performance.now() + durationMs;
@@ -438,9 +701,9 @@
     /* ---------- MediaPipe Face Landmarker (Receiver) ---------- */
     let faceTask = null;
     let faceLoopRunning = false;
-    let faceEnabled = true;         // toggled via DC
+    let faceEnabled = true;         // may be toggled via DC
     let faceWhere = 'receiver';     // 'receiver' | 'sender'
-    let faceDC = null;
+    let faceDC = null;              // DC for AI messages
 
     async function ensureFaceTask() {
       if (faceTask) return faceTask;
@@ -449,18 +712,22 @@
         baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate: "GPU" },
         runningMode: "VIDEO",
         numFaces: 1,
-        // NOTE: we stick to landmarks (no matrices) as requested.
-        // If you want matrices for precise pose, set to true and consume them.
         outputFaceBlendshapes: false,
-        outputFacialTransformationMatrixes: false,
-        minFaceDetectionConfidence: clamp01(els.minDet.value),
-        minTrackingConfidence: clamp01(els.minTrk.value)
+        outputFacialTransformationMatrixes: true,
+        minFaceDetectionConfidence: S.minDet,
+        minTrackingConfidence: S.minTrack,
+        minFacePresenceConfidence: S.minPres
       });
       return faceTask;
     }
+    async function recreateFaceTask(){
+      try { await faceTask?.close?.(); } catch {}
+      faceTask = null;
+      await ensureFaceTask();
+    }
 
     function videoHasFrame(v) {
-      return v && v.readyState >= HAVE_CURRENT_DATA && v.videoWidth  > 0 && v.videoHeight > 0;
+      return v && v.readyState >= HAVE_CURRENT_DATA && v.videoWidth>0 && v.videoHeight>0;
     }
     function waitForVideoFrame(video) {
       if (videoHasFrame(video)) return Promise.resolve();
@@ -477,266 +744,277 @@
       });
     }
 
-    /* ---------- Orientation from landmarks ---------- */
-    // FaceMesh landmark indices (subset)
-    const IDX = {
-      R_EYE_OUT: 33, R_EYE_IN: 133,
-      L_EYE_IN: 362, L_EYE_OUT: 263,
-      NOSE_1: 1, NOSE_4: 4
-    };
-    function lmAt(lm, i){ const p = lm?.[i]; return p ? {x:p.x, y:p.y, z:p.z||0} : null; }
-    function avg(p, q){ return { x:(p.x+q.x)/2, y:(p.y+q.y)/2, z:(p.z+q.z)/2 }; }
-    function sub(a,b){ return { x:a.x-b.x, y:a.y-b.y, z:(a.z||0)-(b.z||0) }; }
-    function len2(a){ return Math.hypot(a.x, a.y); }
-    function toDeg(rad){ return rad * (180/Math.PI); }
+    /* ---------- Prone detection state ---------- */
+    let lastTs = 0;
+    let pitchEma = NaN;
+    let riskEma = 0;
+    let alert = false, aboveT = 0, belowT = 0;
 
-    function eyeCenters(lm){
-      const r0 = lmAt(lm, IDX.R_EYE_OUT), r1 = lmAt(lm, IDX.R_EYE_IN);
-      const l0 = lmAt(lm, IDX.L_EYE_OUT), l1 = lmAt(lm, IDX.L_EYE_IN);
-      if (!r0||!r1||!l0||!l1) return null;
-      return { R: avg(r0, r1), L: avg(l0, l1) };
+    function emaUpdate(prev, x, tau, dt){
+      if (!Number.isFinite(x)) return prev;
+      const a = 1 - Math.exp(-dt / Math.max(0.001, tau));
+      return Number.isFinite(prev) ? (prev + a*(x - prev)) : x;
     }
-    function nosePoint(lm){
-      return lmAt(lm, IDX.NOSE_1) || lmAt(lm, IDX.NOSE_4) || lm?.[0] || null;
-    }
-    function computeAnglesFromLandmarks(lm){
-      const eyes = eyeCenters(lm); const nose = nosePoint(lm);
-      if (!eyes || !nose) return null;
-      const mid = avg(eyes.L, eyes.R);
-      const evec = sub(eyes.L, eyes.R);                 // left minus right
-      const width = Math.max(1e-6, len2(evec));         // normalized width (0..1 units)
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+    function clampNum(v, lo, hi){ v = Number(v); return Number.isFinite(v) ? clamp(v, lo, hi) : lo; }
 
-      // Roll: tilt of eye line
-      const roll = -toDeg(Math.atan2(evec.y, evec.x));  // screen coords (y down), negate for natural sign
-
-      // Nose offset from eye midpoint
-      const n = sub(nose, mid);
-      // Yaw ~ nose x offset relative to face width
-      const yaw = toDeg(Math.atan2(n.x, width * 0.5));      // + right, - left (camera/view coords)
-      // Pitch ~ nose y offset; up is negative screen y
-      const pitch = toDeg(Math.atan2((mid.y - nose.y), width * 0.5));
-
-      // Anchor + scale for drawing (in pixels)
-      const midPx = { x: mid.x * faceCanvas.width, y: mid.y * faceCanvas.height };
-      const facePx = width * Math.hypot(faceCanvas.width, faceCanvas.height) * 0.35;
-
-      return { yaw, pitch, roll, mid, midPx, facePx };
-    }
-
-    /* ---------- Smoothing, calibration, hysteresis ---------- */
-    const state = {
-      ema: { yaw:0, pitch:0, roll:0, primed:false, lastT:0 },
-      calib: { yaw0:0, pitch0:0, roll0:0 },
-      // "attention"/"away" state from hysteresis
-      awayOn: false, awayUntil: 0,
-      lastFacePerf: 0, missFrames: 0
-    };
-    function emaStep(prev, x, a){ return prev + a * (x - prev); }
-    function alphaForTau(dt, tau){ return tau<=0 ? 1 : (1 - Math.exp(-dt / Math.max(1e-3, tau))); }
-
-    function getAnglesSmoothed(raw, nowT){
-      const tau = Number(els.tau.value) || 0.4;
-      const dt = state.ema.lastT ? (nowT - state.ema.lastT)/1000 : 0.016;
-      const a = alphaForTau(dt, tau);
-      if (!state.ema.primed){
-        state.ema.yaw = raw.yaw; state.ema.pitch = raw.pitch; state.ema.roll = raw.roll;
-        state.ema.primed = true;
+    function computeEulerXYZ(m){ // m: Float32Array[16] row-major
+      // Extract rotation (upper-left 3x3)
+      const m00=m[0], m01=m[1], m02=m[2];
+      const m10=m[4], m11=m[5], m12=m[6];
+      const m20=m[8], m21=m[9], m22=m[10];
+      const sy = Math.hypot(m00, m10);
+      let x,y,z;
+      if (sy > 1e-6) {
+        x = Math.atan2(m21, m22);     // pitch around X
+        y = Math.atan2(-m20, sy);     // yaw around Y
+        z = Math.atan2(m10, m00);     // roll around Z
       } else {
-        state.ema.yaw = emaStep(state.ema.yaw, raw.yaw, a);
-        state.ema.pitch = emaStep(state.ema.pitch, raw.pitch, a);
-        state.ema.roll = emaStep(state.ema.roll, raw.roll, a);
+        x = Math.atan2(-m12, m11);
+        y = Math.atan2(-m20, sy);
+        z = 0;
       }
-      state.ema.lastT = nowT;
-      return { yaw: state.ema.yaw, pitch: state.ema.pitch, roll: state.ema.roll };
+      const R2D = 180/Math.PI;
+      return { pitch: x*R2D, yaw: y*R2D, roll: z*R2D };
     }
 
-    function applyCalibration(ang){
-      const c = state.calib;
-      return { yaw: ang.yaw - c.yaw0, pitch: ang.pitch - c.pitch0, roll: ang.roll - c.roll0 };
+    function averagePoint(lms){
+      let sx=0, sy=0, n=lms.length;
+      for (let i=0;i<n;i++){ sx+=lms[i].x; sy+=lms[i].y; }
+      return { x:sx/n, y:sy/n };
     }
 
-    function hysteresisStep(angSm, nowMs){
-      const yawOn = Math.max(0, Number(els.yawOn.value)||15);
-      const yawOff = Math.max(0, yawOn - (Number(els.yawOffDelta.value)||5));
-      const pitchOn = Math.max(0, Number(els.pitchOn.value)||12);
-      const pitchOff = Math.max(0, pitchOn - (Number(els.pitchOffDelta.value)||4));
-      const hold = Math.max(0, Number(els.holdOn.value)||400);
-
-      const absYaw = Math.abs(angSm.yaw), absPitch = Math.abs(angSm.pitch);
-      const wantOn = (absYaw >= yawOn) || (absPitch >= pitchOn);
-
-      if (state.awayOn){
-        if (nowMs < state.awayUntil) return true;
-        const wantOff = (absYaw <= yawOff) && (absPitch <= pitchOff);
-        return !wantOff;
-      } else {
-        if (wantOn){ state.awayUntil = nowMs + hold; return true; }
-        return false;
-      }
-    }
-
-    /* ---------- No-face rule (works in sender mode via watchdog) ---------- */
-    const senderWatch = { timer: 0, lastMsgTs: 0, intervalMs: 200 };
-    function startSenderWatch(){ if (senderWatch.timer) return;
-      senderWatch.lastMsgTs = performance.now();
-      senderWatch.timer = setInterval(()=>{
-        const dt = performance.now() - senderWatch.lastMsgTs;
-        if (dt >= senderWatch.intervalMs * 1.2) noteFaceObservation(false);
-      }, senderWatch.intervalMs);
-    }
-    function stopSenderWatch(){ if (senderWatch.timer){ clearInterval(senderWatch.timer); senderWatch.timer=0; } }
-
-    function noteFaceObservation(hasFace){
-      const useMs = els.nfUseMs.checked;
-      const useFrames = els.nfUseFrames.checked;
-      const msTh = Math.max(100, Number(els.nfMs.value)||500);
-      const pTh = Math.max(1, Number(els.nfFrames.value)||5);
-
-      const t = performance.now();
-      if (hasFace){
-        state.lastFacePerf = t; state.missFrames = 0;
-        return;
-      }
-      // miss
-      state.missFrames++;
-
-      const msSince = state.lastFacePerf ? (t - state.lastFacePerf) : Infinity;
-      const timeRule = useMs && (msSince >= msTh);
-      const frameRule = useFrames && (state.missFrames >= pTh);
-
-      if (timeRule || frameRule){
-        // Clear drawing & show status
-        clearOverlayDrawing();
-        angleBadge.style.display = els.showBadge.checked ? '' : 'none';
-        angleBadge.textContent = 'no face';
-      }
-    }
-
-    /* ---------- Drawing ---------- */
-    function drawMesh(lmArray){
-      const utils = new DrawingUtils(faceCtx);
-      for (const lm of (lmArray||[])) {
-        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_TESSELATION, { color: "#C0C0C070", lineWidth: 1 });
-        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,   { color: "#00FF00", lineWidth: 1 });
-        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,{ color:"#00FF00", lineWidth: 1 });
-        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,    { color: "#00FF00", lineWidth: 1 });
-        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,{ color:"#00FF00", lineWidth: 1 });
-        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,   { color: "#00FF00", lineWidth: 1 });
-        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LIPS,        { color: "#00FF00", lineWidth: 1 });
-        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_IRIS,  { color: "#00FF00", lineWidth: 1 });
-        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_IRIS,   { color: "#00FF00", lineWidth: 1 });
-      }
-    }
-
-    // Rotate 3D vector by yaw(Y), pitch(X), roll(Z) in degrees; return 2D projection
-    function rotProject2D(yawDeg, pitchDeg, rollDeg, scale){
-      const yaw = yawDeg * Math.PI/180, pitch = pitchDeg * Math.PI/180, roll = rollDeg * Math.PI/180;
-      const cy=Math.cos(yaw), sy=Math.sin(yaw);
-      const cx=Math.cos(pitch), sx=Math.sin(pitch);
-      const cz=Math.cos(roll), sz=Math.sin(roll);
-
-      // R = Rz * Ry * Rx (roll→yaw→pitch)
-      const R = [
-        [cz*cy,  cz*sy*sx - sz*cx,  cz*sy*cx + sz*sx],
-        [sz*cy,  sz*sy*sx + cz*cx,  sz*sy*cx - cz*sx],
-        [-sy,    cy*sx,             cy*cx]
-      ];
-      const axes = [
-        { v:[1,0,0], name:'X' },
-        { v:[0,1,0], name:'Y' },
-        { v:[0,0,1], name:'Z' }
-      ];
-      return axes.map(({v,name})=>{
-        const x = R[0][0]*v[0] + R[0][1]*v[1] + R[0][2]*v[2];
-        const y = R[1][0]*v[0] + R[1][1]*v[1] + R[1][2]*v[2];
-        const z = R[2][0]*v[0] + R[2][1]*v[1] + R[2][2]*v[2];
-        const persp = 1 / (1 - 0.4*z); // cheap foreshortening
-        return { name, x: x*scale*persp, y: y*scale*persp };
-      });
-    }
-
-    function drawGizmo(midPx, angDelta, faceScale){
-      const len = Math.max(6, Number(els.gizmoScale.value||0.8) * faceScale);
-      const vecs = rotProject2D(angDelta.yaw, angDelta.pitch, angDelta.roll, len);
-      const colors = { X:'#ef4444', Y:'#22c55e', Z:'#60a5fa' };
-
-      faceCtx.save();
-      faceCtx.lineWidth = 3;
-      ['X','Y','Z'].forEach((axis,i)=>{
-        const v = vecs[i];
+    /* draw 3D axis triad */
+    function drawAxisTriad(m, centroid, scalePx){
+      let xaxis = { x:m[0], y:m[1], z:m[2]  };
+      let yaxis = { x:m[4], y:m[5], z:m[6]  };
+      let zaxis = { x:m[8], y:m[9], z:m[10] };
+      const norm = (v)=>{ const n = Math.hypot(v.x,v.y,v.z)||1; return {x:v.x/n, y:v.y/n, z:v.z/n}; };
+      xaxis = norm(xaxis); yaxis = norm(yaxis); zaxis = norm(zaxis);
+      const cx = centroid.x * faceCanvas.width;
+      const cy = centroid.y * faceCanvas.height;
+      const drawVec = (v, style)=>{
+        faceCtx.save();
+        faceCtx.setLineDash([]);                 // solid
+        faceCtx.lineWidth = AXIS_STYLE.width;    // thicker
+        faceCtx.lineCap = 'round';
+        faceCtx.strokeStyle = style.stroke;
+        faceCtx.shadowColor = style.stroke;      // subtle contrast on video
+        faceCtx.shadowBlur = 2;
+        const tipX = cx + v.x*scalePx, tipY = cy - v.y*scalePx;
+        faceCtx.beginPath(); faceCtx.moveTo(cx, cy); faceCtx.lineTo(tipX, tipY); faceCtx.stroke();
+        const ang = Math.atan2(-v.y, v.x), ah = 9;
         faceCtx.beginPath();
-        faceCtx.moveTo(midPx.x, midPx.y);
-        faceCtx.lineTo(midPx.x + v.x, midPx.y + v.y);
-        faceCtx.strokeStyle = colors[axis];
+        faceCtx.moveTo(tipX, tipY);
+        faceCtx.lineTo(tipX - ah*Math.cos(ang - Math.PI/6), tipY - ah*Math.sin(ang - Math.PI/6));
+        faceCtx.moveTo(tipX, tipY);
+        faceCtx.lineTo(tipX - ah*Math.cos(ang + Math.PI/6), tipY - ah*Math.sin(ang + Math.PI/6));
         faceCtx.stroke();
-      });
+        faceCtx.restore();
+      };
+      drawVec(xaxis, AXIS_STYLE.x);
+      drawVec(yaxis, AXIS_STYLE.y);
+      drawVec(zaxis, AXIS_STYLE.z);
+    }
+
+    function drawFaceAndHUD(result, opts){
+      const { showLM, showOrient, yawDeg, pitchDeg, rollDeg, relPitchDeg, risk, alert, rotMat } = opts;
+      faceCtx.save();
+      faceCtx.clearRect(0,0, faceCanvas.width, faceCanvas.height);
+      const utils = new DrawingUtils(faceCtx);
+
+      if (showLM && result.faceLandmarks?.length) {
+        const lm = result.faceLandmarks[0];
+        try { utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_TESSELATION, { color:"#C0C0C070", lineWidth:1 }); } catch {}
+        try { utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE, { color:"#00FF00", lineWidth:1 }); } catch {}
+        try { utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,  { color:"#00FF00", lineWidth:1 }); } catch {}
+        try { utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LIPS,      { color:"#00FF00", lineWidth:1 }); } catch {}
+        try { utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, { color:"#00FF00", lineWidth:1 }); } catch {}
+      }
+
+      const hasPose = Number.isFinite(yawDeg) && Number.isFinite(pitchDeg) && Number.isFinite(rollDeg) && result.faceLandmarks?.length;
+      if (hasPose){
+        const cen = averagePoint(result.faceLandmarks[0]);
+        const cx = cen.x * faceCanvas.width;
+        const cy = cen.y * faceCanvas.height;
+        const minDim = Math.min(faceCanvas.width, faceCanvas.height);
+
+        // 3D axes
+        if (S.showAxes && rotMat && rotMat.length >= 16){
+          const axisLen = minDim * 0.10 * (S.arrowScale || 1);
+          drawAxisTriad(rotMat, cen, axisLen);
+        }
+
+        // Head-direction arrow
+        if (S.showOrient){
+          const yawRad = yawDeg * Math.PI/180;
+          const pitchRad = (Number.isFinite(relPitchDeg) ? relPitchDeg : 0) * Math.PI/180;
+          const L = minDim * 0.14 * (S.arrowScale || 1);
+          const dx = -Math.sin(yawRad) * L;             // your chosen convention
+          const dy = -Math.sin(pitchRad) * L;
+
+          faceCtx.beginPath();
+          faceCtx.moveTo(cx, cy);
+          faceCtx.lineTo(cx + dx, cy + dy);
+          faceCtx.lineWidth = 4;
+          const mid = (S.thrOn + S.thrOff) / 2;
+          faceCtx.strokeStyle = alert ? '#ff6b6b' : (risk>mid ? '#f6ad55' : '#9ae6b4');
+          faceCtx.stroke();
+
+          const ah = 10, ang = Math.atan2(dy, dx);
+          faceCtx.beginPath();
+          faceCtx.moveTo(cx+dx, cy+dy);
+          faceCtx.lineTo(cx+dx - ah*Math.cos(ang - Math.PI/6), cy+dy - ah*Math.sin(ang - Math.PI/6));
+          faceCtx.lineTo(cx+dx - ah*Math.cos(ang + Math.PI/6), cy+dy - ah*Math.sin(ang + Math.PI/6));
+          faceCtx.closePath();
+          faceCtx.fillStyle = faceCtx.strokeStyle;
+          faceCtx.fill();
+        }
+      }
       faceCtx.restore();
     }
 
-    function updateBadge(angDelta, away, hasFace){
-      if (!els.showBadge.checked){ angleBadge.style.display = 'none'; return; }
-      angleBadge.style.display = '';
-      if (!hasFace){ angleBadge.textContent = 'no face'; return; }
-      const yaw = Math.round(angDelta.yaw), pitch = Math.round(angDelta.pitch), roll = Math.round(angDelta.roll);
-      angleBadge.textContent = `yaw ${yaw}°\npitch ${pitch}°\nroll ${roll}°${away ? '\nstate: AWAY' : '\nstate: ok'}`;
+    function updatePill(risk, alertOn){
+      alertPill.classList.remove('prone-safe','prone-risk','prone-on');
+      const mid = (S.thrOn + S.thrOff) / 2;
+      const cls = alertOn ? 'prone-on' : (risk>mid ? 'prone-risk' : 'prone-safe');
+      alertPill.classList.add(cls);
+      alertPill.textContent = alertOn ? 'PRONE suspected' : (risk>mid ? 'Risk rising' : 'Safe');
     }
 
-    function renderFromLandmarks(lmArray){
-      if (!faceCanvas.width || !faceCanvas.height) return;
-      faceCtx.clearRect(0,0, faceCanvas.width, faceCanvas.height);
+    /* HUD text + risk bar (percent of max 0.6) */
+    function updateHud(pitchDownDeg, risk, yawDeg, pitchDeg, rollDeg, relPitchDeg){
+      const fmt = v => Number.isFinite(v) ? v.toFixed(1) : '–';
+      hudLines.textContent =
+        `pitch↓: ${fmt(pitchDownDeg)}°  •  risk: ${risk.toFixed(2)}\n` +
+        `yaw: ${fmt(yawDeg)}°  pitch(raw): ${fmt(pitchDeg)}°  roll: ${fmt(rollDeg)}°  pitch(rel): ${fmt(relPitchDeg)}°`;
 
-      if (!lmArray?.length){ updateBadge(null, false, false); return; }
+      // Risk as % of 0.6
+      const pct = Math.round(clamp((risk / 0.6) * 100, 0, 100));
+      riskFill.style.width = pct + '%';
+      riskPct.textContent = pct + '%';
 
-      const lm = lmArray[0];
-      const raw = computeAnglesFromLandmarks(lm);
-      if (!raw){ updateBadge(null, false, false); return; }
-
-      const nowT = performance.now();
-      const sm = getAnglesSmoothed(raw, nowT);
-      const delta = applyCalibration(sm);
-      const away = hysteresisStep(delta, nowT);
-      state.awayOn = away;
-
-      if (els.showMesh.checked) drawMesh(lmArray);
-      if (els.showGizmo.checked) drawGizmo(raw.midPx, delta, raw.facePx);
-      updateBadge(delta, away, true);
+      // Color code like motion: green < 50%, orange 50–<100%, red 100%
+      if (pct >= 100) {
+        riskFill.style.background = '#ff6b6b';
+      } else if (pct >= 50) {
+        riskFill.style.background = '#f6ad55';
+      } else {
+        riskFill.style.background = '#9ae6b4';
+      }
     }
 
-    /* ---------- Face loops ---------- */
     async function startReceiverFaceLoop() {
       if (faceLoopRunning) return;
       await ensureFaceTask();
       await waitForVideoFrame(remoteVideo);
 
       faceLoopRunning = true;
+      console.log('[FACE][receiver] inference START (receiver)');
+
       const useRVFC = 'requestVideoFrameCallback' in remoteVideo;
 
       const onFrame = () => {
-        if (!faceLoopRunning || !faceEnabled || faceWhere !== 'receiver') return;
+        if (!faceLoopRunning || !faceEnabled || faceWhere !== 'receiver') {
+          console.log('[FACE][receiver] inference STOP (receiver)');
+          return;
+        }
 
         if (!videoHasFrame(remoteVideo)) {
           faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
-          noteFaceObservation(false);
-          scheduleNext(); return;
+          scheduleNext();
+          return;
         }
 
-        try {
-          const ts = performance.now();
-          const result = faceTask.detectForVideo(remoteVideo, ts);
-          const hasFace = !!(result?.faceLandmarks?.length);
-          noteFaceObservation(hasFace);
+        const ts = performance.now();
+        const dt = lastTs ? (ts - lastTs)/1000 : 0.016;
+        lastTs = ts;
 
-          if (hasFace) {
-            renderFromLandmarks(result.faceLandmarks);
-            if (faceDC?.readyState === 'open') {
-              // Optional: stream to sender/debugger
-              faceDC.send(JSON.stringify({ type:'face', landmarks: result.faceLandmarks, ts }));
+        try {
+          const result = faceTask.detectForVideo(remoteVideo, ts);
+          const present = !!(result?.faceLandmarks?.length);
+
+          let yawDeg = NaN, pitchDeg = NaN, rollDeg = NaN, rotMat = null, relPitchDeg = NaN;
+
+          if (present && result.facialTransformationMatrixes?.length){
+            const mat = result.facialTransformationMatrixes[0];
+            const m = (mat instanceof Float32Array || Array.isArray(mat)) ? mat : (mat?.data || []);
+            if (m.length >= 16) {
+              const e = computeEulerXYZ(m);
+              yawDeg = e.yaw;
+              pitchDeg = e.pitch;
+              rollDeg = e.roll;
+              rotMat = m; // pass to drawing for axes
+            }
+          }
+          // Signed relative pitch (baseline- and Flip-corrected)
+          if (Number.isFinite(pitchDeg) && Number.isFinite(pitchSupine)) {
+            relPitchDeg = (pitchDeg - pitchSupine) * (S.flipPitch ? -1 : 1);
+          }
+          // Calibration sampling
+          if (calRunning) {
+            const elapsed = (ts - calStartTs)/1000;
+            ui.calProg.style.width = clamp((elapsed / S.calDur)*100, 0, 100) + '%';
+            // update external Calibration button timer
+            setCalBtn(true, Math.max(0, S.calDur - elapsed));
+            if (present && Number.isFinite(pitchDeg)) { calAccum += pitchDeg; calCount++; }
+            if (elapsed >= S.calDur) finishCalibration(false);
+          }
+
+          // Prone scoring only if enabled
+          let risk = 0;
+          if (S.enabled) {
+            const faceRisk = present ? 0 : 1; // 0 when visible, 1 when missing
+            const pitchDownNow = Number.isFinite(relPitchDeg) ? Math.max(0, -relPitchDeg) : NaN;
+
+            // Map pitchDownNow into [0,1] around thetaOn with a soft slope
+            let r2 = 0;
+            if (Number.isFinite(pitchDownNow)) {
+              const over = pitchDownNow - S.thetaOn;
+              r2 = clamp((over + 10) / 30, 0, 1);
+            }
+
+            // Combine risks (max fusion)
+            const w1=0.6, w2=0.8;
+            const rInst = Math.max(w1*faceRisk, w2*r2);
+            riskEma = emaUpdate(riskEma, rInst, S.emaTau, dt);
+            pitchEma = emaUpdate(pitchEma, pitchDownNow, S.emaTau, dt);
+            risk = riskEma;
+
+            // Hysteresis + dwell
+            if (!alert) {
+              if (risk > S.thrOn) { aboveT += dt; belowT = 0; }
+              else { aboveT = Math.max(0, aboveT - dt*0.5); } // decay
+              if (aboveT >= S.dwellOn) {
+                alert = true; aboveT = 0; belowT = 0;
+                showStatus('PRONE suspected');
+              }
+            } else {
+              if (risk < S.thrOff) { belowT += dt; aboveT = 0; }
+              else { belowT = Math.max(0, belowT - dt*0.5); }
+              if (belowT >= S.dwellOff) {
+                alert = false; aboveT = 0; belowT = 0;
+                showStatus('Recovered from prone');
+              }
             }
           } else {
-            clearOverlayDrawing();
+            aboveT = belowT = 0;
           }
+
+          // Draw overlay + HUD/pills
+          drawFaceAndHUD(result, {
+            showLM: S.showLM,
+            showOrient: S.showOrient,
+            yawDeg, pitchDeg, rollDeg, relPitchDeg,
+            risk: riskEma||0, alert,
+            rotMat
+          });
+
+          updatePill(riskEma||0, alert);
+          updateHud(Number.isFinite(pitchEma)?pitchEma:NaN, riskEma||0, yawDeg, pitchDeg, rollDeg, relPitchDeg);
+
         } catch (err) {
-          console.warn('[FACE][receiver] detect error', err);
+          console.warn('[FACE][receiver] detect error (retrying next frame)', err);
         } finally {
           scheduleNext();
         }
@@ -746,6 +1024,7 @@
         if (useRVFC) remoteVideo.requestVideoFrameCallback(onFrame);
         else requestAnimationFrame(onFrame);
       };
+
       scheduleNext();
     }
 
@@ -756,14 +1035,9 @@
 
     function applyFaceMode() {
       setOverlayVisible(faceEnabled);
-      if (!faceEnabled) { stopReceiverFaceLoop(); stopSenderWatch(); return; }
-      if (faceWhere === 'receiver') {
-        stopSenderWatch();
-        startReceiverFaceLoop();
-      } else {
-        stopReceiverFaceLoop();    // draw only what we receive
-        startSenderWatch();        // count misses if no DC messages
-      }
+      if (!faceEnabled) { stopReceiverFaceLoop(); return; }
+      if (faceWhere === 'receiver') startReceiverFaceLoop();
+      else stopReceiverFaceLoop(); // sender mode: draw only what we receive
     }
 
     /* ---------- ReceiverCore hookup ---------- */
@@ -778,6 +1052,7 @@
           tryStartMuted();
           attachStreamEndHandlers(stream);
         }
+        console.log('[TRACK][receiver]', track.kind);
         beginViewportSettle();
       },
 
@@ -785,11 +1060,14 @@
         if (state === 'connected' || state === 'completed') {
           showStatus('Connected');
         } else if (state === 'failed') {
-          clearOverlayDrawing(); showStatus('ICE: failed – retrying…');
+          clearOverlayDrawing();
+          showStatus('ICE: failed – retrying…');
         } else if (state === 'disconnected') {
-          clearOverlayDrawing(); showStatus('ICE: disconnected');
+          clearOverlayDrawing();
+          showStatus('ICE: disconnected');
         } else if (state === 'closed') {
-          clearOverlayDrawing(); showStatus('ICE: closed');
+          clearOverlayDrawing();
+          showStatus('ICE: closed');
         } else {
           showStatus('ICE: ' + state);
         }
@@ -797,77 +1075,59 @@
 
       onCreatePC: (pc) => {
         const ch = pc.createDataChannel('pose');
-        ch.onopen  = () => { console.log('[DC] pose open'); startSenderWatch(); };
-        ch.onclose = () => { console.log('[DC] pose close'); stopSenderWatch(); };
-        ch.onerror = (e) => console.warn('[DC] pose error', e);
+        ch.onopen  = () => console.log('[DC][receiver] pose DC open');
+        ch.onclose = () => console.log('[DC][receiver] pose DC close');
+        ch.onerror = (e) => console.warn('[DC][receiver] pose DC error', e);
         ch.onmessage = (ev) => {
-          let msg; try { msg = JSON.parse(ev.data); } catch { return; }
-
-          // Any face payload = recent activity
-          if (msg.type === 'face') {
-            senderWatch.lastMsgTs = performance.now();
-            noteFaceObservation(true);
-            if (faceEnabled && faceWhere === 'sender') renderFromLandmarks(msg.landmarks);
-            return;
-          }
-          if (msg.type === 'ai-modes' && msg.face) {
-            faceEnabled = !!msg.face.enabled;
-            faceWhere   = msg.face.where || 'sender';
-            applyFaceMode();
-          } else if (msg.type === 'face-mode') {
-            faceEnabled = !!msg.enabled;
-            faceWhere   = msg.where || 'sender';
-            applyFaceMode();
-          }
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'ai-modes' && msg.face) {
+              faceEnabled = !!msg.face.enabled;
+              faceWhere   = msg.face.where || 'sender';
+              applyFaceMode();
+            } else if (msg.type === 'face-mode') {
+              faceEnabled = !!msg.enabled;
+              faceWhere   = msg.where || 'sender';
+              applyFaceMode();
+            } else if (msg.type === 'face') {
+              if (faceEnabled && faceWhere === 'sender') {
+                // (not used here)
+              }
+            }
+          } catch {}
         };
-        faceDC = ch; // store for optional outbound debug stream
+        faceDC = ch;
       },
     });
 
     // Clear drawings on common video stoppage states
     ['pause','ended','emptied','stalled','suspend','waiting'].forEach((ev) => {
-      remoteVideo.addEventListener(ev, ()=>{ clearOverlayDrawing(); noteFaceObservation(false); }, { passive: true });
+      remoteVideo.addEventListener(ev, clearOverlayDrawing, { passive: true });
     });
 
     function attachStreamEndHandlers(stream) {
       if (!stream) return;
       stream.getVideoTracks().forEach((t) => {
-        t.addEventListener('ended',  ()=>{ clearOverlayDrawing(); noteFaceObservation(false); });
-        t.addEventListener('mute',   ()=>{ clearOverlayDrawing(); noteFaceObservation(false); });
+        t.addEventListener('ended',  clearOverlayDrawing);
+        t.addEventListener('mute',   clearOverlayDrawing);
       });
       stream.addEventListener('removetrack', (e) => {
-        if (e.track?.kind === 'video') { clearOverlayDrawing(); noteFaceObservation(false); }
+        if (e.track?.kind === 'video') clearOverlayDrawing();
       });
     }
 
     window.addEventListener('beforeunload', () => {
       try { core?.stop?.(); } catch {}
       if (hideStatusTimer) clearTimeout(hideStatusTimer);
-      stopReceiverFaceLoop(); stopSenderWatch();
+      stopReceiverFaceLoop();
     });
 
-    // Calibration buttons
-    els.btnCalib.onclick = () => {
-      // Use current smoothed orientation if available; else zeros
-      state.calib = {
-        yaw0: state.ema.primed ? state.ema.yaw : 0,
-        pitch0: state.ema.primed ? state.ema.pitch : 0,
-        roll0: state.ema.primed ? state.ema.roll : 0
-      };
-      persist();
-    };
-    els.btnReset.onclick = () => {
-      state.calib = { yaw0:0, pitch0:0, roll0:0 };
-      persist();
-    };
+    // Settings init
+    applySettingsToUI();
 
-    // Go!
-    (function boot(){
-      restore();
-      core.start();
-      setOverlayVisible(true);     // show canvas immediately for alignment
-      showStatus('Ready.');
-    })();
+    // Start!
+    core.start();
+    setOverlayVisible(true); // show canvas immediately for alignment
 
     // tiny typo guard used in logs
     function beginViewportSetle(){ beginViewportSettle(); }
