@@ -260,6 +260,16 @@
     const alertPill = document.getElementById('alertPill');
     const hud = document.getElementById('hud');
 
+    // Muted, semi-transparent axis colors (standard mapping kept)
+    // X=red-ish, Y=green-ish, Z=blue-ish
+    const AXIS_STYLE = {
+      x: { stroke: 'rgba(200, 80, 80, 0.65)'  }, // brick red
+      y: { stroke: 'rgba( 50,130, 95, 0.65)'  }, // deep emerald (darker than arrow's mint)
+      z: { stroke: 'rgba( 90,120,210, 0.75)'  }, // slate/royal blue
+      width: 2,
+      dash: [4, 3]
+    };
+
     /* ---------- Settings state ---------- */
     const defaults = {
       enabled: true,
@@ -659,29 +669,36 @@
       const cx = centroid.x * faceCanvas.width;
       const cy = centroid.y * faceCanvas.height;
 
-      const drawVec = (v, color)=>{
+      const drawVec = (v, style)=>{
+        faceCtx.save();
+        faceCtx.setLineDash(AXIS_STYLE.dash);
+        faceCtx.lineWidth = AXIS_STYLE.width;
+        faceCtx.strokeStyle = style.stroke;
+      
+        // line
         faceCtx.beginPath();
         faceCtx.moveTo(cx, cy);
-        faceCtx.lineTo(cx + v.x*scalePx, cy - v.y*scalePx); // canvas Y downward
-        faceCtx.lineWidth = 3;
-        faceCtx.strokeStyle = color;
+        faceCtx.lineTo(cx + v.x*scalePx, cy - v.y*scalePx);
         faceCtx.stroke();
-        // arrowhead
-        const ang = Math.atan2(-v.y, v.x);
-        const ah = 8;
+      
+        // small arrowhead
+        const ang = Math.atan2(-v.y, v.x), ah = 7;
         faceCtx.beginPath();
-        faceCtx.moveTo(cx + v.x*scalePx, cy - v.y*scalePx);
-        faceCtx.lineTo(cx + v.x*scalePx - ah*Math.cos(ang - Math.PI/6), cy - v.y*scalePx - ah*Math.sin(ang - Math.PI/6));
-        faceCtx.lineTo(cx + v.x*scalePx - ah*Math.cos(ang + Math.PI/6), cy - v.y*scalePx - ah*Math.sin(ang + Math.PI/6));
-        faceCtx.closePath();
-        faceCtx.fillStyle = color;
-        faceCtx.fill();
+        const tipX = cx + v.x*scalePx, tipY = cy - v.y*scalePx;
+        faceCtx.moveTo(tipX, tipY);
+        faceCtx.lineTo(tipX - ah*Math.cos(ang - Math.PI/6), tipY - ah*Math.sin(ang - Math.PI/6));
+        faceCtx.moveTo(tipX, tipY);
+        faceCtx.lineTo(tipX - ah*Math.cos(ang + Math.PI/6), tipY - ah*Math.sin(ang + Math.PI/6));
+        faceCtx.stroke();
+        faceCtx.restore();
       };
 
+
       // X (right, red), Y (up, green), Z (camera-forward, blue)
-      drawVec(xaxis, '#ff6666');
-      drawVec(yaxis, '#66ff66');
-      drawVec(zaxis, '#66a2ff');
+      drawVec(xaxis, AXIS_STYLE.x); // X (red)
+      drawVec(yaxis, AXIS_STYLE.y); // Y (green)
+      drawVec(zaxis, AXIS_STYLE.z); // Z (blue)
+
     }
 
     function drawFaceAndHUD(result, opts){
