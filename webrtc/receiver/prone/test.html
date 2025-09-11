@@ -66,7 +66,7 @@
     }
     .overlay.hidden { display: none; }
 
-    /* Top-left alert pill */
+    /* Top-left alert pill (namespaced classes to avoid collisions) */
     #alertPill {
       position: fixed; left: 12px; top: 12px; z-index: 6;
       padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
@@ -74,9 +74,10 @@
       background: rgba(255,255,255,0.06);
       backdrop-filter: blur(6px);
     }
-    #alertPill.safe { color:#9ae6b4; border-color:#1f3b2a; background:rgba(25,60,35,0.45); }
-    #alertPill.risky { color:#f6ad55; border-color:#4a321d; background:rgba(74,50,29,0.5); }
-    #alertPill.alert { color:#fecaca; border-color:#5a1e1e; background:rgba(90,30,30,0.55); }
+    #alertPill.prone-safe { color:#9ae6b4; border-color:#1f3b2a; background:rgba(25,60,35,0.45); }
+    #alertPill.prone-risk { color:#f6ad55; border-color:#4a321d; background:rgba(74,50,29,0.5); }
+    #alertPill.prone-on   { color:#fecaca; border-color:#5a1e1e; background:rgba(90,30,30,0.55); }
+    #alertPill::before, #alertPill::after { content:'' !important; }
 
     /* Settings drawer (compact, like your audio tool) */
     #settingsBtn { position: fixed; right: 16px; bottom: 16px; z-index: 7; }
@@ -106,12 +107,12 @@
     .prog { height:8px; border-radius:999px; background:#111; border:1px solid #222; overflow:hidden; }
     .prog > i { display:block; height:100%; width:0%; background:linear-gradient(90deg,#15c,#3df); }
 
-    /* Small HUD in-canvas text */
+    /* HUD box */
     .hud {
       position: fixed; right: 12px; top: 12px; z-index: 6;
       padding: 6px 8px; font: 12px/1.3 -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       color:#ddd; background: rgba(0,0,0,0.45); border:1px solid rgba(255,255,255,0.12);
-      border-radius:10px;
+      border-radius:10px; white-space: pre;
     }
   </style>
 </head>
@@ -140,8 +141,8 @@
   </script>
 
   <!-- Top-left alert pill -->
-  <div id="alertPill" class="safe">Safe</div>
-  <div id="hud" class="hud">pitch: –  • risk: –</div>
+  <div id="alertPill" class="prone-safe">Safe</div>
+  <div id="hud" class="hud">pitch↓: –°  •  risk: –</div>
 
   <!-- Bottom controls -->
   <div id="controls">
@@ -163,6 +164,8 @@
         <div class="row"><label>Enable prone detection</label><input id="st-enabled" type="checkbox"></div>
         <div class="row"><label>Show landmarks</label><input id="st-showLM" type="checkbox"></div>
         <div class="row"><label>Show orientation arrow</label><input id="st-showOrient" type="checkbox"></div>
+        <div class="row"><label>Show 3D axes</label><input id="st-showAxes" type="checkbox"></div>
+        <div class="row"><label>Arrow length (×)</label><input id="st-arrowScale" type="number" min="0.5" max="3" step="0.1"></div>
         <div class="row"><label>Flip pitch sign (if reversed)</label><input id="st-flipPitch" type="checkbox"></div>
       </div>
 
@@ -225,12 +228,12 @@
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
-    const LS_KEY = "naptio:face-prone-settings:v1";
+    const LS_KEY = "naptio:face-prone-settings:v1.1";
     const LS_SUPINE_KEY = "naptio:face-prone-supine:" + room;
 
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
-    // MediaPipe assets (keep Tasks version in sync with the import above)
+    // MediaPipe assets
     const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     const WASM_DIR = TASKS_URL + "/wasm";
     const FACE_MODEL_URL =
@@ -262,6 +265,8 @@
       enabled: true,
       showLM: true,
       showOrient: true,
+      showAxes: true,        // NEW
+      arrowScale: 1.8,       // NEW (makes arrow longer)
       flipPitch: false,
       emaTau: 2.0,
       thetaOn: 55,   // degrees below supine
@@ -283,6 +288,8 @@
       enabled: $('st-enabled'),
       showLM: $('st-showLM'),
       showOrient: $('st-showOrient'),
+      showAxes: $('st-showAxes'),
+      arrowScale: $('st-arrowScale'),
       flipPitch: $('st-flipPitch'),
       emaTau: $('st-emaTau'),
       thetaOn: $('st-thetaOn'),
@@ -305,6 +312,8 @@
       ui.enabled.checked = !!S.enabled;
       ui.showLM.checked = !!S.showLM;
       ui.showOrient.checked = !!S.showOrient;
+      ui.showAxes.checked = !!S.showAxes;
+      ui.arrowScale.value = S.arrowScale;
       ui.flipPitch.checked = !!S.flipPitch;
       ui.emaTau.value = S.emaTau;
       ui.thetaOn.value = S.thetaOn;
@@ -322,6 +331,8 @@
       S.enabled = ui.enabled.checked;
       S.showLM = ui.showLM.checked;
       S.showOrient = ui.showOrient.checked;
+      S.showAxes = ui.showAxes.checked;
+      S.arrowScale = clampNum(parseFloat(ui.arrowScale.value), 0.5, 3);
       S.flipPitch = ui.flipPitch.checked;
       S.emaTau = clampNum(parseFloat(ui.emaTau.value), 0.1, 20);
       S.thetaOn = clampNum(parseFloat(ui.thetaOn.value), 5, 120);
@@ -357,9 +368,6 @@
     closeSettingsBtn.addEventListener('click', () => settingsDrawer.classList.remove('open'));
     settingsDrawer.addEventListener('change', (e) => {
       readSettingsFromUI();
-      if (['st-enabled','st-showLM','st-showOrient'].includes(e.target.id)) {
-        // visual changes immediate
-      }
     });
     ui.reinitFaceBtn.addEventListener('click', async () => {
       readSettingsFromUI();
@@ -638,15 +646,52 @@
       return { x:sx/n, y:sy/n };
     }
 
+    /* --- NEW: draw 3D axis triad using the rotation part of the 4x4 matrix --- */
+    function drawAxisTriad(m, centroid, scalePx){
+      // Extract rotation columns
+      let xaxis = { x:m[0], y:m[1], z:m[2]  };
+      let yaxis = { x:m[4], y:m[5], z:m[6]  };
+      let zaxis = { x:m[8], y:m[9], z:m[10] };
+
+      const norm = (v)=>{ const n = Math.hypot(v.x,v.y,v.z)||1; return {x:v.x/n, y:v.y/n, z:v.z/n}; };
+      xaxis = norm(xaxis); yaxis = norm(yaxis); zaxis = norm(zaxis);
+
+      const cx = centroid.x * faceCanvas.width;
+      const cy = centroid.y * faceCanvas.height;
+
+      const drawVec = (v, color)=>{
+        faceCtx.beginPath();
+        faceCtx.moveTo(cx, cy);
+        faceCtx.lineTo(cx + v.x*scalePx, cy - v.y*scalePx); // canvas Y downward
+        faceCtx.lineWidth = 3;
+        faceCtx.strokeStyle = color;
+        faceCtx.stroke();
+        // arrowhead
+        const ang = Math.atan2(-v.y, v.x);
+        const ah = 8;
+        faceCtx.beginPath();
+        faceCtx.moveTo(cx + v.x*scalePx, cy - v.y*scalePx);
+        faceCtx.lineTo(cx + v.x*scalePx - ah*Math.cos(ang - Math.PI/6), cy - v.y*scalePx - ah*Math.sin(ang - Math.PI/6));
+        faceCtx.lineTo(cx + v.x*scalePx - ah*Math.cos(ang + Math.PI/6), cy - v.y*scalePx - ah*Math.sin(ang + Math.PI/6));
+        faceCtx.closePath();
+        faceCtx.fillStyle = color;
+        faceCtx.fill();
+      };
+
+      // X (right, red), Y (up, green), Z (camera-forward, blue)
+      drawVec(xaxis, '#ff6666');
+      drawVec(yaxis, '#66ff66');
+      drawVec(zaxis, '#66a2ff');
+    }
+
     function drawFaceAndHUD(result, opts){
-      const { showLM, showOrient, yawDeg, pitchDeg, risk, alert } = opts;
+      const { showLM, showOrient, yawDeg, pitchDeg, rollDeg, risk, alert, rotMat } = opts;
       faceCtx.save();
       faceCtx.clearRect(0,0, faceCanvas.width, faceCanvas.height);
       const utils = new DrawingUtils(faceCtx);
 
       if (showLM && result.faceLandmarks?.length) {
         const lm = result.faceLandmarks[0];
-        // Use normalized connectors; DrawingUtils handles normalization → canvas
         try { utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_TESSELATION, { color:"#C0C0C070", lineWidth:1 }); } catch {}
         try { utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE, { color:"#00FF00", lineWidth:1 }); } catch {}
         try { utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,  { color:"#00FF00", lineWidth:1 }); } catch {}
@@ -654,45 +699,59 @@
         try { utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, { color:"#00FF00", lineWidth:1 }); } catch {}
       }
 
-      if (showOrient && Number.isFinite(yawDeg) && Number.isFinite(pitchDeg) && result.faceLandmarks?.length){
-        // Arrow anchored at face centroid; project simple yaw/pitch to 2D delta
+      const hasPose = Number.isFinite(yawDeg) && Number.isFinite(pitchDeg) && Number.isFinite(rollDeg) && result.faceLandmarks?.length;
+      if (hasPose){
         const cen = averagePoint(result.faceLandmarks[0]);
         const cx = cen.x * faceCanvas.width;
         const cy = cen.y * faceCanvas.height;
-        const L = Math.min(faceCanvas.width, faceCanvas.height) * 0.07;
-        const yawRad = yawDeg * Math.PI/180;
-        const pitchRad = pitchDeg * Math.PI/180;
-        const dx = Math.sin(yawRad) * L;
-        const dy = -Math.sin(pitchRad) * L;
+        const minDim = Math.min(faceCanvas.width, faceCanvas.height);
 
-        // Arrow
-        faceCtx.beginPath();
-        faceCtx.moveTo(cx, cy);
-        faceCtx.lineTo(cx + dx, cy + dy);
-        faceCtx.lineWidth = 3;
-        faceCtx.strokeStyle = alert ? '#ff6b6b' : (risk>0.5 ? '#f6ad55' : '#9ae6b4');
-        faceCtx.stroke();
+        // 3D axes
+        if (S.showAxes && rotMat && rotMat.length >= 16){
+          const axisLen = minDim * 0.10 * (S.arrowScale || 1);
+          drawAxisTriad(rotMat, cen, axisLen);
+        }
 
-        // Arrowhead
-        const ah = 8, ang = Math.atan2(dy, dx);
-        faceCtx.beginPath();
-        faceCtx.moveTo(cx+dx, cy+dy);
-        faceCtx.lineTo(cx+dx - ah*Math.cos(ang - Math.PI/6), cy+dy - ah*Math.sin(ang - Math.PI/6));
-        faceCtx.lineTo(cx+dx - ah*Math.cos(ang + Math.PI/6), cy+dy - ah*Math.sin(ang + Math.PI/6));
-        faceCtx.closePath();
-        faceCtx.fillStyle = faceCtx.strokeStyle;
-        faceCtx.fill();
+        // Head-direction arrow (longer; scaled)
+        if (S.showOrient){
+          const yawRad = yawDeg * Math.PI/180;
+          const pitchRad = pitchDeg * Math.PI/180;
+          const L = minDim * 0.14 * (S.arrowScale || 1);
+          const dx = Math.sin(yawRad) * L;
+          const dy = -Math.sin(pitchRad) * L;
+
+          faceCtx.beginPath();
+          faceCtx.moveTo(cx, cy);
+          faceCtx.lineTo(cx + dx, cy + dy);
+          faceCtx.lineWidth = 4;
+          faceCtx.strokeStyle = alert ? '#ff6b6b' : (risk>0.5 ? '#f6ad55' : '#9ae6b4');
+          faceCtx.stroke();
+
+          const ah = 10, ang = Math.atan2(dy, dx);
+          faceCtx.beginPath();
+          faceCtx.moveTo(cx+dx, cy+dy);
+          faceCtx.lineTo(cx+dx - ah*Math.cos(ang - Math.PI/6), cy+dy - ah*Math.sin(ang - Math.PI/6));
+          faceCtx.lineTo(cx+dx - ah*Math.cos(ang + Math.PI/6), cy+dy - ah*Math.sin(ang + Math.PI/6));
+          faceCtx.closePath();
+          faceCtx.fillStyle = faceCtx.strokeStyle;
+          faceCtx.fill();
+        }
       }
       faceCtx.restore();
     }
 
-    function updatePill(risk, alert){
-      const cls = alert ? 'alert' : (risk>0.5 ? 'risky' : 'safe');
-      alertPill.className = cls;
-      alertPill.textContent = alert ? 'PRONE suspected' : (risk>0.5 ? 'Risk rising' : 'Safe');
+    function updatePill(risk, alertOn){
+      alertPill.classList.remove('prone-safe','prone-risk','prone-on');
+      const mid = (S.thrOn + S.thrOff) / 2;
+      const cls = alertOn ? 'prone-on' : (risk>mid ? 'prone-risk' : 'prone-safe');
+      alertPill.classList.add(cls);
+      alertPill.textContent = alertOn ? 'PRONE suspected' : (risk>mid ? 'Risk rising' : 'Safe');
     }
-    function updateHud(pitchDownDeg, risk){
-      hud.textContent = `pitch↓: ${Number.isFinite(pitchDownDeg)?pitchDownDeg.toFixed(1):'–'}°  •  risk: ${risk.toFixed(2)}`;
+    function updateHud(pitchDownDeg, risk, yawDeg, pitchDeg, rollDeg){
+      const fmt = v => Number.isFinite(v) ? v.toFixed(1) : '–';
+      hud.textContent =
+        `pitch↓: ${fmt(pitchDownDeg)}°  •  risk: ${risk.toFixed(2)}\n` +
+        `yaw: ${fmt(yawDeg)}°  pitch: ${fmt(pitchDeg)}°  roll: ${fmt(rollDeg)}°`;
     }
 
     async function startReceiverFaceLoop() {
@@ -724,7 +783,8 @@
         try {
           const result = faceTask.detectForVideo(remoteVideo, ts);
           const present = !!(result?.faceLandmarks?.length);
-          let yawDeg = NaN, pitchDeg = NaN;
+
+          let yawDeg = NaN, pitchDeg = NaN, rollDeg = NaN, rotMat = null;
 
           if (present && result.facialTransformationMatrixes?.length){
             const mat = result.facialTransformationMatrixes[0];
@@ -733,6 +793,8 @@
               const e = computeEulerXYZ(m);
               yawDeg = e.yaw;
               pitchDeg = e.pitch;
+              rollDeg = e.roll;
+              rotMat = m; // pass to drawing for axes
             }
           }
 
@@ -783,25 +845,25 @@
               }
             }
           } else {
-            // disabled
-            aboveT = belowT = 0; // keep state calm
+            aboveT = belowT = 0;
           }
 
           // Draw overlay
           drawFaceAndHUD(result, {
             showLM: S.showLM,
             showOrient: S.showOrient,
-            yawDeg, pitchDeg,
-            risk: riskEma||0, alert
+            yawDeg, pitchDeg, rollDeg,
+            risk: riskEma||0, alert,
+            rotMat
           });
 
           updatePill(riskEma||0, alert);
-          updateHud(Number.isFinite(pitchEma)?pitchEma:NaN, riskEma||0);
+          updateHud(Number.isFinite(pitchEma)?pitchEma:NaN, riskEma||0, yawDeg, pitchDeg, rollDeg);
 
-          // Optional: stream landmarks to DC if you wish:
-          if (faceDC?.readyState === 'open' && present) {
-            // faceDC.send(JSON.stringify({ type:'face', ts, yawDeg, pitchDeg, risk:riskEma, alert }));
-          }
+          // Optional DC send if needed
+          // if (faceDC?.readyState === 'open' && present) {
+          //   faceDC.send(JSON.stringify({ type:'face', ts, yawDeg, pitchDeg, rollDeg, risk:riskEma, alert }));
+          // }
 
         } catch (err) {
           console.warn('[FACE][receiver] detect error (retrying next frame)', err);
@@ -881,8 +943,7 @@
               applyFaceMode();
             } else if (msg.type === 'face') {
               if (faceEnabled && faceWhere === 'sender') {
-                // If sender streams landmarks, you could draw them here
-                // drawFaceAndHUD({ faceLandmarks:[msg.landmarks] }, { ... });
+                // If sender streams landmarks/pose, you could draw them here
               }
             }
           } catch {}
