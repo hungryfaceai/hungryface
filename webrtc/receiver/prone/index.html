@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Baby Monitor – Receiver (Face Landmarks)</title>
+  <link rel="icon" href="data:,">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+
+  <!-- Shared sidebar stylesheet -->
+  <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
+
+  <style>
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; height: 100%;
+      background: #000; color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+      overflow: hidden;
+    }
+
+    /* Fullscreen stage so video + canvas scale together */
+    #stage {
+      position: fixed; inset: 0;
+      width: 100vw; height: 100vh;   /* fallback */
+      width: 100dvw; height: 100dvh; /* dynamic viewport */
+      width: 100svw; height: 100svh; /* iOS URL bar safe */
+      z-index: 1; background: #000;
+    }
+    #stage > video {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: contain; background: #000;
+      z-index: 0; pointer-events: none;
+    }
+    #stage > canvas {
+      position: absolute;
+      z-index: 2; background: transparent; display: none;
+      pointer-events: none;
+    }
+
+    .btn {
+      padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
+      background: transparent; color: #fff; font-size: 16px; font-weight: 600;
+      cursor: pointer; box-shadow: none;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+    .btn:active { transform: scale(0.99); }
+    .btn.small { padding: 8px 10px; font-size: 13px; border-radius: 10px; }
+
+    #controls {
+      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 12px; z-index: 6;
+    }
+    #enableAudioBtn, #disableAudioBtn { display: none; }
+
+    /* Top-left utility row (like training page) */
+    #utilityBar {
+      position: fixed; left: 12px; top: 12px; z-index: 7; display: flex; gap: 10px; flex-wrap: wrap;
+    }
+
+    .overlay {
+      position: fixed; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      pointer-events: none; z-index: 5;
+    }
+    .status {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
+      text-align: center; white-space: pre-line; max-width: 90vw;
+    }
+    .overlay.hidden { display: none; }
+
+    /* Settings modal (compact, training-page feel) */
+    .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);z-index:140;}
+    .modal.show{display:flex;}
+    .modal-card{width:min(96%,820px);max-height:90vh;overflow-y:auto;background:#0b0b0b;border:1px solid #242424;border-radius:14px;}
+    .modal-head{position:sticky;top:0;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #1a1a1a;background:#0d0d0d;border-top-left-radius:14px;border-top-right-radius:14px;}
+    .modal-actions{display:flex;gap:8px;align-items:center;}
+    .modal-body{padding:12px;}
+    .modal-head .close{appearance:none;border:none;background:transparent;color:#aaa;font-size:22px;cursor:pointer;padding:2px 6px;}
+
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;}
+    .card{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:12px;padding:12px;}
+    .card h3{margin:0 0 8px 0;font-size:16px}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .muted{color:#aaa;font-size:12px}
+    input[type="number"]{padding:8px 10px;border-radius:10px;border:1px solid #222;background:#0b0b0b;color:#ddd;width:100%}
+    label.chk{display:flex;gap:8px;align-items:center}
+
+    /* Angle badge (top-right of canvas) */
+    #angleBadge {
+      position: absolute; right: 12px; top: 12px;
+      background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px; padding: 8px 10px; z-index: 3; font-size: 12px; line-height: 1.35;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- ⬇️ Inject shared sidebar markup and behavior -->
+  <script type="module">
+    (async () => {
+      try {
+        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
+        const html = await res.text();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html.trim();
+        document.body.prepend(...wrap.childNodes);
+
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      } catch (err) {
+        console.error('[Sidebar] failed to load shared assets:', err);
+      }
+    })();
+  </script>
+
+  <!-- Utility bar -->
+  <div id="utilityBar">
+    <button id="btnOpenSettings" class="btn small" type="button">Settings</button>
+  </div>
+
+  <div id="controls">
+    <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
+    <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
+    <button id="fsBtn" class="btn" type="button">Fullscreen</button>
+  </div>
+
+  <div id="stage">
+    <video id="remote" autoplay playsinline></video>
+    <canvas id="faceCanvas"></canvas>
+    <div id="angleBadge" style="display:none">yaw 0°\npitch 0°\nroll 0°</div>
+  </div>
+
+  <div id="overlay" class="overlay">
+    <div id="status" class="status">Idle</div>
+  </div>
+
+  <!-- Settings modal -->
+  <div id="settingsModal" class="modal" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <strong>Face orientation – Settings</strong>
+        <div class="modal-actions">
+          <button id="btnSettingsClose" class="close" type="button" title="Close" aria-label="Close">×</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="grid">
+          <div class="card">
+            <h3>Calibration</h3>
+            <div class="row">
+              <button id="btnCalibrate" class="btn small">Set neutral (Calibrate)</button>
+              <button id="btnResetCalib" class="btn small">Reset</button>
+            </div>
+            <div class="muted">Stand naturally facing the camera, then press Calibrate. We subtract that orientation from subsequent angles.</div>
+          </div>
+
+          <div class="card">
+            <h3>Smoothing</h3>
+            <label>Angle EMA τ (s) <input id="ANG_EMA_TAU" type="number" min="0" step="0.05" value="0.40"></label>
+            <div class="muted">Bigger τ = smoother but more lag.</div>
+          </div>
+
+          <div class="card">
+            <h3>Hysteresis</h3>
+            <label>Yaw ON (°) <input id="YAW_ON" type="number" min="0" step="1" value="15"></label>
+            <label>Yaw OFF delta (°) <input id="YAW_OFF_DELTA" type="number" min="0" step="1" value="5"></label>
+            <label>Pitch ON (°) <input id="PITCH_ON" type="number" min="0" step="1" value="12"></label>
+            <label>Pitch OFF delta (°) <input id="PITCH_OFF_DELTA" type="number" min="0" step="1" value="4"></label>
+            <label>Min ON hold (ms) <input id="HOLD_ON_MS" type="number" min="0" step="50" value="400"></label>
+            <div class="muted">Triggers when |yaw|≥YawON or |pitch|≥PitchON; turns OFF below (ON−delta). Hold prevents flicker.</div>
+          </div>
+
+          <div class="card">
+            <h3>“No face” rule</h3>
+            <label class="chk"><input id="NF_USE_MS" type="checkbox" checked> Use time-based (N ms)</label>
+            <label>N (ms) <input id="NF_MS" type="number" min="100" step="50" value="500"></label>
+            <label class="chk"><input id="NF_USE_FRAMES" type="checkbox" checked> Use frames-based (P missed)</label>
+            <label>P (frames) <input id="NF_FRAMES" type="number" min="1" step="1" value="5"></label>
+            <div class="muted">Sender mode is guarded by a watchdog that counts missed DC messages as frames.</div>
+          </div>
+
+          <div class="card">
+            <h3>Confidence</h3>
+            <label>Min face detection confidence <input id="FACE_MIN_DET" type="number" min="0" max="1" step="0.01" value="0.50"></label>
+            <label>Min tracking confidence <input id="FACE_MIN_TRK" type="number" min="0" max="1" step="0.01" value="0.50"></label>
+            <div class="muted">Affects the side that runs inference (receiver in this page).</div>
+          </div>
+
+          <div class="card">
+            <h3>Visuals</h3>
+            <label class="chk"><input id="SHOW_MESH" type="checkbox" checked> Show facial mesh</label>
+            <label class="chk"><input id="SHOW_GIZMO" type="checkbox" checked> Show 3-axis head gizmo</label>
+            <label>Gizmo length factor <input id="GIZMO_SCALE" type="number" min="0.2" max="2" step="0.05" value="0.8"></label>
+            <label class="chk"><input id="SHOW_BADGE" type="checkbox" checked> Show angle badge</label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { DrawingUtils, FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+    import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
+
+    /* ---------- Constants ---------- */
+    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const room = new URLSearchParams(location.search).get("room") || "Baby";
+    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
+
+    // MediaPipe assets
+    const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+    const WASM_DIR = TASKS_URL + "/wasm";
+    const FACE_MODEL_URL =
+      "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task";
+
+    // Video readyState helper
+    const HAVE_CURRENT_DATA = 2;
+
+    /* ---------- DOM ---------- */
+    const stage = document.getElementById('stage');
+    const remoteVideo = document.getElementById('remote');
+    const faceCanvas = document.getElementById('faceCanvas');
+    const faceCtx = faceCanvas.getContext('2d', { alpha: true });
+    const angleBadge = document.getElementById('angleBadge');
+
+    const fsBtn = document.getElementById('fsBtn');
+    const enableAudioBtn = document.getElementById('enableAudioBtn');
+    const disableAudioBtn = document.getElementById('disableAudioBtn');
+    const overlay = document.getElementById('overlay');
+    const statusEl = document.getElementById('status');
+
+    const settingsModal = document.getElementById('settingsModal');
+    document.getElementById('btnOpenSettings').onclick = () => {
+      settingsModal.classList.add('show'); settingsModal.setAttribute('aria-hidden','false');
+    };
+    document.getElementById('btnSettingsClose').onclick = () => {
+      settingsModal.classList.remove('show'); settingsModal.setAttribute('aria-hidden','true');
+    };
+    settingsModal.addEventListener('click', (e) => {
+      if (e.target === settingsModal) { settingsModal.classList.remove('show'); settingsModal.setAttribute('aria-hidden','true'); }
+    });
+
+    /* ---------- Settings elements ---------- */
+    const EL = id => document.getElementById(id);
+    const els = {
+      // calibration
+      btnCalib: EL('btnCalibrate'), btnReset: EL('btnResetCalib'),
+      // smoothing/hysteresis
+      tau: EL('ANG_EMA_TAU'),
+      yawOn: EL('YAW_ON'), yawOffDelta: EL('YAW_OFF_DELTA'),
+      pitchOn: EL('PITCH_ON'), pitchOffDelta: EL('PITCH_OFF_DELTA'),
+      holdOn: EL('HOLD_ON_MS'),
+      // no-face
+      nfUseMs: EL('NF_USE_MS'), nfMs: EL('NF_MS'), nfUseFrames: EL('NF_USE_FRAMES'), nfFrames: EL('NF_FRAMES'),
+      // confidence
+      minDet: EL('FACE_MIN_DET'), minTrk: EL('FACE_MIN_TRK'),
+      // visuals
+      showMesh: EL('SHOW_MESH'), showGizmo: EL('SHOW_GIZMO'), gizmoScale: EL('GIZMO_SCALE'), showBadge: EL('SHOW_BADGE'),
+    };
+    const clamp01 = (x) => Math.max(0, Math.min(1, Number(x)||0));
+    const SKEY = (k) => `facePage_${k}`;
+    const persist = () => {
+      try {
+        Object.entries({
+          tau: els.tau.value, yawOn: els.yawOn.value, yawOffDelta: els.yawOffDelta.value,
+          pitchOn: els.pitchOn.value, pitchOffDelta: els.pitchOffDelta.value, holdOn: els.holdOn.value,
+          nfUseMs: els.nfUseMs.checked ? '1':'0', nfMs: els.nfMs.value, nfUseFrames: els.nfUseFrames.checked ? '1':'0', nfFrames: els.nfFrames.value,
+          minDet: els.minDet.value, minTrk: els.minTrk.value,
+          showMesh: els.showMesh.checked ? '1':'0', showGizmo: els.showGizmo.checked ? '1':'0',
+          gizmoScale: els.gizmoScale.value, showBadge: els.showBadge.checked ? '1':'0',
+          calib: JSON.stringify(state.calib)
+        }).forEach(([k,v])=> localStorage.setItem(SKEY(k), v));
+      } catch {}
+    };
+    const restore = () => {
+      [
+        ['tau','num'], ['yawOn','num'], ['yawOffDelta','num'], ['pitchOn','num'], ['pitchOffDelta','num'], ['holdOn','num'],
+        ['nfMs','num'], ['nfFrames','num'], ['minDet','num'], ['minTrk','num'], ['gizmoScale','num']
+      ].forEach(([k])=>{ const v = localStorage.getItem(SKEY(k)); if (v!=null) els[k].value = v; });
+      [['nfUseMs'],['nfUseFrames'],['showMesh'],['showGizmo'],['showBadge']].forEach(([k])=>{
+        const v = localStorage.getItem(SKEY(k)); if (v!=null) els[k].checked = (v==='1');
+      });
+      try {
+        const c = localStorage.getItem(SKEY('calib')); if (c) state.calib = JSON.parse(c);
+      } catch {}
+      angleBadge.style.display = els.showBadge.checked ? '' : 'none';
+    };
+    ['change','blur','input'].forEach(ev => {
+      Object.values(els).forEach(el => el?.addEventListener(ev, persist));
+    });
+
+    /* ---------- Status overlay ---------- */
+    let hideStatusTimer = null;
+    function showStatus(msg) {
+      statusEl.textContent = msg;
+      overlay.classList.remove('hidden');
+      if (msg === 'Connected') {
+        if (hideStatusTimer) clearTimeout(hideStatusTimer);
+        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
+      } else {
+        if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
+        overlay.classList.remove('hidden');
+      }
+    }
+
+    /* ---------- Audio UI ---------- */
+    function updateAudioButtons() {
+      if (remoteVideo.muted) {
+        enableAudioBtn.style.display = 'block';
+        disableAudioBtn.style.display = 'none';
+      } else {
+        enableAudioBtn.style.display = 'none';
+        disableAudioBtn.style.display = 'block';
+      }
+    }
+    enableAudioBtn.style.display = 'block';
+    async function tryStartMuted() {
+      try { remoteVideo.muted = true; remoteVideo.volume = 1.0; await remoteVideo.play(); }
+      catch (e) { console.warn('autoplay (muted) blocked:', e); }
+      updateAudioButtons();
+    }
+    enableAudioBtn.addEventListener('click', async (e) => {
+      e?.stopPropagation?.(); e?.preventDefault?.();
+      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); }
+      catch (err) { console.warn('unmute play blocked:', err); }
+      updateAudioButtons();
+    });
+    disableAudioBtn.addEventListener('click', (e) => {
+      e?.stopPropagation?.(); e?.preventDefault?.();
+      remoteVideo.muted = true; updateAudioButtons();
+    });
+
+    /* ---------- Fullscreen ---------- */
+    fsBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        if (!document.fullscreenElement) {
+          await (stage.requestFullscreen?.call(stage) || document.documentElement.requestFullscreen());
+          fsBtn.textContent = 'Exit fullscreen';
+        } else {
+          await document.exitFullscreen();
+          fsBtn.textContent = 'Fullscreen';
+        }
+      } catch (err) { console.warn('fullscreen error', err); }
+      beginViewportSettle();
+    });
+    document.addEventListener('fullscreenchange', () => {
+      fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+      beginViewportSetle();
+    });
+
+    remoteVideo.addEventListener('loadedmetadata', () => { beginViewportSettle(); });
+    remoteVideo.addEventListener('playing', () => { updateAudioButtons(); beginViewportSettle(); });
+    remoteVideo.addEventListener('resize', beginViewportSettle);
+
+    /* ---------- Canvas alignment ---------- */
+    function containRect(containerW, containerH, contentW, contentH) {
+      const scale = Math.min(containerW / (contentW||1), containerH / (contentH||1));
+      const w = Math.round(contentW * scale);
+      const h = Math.round(contentH * scale);
+      const x = Math.floor((containerW - w) / 2);
+      const y = Math.floor((containerH - h) / 2);
+      return { left:x, top:y, width:w, height:h };
+    }
+    function alignCanvasToVideo() {
+      const stageBox = stage.getBoundingClientRect();
+      const videoBox = remoteVideo.getBoundingClientRect();
+      const containerW = Math.round(videoBox.width);
+      const containerH = Math.round(videoBox.height);
+      const vidW = remoteVideo.videoWidth || 1;
+      const vidH = remoteVideo.videoHeight || 1;
+
+      const fit = containRect(containerW, containerH, vidW, vidH);
+      const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
+      const topCSS = Math.round((videoBox.top - stageBox.top) + fit.top);
+
+      faceCanvas.style.left = leftCSS + 'px';
+      faceCanvas.style.top = topCSS + 'px';
+      faceCanvas.style.width = fit.width + 'px';
+      faceCanvas.style.height = fit.height + 'px';
+
+      const dpr = window.devicePixelRatio || 1;
+      const needW = Math.max(1, Math.round(fit.width * dpr));
+      const needH = Math.max(1, Math.round(fit.height * dpr));
+      if (faceCanvas.width !== needW || faceCanvas.height !== needH) {
+        faceCanvas.width = needW; faceCanvas.height = needH;
+      }
+      faceCtx.setTransform(1,0,0,1,0,0);
+    }
+    let settleRAF = 0, settleUntil = 0;
+    function beginViewportSettle(durationMs = 1200) {
+      settleUntil = performance.now() + durationMs;
+      if (settleRAF) return;
+      const tick = () => {
+        alignCanvasToVideo();
+        if (performance.now() < settleUntil) {
+          settleRAF = requestAnimationFrame(tick);
+        } else {
+          cancelAnimationFrame(settleRAF); settleRAF = 0;
+          alignCanvasToVideo();
+        }
+      };
+      tick();
+    }
+    const vpAlign = () => beginViewportSettle();
+    ['resize','orientationchange','scroll'].forEach(ev =>
+      window.addEventListener(ev, vpAlign, { passive: true })
+    );
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', vpAlign, { passive: true });
+      window.visualViewport.addEventListener('scroll',  vpAlign, { passive: true });
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) beginViewportSettle();
+    });
+
+    /* ---------- Overlay helpers ---------- */
+    function setOverlayVisible(v) {
+      faceCanvas.style.display = v ? 'block' : 'none';
+      if (v) beginViewportSettle();
+      else faceCtx.clearRect(0,0, faceCanvas.width, faceCanvas.height);
+    }
+    function clearOverlayDrawing() {
+      try {
+        faceCtx.setTransform(1,0,0,1,0,0);
+        faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
+      } catch {}
+    }
+
+    /* ---------- MediaPipe Face Landmarker (Receiver) ---------- */
+    let faceTask = null;
+    let faceLoopRunning = false;
+    let faceEnabled = true;         // toggled via DC
+    let faceWhere = 'receiver';     // 'receiver' | 'sender'
+    let faceDC = null;
+
+    async function ensureFaceTask() {
+      if (faceTask) return faceTask;
+      const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
+      faceTask = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate: "GPU" },
+        runningMode: "VIDEO",
+        numFaces: 1,
+        // NOTE: we stick to landmarks (no matrices) as requested.
+        // If you want matrices for precise pose, set to true and consume them.
+        outputFaceBlendshapes: false,
+        outputFacialTransformationMatrixes: false,
+        minFaceDetectionConfidence: clamp01(els.minDet.value),
+        minTrackingConfidence: clamp01(els.minTrk.value)
+      });
+      return faceTask;
+    }
+
+    function videoHasFrame(v) {
+      return v && v.readyState >= HAVE_CURRENT_DATA && v.videoWidth  > 0 && v.videoHeight > 0;
+    }
+    function waitForVideoFrame(video) {
+      if (videoHasFrame(video)) return Promise.resolve();
+      return new Promise((resolve) => {
+        const check = () => { if (videoHasFrame(video)) { cleanup(); resolve(); } };
+        const cleanup = () => {
+          video.removeEventListener('loadedmetadata', check);
+          video.removeEventListener('playing', check);
+          video.removeEventListener('resize', check);
+        };
+        video.addEventListener('loadedmetadata', check);
+        video.addEventListener('playing', check);
+        video.addEventListener('resize', check);
+      });
+    }
+
+    /* ---------- Orientation from landmarks ---------- */
+    // FaceMesh landmark indices (subset)
+    const IDX = {
+      R_EYE_OUT: 33, R_EYE_IN: 133,
+      L_EYE_IN: 362, L_EYE_OUT: 263,
+      NOSE_1: 1, NOSE_4: 4
+    };
+    function lmAt(lm, i){ const p = lm?.[i]; return p ? {x:p.x, y:p.y, z:p.z||0} : null; }
+    function avg(p, q){ return { x:(p.x+q.x)/2, y:(p.y+q.y)/2, z:(p.z+q.z)/2 }; }
+    function sub(a,b){ return { x:a.x-b.x, y:a.y-b.y, z:(a.z||0)-(b.z||0) }; }
+    function len2(a){ return Math.hypot(a.x, a.y); }
+    function toDeg(rad){ return rad * (180/Math.PI); }
+
+    function eyeCenters(lm){
+      const r0 = lmAt(lm, IDX.R_EYE_OUT), r1 = lmAt(lm, IDX.R_EYE_IN);
+      const l0 = lmAt(lm, IDX.L_EYE_OUT), l1 = lmAt(lm, IDX.L_EYE_IN);
+      if (!r0||!r1||!l0||!l1) return null;
+      return { R: avg(r0, r1), L: avg(l0, l1) };
+    }
+    function nosePoint(lm){
+      return lmAt(lm, IDX.NOSE_1) || lmAt(lm, IDX.NOSE_4) || lm?.[0] || null;
+    }
+    function computeAnglesFromLandmarks(lm){
+      const eyes = eyeCenters(lm); const nose = nosePoint(lm);
+      if (!eyes || !nose) return null;
+      const mid = avg(eyes.L, eyes.R);
+      const evec = sub(eyes.L, eyes.R);                 // left minus right
+      const width = Math.max(1e-6, len2(evec));         // normalized width (0..1 units)
+
+      // Roll: tilt of eye line
+      const roll = -toDeg(Math.atan2(evec.y, evec.x));  // screen coords (y down), negate for natural sign
+
+      // Nose offset from eye midpoint
+      const n = sub(nose, mid);
+      // Yaw ~ nose x offset relative to face width
+      const yaw = toDeg(Math.atan2(n.x, width * 0.5));      // + right, - left (camera/view coords)
+      // Pitch ~ nose y offset; up is negative screen y
+      const pitch = toDeg(Math.atan2((mid.y - nose.y), width * 0.5));
+
+      // Anchor + scale for drawing (in pixels)
+      const midPx = { x: mid.x * faceCanvas.width, y: mid.y * faceCanvas.height };
+      const facePx = width * Math.hypot(faceCanvas.width, faceCanvas.height) * 0.35;
+
+      return { yaw, pitch, roll, mid, midPx, facePx };
+    }
+
+    /* ---------- Smoothing, calibration, hysteresis ---------- */
+    const state = {
+      ema: { yaw:0, pitch:0, roll:0, primed:false, lastT:0 },
+      calib: { yaw0:0, pitch0:0, roll0:0 },
+      // "attention"/"away" state from hysteresis
+      awayOn: false, awayUntil: 0,
+      lastFacePerf: 0, missFrames: 0
+    };
+    function emaStep(prev, x, a){ return prev + a * (x - prev); }
+    function alphaForTau(dt, tau){ return tau<=0 ? 1 : (1 - Math.exp(-dt / Math.max(1e-3, tau))); }
+
+    function getAnglesSmoothed(raw, nowT){
+      const tau = Number(els.tau.value) || 0.4;
+      const dt = state.ema.lastT ? (nowT - state.ema.lastT)/1000 : 0.016;
+      const a = alphaForTau(dt, tau);
+      if (!state.ema.primed){
+        state.ema.yaw = raw.yaw; state.ema.pitch = raw.pitch; state.ema.roll = raw.roll;
+        state.ema.primed = true;
+      } else {
+        state.ema.yaw = emaStep(state.ema.yaw, raw.yaw, a);
+        state.ema.pitch = emaStep(state.ema.pitch, raw.pitch, a);
+        state.ema.roll = emaStep(state.ema.roll, raw.roll, a);
+      }
+      state.ema.lastT = nowT;
+      return { yaw: state.ema.yaw, pitch: state.ema.pitch, roll: state.ema.roll };
+    }
+
+    function applyCalibration(ang){
+      const c = state.calib;
+      return { yaw: ang.yaw - c.yaw0, pitch: ang.pitch - c.pitch0, roll: ang.roll - c.roll0 };
+    }
+
+    function hysteresisStep(angSm, nowMs){
+      const yawOn = Math.max(0, Number(els.yawOn.value)||15);
+      const yawOff = Math.max(0, yawOn - (Number(els.yawOffDelta.value)||5));
+      const pitchOn = Math.max(0, Number(els.pitchOn.value)||12);
+      const pitchOff = Math.max(0, pitchOn - (Number(els.pitchOffDelta.value)||4));
+      const hold = Math.max(0, Number(els.holdOn.value)||400);
+
+      const absYaw = Math.abs(angSm.yaw), absPitch = Math.abs(angSm.pitch);
+      const wantOn = (absYaw >= yawOn) || (absPitch >= pitchOn);
+
+      if (state.awayOn){
+        if (nowMs < state.awayUntil) return true;
+        const wantOff = (absYaw <= yawOff) && (absPitch <= pitchOff);
+        return !wantOff;
+      } else {
+        if (wantOn){ state.awayUntil = nowMs + hold; return true; }
+        return false;
+      }
+    }
+
+    /* ---------- No-face rule (works in sender mode via watchdog) ---------- */
+    const senderWatch = { timer: 0, lastMsgTs: 0, intervalMs: 200 };
+    function startSenderWatch(){ if (senderWatch.timer) return;
+      senderWatch.lastMsgTs = performance.now();
+      senderWatch.timer = setInterval(()=>{
+        const dt = performance.now() - senderWatch.lastMsgTs;
+        if (dt >= senderWatch.intervalMs * 1.2) noteFaceObservation(false);
+      }, senderWatch.intervalMs);
+    }
+    function stopSenderWatch(){ if (senderWatch.timer){ clearInterval(senderWatch.timer); senderWatch.timer=0; } }
+
+    function noteFaceObservation(hasFace){
+      const useMs = els.nfUseMs.checked;
+      const useFrames = els.nfUseFrames.checked;
+      const msTh = Math.max(100, Number(els.nfMs.value)||500);
+      const pTh = Math.max(1, Number(els.nfFrames.value)||5);
+
+      const t = performance.now();
+      if (hasFace){
+        state.lastFacePerf = t; state.missFrames = 0;
+        return;
+      }
+      // miss
+      state.missFrames++;
+
+      const msSince = state.lastFacePerf ? (t - state.lastFacePerf) : Infinity;
+      const timeRule = useMs && (msSince >= msTh);
+      const frameRule = useFrames && (state.missFrames >= pTh);
+
+      if (timeRule || frameRule){
+        // Clear drawing & show status
+        clearOverlayDrawing();
+        angleBadge.style.display = els.showBadge.checked ? '' : 'none';
+        angleBadge.textContent = 'no face';
+      }
+    }
+
+    /* ---------- Drawing ---------- */
+    function drawMesh(lmArray){
+      const utils = new DrawingUtils(faceCtx);
+      for (const lm of (lmArray||[])) {
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_TESSELATION, { color: "#C0C0C070", lineWidth: 1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,   { color: "#00FF00", lineWidth: 1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,{ color:"#00FF00", lineWidth: 1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,    { color: "#00FF00", lineWidth: 1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,{ color:"#00FF00", lineWidth: 1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,   { color: "#00FF00", lineWidth: 1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LIPS,        { color: "#00FF00", lineWidth: 1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_IRIS,  { color: "#00FF00", lineWidth: 1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_IRIS,   { color: "#00FF00", lineWidth: 1 });
+      }
+    }
+
+    // Rotate 3D vector by yaw(Y), pitch(X), roll(Z) in degrees; return 2D projection
+    function rotProject2D(yawDeg, pitchDeg, rollDeg, scale){
+      const yaw = yawDeg * Math.PI/180, pitch = pitchDeg * Math.PI/180, roll = rollDeg * Math.PI/180;
+      const cy=Math.cos(yaw), sy=Math.sin(yaw);
+      const cx=Math.cos(pitch), sx=Math.sin(pitch);
+      const cz=Math.cos(roll), sz=Math.sin(roll);
+
+      // R = Rz * Ry * Rx (roll→yaw→pitch)
+      const R = [
+        [cz*cy,  cz*sy*sx - sz*cx,  cz*sy*cx + sz*sx],
+        [sz*cy,  sz*sy*sx + cz*cx,  sz*sy*cx - cz*sx],
+        [-sy,    cy*sx,             cy*cx]
+      ];
+      const axes = [
+        { v:[1,0,0], name:'X' },
+        { v:[0,1,0], name:'Y' },
+        { v:[0,0,1], name:'Z' }
+      ];
+      return axes.map(({v,name})=>{
+        const x = R[0][0]*v[0] + R[0][1]*v[1] + R[0][2]*v[2];
+        const y = R[1][0]*v[0] + R[1][1]*v[1] + R[1][2]*v[2];
+        const z = R[2][0]*v[0] + R[2][1]*v[1] + R[2][2]*v[2];
+        const persp = 1 / (1 - 0.4*z); // cheap foreshortening
+        return { name, x: x*scale*persp, y: y*scale*persp };
+      });
+    }
+
+    function drawGizmo(midPx, angDelta, faceScale){
+      const len = Math.max(6, Number(els.gizmoScale.value||0.8) * faceScale);
+      const vecs = rotProject2D(angDelta.yaw, angDelta.pitch, angDelta.roll, len);
+      const colors = { X:'#ef4444', Y:'#22c55e', Z:'#60a5fa' };
+
+      faceCtx.save();
+      faceCtx.lineWidth = 3;
+      ['X','Y','Z'].forEach((axis,i)=>{
+        const v = vecs[i];
+        faceCtx.beginPath();
+        faceCtx.moveTo(midPx.x, midPx.y);
+        faceCtx.lineTo(midPx.x + v.x, midPx.y + v.y);
+        faceCtx.strokeStyle = colors[axis];
+        faceCtx.stroke();
+      });
+      faceCtx.restore();
+    }
+
+    function updateBadge(angDelta, away, hasFace){
+      if (!els.showBadge.checked){ angleBadge.style.display = 'none'; return; }
+      angleBadge.style.display = '';
+      if (!hasFace){ angleBadge.textContent = 'no face'; return; }
+      const yaw = Math.round(angDelta.yaw), pitch = Math.round(angDelta.pitch), roll = Math.round(angDelta.roll);
+      angleBadge.textContent = `yaw ${yaw}°\npitch ${pitch}°\nroll ${roll}°${away ? '\nstate: AWAY' : '\nstate: ok'}`;
+    }
+
+    function renderFromLandmarks(lmArray){
+      if (!faceCanvas.width || !faceCanvas.height) return;
+      faceCtx.clearRect(0,0, faceCanvas.width, faceCanvas.height);
+
+      if (!lmArray?.length){ updateBadge(null, false, false); return; }
+
+      const lm = lmArray[0];
+      const raw = computeAnglesFromLandmarks(lm);
+      if (!raw){ updateBadge(null, false, false); return; }
+
+      const nowT = performance.now();
+      const sm = getAnglesSmoothed(raw, nowT);
+      const delta = applyCalibration(sm);
+      const away = hysteresisStep(delta, nowT);
+      state.awayOn = away;
+
+      if (els.showMesh.checked) drawMesh(lmArray);
+      if (els.showGizmo.checked) drawGizmo(raw.midPx, delta, raw.facePx);
+      updateBadge(delta, away, true);
+    }
+
+    /* ---------- Face loops ---------- */
+    async function startReceiverFaceLoop() {
+      if (faceLoopRunning) return;
+      await ensureFaceTask();
+      await waitForVideoFrame(remoteVideo);
+
+      faceLoopRunning = true;
+      const useRVFC = 'requestVideoFrameCallback' in remoteVideo;
+
+      const onFrame = () => {
+        if (!faceLoopRunning || !faceEnabled || faceWhere !== 'receiver') return;
+
+        if (!videoHasFrame(remoteVideo)) {
+          faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
+          noteFaceObservation(false);
+          scheduleNext(); return;
+        }
+
+        try {
+          const ts = performance.now();
+          const result = faceTask.detectForVideo(remoteVideo, ts);
+          const hasFace = !!(result?.faceLandmarks?.length);
+          noteFaceObservation(hasFace);
+
+          if (hasFace) {
+            renderFromLandmarks(result.faceLandmarks);
+            if (faceDC?.readyState === 'open') {
+              // Optional: stream to sender/debugger
+              faceDC.send(JSON.stringify({ type:'face', landmarks: result.faceLandmarks, ts }));
+            }
+          } else {
+            clearOverlayDrawing();
+          }
+        } catch (err) {
+          console.warn('[FACE][receiver] detect error', err);
+        } finally {
+          scheduleNext();
+        }
+      };
+
+      const scheduleNext = () => {
+        if (useRVFC) remoteVideo.requestVideoFrameCallback(onFrame);
+        else requestAnimationFrame(onFrame);
+      };
+      scheduleNext();
+    }
+
+    function stopReceiverFaceLoop() {
+      faceLoopRunning = false;
+      faceCtx.clearRect(0,0, faceCanvas.width, faceCanvas.height);
+    }
+
+    function applyFaceMode() {
+      setOverlayVisible(faceEnabled);
+      if (!faceEnabled) { stopReceiverFaceLoop(); stopSenderWatch(); return; }
+      if (faceWhere === 'receiver') {
+        stopSenderWatch();
+        startReceiverFaceLoop();
+      } else {
+        stopReceiverFaceLoop();    // draw only what we receive
+        startSenderWatch();        // count misses if no DC messages
+      }
+    }
+
+    /* ---------- ReceiverCore hookup ---------- */
+    const core = new ReceiverCore({
+      wsEndpoint: WS_ENDPOINT,
+      room,
+      onStatus: showStatus,
+
+      onStream: (stream, track) => {
+        if (remoteVideo.srcObject !== stream) {
+          remoteVideo.srcObject = stream;
+          tryStartMuted();
+          attachStreamEndHandlers(stream);
+        }
+        beginViewportSettle();
+      },
+
+      onIceState: (state) => {
+        if (state === 'connected' || state === 'completed') {
+          showStatus('Connected');
+        } else if (state === 'failed') {
+          clearOverlayDrawing(); showStatus('ICE: failed – retrying…');
+        } else if (state === 'disconnected') {
+          clearOverlayDrawing(); showStatus('ICE: disconnected');
+        } else if (state === 'closed') {
+          clearOverlayDrawing(); showStatus('ICE: closed');
+        } else {
+          showStatus('ICE: ' + state);
+        }
+      },
+
+      onCreatePC: (pc) => {
+        const ch = pc.createDataChannel('pose');
+        ch.onopen  = () => { console.log('[DC] pose open'); startSenderWatch(); };
+        ch.onclose = () => { console.log('[DC] pose close'); stopSenderWatch(); };
+        ch.onerror = (e) => console.warn('[DC] pose error', e);
+        ch.onmessage = (ev) => {
+          let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+
+          // Any face payload = recent activity
+          if (msg.type === 'face') {
+            senderWatch.lastMsgTs = performance.now();
+            noteFaceObservation(true);
+            if (faceEnabled && faceWhere === 'sender') renderFromLandmarks(msg.landmarks);
+            return;
+          }
+          if (msg.type === 'ai-modes' && msg.face) {
+            faceEnabled = !!msg.face.enabled;
+            faceWhere   = msg.face.where || 'sender';
+            applyFaceMode();
+          } else if (msg.type === 'face-mode') {
+            faceEnabled = !!msg.enabled;
+            faceWhere   = msg.where || 'sender';
+            applyFaceMode();
+          }
+        };
+        faceDC = ch; // store for optional outbound debug stream
+      },
+    });
+
+    // Clear drawings on common video stoppage states
+    ['pause','ended','emptied','stalled','suspend','waiting'].forEach((ev) => {
+      remoteVideo.addEventListener(ev, ()=>{ clearOverlayDrawing(); noteFaceObservation(false); }, { passive: true });
+    });
+
+    function attachStreamEndHandlers(stream) {
+      if (!stream) return;
+      stream.getVideoTracks().forEach((t) => {
+        t.addEventListener('ended',  ()=>{ clearOverlayDrawing(); noteFaceObservation(false); });
+        t.addEventListener('mute',   ()=>{ clearOverlayDrawing(); noteFaceObservation(false); });
+      });
+      stream.addEventListener('removetrack', (e) => {
+        if (e.track?.kind === 'video') { clearOverlayDrawing(); noteFaceObservation(false); }
+      });
+    }
+
+    window.addEventListener('beforeunload', () => {
+      try { core?.stop?.(); } catch {}
+      if (hideStatusTimer) clearTimeout(hideStatusTimer);
+      stopReceiverFaceLoop(); stopSenderWatch();
+    });
+
+    // Calibration buttons
+    els.btnCalib.onclick = () => {
+      // Use current smoothed orientation if available; else zeros
+      state.calib = {
+        yaw0: state.ema.primed ? state.ema.yaw : 0,
+        pitch0: state.ema.primed ? state.ema.pitch : 0,
+        roll0: state.ema.primed ? state.ema.roll : 0
+      };
+      persist();
+    };
+    els.btnReset.onclick = () => {
+      state.calib = { yaw0:0, pitch0:0, roll0:0 };
+      persist();
+    };
+
+    // Go!
+    (function boot(){
+      restore();
+      core.start();
+      setOverlayVisible(true);     // show canvas immediately for alignment
+      showStatus('Ready.');
+    })();
+
+    // tiny typo guard used in logs
+    function beginViewportSetle(){ beginViewportSettle(); }
+  </script>
+</body>
+</html>
