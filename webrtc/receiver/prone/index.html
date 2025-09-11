@@ -101,9 +101,9 @@
 
     /* HUD pill — move to left side and include alert pill inside */
     .hud {
-      position: fixed;
-      left: max(12px, env(safe-area-inset-left));
-      top: max(12px, env(safe-area-inset-top));
+      position: absolute;
+      left: 0;
+      top: 0;
       z-index: 6;
       padding: 10px 12px;
       background: rgba(0,0,0,0.45);
@@ -138,12 +138,21 @@
       border-radius: 2px;
       pointer-events: none;
     }
-
+    
+    .hud-head {
+      display: flex;
+      align-items: center;
+      margin-bottom: 8px;               /* ensures it sits above the text */
+    }
 
     /* Small alert pill INSIDE the HUD (top-right corner) */
     #alertPill {
-      position: absolute; right: 8px; top: 8px; z-index: 1;
-      padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700;
+      position: static;                 /* was absolute */
+      margin-left: auto;                /* right-align within header */
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
       border: 1px solid rgba(255,255,255,0.12);
       background: rgba(255,255,255,0.06);
       backdrop-filter: blur(6px);
@@ -205,7 +214,9 @@
 
   <!-- HUD pill (now left side). Alert pill lives inside it. -->
   <div id="hud" class="hud">
-    <div id="alertPill" class="prone-safe">Safe</div>
+    <div class="hud-head">
+      <div id="alertPill" class="prone-safe">Safe</div>
+    </div>
     <div id="hudLines" class="lines">pitch↓: –°  •  risk: –</div>
     <div class="riskbar" aria-label="Risk">
       <i id="riskFill"></i><span id="riskPct" class="pct">0%</span>
@@ -213,7 +224,6 @@
       <b class="tick" id="tick-on"   title="Alert on"></b>
       <b class="tick" id="tick-off"  title="Alert off"></b>
     </div>
-
   </div>
 
   <!-- Bottom controls (Calibration + Settings added here) -->
@@ -666,6 +676,9 @@
       const fit = containRect(containerW, containerH, vidW, vidH);
       const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
       const topCSS = Math.round((videoBox.top - stageBox.top) + fit.top);
+      // Position the HUD at the video’s top-left corner with a small inset
+      hud.style.left = (leftCSS + 8) + 'px';
+      hud.style.top  = (topCSS  + 8) + 'px';
 
       faceCanvas.style.left = leftCSS + 'px';
       faceCanvas.style.top = topCSS + 'px';
