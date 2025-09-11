@@ -685,7 +685,7 @@
     }
 
     function drawFaceAndHUD(result, opts){
-      const { showLM, showOrient, yawDeg, pitchDeg, rollDeg, risk, alert, rotMat } = opts;
+      const { showLM, showOrient, yawDeg, pitchDeg, rollDeg, relPitchDeg, risk, alert, rotMat } = opts;
       faceCtx.save();
       faceCtx.clearRect(0,0, faceCanvas.width, faceCanvas.height);
       const utils = new DrawingUtils(faceCtx);
@@ -715,7 +715,7 @@
         // Head-direction arrow (longer; scaled)
         if (S.showOrient){
           const yawRad = yawDeg * Math.PI/180;
-          const pitchRad = pitchDeg * Math.PI/180;
+          const pitchRad = (Number.isFinite(relPitchDeg) ? relPitchDeg : 0) * Math.PI/180; // ← relative
           const L = minDim * 0.14 * (S.arrowScale || 1);
           const dx = Math.sin(yawRad) * L;
           const dy = -Math.sin(pitchRad) * L;
@@ -747,11 +747,11 @@
       alertPill.classList.add(cls);
       alertPill.textContent = alertOn ? 'PRONE suspected' : (risk>mid ? 'Risk rising' : 'Safe');
     }
-    function updateHud(pitchDownDeg, risk, yawDeg, pitchDeg, rollDeg){
+    function updateHud(pitchDownDeg, risk, yawDeg, pitchDeg, rollDeg, relPitchDeg){
       const fmt = v => Number.isFinite(v) ? v.toFixed(1) : '–';
       hud.textContent =
-        `pitch↓: ${fmt(pitchDownDeg)}°  •  risk: ${risk.toFixed(2)}\n` +
-        `yaw: ${fmt(yawDeg)}°  pitch: ${fmt(pitchDeg)}°  roll: ${fmt(rollDeg)}°`;
+        `pitch↓(down): ${fmt(pitchDownDeg)}°  •  risk: ${risk.toFixed(2)}\n` +
+        +   `yaw: ${fmt(yawDeg)}°  pitch(raw): ${fmt(pitchDeg)}°  roll: ${fmt(rollDeg)}°  pitch(rel): ${fmt(relPitchDeg)}°`;
     }
 
     async function startReceiverFaceLoop() {
@@ -784,7 +784,7 @@
           const result = faceTask.detectForVideo(remoteVideo, ts);
           const present = !!(result?.faceLandmarks?.length);
 
-          let yawDeg = NaN, pitchDeg = NaN, rollDeg = NaN, rotMat = null;
+          let yawDeg = NaN, pitchDeg = NaN, rollDeg = NaN, rotMat = null, relPitchDeg = NaN;
 
           if (present && result.facialTransformationMatrixes?.length){
             const mat = result.facialTransformationMatrixes[0];
@@ -810,10 +810,11 @@
           let risk = 0, pitchDownDeg = NaN;
           if (S.enabled) {
             const faceRisk = present ? 0 : 1; // 0 when visible, 1 when missing
-            let relPitch = Number.isFinite(pitchDeg) && Number.isFinite(pitchSupine) ? (pitchDeg - pitchSupine) : NaN;
+            /*let relPitch = Number.isFinite(pitchDeg) && Number.isFinite(pitchSupine) ? (pitchDeg - pitchSupine) : NaN;
             if (S.flipPitch && Number.isFinite(relPitch)) relPitch = -relPitch;
-            pitchDownDeg = Number.isFinite(relPitch) ? Math.max(0, -relPitch) : NaN; // positive when looking down (toward mattress)
-
+            pitchDownDeg = Number.isFinite(relPitch) ? Math.max(0, -relPitch) : NaN; // positive when looking down (toward mattress)*/
+            const pitchDownDeg = Number.isFinite(relPitchDeg) ? Math.max(0, -relPitchDeg) : NaN;
+            
             // Map pitchDownDeg into [0,1] around thetaOn with a soft slope
             let r2 = 0;
             if (Number.isFinite(pitchDownDeg)) {
@@ -852,13 +853,13 @@
           drawFaceAndHUD(result, {
             showLM: S.showLM,
             showOrient: S.showOrient,
-            yawDeg, pitchDeg, rollDeg,
+            yawDeg, pitchDeg, rollDeg, relPitchDeg,
             risk: riskEma||0, alert,
             rotMat
           });
 
           updatePill(riskEma||0, alert);
-          updateHud(Number.isFinite(pitchEma)?pitchEma:NaN, riskEma||0, yawDeg, pitchDeg, rollDeg);
+          updateHud(Number.isFinite(pitchEma)?pitchEma:NaN, riskEma||0, yawDeg, pitchDeg, rollDeg, relPitchDeg);
 
           // Optional DC send if needed
           // if (faceDC?.readyState === 'open' && present) {
