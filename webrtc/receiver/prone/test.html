@@ -263,10 +263,10 @@
     // Muted, semi-transparent axis colors (standard mapping kept)
     // X=red-ish, Y=green-ish, Z=blue-ish
     const AXIS_STYLE = {
-      x: { stroke: 'rgba(200, 80, 80, 0.65)'  }, // brick red
-      y: { stroke: 'rgba( 50,130, 95, 0.65)'  }, // deep emerald (darker than arrow's mint)
-      z: { stroke: 'rgba( 90,120,210, 0.75)'  }, // slate/royal blue
-      width: 2,
+      x: { stroke: 'rgba(220, 70, 70, 0.90)'  }, // X = red-ish
+      y: { stroke: 'rgba( 40,155,135,0.90)'  }, // Y = teal-leaning green
+      z: { stroke: 'rgba( 90,120,210,0.95)'  }, // Z = blue-ish
+      width: 2.5,
       dash: [4, 3]
     };
 
@@ -669,22 +669,26 @@
       const cx = centroid.x * faceCanvas.width;
       const cy = centroid.y * faceCanvas.height;
 
+      // Inside drawAxisTriad, replace drawVec with this SOLID version
       const drawVec = (v, style)=>{
         faceCtx.save();
-        faceCtx.setLineDash(AXIS_STYLE.dash);
-        faceCtx.lineWidth = AXIS_STYLE.width;
+        faceCtx.setLineDash([]);                 // ← solid
+        faceCtx.lineWidth = AXIS_STYLE.width;    // thicker
+        faceCtx.lineCap = 'round';
         faceCtx.strokeStyle = style.stroke;
+        faceCtx.shadowColor = style.stroke;      // subtle contrast on video
+        faceCtx.shadowBlur = 2;
       
+        const tipX = cx + v.x*scalePx, tipY = cy - v.y*scalePx;
         // line
         faceCtx.beginPath();
         faceCtx.moveTo(cx, cy);
-        faceCtx.lineTo(cx + v.x*scalePx, cy - v.y*scalePx);
+        faceCtx.lineTo(tipX, tipY);
         faceCtx.stroke();
       
-        // small arrowhead
-        const ang = Math.atan2(-v.y, v.x), ah = 7;
+        // arrowhead
+        const ang = Math.atan2(-v.y, v.x), ah = 9;
         faceCtx.beginPath();
-        const tipX = cx + v.x*scalePx, tipY = cy - v.y*scalePx;
         faceCtx.moveTo(tipX, tipY);
         faceCtx.lineTo(tipX - ah*Math.cos(ang - Math.PI/6), tipY - ah*Math.sin(ang - Math.PI/6));
         faceCtx.moveTo(tipX, tipY);
@@ -692,6 +696,7 @@
         faceCtx.stroke();
         faceCtx.restore();
       };
+
 
 
       // X (right, red), Y (up, green), Z (camera-forward, blue)
