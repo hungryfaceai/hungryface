@@ -854,11 +854,12 @@
       drawVec(zaxis, AXIS_STYLE.z);
     }
 
+    let drawUtils = null;
     function drawFaceAndHUD(result, opts){
       const { showLM, showOrient, yawDeg, pitchDeg, rollDeg, relPitchDeg, risk, alert, rotMat } = opts;
       faceCtx.save();
       faceCtx.clearRect(0,0, faceCanvas.width, faceCanvas.height);
-      const utils = new DrawingUtils(faceCtx);
+      if (!drawUtils) drawUtils = new DrawingUtils(faceCtx);
 
       if (showLM && result.faceLandmarks?.length) {
         const lm = result.faceLandmarks[0];
@@ -925,26 +926,26 @@
       hudLines.textContent =
         `pitch↓: ${fmt(pitchDownDeg)}°  •  risk: ${risk.toFixed(2)}\n` +
         `yaw: ${fmt(yawDeg)}°  pitch(raw): ${fmt(pitchDeg)}°  roll: ${fmt(rollDeg)}°  pitch(rel): ${fmt(relPitchDeg)}°`;
-
-      // --- BAR WIDTH: normalize to RISK_MAX (0.8) for visual headroom/ticks ---
+    
+      // Normalize bar width to overall headroom (RISK_MAX)
       const widthPct = Math.round(clamp(((risk || 0) / RISK_MAX), 0, 1) * 100);
-      riskBar.style.width = widthPct + '%';
-      
+      if (riskBar) riskBar.style.width = widthPct + '%';
+    
+      // Text shows occlusion-normalized percent
       const uiPct = Math.round(clamp(((risk || 0) / OCCL_MAX), 0, 1) * 100);
-      riskPct.textContent = uiPct + '%';
-            
-      // --- TICKS (positions are % of RISK_MAX) ---
+      if (riskPct) riskPct.textContent = uiPct + '%';
+    
+      // Tick marks (% of RISK_MAX)
       if (tickOccl) tickOccl.style.left = (OCCL_MAX / RISK_MAX * 100) + '%';
       if (tickOn)   tickOn.style.left   = (S.thrOn   / RISK_MAX * 100) + '%';
       if (tickOff)  tickOff.style.left  = (S.thrOff  / RISK_MAX * 100) + '%';
-
-      // Color code like motion: green < 50%, orange 50–<100%, red 100%
-      if (pct >= 100) {
-        riskFill.style.background = '#ff6b6b';
-      } else if (pct >= 50) {
-        riskFill.style.background = '#f6ad55';
-      } else {
-        riskFill.style.background = '#9ae6b4';
+    
+      // Color-coding (green <50%, orange 50–99%, red 100% of occlusion ceiling)
+      const pct = uiPct;
+      if (riskBar) {
+        if (pct >= 100)      riskBar.style.background = '#ff6b6b';
+        else if (pct >= 50)  riskBar.style.background = '#f6ad55';
+        else                 riskBar.style.background = '#9ae6b4';
       }
     }
 
