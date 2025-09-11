@@ -128,6 +128,17 @@
       font-size:10px; color:#ddd;
       text-shadow: 0 1px 2px rgba(0,0,0,0.6);
     }
+    
+    .hud .riskbar .tick {
+      position: absolute;
+      top: -2px;              /* sits slightly above the bar */
+      bottom: -2px;           /* extends slightly below for visibility */
+      width: 2px;
+      background: rgba(255,255,255,0.7);
+      border-radius: 2px;
+      pointer-events: none;
+    }
+
 
     /* Small alert pill INSIDE the HUD (top-right corner) */
     #alertPill {
@@ -198,7 +209,11 @@
     <div id="hudLines" class="lines">pitch↓: –°  •  risk: –</div>
     <div class="riskbar" aria-label="Risk">
       <i id="riskFill"></i><span id="riskPct" class="pct">0%</span>
+      <b class="tick" id="tick-occl" title="Occlusion ceiling"></b>
+      <b class="tick" id="tick-on"   title="Alert on"></b>
+      <b class="tick" id="tick-off"  title="Alert off"></b>
     </div>
+
   </div>
 
   <!-- Bottom controls (Calibration + Settings added here) -->
@@ -298,7 +313,10 @@
       "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task";
 
     const HAVE_CURRENT_DATA = 2;
-
+    // --- Risk scaling (keep in sync with rInst = max(0.6*faceRisk, 0.8*r2)) ---
+    const OCCL_MAX = 0.6; // occlusion-only ceiling
+    const RISK_MAX = 0.8; // true overall ceiling
+    
     /* ---------- DOM ---------- */
     const stage = document.getElementById('stage');
     const remoteVideo = document.getElementById('remote');
@@ -319,11 +337,17 @@
     const alertPill = document.getElementById('alertPill');
     const hud = document.getElementById('hud');
     const hudLines = document.getElementById('hudLines');
-    const riskFill = document.getElementById('riskFill');
-    const riskPct = document.getElementById('riskPct');
 
     const helpOverlay = document.getElementById('helpOverlay');
     const helpBody = document.getElementById('helpBody');
+
+    const riskBar = document.getElementById('riskFill'); // alias: the fill element
+    const riskPct = document.getElementById('riskPct');
+    
+    const tickOccl = document.getElementById('tick-occl');
+    const tickOn   = document.getElementById('tick-on');
+    const tickOff  = document.getElementById('tick-off');
+
 
     // Muted axis colors (standard mapping kept)
     const AXIS_STYLE = {
@@ -889,10 +913,21 @@
         `pitch↓: ${fmt(pitchDownDeg)}°  •  risk: ${risk.toFixed(2)}\n` +
         `yaw: ${fmt(yawDeg)}°  pitch(raw): ${fmt(pitchDeg)}°  roll: ${fmt(rollDeg)}°  pitch(rel): ${fmt(relPitchDeg)}°`;
 
-      // Risk as % of 0.6
-      const pct = Math.round(clamp((risk / 0.6) * 100, 0, 100));
-      riskFill.style.width = pct + '%';
-      riskPct.textContent = pct + '%';
+      // --- BAR WIDTH: normalize to RISK_MAX (0.8) for visual headroom/ticks ---
+      const widthPct = Math.round(clamp(((risk || 0) / RISK_MAX), 0, 1) * 100);
+      riskBar.style.width = widthPct + '%';
+      
+      // --- DISPLAYED %: keep your spec — % of OCCL_MAX (0.6) ---
+      const widthPct = Math.round(clamp(((risk || 0) / RISK_MAX), 0, 1) * 100);
+      riskBar.style.width = widthPct + '%';
+      
+      const uiPct = Math.round(clamp(((risk || 0) / OCCL_MAX), 0, 1) * 100);
+      riskPct.textContent = uiPct + '%';
+            
+      // --- TICKS (positions are % of RISK_MAX) ---
+      if (tickOccl) tickOccl.style.left = (OCCL_MAX / RISK_MAX * 100) + '%';
+      if (tickOn)   tickOn.style.left   = (S.thrOn   / RISK_MAX * 100) + '%';
+      if (tickOff)  tickOff.style.left  = (S.thrOff  / RISK_MAX * 100) + '%';
 
       // Color code like motion: green < 50%, orange 50–<100%, red 100%
       if (pct >= 100) {
