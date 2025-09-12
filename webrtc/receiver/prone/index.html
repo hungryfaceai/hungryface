@@ -422,6 +422,9 @@
       thrOff: 0.40,
       dwellOn: 12,
       dwellOff: 5,
+      // occlusion-specific dwell (not exposed in UI)
+      occDwellOn: 10,
+      occDwellOff: 3,
       minDet: 0.5,
       minTrack: 0.5,
       minPres: 0.5,
@@ -834,9 +837,16 @@
 
     /* ---------- Prone detection state ---------- */
     let lastTs = 0;
-    let pitchEma = NaN;
-    let riskEma = 0;
-    let alert = false, aboveT = 0, belowT = 0;
+    let pitchEma = NaN;   // EMA of pitch-down (for HUD)
+    let riskEma = 0;      // EMA of fused visual risk (bar only)
+    let alert = false;    // global alert (pose OR occlusion)
+
+    // Pose path
+    let poseRiskEma = 0;
+    let poseAlert = false, poseAboveT = 0, poseBelowT = 0;
+
+    // Occlusion path
+    let occAlert = false, occAboveT = 0, occBelowT = 0;
 
     function emaUpdate(prev, x, tau, dt){
       if (!Number.isFinite(x)) return prev;
@@ -1056,10 +1066,11 @@
             if (elapsed >= S.calDur) finishCalibration(false);
           }
 
-          // Prone scoring only if enabled
-          let risk = 0;
+          // --------- Independent pose & occlusion logic ----------
           if (S.enabled) {
             const faceRisk = present ? 0 : 1; // 0 when visible, 1 when missing
+
+            // Pose path (pitch down)
             const pitchDownNow = Number.isFinite(relPitchDeg) ? Math.max(0, -relPitchDeg) : NaN;
 
             // Map pitchDownNow into [0,1] around thetaOn with a soft slope
@@ -1068,33 +1079,46 @@
               const over = pitchDownNow - S.thetaOn;
               r2 = clamp((over + 10) / 30, 0, 1);
             }
+            const rPoseInst = 0.8 * r2;                       // pose-only instantaneous risk
+            poseRiskEma = emaUpdate(poseRiskEma, rPoseInst, S.emaTau, dt);
+            pitchEma    = emaUpdate(pitchEma,  pitchDownNow, S.emaTau, dt);
 
-            // Combine risks (max fusion)
-            const w1=0.6, w2=0.8;
-            const rInst = Math.max(w1*faceRisk, w2*r2);
-            riskEma = emaUpdate(riskEma, rInst, S.emaTau, dt);
-            pitchEma = emaUpdate(pitchEma, pitchDownNow, S.emaTau, dt);
-            risk = riskEma;
-
-            // Hysteresis + dwell
-            if (!alert) {
-              if (risk > S.thrOn) { aboveT += dt; belowT = 0; }
-              else { aboveT = Math.max(0, aboveT - dt*0.5); } // decay
-              if (aboveT >= S.dwellOn) {
-                alert = true; aboveT = 0; belowT = 0;
-                showStatus('PRONE suspected');
-              }
+            // Pose hysteresis + dwell
+            if (!poseAlert) {
+              if (poseRiskEma > S.thrOn) { poseAboveT += dt; poseBelowT = 0; }
+              else { poseAboveT = Math.max(0, poseAboveT - dt*0.5); }
+              if (poseAboveT >= S.dwellOn) { poseAlert = true; poseAboveT = 0; poseBelowT = 0; }
             } else {
-              if (risk < S.thrOff) { belowT += dt; aboveT = 0; }
-              else { belowT = Math.max(0, belowT - dt*0.5); }
-              if (belowT >= S.dwellOff) {
-                alert = false; aboveT = 0; belowT = 0;
-                showStatus('Recovered from prone');
-              }
+              if (poseRiskEma < S.thrOff) { poseBelowT += dt; poseAboveT = 0; }
+              else { poseBelowT = Math.max(0, poseBelowT - dt*0.5); }
+              if (poseBelowT >= S.dwellOff) { poseAlert = false; poseAboveT = 0; poseBelowT = 0; }
             }
+
+            // Occlusion path: presence dwell (no EMA needed)
+            if (!present) { occAboveT += dt; occBelowT = 0; }
+            else { occBelowT += dt; occAboveT = Math.max(0, occAboveT - dt*0.5); }
+
+            if (!occAlert && occAboveT >= (S.occDwellOn || 10)) { occAlert = true; occAboveT = 0; }
+            if (occAlert  && occBelowT >= (S.occDwellOff || 3)) { occAlert = false; occBelowT = 0; }
+
+            // Global alert (OR)
+            const newAlert = poseAlert || occAlert;
+            if (newAlert !== alert) {
+              alert = newAlert;
+              showStatus(alert ? 'PRONE suspected' : 'Recovered from prone');
+            }
+
+            // Fused risk ONLY for the visual bar
+            const fusedInst = Math.max(0.6 * faceRisk, rPoseInst);
+            riskEma = emaUpdate(riskEma, fusedInst, S.emaTau, dt);
+
           } else {
-            aboveT = belowT = 0;
+            // Disabled: hold safe & reset timers
+            poseAlert = false; occAlert = false; alert = false;
+            poseAboveT = poseBelowT = 0;
+            occAboveT = occBelowT = 0;
           }
+          // ------------------------------------------------------
 
           // Draw overlay + HUD/pills
           drawFaceAndHUD(result, {
@@ -1170,8 +1194,8 @@
 
       onCreatePC: (pc) => {
         const ch = pc.createDataChannel('pose');
-        ch.onopen  = () => console.log('[DC][receiver] pose DC open');
-        ch.onclose = () => console.log('[DC][receiver] pose DC close');
+        ch.onopen  = () => console.log('[DC][receiver] pose DC open']);
+        ch.onclose = () => console.log('[DC][receiver] pose DC close']);
         ch.onerror = (e) => console.warn('[DC][receiver] pose DC error', e);
         ch.onmessage = (ev) => {
           try {
