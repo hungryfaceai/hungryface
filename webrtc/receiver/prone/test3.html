@@ -47,7 +47,12 @@
     }
     .btn:active { transform: scale(0.99); }
     .btn.muted { opacity: 0.6; pointer-events: none; }
-
+    
+    button.btn:disabled { 
+      opacity: 0.45;
+      cursor: not-allowed;
+      filter: grayscale(0.4);
+    }
     #controls {
       position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
       display: flex; align-items: center; gap: 12px; z-index: 6;
@@ -184,7 +189,7 @@
 
     /* Stopwatch badge — match Motion receiver look */
     .icon.timer {
-      display: inline-grid;
+      display: none;
       place-items: center;
       width: 18px;
       height: 18px;
@@ -196,6 +201,8 @@
       vertical-align: -2px;
     }
     .icon.timer svg { width: 12px; height: 12px; }
+    /* When calibrating, show it and keep your existing running styles */
+    #calBtn.running .icon.timer { display: inline-grid; }
     #calBtn.running .icon.timer {
       background: rgba(255,180,0,0.10);
       border-color: rgba(255,180,0,0.40);
@@ -595,6 +602,9 @@
     /* Calibration control (shared with main "Calibration" button) */
     let calRunning = false, calStartTs = 0, calAccum = 0, calCount = 0, calUItimer = null;
     const calBtn = document.getElementById('calBtn');
+    /* NEW: start hidden-icon & disabled until we have landmarks */ //https://chatgpt.com/c/68c45774-e95c-832b-8011-c612280af8fa
+    calBtn.disabled = true;
+    setCalBtn(false, 0);
 
     function setCalBtn(running, remainingSec = 0){
       const label = calBtn.querySelector('.label');
@@ -612,6 +622,15 @@
         calBtn.classList.remove('running');
         icon.style.removeProperty('--hand-rot');
       }
+    }
+
+    function updateCalButtonState(hasLandmarks) {
+      // If calibration is running, keep the button enabled so the user can stop it.
+      if (calRunning) {
+        calBtn.disabled = false;
+        return;
+      }
+      calBtn.disabled = !hasLandmarks;
     }
 
     calBtn.addEventListener('click', () => {
@@ -1069,6 +1088,7 @@
         try {
           const result = faceTask.detectForVideo(remoteVideo, ts);
           const present = !!(result?.faceLandmarks?.length);
+          updateCalButtonState(present);
 
           let yawDeg = NaN, pitchDeg = NaN, rollDeg = NaN, rotMat = null, relPitchDeg = NaN;
 
