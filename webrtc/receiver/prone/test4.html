@@ -72,6 +72,45 @@
     }
     .overlay.hidden { display: none; }
 
+    /* Side help sheet (Motion style) */
+    .help-sheet {
+      position: fixed;
+      top: max(12px, env(safe-area-inset-top));
+      right: max(12px, env(safe-area-inset-right));
+      bottom: max(12px, env(safe-area-inset-bottom));
+      width: min(92vw, 520px);
+      z-index: 9; /* above backdrop (8) and settings (7) */
+      background: rgba(12,12,12,0.58);
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+      transform: translateX(110%);
+      transition: transform 180ms ease;
+      overflow: hidden;
+    }
+    .help-sheet.open { transform: translateX(0); }
+    
+    .help-header {
+      position: sticky; top: 0; z-index: 1;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08);
+      background: rgba(18,18,18,0.96);
+      -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    }
+    
+    .help-body { padding: 12px; overflow: auto; max-height: calc(100svh - 48px); font-size: 13px; color: #ddd; line-height: 1.45; }
+    
+    /* Bare “×” (already added) */
+    .help-header .close, #helpClose {
+      appearance: none; background: transparent !important; border: none !important;
+      box-shadow: none !important; color: #aaa; font-size: 22px; line-height: 1;
+      padding: 2px 6px; cursor: pointer; border-radius: 6px;
+    }
+    .help-header .close:hover, #helpClose:hover { color: #fff; }
+    .help-header .close:active, #helpClose:active { transform: scale(0.98); }
+    
     /* Backdrop */
     .help-backdrop {
       position: fixed;
@@ -611,27 +650,71 @@
 
     // OPEN/CLOSE: Motion-style side sheet
     async function ensureHelpSheetLoaded() {
-      if (document.getElementById('helpSheet')) return; // already in DOM
+    // Already present?
+    if (document.getElementById('helpSheet')) return;
+  
+    // Ensure the injector script is in the page
+    if (!document.getElementById('helpSheetLoader')) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.id = 'helpSheetLoader';
+        s.src = '/hungryface/webrtc/receiver/prone/help-sheet.js'; // <- use shared injector
+        s.onload = resolve;
+        s.onerror = reject;
+        document.body.appendChild(s);
+      });
+    }
+  
+    // Wait until the injector actually appended #helpSheet/#helpBackdrop
+    if (!document.getElementById('helpSheet')) {
+      await new Promise((resolve) => {
+        const done = () => resolve();
+        document.addEventListener('help:ready', done, { once: true });
+      });
+    }
+  }
+
+    function wireHelpEventsOnce() {
+      const sheet = document.getElementById('helpSheet');
+      const backdrop = document.getElementById('helpBackdrop');
+      if (!sheet || !backdrop || sheet.dataset.wired) return;
     
-      // Load the injector once
-      if (!document.getElementById('helpSheetLoader')) {
-        await new Promise((resolve, reject) => {
-          const s = document.createElement('script');
-          s.id = 'helpSheetLoader';
-          s.src = '/hungryface/webrtc/receiver/prone/help-sheet.js';
-          s.onload = resolve;
-          s.onerror = reject;
-          document.body.appendChild(s);
-        });
-      } else {
-        // Wait until the injector finishes
-        if (!document.getElementById('helpSheet')) {
-          await new Promise((r) => {
-            const onReady = () => { document.removeEventListener('help:ready', onReady); r(); };
-            document.addEventListener('help:ready', onReady);
-          });
-        }
-      }
+      const closeBtn = document.getElementById('helpClose');
+    
+      const close = () => {
+        sheet.classList.remove('open');
+        backdrop.classList.remove('open');
+        backdrop.setAttribute('aria-hidden', 'true');
+      };
+    
+      backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); }, { passive: true });
+      closeBtn?.addEventListener('click', (e) => { e.stopPropagation(); close(); });
+    
+      // ESC to close
+      const onEsc = (e) => {
+        if (e.key === 'Escape' && sheet.classList.contains('open')) close();
+      };
+      document.addEventListener('keydown', onEsc);
+    
+      sheet.dataset.wired = '1';
+    }
+    
+    async function openHelp() {
+      await ensureHelpSheetLoaded();
+      wireHelpEventsOnce();
+      const sheet = document.getElementById('helpSheet');
+      const backdrop = document.getElementById('helpBackdrop');
+      sheet?.classList.add('open');
+      backdrop?.classList.add('open');
+      backdrop?.setAttribute('aria-hidden', 'false');
+    }
+    
+    function closeHelp() {
+      const sheet = document.getElementById('helpSheet');
+      const backdrop = document.getElementById('helpBackdrop');
+      sheet?.classList.remove('open');
+      backdrop?.classList.remove('open');
+      backdrop?.setAttribute('aria-hidden', 'true');
     }
     
     function wireHelpEvents() {
@@ -660,12 +743,6 @@
     
     // keep your existing binding
     helpBtn.addEventListener('click', openHelp);
-    
-    // If you want a global click on stage to close help as well:
-    stage.addEventListener('click', () => {
-      settingsDrawer.classList.remove('open');
-      closeHelp();
-    });
 
     /* Calibration control (shared with main "Calibration" button) */
     let calRunning = false, calStartTs = 0, calAccum = 0, calCount = 0, calUItimer = null;
