@@ -1,14 +1,23 @@
-// Wire up the "Close" button inside the loaded help sheet
-(function(){
-  const overlay = document.getElementById('helpOverlay');
-  function close(){ overlay?.classList.remove('open'); overlay?.setAttribute('aria-hidden','true'); }
-  // delegate since content is injected
-  document.addEventListener('click', (e) => {
-    const t = e.target;
-    if (t && t.id === 'helpClose') {
-      e.preventDefault();
-      e.stopPropagation();
-      close();
-    }
-  }, true);
+// /hungryface/webrtc/receiver/prone/help-sheet.js
+(async () => {
+  // Avoid double insert
+  if (document.getElementById('helpSheet') || document.getElementById('helpBackdrop')) return;
+
+  try {
+    const res = await fetch('/hungryface/webrtc/receiver/prone/help-sheet.html', { cache: 'no-cache' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const html = await res.text();
+
+    const wrap = document.createElement('div');
+    wrap.innerHTML = html.trim();
+
+    // Move into DOM (keeps two top-level nodes)
+    const frag = document.createDocumentFragment();
+    while (wrap.firstChild) frag.appendChild(wrap.firstChild);
+    document.body.appendChild(frag);
+
+    document.dispatchEvent(new CustomEvent('help:ready'));
+  } catch (err) {
+    console.error('[HelpSheet] failed to load:', err);
+  }
 })();
