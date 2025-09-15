@@ -47,7 +47,12 @@
     }
     .btn:active { transform: scale(0.99); }
     .btn.muted { opacity: 0.6; pointer-events: none; }
-
+    
+    button.btn:disabled { 
+      opacity: 0.45;
+      cursor: not-allowed;
+      filter: grayscale(0.4);
+    }
     #controls {
       position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
       display: flex; align-items: center; gap: 12px; z-index: 6;
@@ -67,6 +72,88 @@
     }
     .overlay.hidden { display: none; }
 
+    /* Side help sheet (Motion style) */
+    .help-sheet {
+      position: fixed;
+      top: max(12px, env(safe-area-inset-top));
+      right: max(12px, env(safe-area-inset-right));
+      bottom: max(12px, env(safe-area-inset-bottom));
+      width: min(92vw, 520px);
+      z-index: 9; /* above backdrop (8) and settings (7) */
+      background: rgba(12,12,12,0.58);
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+      transform: translateX(110%);
+      transition: transform 180ms ease;
+      overflow: hidden;
+    }
+    .help-sheet.open { transform: translateX(0); }
+    
+    .help-header {
+      position: sticky; top: 0; z-index: 1;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08);
+      background: rgba(18,18,18,0.96);
+      -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    }
+    
+    /* Bare “×” (already added) */
+    .help-header .close:hover, #helpClose:hover { color: #fff; }
+    .help-header .close:active, #helpClose:active { transform: scale(0.98); }
+    
+    /* Backdrop */
+    .help-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 8; /* above settings (7) */
+      background: rgba(0,0,0,0.45);
+      -webkit-backdrop-filter: blur(6px);
+      backdrop-filter: blur(6px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms ease;
+    }
+    .help-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+     
+    /* Bare “×” icon (NOT a .btn rectangle) */
+    .help-header .close, #helpClose {
+      appearance: none;
+      background: transparent !important;
+      border: none !important;
+      box-shadow: none !important;
+      color: #aaa;
+      font-size: 22px;
+      line-height: 1;
+      padding: 2px 6px;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+    
+    .help-body {
+      padding: 12px;
+      overflow: auto;
+      max-height: calc(100svh - 48px);
+      font-size: 13px;
+      color: #ddd;
+      line-height: 1.45;
+    }
+    
+    /* Optional: small TOC / tables styling if you reuse Motion blocks */
+    .help-body .help-toc { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 10px; }
+    .help-body .help-toc a {
+      font-size: 12px; padding: 4px 8px; border-radius: 10px;
+      background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); color:#ddd; text-decoration:none;
+    }
+    .help-body .help-kv { width:100%; border-collapse:collapse; font-size:12px; }
+    .help-body .help-kv th { text-align:left; white-space:nowrap; padding:4px 8px; color:#ddd; }
+    .help-body .help-kv td { padding:4px 8px; color:#bbb; }
+
     /* Settings drawer — match motion app transparency */
     #settingsBtn { /* now lives beside Calibration in #controls */ }
     #settingsDrawer {
@@ -84,6 +171,22 @@
     .sd-head { position: sticky; top: 0; display:flex; align-items:center; gap:8px; justify-content:space-between; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,0.08);}
     .sd-head h2 { margin:0; font-size:16px; }
     .sd-head-right { display:flex; align-items:center; gap:8px; }
+    /* Settings header close icon */
+    .sd-head-right .close {
+      appearance: none;
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      color: #aaa;
+      font-size: 22px;
+      line-height: 1;
+      padding: 2px 6px;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+    .sd-head-right .close:hover { color: #fff; }
+    .sd-head-right .close:active { transform: scale(0.98); }
+
     .sd-body { padding: 10px 14px; display: grid; gap: 12px; max-height: 70vh; overflow:auto; }
     .sd-group { border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:10px; background: rgba(0,0,0,0.25); }
     .sd-group h3 { margin:0 0 6px; font-size:14px; color:#ddd; }
@@ -128,27 +231,25 @@
       font-size:10px; color:#ddd;
       text-shadow: 0 1px 2px rgba(0,0,0,0.6);
     }
-    
     .hud .riskbar .tick {
       position: absolute;
-      top: -2px;              /* sits slightly above the bar */
-      bottom: -2px;           /* extends slightly below for visibility */
+      top: -2px;
+      bottom: -2px;
       width: 2px;
       background: rgba(255,255,255,0.7);
       border-radius: 2px;
       pointer-events: none;
     }
-    
     .hud-head {
       display: flex;
       align-items: center;
-      margin-bottom: 8px;               /* ensures it sits above the text */
+      margin-bottom: 8px;
     }
 
     /* Small alert pill INSIDE the HUD (top-right corner) */
     #alertPill {
-      position: static;                 /* was absolute */
-      margin-left: auto;                /* right-align within header */
+      position: static;
+      margin-left: auto;
       padding: 3px 8px;
       border-radius: 999px;
       font-size: 11px;
@@ -162,32 +263,9 @@
     #alertPill.prone-on   { color:#fecaca; border-color:#5a1e1e; background:rgba(90,30,30,0.55); }
     #alertPill::before, #alertPill::after { content:'' !important; }
 
-    /* Help overlay (separate HTML/JS) */
-    .help-overlay {
-      position: fixed; inset: 0; z-index: 8; display: none;
-      background: rgba(0,0,0,0.5);
-      -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
-    }
-    .help-overlay.open { display: block; }
-    .help-sheet {
-      position: absolute;
-      left: max(12px, env(safe-area-inset-left));
-      right: max(12px, env(safe-area-inset-right));
-      top: calc(env(safe-area-inset-top) + 20px);   /* not too close on iPhone */
-      margin: 0 auto;
-      max-width: 720px;
-      background: rgba(12,12,12,0.58);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 14px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-      overflow: hidden;
-    }
-    .help-sheet .body { max-height: 70vh; overflow: auto; }
-
-    /* Timer icon for Calibration */
     /* Stopwatch badge — match Motion receiver look */
     .icon.timer {
-      display: inline-grid;
+      display: none;
       place-items: center;
       width: 18px;
       height: 18px;
@@ -196,26 +274,21 @@
       background: rgba(255,255,255,0.06);
       border: 1px solid rgba(255,255,255,0.18);
       box-shadow: inset 0 1px 1px rgba(0,0,0,0.25);
-      vertical-align: -2px; /* sits nicely with text */
+      vertical-align: -2px;
     }
     .icon.timer svg { width: 12px; height: 12px; }
-    
-    /* Running state: subtle warm highlight like other “active” pills */
+    /* When calibrating, show it and keep your existing running styles */
+    #calBtn.running .icon.timer { display: inline-grid; }
     #calBtn.running .icon.timer {
       background: rgba(255,180,0,0.10);
       border-color: rgba(255,180,0,0.40);
     }
-    
-    /* Optional: rotate the hand as we count down (we set --hand-rot in JS) */
     .icon.timer .hand {
       transform-origin: 12px 12px;
       transform: rotate(var(--hand-rot, 0deg));
       transition: transform 120ms linear;
     }
-    
-    /* Keep your generic icon rule (can coexist) */
     .icon { font-style: normal; margin-right: 6px; }
-
   </style>
 </head>
 <body>
@@ -251,8 +324,8 @@
     <div class="riskbar" aria-label="Risk">
       <i id="riskFill"></i><span id="riskPct" class="pct">0%</span>
       <b class="tick" id="tick-occl" title="Occlusion ceiling"></b>
-      <b class="tick" id="tick-on"   title="Alert on"></b>
-      <b class="tick" id="tick-off"  title="Alert off"></b>
+      <b class="tick" id="tick-on"   title="Alert on (pose)"></b>
+      <b class="tick" id="tick-off"  title="Alert off (pose)"></b>
     </div>
   </div>
 
@@ -280,7 +353,7 @@
       <h2>Prone detection settings</h2>
       <div class="sd-head-right">
         <button id="helpBtn" class="btn" type="button" style="padding:6px 10px;font-size:13px;">Help</button>
-        <button id="closeSettingsBtn" class="btn" type="button" title="Close" style="padding:6px 10px;font-size:16px;line-height:1;">×</button>
+        <button id="closeSettingsBtn" class="close" type="button" title="Close" aria-label="Close">×</button>
       </div>
     </div>
     <div class="sd-body">
@@ -309,10 +382,14 @@
         <h3>Smoothing & thresholds</h3>
         <div class="row"><label>EMA τ (s)</label><input id="st-emaTau" type="number" min="0.2" max="10" step="0.1"></div>
         <div class="row"><label>Pitch θ<sub>on</sub> (deg below supine)</label><input id="st-thetaOn" type="number" min="10" max="90" step="1"></div>
-        <div class="row"><label>Risk thr<sub>on</sub></label><input id="st-thrOn" type="number" min="0.1" max="1" step="0.05"></div>
-        <div class="row"><label>Risk thr<sub>off</sub></label><input id="st-thrOff" type="number" min="0.05" max="0.95" step="0.05"></div>
-        <div class="row"><label>Dwell on (s)</label><input id="st-dwellOn" type="number" min="1" max="60" step="1"></div>
-        <div class="row"><label>Dwell off (s)</label><input id="st-dwellOff" type="number" min="1" max="60" step="1"></div>
+        <div class="row"><label>Pose thr<sub>on</sub></label><input id="st-poseThrOn" type="number" min="0.1" max="1" step="0.05"></div>
+        <div class="row"><label>Pose thr<sub>off</sub></label><input id="st-poseThrOff" type="number" min="0.05" max="0.95" step="0.05"></div>
+        <div class="row"><label>Pose dwell on (s)</label><input id="st-poseDwellOn" type="number" min="1" max="60" step="1"></div>
+        <div class="row"><label>Pose dwell off (s)</label><input id="st-poseDwellOff" type="number" min="1" max="60" step="1"></div>
+        <div class="row"><label>Occlusion thr<sub>on</sub></label><input id="st-occThrOn" type="number" min="0.1" max="1" step="0.05"></div>
+        <div class="row"><label>Occlusion thr<sub>off</sub></label><input id="st-occThrOff" type="number" min="0.05" max="0.95" step="0.05"></div>
+        <div class="row"><label>Occlusion dwell on (s)</label><input id="st-occDwellOn" type="number" min="1" max="60" step="1"></div>
+        <div class="row"><label>Occlusion dwell off (s)</label><input id="st-occDwellOff" type="number" min="1" max="60" step="1"></div>
       </div>
 
       <div class="sd-group">
@@ -321,18 +398,11 @@
         <div class="row"><label>minTrackingConfidence</label><input id="st-minTrack" type="number" min="0" max="1" step="0.05"></div>
         <div class="row"><label>minFacePresenceConfidence</label><input id="st-minPres" type="number" min="0" max="1" step="0.05"></div>
         <div class="row"><button id="reinitFaceBtn" class="btn" type="button">Apply to model</button></div>
+        <div class="row"><button id="resetDefaultsBtn" class="btn" type="button">Reset all defaults</button></div>
       </div>
-
-      <!-- Help details removed per request -->
     </div>
   </div>
 
-  <!-- Help overlay (loads separate page + js) -->
-  <div id="helpOverlay" class="help-overlay" aria-hidden="true">
-    <div id="helpSheet" class="help-sheet" role="dialog" aria-modal="true" aria-label="Help">
-      <div class="body" id="helpBody"><!-- populated from help-sheet.html --></div>
-    </div>
-  </div>
 
   <div id="stage">
     <video id="remote" autoplay playsinline></video>
@@ -350,10 +420,10 @@
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
-    const LS_KEY = "naptio:face-prone-settings:v1.1";
+    const LS_KEY = "naptio:face-prone-settings:v1.2";
     const LS_SUPINE_KEY = "naptio:face-prone-supine:" + room;
 
-    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
+    const STATUS_HIDE_MS = 3000;
 
     // MediaPipe assets
     const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
@@ -362,10 +432,9 @@
       "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task";
 
     const HAVE_CURRENT_DATA = 2;
-    // --- Risk scaling (keep in sync with rInst = max(0.6*faceRisk, 0.8*r2)) ---
-    const OCCL_MAX = 0.6; // occlusion-only ceiling
-    const RISK_MAX = 0.8; // true overall ceiling
-    
+    // --- Unified scale: pose instant risk ranges 0..POSE_RANGE, normalize to 0..1 for the fused bar ---
+    const POSE_RANGE = 0.8;
+
     /* ---------- DOM ---------- */
     const stage = document.getElementById('stage');
     const remoteVideo = document.getElementById('remote');
@@ -387,24 +456,19 @@
     const hud = document.getElementById('hud');
     const hudLines = document.getElementById('hudLines');
 
-    const helpOverlay = document.getElementById('helpOverlay');
-    const helpBody = document.getElementById('helpBody');
-
-    const riskBar = document.getElementById('riskFill'); // alias: the fill element
+    const riskBar = document.getElementById('riskFill');
     const riskPct = document.getElementById('riskPct');
     
     const tickOccl = document.getElementById('tick-occl');
     const tickOn   = document.getElementById('tick-on');
     const tickOff  = document.getElementById('tick-off');
 
-
     // Muted axis colors (standard mapping kept)
     const AXIS_STYLE = {
-      x: { stroke: 'rgba(200, 80, 80, 0.65)'  }, // X
-      y: { stroke: 'rgba( 40,155,135,0.90)'  }, // Y teal-leaning
-      z: { stroke: 'rgba( 90,120,210,0.95)'  }, // Z
-      width: 1.0,
-      dash: [4, 3]
+      x: { stroke: 'rgba(200, 80, 80, 0.65)'  },
+      y: { stroke: 'rgba( 40,155,135,0.90)'  },
+      z: { stroke: 'rgba( 90,120,210,0.95)'  },
+      width: 1.0
     };
 
     /* ---------- Settings state ---------- */
@@ -415,18 +479,29 @@
       showAxes: true,
       arrowScale: 1.8,
       flipPitch: false,
+
+      // Filtering
       emaTau: 2.0,
-      thetaOn: 55,
-      thrOn: 0.70,
-      thrOff: 0.40,
-      dwellOn: 12,
-      dwellOff: 5,
-      // occlusion-specific dwell (not exposed in UI)
+
+      // Pose mapping + hysteresis
+      thetaOn: 55,            // deg below supine considered "prone-ish"
+      poseThrOn: 0.70,
+      poseThrOff: 0.40,
+      poseDwellOn: 12,
+      poseDwellOff: 5,
+
+      // Occlusion hysteresis (on EMA of presence: 1 when missing, 0 when present)
+      occThrOn: 0.75,
+      occThrOff: 0.45,
       occDwellOn: 10,
       occDwellOff: 3,
+
+      // FaceLandmarker
       minDet: 0.5,
       minTrack: 0.5,
       minPres: 0.5,
+
+      // Calibration
       calDur: 10
     };
     let S = loadSettings();
@@ -443,10 +518,14 @@
       flipPitch: $('st-flipPitch'),
       emaTau: $('st-emaTau'),
       thetaOn: $('st-thetaOn'),
-      thrOn: $('st-thrOn'),
-      thrOff: $('st-thrOff'),
-      dwellOn: $('st-dwellOn'),
-      dwellOff: $('st-dwellOff'),
+      poseThrOn: $('st-poseThrOn'),
+      poseThrOff: $('st-poseThrOff'),
+      poseDwellOn: $('st-poseDwellOn'),
+      poseDwellOff: $('st-poseDwellOff'),
+      occThrOn: $('st-occThrOn'),
+      occThrOff: $('st-occThrOff'),
+      occDwellOn: $('st-occDwellOn'),
+      occDwellOff: $('st-occDwellOff'),
       minDet: $('st-minDet'),
       minTrack: $('st-minTrack'),
       minPres: $('st-minPres'),
@@ -455,7 +534,8 @@
       supineVal: $('supineVal'),
       calStartBtn: $('calStartBtn'),
       calResetBtn: $('calResetBtn'),
-      reinitFaceBtn: $('reinitFaceBtn')
+      reinitFaceBtn: $('reinitFaceBtn'),
+      resetDefaultsBtn: $('resetDefaultsBtn')
     };
 
     function applySettingsToUI(){
@@ -465,16 +545,25 @@
       ui.showAxes.checked = !!S.showAxes;
       ui.arrowScale.value = S.arrowScale;
       ui.flipPitch.checked = !!S.flipPitch;
+
       ui.emaTau.value = S.emaTau;
       ui.thetaOn.value = S.thetaOn;
-      ui.thrOn.value = S.thrOn;
-      ui.thrOff.value = S.thrOff;
-      ui.dwellOn.value = S.dwellOn;
-      ui.dwellOff.value = S.dwellOff;
+
+      ui.poseThrOn.value = S.poseThrOn;
+      ui.poseThrOff.value = S.poseThrOff;
+      ui.poseDwellOn.value = S.poseDwellOn;
+      ui.poseDwellOff.value = S.poseDwellOff;
+
+      ui.occThrOn.value = S.occThrOn;
+      ui.occThrOff.value = S.occThrOff;
+      ui.occDwellOn.value = S.occDwellOn;
+      ui.occDwellOff.value = S.occDwellOff;
+
       ui.minDet.value = S.minDet;
       ui.minTrack.value = S.minTrack;
       ui.minPres.value = S.minPres;
       ui.calDur.value = S.calDur;
+
       ui.supineVal.textContent = Number.isFinite(pitchSupine) ? pitchSupine.toFixed(1) : '–';
     }
     function readSettingsFromUI(){
@@ -484,12 +573,20 @@
       S.showAxes = ui.showAxes.checked;
       S.arrowScale = clampNum(parseFloat(ui.arrowScale.value), 0.5, 3);
       S.flipPitch = ui.flipPitch.checked;
+
       S.emaTau = clampNum(parseFloat(ui.emaTau.value), 0.1, 20);
       S.thetaOn = clampNum(parseFloat(ui.thetaOn.value), 5, 120);
-      S.thrOn = clampNum(parseFloat(ui.thrOn.value), 0, 1);
-      S.thrOff = clampNum(parseFloat(ui.thrOff.value), 0, 1);
-      S.dwellOn = clampNum(parseFloat(ui.dwellOn.value), 0, 120);
-      S.dwellOff = clampNum(parseFloat(ui.dwellOff.value), 0, 120);
+
+      S.poseThrOn = clampNum(parseFloat(ui.poseThrOn.value), 0, 1);
+      S.poseThrOff = clampNum(parseFloat(ui.poseThrOff.value), 0, 1);
+      S.poseDwellOn = clampNum(parseFloat(ui.poseDwellOn.value), 0, 120);
+      S.poseDwellOff = clampNum(parseFloat(ui.poseDwellOff.value), 0, 120);
+
+      S.occThrOn = clampNum(parseFloat(ui.occThrOn.value), 0, 1);
+      S.occThrOff = clampNum(parseFloat(ui.occThrOff.value), 0, 1);
+      S.occDwellOn = clampNum(parseFloat(ui.occDwellOn.value), 0, 120);
+      S.occDwellOff = clampNum(parseFloat(ui.occDwellOff.value), 0, 120);
+
       S.minDet = clampNum(parseFloat(ui.minDet.value), 0, 1);
       S.minTrack = clampNum(parseFloat(ui.minTrack.value), 0, 1);
       S.minPres = clampNum(parseFloat(ui.minPres.value), 0, 1);
@@ -517,7 +614,13 @@
       applySettingsToUI();
     });
     closeSettingsBtn.addEventListener('click', () => settingsDrawer.classList.remove('open'));
-    settingsDrawer.addEventListener('change', (e) => { readSettingsFromUI(); });
+    settingsDrawer.addEventListener('change', () => { readSettingsFromUI(); });
+
+    // Close settings when clicking on the main page (video stage)
+    stage.addEventListener('click', () => {
+      settingsDrawer.classList.remove('open');
+      closeHelp();
+    });
 
     ui.reinitFaceBtn.addEventListener('click', async () => {
       readSettingsFromUI();
@@ -528,49 +631,101 @@
       saveSupine(NaN);
       showStatus('Supine baseline cleared');
     });
-
-    /* Help: separate page + JS, open from Settings header; click main page closes */
-    helpBtn.addEventListener('click', openHelp);
-    helpOverlay.addEventListener('click', (e) => {
-      if (e.target === helpOverlay) closeHelp(); // backdrop click
+    ui.resetDefaultsBtn.addEventListener('click', async () => {
+      S = {...defaults};
+      saveSettings();
+      applySettingsToUI();
+      await recreateFaceTask();
+      showStatus('All settings reset to defaults');
     });
-    stage.addEventListener('click', () => { closeHelp(); }); // click main page closes help
 
-    async function openHelp(){
-      try {
-        const res = await fetch('help-sheet.html', { cache: 'no-cache' });
-        helpBody.innerHTML = await res.text();
-      } catch { helpBody.innerHTML = '<div style="padding:16px">Help unavailable.</div>'; }
-      // load associated JS once
-      if (!document.getElementById('helpSheetScript')) {
+    // OPEN/CLOSE: Motion-style side sheet
+    async function ensureHelpSheetLoaded() {
+    // Already present?
+    if (document.getElementById('helpSheet')) return;
+  
+    // Ensure the injector script is in the page
+    if (!document.getElementById('helpSheetLoader')) {
+      await new Promise((resolve, reject) => {
         const s = document.createElement('script');
-        s.id = 'helpSheetScript';
-        s.src = 'help-sheet.js';
+        s.id = 'helpSheetLoader';
+        s.src = '/hungryface/webrtc/receiver/prone/help-sheet.js'; // <- use shared injector
+        s.onload = resolve;
+        s.onerror = reject;
         document.body.appendChild(s);
-      }
-      helpOverlay.classList.add('open');
-      helpOverlay.setAttribute('aria-hidden','false');
+      });
     }
-    function closeHelp(){
-      helpOverlay.classList.remove('open');
-      helpOverlay.setAttribute('aria-hidden','true');
+  
+    // Wait until the injector actually appended #helpSheet/#helpBackdrop
+    if (!document.getElementById('helpSheet')) {
+      await new Promise((resolve) => {
+        const done = () => resolve();
+        document.addEventListener('help:ready', done, { once: true });
+      });
     }
+  }
+
+    function wireHelpEventsOnce() {
+      const sheet = document.getElementById('helpSheet');
+      const backdrop = document.getElementById('helpBackdrop');
+      if (!sheet || !backdrop || sheet.dataset.wired) return;
+    
+      const closeBtn = document.getElementById('helpClose');
+    
+      const onEsc = (e) => {
+        if (e.key === 'Escape' && sheet.classList.contains('open')) close();
+      };
+    
+      const close = () => {
+        sheet.classList.remove('open');
+        backdrop.classList.remove('open');
+        backdrop.setAttribute('aria-hidden', 'true');
+        document.removeEventListener('keydown', onEsc);
+      };
+    
+      backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); }, { passive: true });
+      closeBtn?.addEventListener('click', (e) => { e.stopPropagation(); close(); });
+      document.addEventListener('keydown', onEsc);
+    
+      sheet.dataset.wired = '1';
+    }
+    
+    async function openHelp() {
+      await ensureHelpSheetLoaded();
+      wireHelpEventsOnce();
+      const sheet = document.getElementById('helpSheet');
+      const backdrop = document.getElementById('helpBackdrop');
+      sheet?.classList.add('open');
+      backdrop?.classList.add('open');
+      backdrop?.setAttribute('aria-hidden', 'false');
+    }
+    
+    function closeHelp() {
+      const sheet = document.getElementById('helpSheet');
+      const backdrop = document.getElementById('helpBackdrop');
+      sheet?.classList.remove('open');
+      backdrop?.classList.remove('open');
+      backdrop?.setAttribute('aria-hidden', 'true');
+    }
+    
+    // keep your existing binding
+    helpBtn.addEventListener('click', openHelp);
 
     /* Calibration control (shared with main "Calibration" button) */
     let calRunning = false, calStartTs = 0, calAccum = 0, calCount = 0, calUItimer = null;
     const calBtn = document.getElementById('calBtn');
+    /* NEW: start hidden-icon & disabled until we have landmarks */ //https://chatgpt.com/c/68c45774-e95c-832b-8011-c612280af8fa
+    calBtn.disabled = true;
+    setCalBtn(false, 0);
 
     function setCalBtn(running, remainingSec = 0){
       const label = calBtn.querySelector('.label');
       const icon  = calBtn.querySelector('.icon.timer');
       if (!label || !icon) return;
-    
       if (running){
         const secs = Math.max(0, Math.ceil(remainingSec));
         label.textContent = `Calibrating… ${secs} s`;
         calBtn.classList.add('running');
-    
-        // Optional: sweep the hand around proportionally
         const pct  = S.calDur > 0 ? (1 - (remainingSec / S.calDur)) : 0;
         const deg  = Math.max(0, Math.min(1, pct)) * 360;
         icon.style.setProperty('--hand-rot', deg + 'deg');
@@ -581,15 +736,21 @@
       }
     }
 
+    function updateCalButtonState(hasLandmarks) {
+      // If calibration is running, keep the button enabled so the user can stop it.
+      if (calRunning) {
+        calBtn.disabled = false;
+        return;
+      }
+      calBtn.disabled = !hasLandmarks;
+    }
 
     calBtn.addEventListener('click', () => {
-      // Open settings and start calibration there
       if (!settingsDrawer.classList.contains('open')) {
         settingsDrawer.classList.add('open');
         applySettingsToUI();
       }
       if (!calRunning) {
-        // start
         startCalibrationUI();
       }
     });
@@ -604,7 +765,6 @@
       ui.calProg.style.width = '0%';
       ui.calStartBtn.textContent = 'Stop';
       showStatus('Calibration started… Keep face-up / neutral');
-      // main button state + timer
       clearInterval(calUItimer);
       calUItimer = setInterval(() => {
         const elapsed = (performance.now() - calStartTs)/1000;
@@ -637,14 +797,13 @@
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
       console.log('[STATUS]', msg);
-      if (msg === 'Connected') {
-        if (hideStatusTimer) clearTimeout(hideStatusTimer);
-        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
-      } else {
-        if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
-        overlay.classList.remove('hidden');
-      }
+    
+      if (hideStatusTimer) clearTimeout(hideStatusTimer);
+      hideStatusTimer = setTimeout(() => {
+        overlay.classList.add('hidden');
+      }, STATUS_HIDE_MS);
     }
+
 
     /* ---------- Audio UI ---------- */
     function updateAudioButtons() {
@@ -729,7 +888,6 @@
       const fit = containRect(containerW, containerH, vidW, vidH);
       const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
       const topCSS = Math.round((videoBox.top - stageBox.top) + fit.top);
-      // Position the HUD at the video’s top-left corner with a small inset
       hud.style.left = (leftCSS + 8) + 'px';
       hud.style.top  = (topCSS  + 8) + 'px';
 
@@ -791,9 +949,9 @@
     /* ---------- MediaPipe Face Landmarker (Receiver) ---------- */
     let faceTask = null;
     let faceLoopRunning = false;
-    let faceEnabled = true;         // may be toggled via DC
-    let faceWhere = 'receiver';     // 'receiver' | 'sender'
-    let faceDC = null;              // DC for AI messages
+    let faceEnabled = true;
+    let faceWhere = 'receiver';
+    let faceDC = null;
 
     async function ensureFaceTask() {
       if (faceTask) return faceTask;
@@ -836,15 +994,20 @@
 
     /* ---------- Prone detection state ---------- */
     let lastTs = 0;
+
+    // Visuals
     let pitchEma = NaN;   // EMA of pitch-down (for HUD)
-    let riskEma = 0;      // EMA of fused visual risk (bar only)
-    let alert = false;    // global alert (pose OR occlusion)
+    let riskEma  = 0;     // EMA of fused visual risk (bar only) — normalized 0..1
+
+    // Global alert (OR of poseAlert, occAlert)
+    let alert = false;
 
     // Pose path
     let poseRiskEma = 0;
     let poseAlert = false, poseAboveT = 0, poseBelowT = 0;
 
     // Occlusion path
+    let occEma = 0;
     let occAlert = false, occAboveT = 0, occBelowT = 0;
 
     function emaUpdate(prev, x, tau, dt){
@@ -856,7 +1019,6 @@
     function clampNum(v, lo, hi){ v = Number(v); return Number.isFinite(v) ? clamp(v, lo, hi) : lo; }
 
     function computeEulerXYZ(m){ // m: Float32Array[16] row-major
-      // Extract rotation (upper-left 3x3)
       const m00=m[0], m01=m[1], m02=m[2];
       const m10=m[4], m11=m[5], m12=m[6];
       const m20=m[8], m21=m[9], m22=m[10];
@@ -892,11 +1054,11 @@
       const cy = centroid.y * faceCanvas.height;
       const drawVec = (v, style)=>{
         faceCtx.save();
-        faceCtx.setLineDash([]);                 // solid
-        faceCtx.lineWidth = AXIS_STYLE.width;    // thicker
+        faceCtx.setLineDash([]);
+        faceCtx.lineWidth = AXIS_STYLE.width;
         faceCtx.lineCap = 'round';
         faceCtx.strokeStyle = style.stroke;
-        faceCtx.shadowColor = style.stroke;      // subtle contrast on video
+        faceCtx.shadowColor = style.stroke;
         faceCtx.shadowBlur = 2;
         const tipX = cx + v.x*scalePx, tipY = cy - v.y*scalePx;
         faceCtx.beginPath(); faceCtx.moveTo(cx, cy); faceCtx.lineTo(tipX, tipY); faceCtx.stroke();
@@ -936,25 +1098,23 @@
         const cy = cen.y * faceCanvas.height;
         const minDim = Math.min(faceCanvas.width, faceCanvas.height);
 
-        // 3D axes
         if (S.showAxes && rotMat && rotMat.length >= 16){
           const axisLen = minDim * 0.10 * (S.arrowScale || 1);
           drawAxisTriad(rotMat, cen, axisLen);
         }
 
-        // Head-direction arrow
         if (S.showOrient){
           const yawRad = yawDeg * Math.PI/180;
           const pitchRad = (Number.isFinite(relPitchDeg) ? relPitchDeg : 0) * Math.PI/180;
           const L = minDim * 0.14 * (S.arrowScale || 1);
-          const dx = -Math.sin(yawRad) * L;             // your chosen convention
+          const dx = -Math.sin(yawRad) * L;
           const dy = -Math.sin(pitchRad) * L;
 
           faceCtx.beginPath();
           faceCtx.moveTo(cx, cy);
           faceCtx.lineTo(cx + dx, cy + dy);
           faceCtx.lineWidth = 4;
-          const mid = (S.thrOn + S.thrOff) / 2;
+          const mid = (S.poseThrOn + S.poseThrOff) / 2;
           faceCtx.strokeStyle = alert ? '#ff6b6b' : (risk>mid ? '#f6ad55' : '#9ae6b4');
           faceCtx.stroke();
 
@@ -973,34 +1133,37 @@
 
     function updatePill(risk, alertOn){
       alertPill.classList.remove('prone-safe','prone-risk','prone-on');
-      const mid = (S.thrOn + S.thrOff) / 2;
+      const mid = (S.poseThrOn + S.poseThrOff) / 2;
       const cls = alertOn ? 'prone-on' : (risk>mid ? 'prone-risk' : 'prone-safe');
       alertPill.classList.add(cls);
-      alertPill.textContent = alertOn ? 'PRONE suspected' : (risk>mid ? 'Risk rising' : 'Safe');
+
+      // Show dominant channel on the pill (unified 0..1 scale)
+      const poseNorm = (poseRiskEma / POSE_RANGE);      // 0..1
+      const dominant = (occEma >= poseNorm) ? 'Occlusion' : 'Pose';
+
+      alertPill.textContent = alertOn
+        ? `PRONE suspected • ${dominant}`
+        : (risk>mid ? `Risk rising • ${dominant}` : 'Safe');
     }
 
-    /* HUD text + risk bar (percent of max 0.6) */
-    function updateHud(pitchDownDeg, risk, yawDeg, pitchDeg, rollDeg, relPitchDeg){
+    /* HUD text + risk bar — unified 0..100% scale */
+    function updateHud(pitchDownDeg, fused, yawDeg, pitchDeg, rollDeg, relPitchDeg){
       const fmt = v => Number.isFinite(v) ? v.toFixed(1) : '–';
       hudLines.textContent =
-        `pitch↓: ${fmt(pitchDownDeg)}°  •  risk: ${risk.toFixed(2)}\n` +
+        `pitch↓: ${fmt(pitchDownDeg)}°  •  risk: ${(fused||0).toFixed(2)}\n` +
         `yaw: ${fmt(yawDeg)}°  pitch(raw): ${fmt(pitchDeg)}°  roll: ${fmt(rollDeg)}°  pitch(rel): ${fmt(relPitchDeg)}°`;
-    
-      // Normalize bar width to overall headroom (RISK_MAX)
-      const widthPct = Math.round(clamp(((risk || 0) / RISK_MAX), 0, 1) * 100);
-      if (riskBar) riskBar.style.width = widthPct + '%';
-    
-      // Text shows occlusion-normalized percent
-      const uiPct = Math.round(clamp(((risk || 0) / OCCL_MAX), 0, 1) * 100);
-      if (riskPct) riskPct.textContent = uiPct + '%';
-    
-      // Tick marks (% of RISK_MAX)
-      if (tickOccl) tickOccl.style.left = (OCCL_MAX / RISK_MAX * 100) + '%';
-      if (tickOn)   tickOn.style.left   = (S.thrOn   / RISK_MAX * 100) + '%';
-      if (tickOff)  tickOff.style.left  = (S.thrOff  / RISK_MAX * 100) + '%';
-    
-      // Color-coding (green <50%, orange 50–99%, red 100% of occlusion ceiling)
-      const pct = uiPct;
+
+      const pct = Math.round(clamp(((fused || 0)), 0, 1) * 100);
+      if (riskBar) riskBar.style.width = pct + '%';
+      if (riskPct) riskPct.textContent = pct + '%';
+
+      // Pose thresholds mapped to unified scale via POSE_RANGE
+      if (tickOn)   tickOn.style.left   = (S.poseThrOn  / POSE_RANGE * 100) + '%';
+      if (tickOff)  tickOff.style.left  = (S.poseThrOff / POSE_RANGE * 100) + '%';
+
+      // Hide the old occlusion ceiling tick in the unified-scale UI
+      if (tickOccl) tickOccl.style.display = 'none';
+
       if (riskBar) {
         if (pct >= 100)      riskBar.style.background = '#ff6b6b';
         else if (pct >= 50)  riskBar.style.background = '#f6ad55';
@@ -1037,6 +1200,7 @@
         try {
           const result = faceTask.detectForVideo(remoteVideo, ts);
           const present = !!(result?.faceLandmarks?.length);
+          updateCalButtonState(present);
 
           let yawDeg = NaN, pitchDeg = NaN, rollDeg = NaN, rotMat = null, relPitchDeg = NaN;
 
@@ -1048,7 +1212,7 @@
               yawDeg = e.yaw;
               pitchDeg = e.pitch;
               rollDeg = e.roll;
-              rotMat = m; // pass to drawing for axes
+              rotMat = m;
             }
           }
           // Signed relative pitch (baseline- and Flip-corrected)
@@ -1059,46 +1223,49 @@
           if (calRunning) {
             const elapsed = (ts - calStartTs)/1000;
             ui.calProg.style.width = clamp((elapsed / S.calDur)*100, 0, 100) + '%';
-            // update external Calibration button timer
             setCalBtn(true, Math.max(0, S.calDur - elapsed));
             if (present && Number.isFinite(pitchDeg)) { calAccum += pitchDeg; calCount++; }
             if (elapsed >= S.calDur) finishCalibration(false);
           }
 
-          // --------- Independent pose & occlusion logic ----------
           if (S.enabled) {
             const faceRisk = present ? 0 : 1; // 0 when visible, 1 when missing
 
             // Pose path (pitch down)
             const pitchDownNow = Number.isFinite(relPitchDeg) ? Math.max(0, -relPitchDeg) : NaN;
 
-            // Map pitchDownNow into [0,1] around thetaOn with a soft slope
             let r2 = 0;
             if (Number.isFinite(pitchDownNow)) {
               const over = pitchDownNow - S.thetaOn;
               r2 = clamp((over + 10) / 30, 0, 1);
             }
-            const rPoseInst = 0.8 * r2;                       // pose-only instantaneous risk
+            const rPoseInst = POSE_RANGE * r2; // 0..POSE_RANGE (0..0.8)
             poseRiskEma = emaUpdate(poseRiskEma, rPoseInst, S.emaTau, dt);
             pitchEma    = emaUpdate(pitchEma,  pitchDownNow, S.emaTau, dt);
 
             // Pose hysteresis + dwell
             if (!poseAlert) {
-              if (poseRiskEma > S.thrOn) { poseAboveT += dt; poseBelowT = 0; }
+              if (poseRiskEma > S.poseThrOn) { poseAboveT += dt; poseBelowT = 0; }
               else { poseAboveT = Math.max(0, poseAboveT - dt*0.5); }
-              if (poseAboveT >= S.dwellOn) { poseAlert = true; poseAboveT = 0; poseBelowT = 0; }
+              if (poseAboveT >= S.poseDwellOn) { poseAlert = true; poseAboveT = 0; poseBelowT = 0; }
             } else {
-              if (poseRiskEma < S.thrOff) { poseBelowT += dt; poseAboveT = 0; }
+              if (poseRiskEma < S.poseThrOff) { poseBelowT += dt; poseAboveT = 0; }
               else { poseBelowT = Math.max(0, poseBelowT - dt*0.5); }
-              if (poseBelowT >= S.dwellOff) { poseAlert = false; poseAboveT = 0; poseBelowT = 0; }
+              if (poseBelowT >= S.poseDwellOff) { poseAlert = false; poseAboveT = 0; poseBelowT = 0; }
             }
 
-            // Occlusion path: presence dwell (no EMA needed)
-            if (!present) { occAboveT += dt; occBelowT = 0; }
-            else { occBelowT += dt; occAboveT = Math.max(0, occAboveT - dt*0.5); }
+            // Occlusion path (EMA of presence)
+            occEma = emaUpdate(occEma, faceRisk, S.emaTau, dt);
 
-            if (!occAlert && occAboveT >= (S.occDwellOn || 10)) { occAlert = true; occAboveT = 0; }
-            if (occAlert  && occBelowT >= (S.occDwellOff || 3)) { occAlert = false; occBelowT = 0; }
+            if (!occAlert) {
+              if (occEma > S.occThrOn) { occAboveT += dt; occBelowT = 0; }
+              else { occAboveT = Math.max(0, occAboveT - dt*0.5); }
+              if (occAboveT >= S.occDwellOn) { occAlert = true; occAboveT = 0; occBelowT = 0; }
+            } else {
+              if (occEma < S.occThrOff) { occBelowT += dt; occAboveT = 0; }
+              else { occBelowT = Math.max(0, occBelowT - dt*0.5); }
+              if (occBelowT >= S.occDwellOff) { occAlert = false; occAboveT = 0; occBelowT = 0; }
+            }
 
             // Global alert (OR)
             const newAlert = poseAlert || occAlert;
@@ -1107,17 +1274,18 @@
               showStatus(alert ? 'PRONE suspected' : 'Recovered from prone');
             }
 
-            // Fused risk ONLY for the visual bar
-            const fusedInst = Math.max(0.6 * faceRisk, rPoseInst);
+            // Fused risk for the visual bar (unified 0..1 scale; dominant channel)
+            const pOccInst  = faceRisk;                               // 0..1
+            const pPoseInst = clamp(rPoseInst / POSE_RANGE, 0, 1);    // 0..1
+            const fusedInst = Math.max(pOccInst, pPoseInst);          // 0..1
             riskEma = emaUpdate(riskEma, fusedInst, S.emaTau, dt);
 
           } else {
-            // Disabled: hold safe & reset timers
+            // Disabled: reset timers/alerts
             poseAlert = false; occAlert = false; alert = false;
             poseAboveT = poseBelowT = 0;
             occAboveT = occBelowT = 0;
           }
-          // ------------------------------------------------------
 
           // Draw overlay + HUD/pills
           drawFaceAndHUD(result, {
@@ -1155,7 +1323,7 @@
       setOverlayVisible(faceEnabled);
       if (!faceEnabled) { stopReceiverFaceLoop(); return; }
       if (faceWhere === 'receiver') startReceiverFaceLoop();
-      else stopReceiverFaceLoop(); // sender mode: draw only what we receive
+      else stopReceiverFaceLoop();
     }
 
     /* ---------- ReceiverCore hookup ---------- */
