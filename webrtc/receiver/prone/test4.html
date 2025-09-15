@@ -72,6 +72,56 @@
     }
     .overlay.hidden { display: none; }
 
+    /* Backdrop */
+    .help-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 8; /* above settings (7) */
+      background: rgba(0,0,0,0.45);
+      -webkit-backdrop-filter: blur(6px);
+      backdrop-filter: blur(6px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms ease;
+    }
+    .help-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+     
+    /* Bare “×” icon (NOT a .btn rectangle) */
+    .help-header .close, #helpClose {
+      appearance: none;
+      background: transparent !important;
+      border: none !important;
+      box-shadow: none !important;
+      color: #aaa;
+      font-size: 22px;
+      line-height: 1;
+      padding: 2px 6px;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+    
+    .help-body {
+      padding: 12px;
+      overflow: auto;
+      max-height: calc(100svh - 48px);
+      font-size: 13px;
+      color: #ddd;
+      line-height: 1.45;
+    }
+    
+    /* Optional: small TOC / tables styling if you reuse Motion blocks */
+    .help-body .help-toc { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 10px; }
+    .help-body .help-toc a {
+      font-size: 12px; padding: 4px 8px; border-radius: 10px;
+      background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); color:#ddd; text-decoration:none;
+    }
+    .help-body .help-kv { width:100%; border-collapse:collapse; font-size:12px; }
+    .help-body .help-kv th { text-align:left; white-space:nowrap; padding:4px 8px; color:#ddd; }
+    .help-body .help-kv td { padding:4px 8px; color:#bbb; }
+
     /* Settings drawer — match motion app transparency */
     #settingsBtn { /* now lives beside Calibration in #controls */ }
     #settingsDrawer {
@@ -180,28 +230,6 @@
     #alertPill.prone-risk { color:#f6ad55; border-color:#4a321d; background:rgba(74,50,29,0.5); }
     #alertPill.prone-on   { color:#fecaca; border-color:#5a1e1e; background:rgba(90,30,30,0.55); }
     #alertPill::before, #alertPill::after { content:'' !important; }
-
-    /* Help overlay (separate HTML/JS) */
-    .help-overlay {
-      position: fixed; inset: 0; z-index: 8; display: none;
-      background: rgba(0,0,0,0.5);
-      -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
-    }
-    .help-overlay.open { display: block; }
-    .help-sheet {
-      position: absolute;
-      left: max(12px, env(safe-area-inset-left));
-      right: max(12px, env(safe-area-inset-right));
-      top: calc(env(safe-area-inset-top) + 20px);
-      margin: 0 auto;
-      max-width: 720px;
-      background: rgba(12,12,12,0.58);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 14px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-      overflow: hidden;
-    }
-    .help-sheet .body { max-height: 70vh; overflow: auto; }
 
     /* Stopwatch badge — match Motion receiver look */
     .icon.timer {
@@ -344,12 +372,6 @@
     </div>
   </div>
 
-  <!-- Help overlay (loads separate page + js) -->
-  <div id="helpOverlay" class="help-overlay" aria-hidden="true">
-    <div id="helpSheet" class="help-sheet" role="dialog" aria-modal="true" aria-label="Help">
-      <div class="body" id="helpBody"><!-- populated from help-sheet.html --></div>
-    </div>
-  </div>
 
   <div id="stage">
     <video id="remote" autoplay playsinline></video>
@@ -402,9 +424,6 @@
     const alertPill = document.getElementById('alertPill');
     const hud = document.getElementById('hud');
     const hudLines = document.getElementById('hudLines');
-
-    const helpOverlay = document.getElementById('helpOverlay');
-    const helpBody = document.getElementById('helpBody');
 
     const riskBar = document.getElementById('riskFill');
     const riskPct = document.getElementById('riskPct');
@@ -590,30 +609,63 @@
       showStatus('All settings reset to defaults');
     });
 
-    /* Help: separate page + JS */
-    helpBtn.addEventListener('click', openHelp);
-    helpOverlay.addEventListener('click', (e) => {
-      if (e.target === helpOverlay) closeHelp(); // backdrop click
-    });
-
-    async function openHelp(){
-      try {
-        const res = await fetch('help-sheet.html', { cache: 'no-cache' });
-        helpBody.innerHTML = await res.text();
-      } catch { helpBody.innerHTML = '<div style="padding:16px">Help unavailable.</div>'; }
-      if (!document.getElementById('helpSheetScript')) {
-        const s = document.createElement('script');
-        s.id = 'helpSheetScript';
-        s.src = 'help-sheet.js';
-        document.body.appendChild(s);
+    // OPEN/CLOSE: Motion-style side sheet
+    async function ensureHelpSheetLoaded() {
+      if (document.getElementById('helpSheet')) return; // already in DOM
+    
+      // Load the injector once
+      if (!document.getElementById('helpSheetLoader')) {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.id = 'helpSheetLoader';
+          s.src = '/hungryface/webrtc/receiver/prone/help-sheet.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      } else {
+        // Wait until the injector finishes
+        if (!document.getElementById('helpSheet')) {
+          await new Promise((r) => {
+            const onReady = () => { document.removeEventListener('help:ready', onReady); r(); };
+            document.addEventListener('help:ready', onReady);
+          });
+        }
       }
-      helpOverlay.classList.add('open');
-      helpOverlay.setAttribute('aria-hidden','false');
     }
-    function closeHelp(){
-      helpOverlay.classList.remove('open');
-      helpOverlay.setAttribute('aria-hidden','true');
+    
+    function wireHelpEvents() {
+      const sheet = document.getElementById('helpSheet');
+      const backdrop = document.getElementById('helpBackdrop');
+      const closeBtn = document.getElementById('helpClose');
+      if (!sheet || !backdrop) return;
+    
+      const close = () => {
+        sheet.classList.remove('open');
+        backdrop.classList.remove('open');
+        backdrop.setAttribute('aria-hidden', 'true');
+      };
+    
+      backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); }, { passive: true });
+      closeBtn?.addEventListener('click', (e) => { e.stopPropagation(); close(); });
+    
+      // ESC to close while open
+      const onEsc = (e) => {
+        if (e.key === 'Escape' && sheet.classList.contains('open')) {
+          e.preventDefault(); close(); document.removeEventListener('keydown', onEsc);
+        }
+      };
+      document.addEventListener('keydown', onEsc);
     }
+    
+    // keep your existing binding
+    helpBtn.addEventListener('click', openHelp);
+    
+    // If you want a global click on stage to close help as well:
+    stage.addEventListener('click', () => {
+      settingsDrawer.classList.remove('open');
+      closeHelp();
+    });
 
     /* Calibration control (shared with main "Calibration" button) */
     let calRunning = false, calStartTs = 0, calAccum = 0, calCount = 0, calUItimer = null;
