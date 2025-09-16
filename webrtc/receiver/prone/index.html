@@ -1377,9 +1377,29 @@
               applyFaceMode();
             } else if (msg.type === 'face') {
               if (faceEnabled && faceWhere === 'sender') {
-                const res = { faceLandmarks: (msg.present && msg.landmarks) ? [msg.landmarks] : [] };
-                drawFaceAndHUD(res, { showLM:S.showLM, showOrient:S.showOrient, yawDeg:msg.yawDeg, pitchDeg:msg.pitchDeg, rollDeg:msg.rollDeg, relPitchDeg:(Number.isFinite(msg.pitchDeg)&&Number.isFinite(pitchSupine)?(msg.pitchDeg - pitchSupine)*(S.flipPitch?-1:1):NaN), risk:riskEma||0, alert, rotMat:msg.rotMat });
+                const ts = performance.now(), dt = lastTs ? (ts - lastTs)/1000 : 0.016; lastTs = ts;
                 updateCalButtonState(!!msg.present);
+            
+                // Calibration progress (works even when inference runs on sender)
+                if (calRunning) {
+                  const elapsed = (ts - calStartTs)/1000;
+                  ui.calProg.style.width = clamp((elapsed / S.calDur)*100, 0, 100) + '%';
+                  setCalBtn(true, Math.max(0, S.calDur - elapsed));
+                  if (msg.present && Number.isFinite(msg.pitchDeg)) { calAccum += msg.pitchDeg; calCount++; }
+                  if (elapsed >= S.calDur) finishCalibration(false);
+                }
+            
+                // Draw landmarks + orientation/axes using sender’s pose
+                const res = { faceLandmarks: (msg.present && msg.landmarks) ? [msg.landmarks] : [] };
+                const relPitchDeg =
+                  (Number.isFinite(msg.pitchDeg) && Number.isFinite(pitchSupine))
+                    ? (msg.pitchDeg - pitchSupine) * (S.flipPitch ? -1 : 1) : NaN;
+            
+                drawFaceAndHUD(res, {
+                  showLM: S.showLM, showOrient: S.showOrient,
+                  yawDeg: msg.yawDeg, pitchDeg: msg.pitchDeg, rollDeg: msg.rollDeg, relPitchDeg,
+                  risk: riskEma || 0, alert, rotMat: msg.rotMat
+                });
               }
             }
           } catch {}
