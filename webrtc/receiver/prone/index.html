@@ -1400,6 +1400,15 @@
                   yawDeg: msg.yawDeg, pitchDeg: msg.pitchDeg, rollDeg: msg.rollDeg, relPitchDeg,
                   risk: riskEma || 0, alert, rotMat: msg.rotMat
                 });
+                const pd = Number.isFinite(relPitchDeg) ? Math.max(0, -relPitchDeg) : NaN;
+                pitchEma    = emaUpdate(pitchEma, pd, S.emaTau, dt);
+                const rPose = POSE_RANGE * clamp(((pd - S.thetaOn) + 10) / 30, 0, 1);
+                poseRiskEma = emaUpdate(poseRiskEma, rPose, S.emaTau, dt);
+                occEma      = emaUpdate(occEma, msg.present ? 0 : 1, S.emaTau, dt);
+                riskEma     = emaUpdate(riskEma, Math.max(occEma, clamp(rPose/POSE_RANGE, 0, 1)), S.emaTau, dt);
+                alert       = (poseRiskEma > S.poseThrOn) || (occEma > S.occThrOn);
+                updatePill(riskEma || 0, alert);
+                updateHud(Number.isFinite(pitchEma) ? pitchEma : NaN, riskEma || 0, msg.yawDeg, msg.pitchDeg, msg.rollDeg, relPitchDeg);
               }
             }
           } catch {}
