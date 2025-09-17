@@ -314,7 +314,15 @@
   <script type="module">
     import { DrawingUtils, PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
-
+    // 🔔 Alerts (shared)
+    import {
+      initAlertsUI,
+      beginAlert,
+      finishAlert,
+      showAlertBanner,
+      AlertTypes
+    } from "/hungryface/webrtc/receiver/shared/alerts/index.js";
+    
     /* --------- tiny safe addEventListener helper --------- */
     const on = (el, ev, fn, opts) => { if (el && el.addEventListener) el.addEventListener(ev, fn, opts); };
 
@@ -326,7 +334,9 @@
     // live-pose gating
     const LIVE_POSE_TIMEOUT_MS = 2000; // consider "live" if a landmark arrived in the last 2s
     let lastPoseTs = 0;
-
+    // 🔔 Alerts UI (banner + drawer). IDs are optional; auto-wires if present.
+    initAlertsUI(); // or: initAlertsUI({ drawerOpenBtnId:'btnOpenAlerts', drawerBadgeId:'alertsBadge' });
+    
     const MOVE_DEFAULTS = {
       VIS_MIN: 0.80,
       PRES_MIN: 0.90,
@@ -449,6 +459,51 @@
 
     let offLink = { ema: false, int: false, drift: false };
 
+    /* 🔔 Alerts: Motion alert lifecycle */
+    let motionAlertId = null;     // IndexedDB row id from beginAlert()
+    let motionCause   = null;     // 'EMA' | 'INT' | 'DRIFT'
+    let motionSum     = 0;        // accumulate score of the triggering channel
+    let motionN       = 0;        // samples counted
+
+    function motionCauseLabel(kind) {
+      if (kind === 'INT')  return 'Sustained motion (Integrator)';
+      if (kind === 'DRIFT')return 'Baseline drift (DRIFT)';
+      return 'Motion detected (EMA)';
+    }
+
+    function accumulateMotionSample() {
+      if (!motionCause) return;
+      const v = (motionCause === 'INT') ? intScore : (motionCause === 'DRIFT') ? driftScore : moveEma;
+      motionSum += v; motionN++;
+    }
+
+    async function startMotionAlert(kind) {
+      motionCause = kind; motionSum = 0; motionN = 0;
+      try {
+        motionAlertId = await beginAlert({ type: AlertTypes.Motion, message: motionCauseLabel(kind) });
+      } catch (e) {
+        console.warn('[ALERTS] beginAlert failed', e);
+        motionAlertId = null;
+      }
+      // Respect snooze setting
+      showAlertBanner(Date.now());
+    }
+
+    async function finishMotionAlert() {
+      const avg = motionN ? (motionSum / motionN) : 0;
+      try {
+        if (motionAlertId != null) {
+          await finishAlert(motionAlertId, { avgScore: avg, message: 'Motion ended' });
+        }
+      } catch (e) {
+        console.warn('[ALERTS] finishAlert failed', e);
+      } finally {
+        motionAlertId = null;
+        motionCause = null;
+        motionSum = 0; motionN = 0;
+      }
+    }
+    
     /* ---------- Utils for live pose gating ---------- */
     const hasLivePose = () => (performance.now() - lastPoseTs) < LIVE_POSE_TIMEOUT_MS;
 
@@ -923,6 +978,7 @@
     /* ---------- Movement update ---------- */
     function updateMovementFromLandmarks(lm, canSend=true) {
       const now = performance.now();
+      const wasMoving = moving; // 🔔 remember previous global state for edge detection
       lastPoseTs = now;
       updateCalibrationAvailability();
 
@@ -959,6 +1015,21 @@
         if (moving) movingSince = now;
       }
 
+      // 🔔 Alerts: edge detection + start/stop with cause selection
+      if (!wasMoving && moving) {
+        // Pick the dominant triggering channel (highest ratio over its ON threshold)
+        const cand = [];
+        if (MOVE.USE_INT   && longTrigger)  cand.push({ k:'INT',   r: intScore   / Math.max(1e-6, MOVE.INT_ON)   });
+        if (MOVE.USE_EMA   && shortTrigger) cand.push({ k:'EMA',   r: moveEma    / Math.max(1e-6, MOVE.ON)       });
+        if (MOVE.USE_DRIFT && driftTrigger) cand.push({ k:'DRIFT', r: driftScore / Math.max(1e-6, MOVE.DRIFT_ON) });
+        const cause = (cand.sort((a,b)=>b.r-a.r)[0]?.k) || (MOVE.USE_INT?'INT':MOVE.USE_DRIFT?'DRIFT':'EMA');
+        // Fire-and-forget; we don't need to await here
+        startMotionAlert(cause);
+      } else if (wasMoving && !moving) {
+        // Motion ended
+        finishMotionAlert();
+      }
+      
       if (!moving && baseLm) {
         const a = 1 - Math.exp(-dt / MOVE.DRIFT_TAU);
         baseLm = blendLm(baseLm, lm, a);
@@ -997,7 +1068,10 @@
         if (now >= calEndMs) finishCalibration();
       }
 
+      // 🔔 Alerts: accumulate avg score over the alert window
+      if (moving) accumulateMotionSample();
       poseCtx.save();
+      
       try {
         drawMovementBadge(moving, moveEma, intScore, driftScore);
       } catch (e) {
