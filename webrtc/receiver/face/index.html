@@ -333,7 +333,7 @@
       });
     }
 
-    function drawFaceLandmarks(landmarksArray) {
+    /*function drawFaceLandmarks(landmarksArray) {
       if (!faceCanvas.width || !faceCanvas.height) return;
 
       faceCtx.save();
@@ -342,15 +342,15 @@
       const utils = new DrawingUtils(faceCtx);
       for (const lm of landmarksArray || []) {
         // Draw connectors if constants exist, else just points
-        /*try { FaceLandmarker.FACE_LANDMARKS_TESSELATION && utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_TESSELATION); } catch {}
-        try { FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE  && utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE); } catch {}
-        try { FaceLandmarker.FACE_LANDMARKS_LEFT_EYE   && utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYE); } catch {}
-        try { FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW && utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW); } catch {}
-        try { FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW  && utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW); } catch {}
-        try { FaceLandmarker.FACE_LANDMARKS_LIPS && utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LIPS); } catch {}
+        //try { FaceLandmarker.FACE_LANDMARKS_TESSELATION && utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_TESSELATION); } catch {}
+        //try { FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE  && utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE); } catch {}
+        //try { FaceLandmarker.FACE_LANDMARKS_LEFT_EYE   && utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYE); } catch {}
+        //try { FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW && utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW); } catch {}
+        //try { FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW  && utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW); } catch {}
+        //try { FaceLandmarker.FACE_LANDMARKS_LIPS && utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LIPS); } catch {}
         // Always draw points
-        utils.drawLandmarks(lm, { radius: 0.5, color:    "#00FF00", fillColor:"#00FF00"});
-        }*/
+        //utils.drawLandmarks(lm, { radius: 0.5, color:    "#00FF00", fillColor:"#00FF00"});
+        //}
         utils.drawConnectors(
           lm,
           FaceLandmarker.FACE_LANDMARKS_TESSELATION,
@@ -399,8 +399,38 @@
     }
 
       faceCtx.restore();
-    }
+    }*/
 
+    function drawFaceLandmarks(input) {
+      if (!input) return;
+    
+      // Accept either: [ {x,y,z}... ]  (single face)
+      // or:           [ [ {x,y,z}... ], [ ... ] ] (multi-face)
+      const faces = (Array.isArray(input) && input.length && typeof input[0]?.x === 'number')
+        ? [input]        // a single face’s landmarks
+        : input;         // already an array of faces
+    
+      if (!faceCanvas.width || !faceCanvas.height) beginViewportSettle();
+    
+      faceCtx.save();
+      faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
+    
+      const utils = new DrawingUtils(faceCtx);
+      for (const lm of faces || []) {
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_TESSELATION, { color:"#C0C0C070", lineWidth:1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,   { lineWidth:1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,{ lineWidth:1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,    { lineWidth:1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,{ lineWidth:1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,   { lineWidth:1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LIPS,        { lineWidth:1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_IRIS,  { lineWidth:1 });
+        utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_IRIS,   { lineWidth:1 });
+      }
+    
+      faceCtx.restore();
+    }
+ 
     async function startReceiverFaceLoop() {
       if (faceLoopRunning) return;
       await ensureFaceTask();
