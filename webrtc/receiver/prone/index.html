@@ -625,6 +625,7 @@
     ui.reinitFaceBtn.addEventListener('click', async () => {
       readSettingsFromUI();
       await recreateFaceTask();
+      sendFaceConfig(); 
       showStatus('Face task reinitialized');
     });
     ui.calResetBtn.addEventListener('click', () => {
@@ -636,6 +637,7 @@
       saveSettings();
       applySettingsToUI();
       await recreateFaceTask();
+      sendFaceConfig();   
       showStatus('All settings reset to defaults');
     });
 
@@ -953,6 +955,12 @@
     let faceWhere = 'receiver';
     let faceDC = null;
 
+    function sendFaceConfig() {
+      if (!faceDC || faceDC.readyState !== 'open') return;
+      const payload = { type: 'face-config', minDet: S.minDet, minTrack: S.minTrack, minPres: S.minPres };
+      try { faceDC.send(JSON.stringify(payload)); } catch {}
+    }
+
     async function ensureFaceTask() {
       if (faceTask) return faceTask;
       const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
@@ -1138,7 +1146,7 @@
       alertPill.classList.add(cls);
 
       // Show dominant channel on the pill (unified 0..1 scale)
-      const poseNorm = (poseRiskEma / POSE_RANGE);      // 0..1
+      const poseNorm = clamp(poseRiskEma / POSE_RANGE, 0, 1);      // 0..1
       const dominant = (occEma >= poseNorm) ? 'Occlusion' : 'Pose';
 
       alertPill.textContent = alertOn
@@ -1158,8 +1166,8 @@
       if (riskPct) riskPct.textContent = pct + '%';
 
       // Pose thresholds mapped to unified scale via POSE_RANGE
-      if (tickOn)   tickOn.style.left   = (S.poseThrOn  / POSE_RANGE * 100) + '%';
-      if (tickOff)  tickOff.style.left  = (S.poseThrOff / POSE_RANGE * 100) + '%';
+      if (tickOn)  tickOn.style.left  = (clamp(S.poseThrOn  / POSE_RANGE, 0, 1) * 100) + '%';
+      if (tickOff) tickOff.style.left = (clamp(S.poseThrOff / POSE_RANGE, 0, 1) * 100) + '%';
 
       // Hide the old occlusion ceiling tick in the unified-scale UI
       if (tickOccl) tickOccl.style.display = 'none';
@@ -1174,6 +1182,7 @@
     async function startReceiverFaceLoop() {
       if (faceLoopRunning) return;
       await ensureFaceTask();
+      sendFaceConfig();
       await waitForVideoFrame(remoteVideo);
 
       faceLoopRunning = true;
@@ -1367,6 +1376,7 @@
         ch.onmessage = (ev) => {
           try {
             const msg = JSON.parse(ev.data);
+            if (msg.type === 'need-face-config') { sendFaceConfig(); return; }
             if (msg.type === 'ai-modes' && msg.face) {
               faceEnabled = !!msg.face.enabled;
               faceWhere   = msg.face.where || 'sender';
