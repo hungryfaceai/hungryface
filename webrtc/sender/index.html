@@ -266,6 +266,10 @@
     const WASM_DIR   = TASKS_URL + "/wasm";
     const AUDIO_TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0";
     const AUDIO_WASM_DIR  = AUDIO_TASKS_URL + "/wasm";
+    const FACE_MODEL_URL =
+      "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task";    
+    // Runtime-configurable thresholds (default to receiver’s defaults)
+    const FACE_OPTS = { minDet: 0.5, minTrack: 0.5, minPres: 0.5 };
 
     /* ---------- DEBUG LOG SWITCHES ---------- */
     const LOG = {
@@ -440,6 +444,8 @@
     const poseDCs = new Set();
     // Cache the most recent audio score payload so late-joining receivers get one instantly. //https://chatgpt.com/c/68c1d349-17d8-832f-9534-fcb6826946a4
     let lastAudioPayload = null;
+    let lastPosePayload = null;
+    let lastFacePayload = null;    
 
     let PoseLandmarker, FilesetResolver, DrawingUtils;
     let poseTask = null, poseLoopRunning = false;
@@ -740,16 +746,6 @@
         });
       }
 
-      /*pc.ondatachannel = (ev) => {
-        if (ev.channel?.label === 'pose') {
-          const ch = ev.channel;
-          if (LOG.dc) console.log('[DC][sender] ondatachannel: pose from', peerId);
-          ch.onopen  = () => { if (LOG.dc) console.log('[POSE][sender] DC open', peerId); poseDCs.add(ch); announceAIModes();};
-          ch.onclose = () => { if (LOG.dc) console.log('[POSE][sender] DC close', peerId); poseDCs.delete(ch); };
-          ch.onerror = (e) => { if (LOG.dc) console.log('[POSE][sender] DC error', peerId, e); };
-          ch.onmessage = onPoseMessageFromReceiver;
-        }
-      };*/ //https://chatgpt.com/c/68c1d349-17d8-832f-9534-fcb6826946a4
       pc.ondatachannel = (ev) => {
         if (ev.channel?.label === 'pose') {
           const ch = ev.channel;
@@ -764,6 +760,13 @@
             if (lastAudioPayload) {
               try { ch.send(lastAudioPayload); } catch {}
             }
+            if (lastPosePayload) {
+              try { ch.send(lastPosePayload); } catch {}
+            }
+            if (lastFacePayload) {
+              try { ch.send(lastFacePayload); } catch {}
+            }
+            try { ch.send(JSON.stringify({ type: 'need-face-config' })); } catch {}  //ask receiver to send its FaceLandmarker thresholds
           };
       
           ch.onclose = () => {
@@ -775,7 +778,7 @@
             if (LOG.dc) console.log('[POSE][sender] DC error', peerId, e);
           };
       
-          ch.onmessage = (ev2) => {
+          ch.onmessage = async (ev2) => {
             let msg;
             try { msg = JSON.parse(ev2.data); } catch { return; }
             if (!msg || !msg.type) return;
@@ -784,15 +787,41 @@
               // Receiver is asking for the current AI modes after it opens
               announceAIModes();
               // Also push a fresh score if we have one and audio is running on the sender
-              if (lastAudioPayload && audioAiOn?.checked && audioAiWhere?.value === 'sender') {
+              /*if (lastAudioPayload && audioAiOn?.checked && audioAiWhere?.value === 'sender') {
                 try { ch.send(lastAudioPayload); } catch {}
+              }*/
+              if (lastAudioPayload) { try { ch.send(lastAudioPayload); } catch {} }
+              if (lastPosePayload)  { try { ch.send(lastPosePayload);  } catch {} }
+              if (lastFacePayload)  { try { ch.send(lastFacePayload);  } catch {} }
+              return;
+            }
+
+            if (msg.type === 'face-config') {
+              let changed = false;
+              if (typeof msg.minDet  === 'number' && msg.minDet  !== FACE_OPTS.minDet)  { FACE_OPTS.minDet  = msg.minDet;  changed = true; }
+              if (typeof msg.minTrack=== 'number' && msg.minTrack!== FACE_OPTS.minTrack){ FACE_OPTS.minTrack= msg.minTrack;changed = true; }
+              if (typeof msg.minPres === 'number' && msg.minPres !== FACE_OPTS.minPres) { FACE_OPTS.minPres = msg.minPres; changed = true; }
+              if (changed) {
+                await recreateSenderFaceTask();
+                // If sender-side face loop is running, keep it running with new opts
+                if (started && faceOn?.checked && faceWhere?.value === 'sender') {
+                  stopSenderFaceLoop();
+                  startSenderFaceLoop();
+                }
               }
               return;
             }
-      
+            if (msg.type === 'audio') {
+              onAudioMessageFromReceiver(ev2, ch);
+              return;
+            }
             if (msg.type === 'pose') {
               // Existing echo path used for overlay/debug
-              onPoseMessageFromReceiver(ev2);
+              onPoseMessageFromReceiver(ev2, ch);   // <-- pass origin channel
+              return;
+            }
+            if (msg.type === 'face') {
+              onFaceMessageFromReceiver(ev2, ch);
               return;
             }
           };
@@ -1122,15 +1151,22 @@
       if (faceTask) return faceTask;
       const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
       faceTask = await FaceLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-          delegate: "GPU"
-        },
+        baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate: "GPU" },
         runningMode: "VIDEO",
-        numFaces: 1
+        numFaces: 1,
+        outputFaceBlendshapes: false,
+        outputFacialTransformationMatrixes: true,
+        minFaceDetectionConfidence: FACE_OPTS.minDet,
+        minTrackingConfidence: FACE_OPTS.minTrack,
+        minFacePresenceConfidence: FACE_OPTS.minPres,
       });
       return faceTask;
+    }
+
+    async function recreateSenderFaceTask() {
+      try { await faceTask?.close?.(); } catch {}
+      faceTask = null;
+      await ensureFaceTask();
     }
 
     async function ensureAudioTask() {
@@ -1187,8 +1223,10 @@
 
     function sendPoseToReceivers(landmarks) {
       const payload = JSON.stringify({ type:'pose', landmarks, ts: performance.now() });
+      lastPosePayload = payload;                 // <-- cache for late joiners
       for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
     }
+
     function drawPoseOnSender(landmarks) {
       if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
       const dutils = new DrawingUtils(ctx);
@@ -1250,19 +1288,103 @@
       if (!faceLoopRunning) ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
 
-    function onPoseMessageFromReceiver(ev) {
-      try {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === 'pose' && document.body.classList.contains('previewing')) {
-          drawPoseOnSender(msg.landmarks);
+    function onAudioMessageFromReceiver(ev, originChannel = null) {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.type !== 'audio') return;
+    
+      // Cache so late joiners get an immediate score
+      lastAudioPayload = ev.data;
+    
+      // Fan out to other receivers (avoid echo to origin)
+      for (const ch of poseDCs) {
+        if (ch === originChannel) continue;
+        if (ch.readyState === 'open') {
+          try { ch.send(ev.data); } catch {}
         }
-      } catch {}
+      }
     }
+
+    function onPoseMessageFromReceiver(ev, originChannel = null) {
+      let msg;
+      try {
+        msg = JSON.parse(ev.data);
+      } catch {
+        return;
+      }
+      if (msg.type !== 'pose') return;
+    
+      // 1) cache the raw JSON for instant replay to late joiners
+      lastPosePayload = ev.data;
+    
+      // 2) draw locally during preview
+      if (document.body.classList.contains('previewing')) {
+        try { drawPoseOnSender(msg.landmarks); } catch {}
+      }
+    
+      // 3) (optional) rebroadcast to other receivers (avoid echo to origin)
+      for (const ch of poseDCs) {
+        if (ch === originChannel) continue;      // don't echo back to the same receiver
+        if (ch.readyState === 'open') {
+          try { ch.send(ev.data); } catch {}
+        }
+      }
+    }
+
+    function onFaceMessageFromReceiver(ev, originChannel = null) {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.type !== 'face') return;
+    
+      // cache for late joiners
+      lastFacePayload = ev.data;
+    
+      // optional preview draw on sender
+      if (document.body.classList.contains('previewing') && msg.present && msg.landmarks) {
+        try { drawFaceOnSender([msg.landmarks]); } catch {}
+      }
+    
+      // rebroadcast to other receivers (avoid echo to origin)
+      for (const ch of poseDCs) {
+        if (ch === originChannel) continue;
+        if (ch.readyState === 'open') {
+          try { ch.send(ev.data); } catch {}
+        }
+      }
+    }
+    
     function applyPoseUI() {
       beginViewportSettle();
       if (!poseOn.checked) { stopSenderPoseLoop(); return; }
       if (started && poseWhere.value === 'sender') startSenderPoseLoop();
       else stopSenderPoseLoop();
+    }
+
+    // --- FACE helpers shared with receiver --- //https://chatgpt.com/c/68c93e96-8f88-832f-89f1-87198b5ee34c
+    function computeEulerXYZ(m){ // m: Float32Array[16] row-major
+      const m00=m[0], m01=m[1], m02=m[2];
+      const m10=m[4], m11=m[5], m12=m[6];
+      const m20=m[8], m21=m[9], m22=m[10];
+      const sy = Math.hypot(m00, m10);
+      let x,y,z;
+      if (sy > 1e-6) {
+        x = Math.atan2(m21, m22);     // pitch around X
+        y = Math.atan2(-m20, sy);     // yaw around Y
+        z = Math.atan2(m10, m00);     // roll around Z
+      } else {
+        x = Math.atan2(-m12, m11);
+        y = Math.atan2(-m20, sy);
+        z = 0;
+      }
+      const R2D = 180/Math.PI;
+      return { pitch: x*R2D, yaw: y*R2D, roll: z*R2D };
+    }
+    
+    function averagePoint(lms){
+      let sx=0, sy=0, n=lms.length||0;
+      if (!n) return {x:0.5,y:0.5};
+      for (let i=0;i<n;i++){ sx+=lms[i].x; sy+=lms[i].y; }
+      return { x:sx/n, y:sy/n };
     }
 
     // ======= AUDIO (SENDER) =======
@@ -1690,32 +1812,72 @@
       const task = await ensureFaceTask();
       faceLoopRunning = true;
       if (faceRAF) cancelAnimationFrame(faceRAF);
-
+    
       console.log('[FACE][sender] loop START (sender)');
-
+    
       const loop = (ts) => {
         if (!faceLoopRunning || !started || !faceOn.checked || faceWhere?.value !== 'sender') {
           console.log('[FACE][sender] loop STOP (sender)');
           return;
         }
-
+    
+        // Keep preview overlay tidy
         if (document.body.classList.contains('previewing') && ts !== lastClearedTs) {
           ctx.setTransform(1,0,0,1,0,0);
           ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
           lastClearedTs = ts;
         }
-
-        const result = task.detectForVideo(localVideo, ts);
-        if (document.body.classList.contains('previewing')) {
-          drawFaceOnSender(result?.faceLandmarks);
+    
+        let payload = { type:'face', present:false, ts };
+    
+        try {
+          const result = task.detectForVideo(localVideo, ts);
+          const landmarks = result?.faceLandmarks?.[0] || null;
+          const mats = result?.facialTransformationMatrixes || result?.facialTransformationMatrices || null;
+    
+          if (landmarks) {
+            // Optional preview drawing on the sender phone
+            if (document.body.classList.contains('previewing')) {
+              drawFaceOnSender([landmarks]);
+            }
+    
+            // Extract 4x4 pose matrix (row-major float32[16]) if provided
+            let rotMat = null, yawDeg = NaN, pitchDeg = NaN, rollDeg = NaN;
+            if (mats && mats.length) {
+              const mat = mats[0];
+              const m = (mat instanceof Float32Array || Array.isArray(mat)) ? mat : (mat?.data || []);
+              if (m && m.length >= 16) {
+                rotMat = Array.from(m.slice(0,16)); // serialize to plain array for DC
+                const e = computeEulerXYZ(m);
+                yawDeg = e.yaw; pitchDeg = e.pitch; rollDeg = e.roll;
+              }
+            }
+    
+            const cen = averagePoint([landmarks].flat());
+    
+            payload = {
+              type: 'face',
+              present: true,
+              landmarks,       // keep for optional overlay on receiver
+              rotMat,          // 4x4 (optional but great for axes/arrow)
+              yawDeg, pitchDeg, rollDeg,
+              centroid: cen,
+              ts
+            };
+          }
+        } catch (e) {
+          // If anything fails this frame, we still ship a "present:false" so the receiver can drive occlusion logic
+          // console.warn('[FACE][sender] detect error:', e);
         }
-
-        const payload = JSON.stringify({ type:'face', landmarks: result?.faceLandmarks ?? null, ts });
-        for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
-
+    
+        // Ship to all open receivers
+        const json = JSON.stringify(payload);
+        lastFacePayload = json;  
+        for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(json);
+    
         faceRAF = requestAnimationFrame(loop);
       };
-
+    
       faceRAF = requestAnimationFrame(loop);
     }
 
