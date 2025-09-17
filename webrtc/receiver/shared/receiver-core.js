@@ -37,6 +37,7 @@ export class ReceiverCore {
     this.remoteDescriptionSet = false;
     this.lastAnswerSdp = null;
     this.candidateQueue = [];
+    this.processingAnswer = false;
     this.offerResendTimer = null;
     this.iceDisconnectedSince = null;
 
@@ -118,6 +119,8 @@ export class ReceiverCore {
     if (this.pc && !force) return;
 
     if (this.pc) { try { this.pc.close(); } catch{}; }
+    this.#stopOfferResendLoop();   // kill any old resend timer
+    this.processingAnswer = false; // clear any stale lock
     this.pc = null;
     this.remoteDescriptionSet = false;
     this.lastAnswerSdp = null;
@@ -147,8 +150,9 @@ export class ReceiverCore {
     pc.oniceconnectionstatechange = () => {
       const s = pc.iceConnectionState;
       this.onIceState?.(s);
-      if (s === 'connected' || s === 'completed') {
-        this.#status('Connected');
+      //if (s === 'connected' || s === 'completed') {
+      if (s === 'connected') { // ignore 'completed' to avoid duplicate status
+        //this.#status('Connected'); //// UI logging handled by onIceState in the page
         this.iceDisconnectedSince = null;
       } else if (s === 'failed') {
         this.#status('ICE: failed');
@@ -249,7 +253,7 @@ export class ReceiverCore {
       if (!this.targetSenderId && msg.from) this.targetSenderId = msg.from;
       if (msg.from && this.targetSenderId && msg.from !== this.targetSenderId) return;
 
-      if (this.pc.signalingState !== 'have-local-offer') {
+      /*if (this.pc.signalingState !== 'have-local-offer') {
         if (this.pc.signalingState === 'stable') this.#stopOfferResendLoop();
         return;
       }
@@ -265,6 +269,41 @@ export class ReceiverCore {
         try { await this.pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
       }
       this.candidateQueue.length = 0;
+      return;*/
+    
+      if (this.processingAnswer) return;           // drop concurrent duplicate
+      this.processingAnswer = true;
+      try {
+        // state may change while we were awaiting earlier tasks; check *now*
+        if (this.pc.signalingState !== 'have-local-offer') {
+          if (this.pc.signalingState === 'stable') this.#stopOfferResendLoop();
+          return;
+        }
+        if (this.lastAnswerSdp === msg.sdp) return;  // exact dup?
+      
+        // Apply; if another answer raced and got in first, this may flip to stable mid-flight
+        await this.pc.setRemoteDescription(new RTCSessionDescription(msg));
+        this.remoteDescriptionSet = true;
+        this.lastAnswerSdp = msg.sdp;
+        this.#stopOfferResendLoop();
+        this.#status('Got answer, applied.');
+      
+        for (const c of this.candidateQueue) {
+          try { await this.pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
+        }
+        this.candidateQueue.length = 0;
+      } catch (e) {
+        // Benign duplicate: someone else already applied an answer
+        if (this.pc.signalingState === 'stable') {
+          this.remoteDescriptionSet = true;
+          this.#stopOfferResendLoop();
+          console.debug('[ReceiverCore] duplicate answer ignored');
+        } else {
+          console.warn('[ReceiverCore] setRemoteDescription failed:', e);
+        }
+      } finally {
+        this.processingAnswer = false;
+      }
       return;
     }
 
