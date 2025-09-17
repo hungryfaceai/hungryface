@@ -382,8 +382,8 @@
         <h3>Smoothing & thresholds</h3>
         <div class="row"><label>EMA τ (s)</label><input id="st-emaTau" type="number" min="0.2" max="10" step="0.1"></div>
         <div class="row"><label>Pitch θ<sub>on</sub> (deg below supine)</label><input id="st-thetaOn" type="number" min="10" max="90" step="1"></div>
-        <div class="row"><label>Pose thr<sub>on</sub></label><input id="st-poseThrOn" type="number" min="0.1" max="1" step="0.05"></div>
-        <div class="row"><label>Pose thr<sub>off</sub></label><input id="st-poseThrOff" type="number" min="0.05" max="0.95" step="0.05"></div>
+        <div class="row"><label>Pose thr<sub>on</sub></label><input id="st-poseThrOn" type="number" min="0.1" max="0.8" step="0.05"></div>
+        <div class="row"><label>Pose thr<sub>off</sub></label><input id="st-poseThrOff" type="number" min="0.05" max="0.8" step="0.05"></div>
         <div class="row"><label>Pose dwell on (s)</label><input id="st-poseDwellOn" type="number" min="1" max="60" step="1"></div>
         <div class="row"><label>Pose dwell off (s)</label><input id="st-poseDwellOff" type="number" min="1" max="60" step="1"></div>
         <div class="row"><label>Occlusion thr<sub>on</sub></label><input id="st-occThrOn" type="number" min="0.1" max="1" step="0.05"></div>
@@ -577,8 +577,8 @@
       S.emaTau = clampNum(parseFloat(ui.emaTau.value), 0.1, 20);
       S.thetaOn = clampNum(parseFloat(ui.thetaOn.value), 5, 120);
 
-      S.poseThrOn = clampNum(parseFloat(ui.poseThrOn.value), 0, 1);
-      S.poseThrOff = clampNum(parseFloat(ui.poseThrOff.value), 0, 1);
+      S.poseThrOn = clampNum(parseFloat(ui.poseThrOn.value), 0, POSE_RANGE);
+      S.poseThrOff = clampNum(parseFloat(ui.poseThrOff.value), 0, POSE_RANGE);
       S.poseDwellOn = clampNum(parseFloat(ui.poseDwellOn.value), 0, 120);
       S.poseDwellOff = clampNum(parseFloat(ui.poseDwellOff.value), 0, 120);
 
@@ -1139,6 +1139,102 @@
       faceCtx.restore();
     }
 
+    // --- One symmetric step for prone logic (used by both receiver loop and sender-DC) ---
+    function processProneStep(obs, ts, dt) {
+      const { present, yawDeg, pitchDeg, rollDeg, rotMat, landmarks } = obs;
+    
+      updateCalButtonState(!!present);
+    
+      // Calibration sampling / progress
+      if (calRunning) {
+        const elapsed = (ts - calStartTs)/1000;
+        ui.calProg.style.width = clamp((elapsed / S.calDur)*100, 0, 100) + '%';
+        setCalBtn(true, Math.max(0, S.calDur - elapsed));
+        if (present && Number.isFinite(pitchDeg)) { calAccum += pitchDeg; calCount++; }
+        if (elapsed >= S.calDur) finishCalibration(false);
+      }
+    
+      // Relative pitch (baseline + optional flip)
+      let relPitchDeg = NaN;
+      if (Number.isFinite(pitchDeg) && Number.isFinite(pitchSupine)) {
+        relPitchDeg = (pitchDeg - pitchSupine) * (S.flipPitch ? -1 : 1);
+      }
+    
+      if (S.enabled) {
+        const faceRisk = present ? 0 : 1;  // 0 visible, 1 missing
+    
+        // Pose path (instant pose risk → EMA + dwell/hysteresis)
+        const pitchDownNow = Number.isFinite(relPitchDeg) ? Math.max(0, -relPitchDeg) : NaN;
+        let rPoseInst = 0;
+        if (Number.isFinite(pitchDownNow)) {
+          const over = pitchDownNow - S.thetaOn;
+          rPoseInst = POSE_RANGE * clamp((over + 10) / 30, 0, 1);  // 0..POSE_RANGE
+        }
+        poseRiskEma = emaUpdate(poseRiskEma, rPoseInst, S.emaTau, dt);
+        pitchEma    = emaUpdate(pitchEma,  pitchDownNow, S.emaTau, dt);
+    
+        if (!poseAlert) {
+          if (poseRiskEma > S.poseThrOn) { poseAboveT += dt; poseBelowT = 0; }
+          else { poseAboveT = Math.max(0, poseAboveT - dt*0.5); }
+          if (poseAboveT >= S.poseDwellOn) { poseAlert = true; poseAboveT = 0; poseBelowT = 0; }
+        } else {
+          if (poseRiskEma < S.poseThrOff) { poseBelowT += dt; poseAboveT = 0; }
+          else { poseBelowT = Math.max(0, poseBelowT - dt*0.5); }
+          if (poseBelowT >= S.poseDwellOff) { poseAlert = false; poseAboveT = 0; poseBelowT = 0; }
+        }
+    
+        // Occlusion path (EMA of faceRisk) + dwell/hysteresis
+        occEma = emaUpdate(occEma, faceRisk, S.emaTau, dt);
+    
+        if (!occAlert) {
+          if (occEma > S.occThrOn) { occAboveT += dt; occBelowT = 0; }
+          else { occAboveT = Math.max(0, occAboveT - dt*0.5); }
+          if (occAboveT >= S.occDwellOn) { occAlert = true; occAboveT = 0; occBelowT = 0; }
+        } else {
+          if (occEma < S.occThrOff) { occBelowT += dt; occAboveT = 0; }
+          else { occBelowT = Math.max(0, occBelowT - dt*0.5); }
+          if (occBelowT >= S.occDwellOff) { occAlert = false; occAboveT = 0; occBelowT = 0; }
+        }
+    
+        // Global alert toggle + status cause
+        const newAlert = poseAlert || occAlert;
+        if (newAlert !== alert) {
+          alert = newAlert;
+          if (alert) {
+            const cause = (poseAlert && !occAlert) ? 'Pose' : (!poseAlert && occAlert) ? 'Occlusion' : 'Pose + Occlusion';
+            showStatus(`PRONE suspected • ${cause}`);
+          } else {
+            showStatus('Recovered from prone');
+          }
+        }
+    
+        // Fused risk bar (instant occlusion vs normalized pose)
+        const pPoseInst = clamp(rPoseInst / POSE_RANGE, 0, 1); // 0..1
+        const fusedInst = Math.max(faceRisk, pPoseInst);       // 0..1
+        riskEma = emaUpdate(riskEma, fusedInst, S.emaTau, dt);
+    
+      } else {
+        // Disabled: reset FSM + UI
+        poseAlert = false; occAlert = false; alert = false;
+        poseAboveT = poseBelowT = 0;
+        occAboveT = occBelowT = 0;
+        riskEma = 0;
+        pitchEma = NaN;
+      }
+    
+      // Draw overlay + HUD/pill (works for both paths)
+      drawFaceAndHUD(
+        { faceLandmarks: landmarks ? [landmarks] : [] },
+        {
+          showLM: S.showLM, showOrient: S.showOrient,
+          yawDeg, pitchDeg, rollDeg, relPitchDeg,
+          risk: riskEma || 0, alert, rotMat
+        }
+      );
+      updatePill(riskEma || 0, alert);
+      updateHud(Number.isFinite(pitchEma) ? pitchEma : NaN, riskEma || 0, yawDeg, pitchDeg, rollDeg, relPitchDeg);
+    }
+
     function updatePill(risk, alertOn){
       alertPill.classList.remove('prone-safe','prone-risk','prone-on');
       const mid = (S.poseThrOn + S.poseThrOff) / 2;
@@ -1224,90 +1320,14 @@
               rotMat = m;
             }
           }
-          // Signed relative pitch (baseline- and Flip-corrected)
-          if (Number.isFinite(pitchDeg) && Number.isFinite(pitchSupine)) {
-            relPitchDeg = (pitchDeg - pitchSupine) * (S.flipPitch ? -1 : 1);
-          }
-          // Calibration sampling
-          if (calRunning) {
-            const elapsed = (ts - calStartTs)/1000;
-            ui.calProg.style.width = clamp((elapsed / S.calDur)*100, 0, 100) + '%';
-            setCalBtn(true, Math.max(0, S.calDur - elapsed));
-            if (present && Number.isFinite(pitchDeg)) { calAccum += pitchDeg; calCount++; }
-            if (elapsed >= S.calDur) finishCalibration(false);
-          }
 
-          if (S.enabled) {
-            const faceRisk = present ? 0 : 1; // 0 when visible, 1 when missing
-
-            // Pose path (pitch down)
-            const pitchDownNow = Number.isFinite(relPitchDeg) ? Math.max(0, -relPitchDeg) : NaN;
-
-            let r2 = 0;
-            if (Number.isFinite(pitchDownNow)) {
-              const over = pitchDownNow - S.thetaOn;
-              r2 = clamp((over + 10) / 30, 0, 1);
-            }
-            const rPoseInst = POSE_RANGE * r2; // 0..POSE_RANGE (0..0.8)
-            poseRiskEma = emaUpdate(poseRiskEma, rPoseInst, S.emaTau, dt);
-            pitchEma    = emaUpdate(pitchEma,  pitchDownNow, S.emaTau, dt);
-
-            // Pose hysteresis + dwell
-            if (!poseAlert) {
-              if (poseRiskEma > S.poseThrOn) { poseAboveT += dt; poseBelowT = 0; }
-              else { poseAboveT = Math.max(0, poseAboveT - dt*0.5); }
-              if (poseAboveT >= S.poseDwellOn) { poseAlert = true; poseAboveT = 0; poseBelowT = 0; }
-            } else {
-              if (poseRiskEma < S.poseThrOff) { poseBelowT += dt; poseAboveT = 0; }
-              else { poseBelowT = Math.max(0, poseBelowT - dt*0.5); }
-              if (poseBelowT >= S.poseDwellOff) { poseAlert = false; poseAboveT = 0; poseBelowT = 0; }
-            }
-
-            // Occlusion path (EMA of presence)
-            occEma = emaUpdate(occEma, faceRisk, S.emaTau, dt);
-
-            if (!occAlert) {
-              if (occEma > S.occThrOn) { occAboveT += dt; occBelowT = 0; }
-              else { occAboveT = Math.max(0, occAboveT - dt*0.5); }
-              if (occAboveT >= S.occDwellOn) { occAlert = true; occAboveT = 0; occBelowT = 0; }
-            } else {
-              if (occEma < S.occThrOff) { occBelowT += dt; occAboveT = 0; }
-              else { occBelowT = Math.max(0, occBelowT - dt*0.5); }
-              if (occBelowT >= S.occDwellOff) { occAlert = false; occAboveT = 0; occBelowT = 0; }
-            }
-
-            // Global alert (OR)
-            const newAlert = poseAlert || occAlert;
-            if (newAlert !== alert) {
-              alert = newAlert;
-              showStatus(alert ? 'PRONE suspected' : 'Recovered from prone');
-            }
-
-            // Fused risk for the visual bar (unified 0..1 scale; dominant channel)
-            const pOccInst  = faceRisk;                               // 0..1
-            const pPoseInst = clamp(rPoseInst / POSE_RANGE, 0, 1);    // 0..1
-            const fusedInst = Math.max(pOccInst, pPoseInst);          // 0..1
-            riskEma = emaUpdate(riskEma, fusedInst, S.emaTau, dt);
-
-          } else {
-            // Disabled: reset timers/alerts
-            poseAlert = false; occAlert = false; alert = false;
-            poseAboveT = poseBelowT = 0;
-            occAboveT = occBelowT = 0;
-          }
-
-          // Draw overlay + HUD/pills
-          drawFaceAndHUD(result, {
-            showLM: S.showLM,
-            showOrient: S.showOrient,
-            yawDeg, pitchDeg, rollDeg, relPitchDeg,
-            risk: riskEma||0, alert,
-            rotMat
-          });
-
-          updatePill(riskEma||0, alert);
-          updateHud(Number.isFinite(pitchEma)?pitchEma:NaN, riskEma||0, yawDeg, pitchDeg, rollDeg, relPitchDeg);
-
+          //https://chatgpt.com/c/68caf7f6-0270-8320-a6cd-a1c82d55eb39
+          processProneStep({
+            present,
+            yawDeg, pitchDeg, rollDeg,
+            rotMat,
+            landmarks: present && result.faceLandmarks ? result.faceLandmarks[0] : null
+          }, ts, dt);
         } catch (err) {
           console.warn('[FACE][receiver] detect error (retrying next frame)', err);
         } finally {
@@ -1387,38 +1407,18 @@
               applyFaceMode();
             } else if (msg.type === 'face') {
               if (faceEnabled && faceWhere === 'sender') {
-                const ts = performance.now(), dt = lastTs ? (ts - lastTs)/1000 : 0.016; lastTs = ts;
-                updateCalButtonState(!!msg.present);
+                const ts = performance.now();
+                const dt = lastTs ? (ts - lastTs)/1000 : 0.016;
+                lastTs = ts;
             
-                // Calibration progress (works even when inference runs on sender)
-                if (calRunning) {
-                  const elapsed = (ts - calStartTs)/1000;
-                  ui.calProg.style.width = clamp((elapsed / S.calDur)*100, 0, 100) + '%';
-                  setCalBtn(true, Math.max(0, S.calDur - elapsed));
-                  if (msg.present && Number.isFinite(msg.pitchDeg)) { calAccum += msg.pitchDeg; calCount++; }
-                  if (elapsed >= S.calDur) finishCalibration(false);
-                }
-            
-                // Draw landmarks + orientation/axes using sender’s pose
-                const res = { faceLandmarks: (msg.present && msg.landmarks) ? [msg.landmarks] : [] };
-                const relPitchDeg =
-                  (Number.isFinite(msg.pitchDeg) && Number.isFinite(pitchSupine))
-                    ? (msg.pitchDeg - pitchSupine) * (S.flipPitch ? -1 : 1) : NaN;
-            
-                drawFaceAndHUD(res, {
-                  showLM: S.showLM, showOrient: S.showOrient,
-                  yawDeg: msg.yawDeg, pitchDeg: msg.pitchDeg, rollDeg: msg.rollDeg, relPitchDeg,
-                  risk: riskEma || 0, alert, rotMat: msg.rotMat
-                });
-                const pd = Number.isFinite(relPitchDeg) ? Math.max(0, -relPitchDeg) : NaN;
-                pitchEma    = emaUpdate(pitchEma, pd, S.emaTau, dt);
-                const rPose = POSE_RANGE * clamp(((pd - S.thetaOn) + 10) / 30, 0, 1);
-                poseRiskEma = emaUpdate(poseRiskEma, rPose, S.emaTau, dt);
-                occEma      = emaUpdate(occEma, msg.present ? 0 : 1, S.emaTau, dt);
-                riskEma     = emaUpdate(riskEma, Math.max(occEma, clamp(rPose/POSE_RANGE, 0, 1)), S.emaTau, dt);
-                alert       = (poseRiskEma > S.poseThrOn) || (occEma > S.occThrOn);
-                updatePill(riskEma || 0, alert);
-                updateHud(Number.isFinite(pitchEma) ? pitchEma : NaN, riskEma || 0, msg.yawDeg, msg.pitchDeg, msg.rollDeg, relPitchDeg);
+                processProneStep({
+                  present: !!msg.present,
+                  yawDeg:  Number.isFinite(msg.yawDeg)  ? msg.yawDeg  : NaN,
+                  pitchDeg:Number.isFinite(msg.pitchDeg)? msg.pitchDeg: NaN,
+                  rollDeg: Number.isFinite(msg.rollDeg) ? msg.rollDeg : NaN,
+                  rotMat:  msg.rotMat || null,
+                  landmarks: (msg.present && msg.landmarks) ? msg.landmarks : null
+                }, ts, dt);
               }
             }
           } catch {}
