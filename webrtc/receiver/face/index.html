@@ -512,7 +512,7 @@ const core = new ReceiverCore({
 
   // You can keep any other hooks you like (roster, hello, etc.)
   onIceState: (state) => {
-    if (state === 'connected' || state === 'completed') {
+    if (state === 'connected') {
       showStatus('Connected');
     } else if (state === 'failed') {
       clearOverlayDrawing();
@@ -531,6 +531,7 @@ const core = new ReceiverCore({
   onCreatePC: (pc) => {
     // ❗ Use 'pose' so the sender adds this DC to poseDCs and sends AI messages here
     const ch = pc.createDataChannel('pose');
+    faceDC = ch;
     ch.onopen  = () => console.log('[DC][receiver] pose DC open');
     ch.onclose = () => console.log('[DC][receiver] pose DC close');
     ch.onerror = (e) => console.warn('[DC][receiver] pose DC error', e);
@@ -547,9 +548,16 @@ const core = new ReceiverCore({
           faceEnabled = !!msg.enabled;
           faceWhere   = msg.where || 'sender';
           applyFaceMode();
-        } else if (msg.type === 'face') {
-          if (faceEnabled && faceWhere === 'sender') drawFaceLandmarks(msg.landmarks);
-        }
+          } else if (msg.type === 'face') {
+            // ⬇️ Replace your old single-line draw with this:
+            if (faceEnabled && faceWhere === 'sender') {
+              if (msg.present === false) {
+                clearOverlayDrawing();
+              } else {
+                drawFaceLandmarks(msg.landmarks);
+              }
+            }
+          }
       } catch {}
     };
 
