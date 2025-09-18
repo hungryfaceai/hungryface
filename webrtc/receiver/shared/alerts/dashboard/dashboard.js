@@ -45,6 +45,30 @@ const els = {
   btnClear: document.getElementById('btnClearAll'),
 };
 
+// Cross-tab updates
+const bc = ('BroadcastChannel' in window) ? new BroadcastChannel('alerts-bc') : null;
+bc && (bc.onmessage = async (ev) => {
+  if (ev?.data?.type === 'changed') {
+    state.rowsAll = await getAllAlerts();
+    renderAll();
+  }
+});
+
+if (!bc) {
+  setInterval(async () => {
+    state.rowsAll = await getAllAlerts();
+    renderAll();
+  }, 60_000);
+}
+
+// Refresh when the tab becomes visible again
+document.addEventListener('visibilitychange', async () => {
+  if (!document.hidden) {
+    state.rowsAll = await getAllAlerts();
+    renderAll();
+  }
+});
+
 // Sync chip “active” state with filter on first load
 for (const ch of els.chips) {
   const t = ch.dataset.type || '';
@@ -75,6 +99,21 @@ function download(name, type, text) {
   URL.revokeObjectURL(a.href);
 }
 
+let rollTimer = null;
+function startRolling() {
+  stopRolling();
+  rollTimer = setInterval(() => {
+    // Keep the same span, slide to "now"
+    const span = Math.max(60_000, (state.windowEndMs - state.windowStartMs) || (state.windowHours * 3600_000));
+    state.windowEndMs = Date.now();
+    state.windowStartMs = state.windowEndMs - span;
+    renderAll();
+  }, 30_000); // update every 30s; feel free to make it 10s
+}
+function stopRolling() {
+  if (rollTimer) { clearInterval(rollTimer); rollTimer = null; }
+}
+
 // ------- Time window helpers -------
 function setRollingWindow(hours) {
   state.windowHours = Math.max(1, Number(hours) || 12);
@@ -82,7 +121,9 @@ function setRollingWindow(hours) {
   state.windowEndMs = now;
   state.windowStartMs = now - state.windowHours * 3600 * 1000;
   state.rolling = true;
+  startRolling(); 
 }
+
 function setExplicitWindow(startMs, endMs) {
   state.windowStartMs = Math.min(startMs, endMs);
   state.windowEndMs   = Math.max(startMs, endMs);
@@ -312,7 +353,18 @@ function addBrushOverlay(svg, plotBox, startMs, endMs){
     state.brushEndX = state.brushStartX;
     sel.style.display = '';
     e.preventDefault();
+  
+    // Bind move/up for THIS drag only
+    const move = (ev) => onMove(ev);
+    const up = () => {
+      window.removeEventListener('mousemove', move, true);
+      window.removeEventListener('mouseup', up, true);
+      onUp();
+    };
+    window.addEventListener('mousemove', move, true);
+    window.addEventListener('mouseup', up, true);
   };
+
   const onMove = (e) => {
     if (!state.brushing) return;
     state.brushEndX = toLocalX(e);
@@ -334,12 +386,12 @@ function addBrushOverlay(svg, plotBox, startMs, endMs){
     const t0 = xToTime(x0, { x:0, width:plotBox.width }, startMs, endMs);
     const t1 = xToTime(x1, { x:0, width:plotBox.width }, startMs, endMs);
     setExplicitWindow(t0, t1);
+    stopRolling();
     renderAll();
   };
 
   overlay.addEventListener('mousedown', onDown, { passive:false });
-  window.addEventListener('mousemove', onMove, { passive:true, once:false });
-  window.addEventListener('mouseup',   onUp,   { passive:true, once:true });
+  //window.addEventListener('mousemove', onMove, { passive:true }); // keep global
   // reset zoom on double click
   svg.addEventListener('dblclick', () => { setRollingWindow(state.windowHours); renderAll(); });
 }
@@ -433,6 +485,9 @@ document.addEventListener('alerts:changed', async () => {
   state.rowsAll = await getAllAlerts();
   renderAll();
 });
+
+// Re-render on resize
+window.addEventListener('resize', () => renderAll());
 
 // ------- Render all -------
 function renderAll() {
