@@ -5,13 +5,14 @@ const DB = 'naptioAlerts';
 const STORE = 'alerts';
 // Cross-tab notifications
 const _bc = ('BroadcastChannel' in self) ? new BroadcastChannel('alerts-bc') : null;
+
 function _notify(action, payload = {}) {
   try {
-    //document.dispatchEvent(new CustomEvent('alerts:changed', { detail: { action, ...payload } }));
-    _notify('add',   { record: rec });          // when adding
-    _notify('update',{ id, record: next });     // when updating
-    _notify('clear');                           // when clearing
-
+    // Local (same-tab) listeners
+    document.dispatchEvent(new CustomEvent('alerts:changed', {
+      detail: { action, ...payload }
+    }));
+    // Cross-tab listeners
     _bc?.postMessage({ type: 'changed', action, ...payload });
   } catch {}
 }
@@ -30,7 +31,11 @@ export function openDB() {
         st.createIndex('startAt', 'startAt', { unique: false });
       }
     };
-    req.onsuccess = () => { _db = req.result; resolve(_db); };
+    req.onsuccess = () => {
+      _db = req.result;
+      _db.onversionchange = () => _db.close();
+      resolve(_db);
+    };
     req.onerror   = () => reject(req.error);
   });
 }
@@ -54,9 +59,8 @@ export async function addAlert(record) {
     addReq.onerror = () => reject(addReq.error);
     addReq.onsuccess = () => {
       const id = addReq.result;
-      document.dispatchEvent(new CustomEvent('alerts:changed', {
-        detail: { action: 'add', id, record: { id, ...rec } }
-      }));
+      const full = { id, ...rec };
+      _notify('add', { id, record: full });
       resolve(id);
     };
   });
@@ -79,9 +83,7 @@ export async function updateAlert(id, patch) {
       const putReq = st.put(next);
       putReq.onerror = () => reject(putReq.error);
       putReq.onsuccess = () => {
-        document.dispatchEvent(new CustomEvent('alerts:changed', {
-          detail: { action: 'update', id, record: next }
-        }));
+        _notify('update', { id, record: next });
         resolve(true);
       };
     };
@@ -112,7 +114,7 @@ export async function clearAllAlerts() {
     const st = tx.objectStore(STORE);
     tx.onerror = () => reject(tx.error);
     tx.oncomplete = () => {
-      document.dispatchEvent(new CustomEvent('alerts:changed', { detail: { action: 'clear' } }));
+      _notify('clear');
       resolve();
     };
     st.clear();
