@@ -1,66 +1,67 @@
-// Public entrypoint that re-exports alerts functionality
-// Used by all receivers (Audio / Motion / Prone / Fence)
+// webrtc/receiver/shared/alerts/index.js
+// Public surface for shared Alerts UI + store + banner
 
-import {
-  showAlertBanner,
-  hideAlertBanner,
-  setSnoozeMinutes,
-  getSnoozeMinutes
-} from './banner.js';
+import { setupAlertBanner, showAlertBanner as _showAlertBanner, hideAlertBanner } from './banner.js';
+import { setupAlertsDrawer, refreshAlertsBadge } from './drawer.js';
+import { getAllAlerts, addAlert, updateAlert, clearAllAlerts, AlertTypes } from './store.js';
+import { mountAlertsPill } from './pill.js';
 
-import { refreshAlertsBadge } from './drawer.js';
+/** One-shot UI init: pill + drawer + banner */
+export function initAlertsUI(opts = {}) {
+  // Banner (top red)
+  setupAlertBanner();
 
-import {
-  openAlertDB,
-  saveAlertRecord,
-  updateAlertById,
-  getAllAlerts,
-  clearAllAlerts,
-  AlertTypes
-} from './store.js';
+  // Pill (button + badge). If you already have your own markup, pass ids:
+  //   { drawerOpenBtnId: 'btnOpenAlerts', drawerBadgeId:'alertsBadge' }
+  const { openBtn, badge } = mountAlertsPill({
+    drawerOpenBtnId: opts.drawerOpenBtnId || 'btnOpenAlerts',
+    drawerBadgeId:   opts.drawerBadgeId   || 'alertsBadge',
+    injectIfMissing: true
+  });
 
-export {
-  // banner
-  showAlertBanner,
-  hideAlertBanner,
-  setSnoozeMinutes,
-  getSnoozeMinutes,
-  // drawer
-  refreshAlertsBadge,
-  // store
-  openAlertDB,
-  getAllAlerts,
-  clearAllAlerts,
-  // enum
-  AlertTypes
-};
+  // Drawer (history modal). You can pass a host to render into:
+  setupAlertsDrawer({
+    openBtnEl: openBtn,
+    badgeEl: badge,
+    hostId: opts.drawerHostId || 'alertsModalHost'
+  });
 
-// Begin/finish lifecycle helpers used by receiver pages
+  // Initial badge load
+  refreshAlertsBadge();
+}
+
+/** Start a new alert episode; returns the record id. */
 export async function beginAlert({ type, message }) {
-  return saveAlertRecord({
-    type,
-    message: message || '',
-    startAt: new Date().toISOString()
-  }); // returns the record id
-}
-
-export async function finishAlert(id, extra = {}) {
-  if (!id) return false;
-  const patch = {
-    endAt: new Date().toISOString()
+  // type must be from AlertTypes; message is free text
+  const rec = {
+    type: String(type || 'Motion'),
+    message: String(message || ''),
+    startAt: new Date().toISOString(),
+    endAt: null,
+    avgScore: 0
   };
-  if (extra.avgScore != null) patch.avgScore = Number(extra.avgScore) || 0;
-  if (extra.message) patch.message = extra.message;
-  return updateAlertById(id, patch);
+  const id = await addAlert(rec);
+  // Notify listeners (drawer & badge refresh themselves)
+  document.dispatchEvent(new CustomEvent('alerts:changed', { detail: { action: 'add', id, record: { id, ...rec } } }));
+  return id;
 }
 
-// Lightweight UI initializer (auto-refresh badge if present)
-export function initAlertsUI({ drawerBadgeId = 'alertsBadge' } = {}) {
-  const badge =
-    document.getElementById(drawerBadgeId) ||
-    document.querySelector('#alertsBadge');
-
-  const refresh = () => refreshAlertsBadge(badge || '#alertsBadge');
-  document.addEventListener('alerts:changed', refresh);
-  refresh();
+/** Finish an existing alert episode (by id). */
+export async function finishAlert(id, { avgScore = 0, message = '' } = {}) {
+  const patch = {
+    endAt: new Date().toISOString(),
+    avgScore: Number(avgScore) || 0
+  };
+  if (message) patch.message = message;
+  const ok = await updateAlert(id, patch);
+  if (ok) document.dispatchEvent(new CustomEvent('alerts:changed', { detail: { action: 'update', id, record: patch } }));
+  return ok;
 }
+
+/** Red banner (styled like audio page) */
+export function showAlertBanner(whenMs = Date.now()) {
+  _showAlertBanner(whenMs);
+}
+
+// re-exports for convenience / compatibility
+export { refreshAlertsBadge, getAllAlerts, clearAllAlerts, AlertTypes, hideAlertBanner };
