@@ -866,8 +866,11 @@
       pc.onconnectionstatechange = () => {
         const st = pc.connectionState;
         console.log('[SENDER][PC]', peerId, st);
-        if (st === 'failed' || st === 'closed' || st === 'disconnected') {
-          cleanupPeer(peerId, 'pc-state:' + st);
+        if (st === 'failed' || st === 'closed') return cleanupPeer(peerId, 'pc-state:' + st);
+        if (st === 'disconnected') {
+          setTimeout(() => {
+            if (pc.connectionState === 'disconnected') cleanupPeer(peerId, 'pc-state:disconnected');
+          }, 3000);
         }
       };
 
@@ -888,13 +891,23 @@
       return pc;
     }
 
-    function cleanupPeer(peerId, reason = 'cleanup') {
+    function cleanupPeer(peerId, reason='cleanup') {
       const rec = peers.get(peerId);
       if (!rec) return;
       try { rec.pc.close(); } catch {}
+      // If this peer’s stream is what the audio element is playing, clear it
+      try {
+        const ms = talkbackAudio.srcObject;
+        if (ms && ms.getAudioTracks().length && rec.pc) {
+          // crude: if we only ever had one inbound stream, just clear
+          talkbackAudio.pause();
+          talkbackAudio.srcObject = null;
+        }
+      } catch {}
       peers.delete(peerId);
       console.log('[SENDER] cleaned', peerId, reason);
     }
+
 
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
