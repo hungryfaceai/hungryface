@@ -468,7 +468,10 @@
 
     // 🔓 WebAudio unlock on any user gesture (sender)
     ['click','touchstart'].forEach(ev =>
-      document.addEventListener(ev, () => audioCtx?.resume?.(), { passive: true })
+      document.addEventListener(ev, () => {
+        audioCtx?.resume?.();
+        talkbackAudio?.play?.().catch(()=>{});
+      }, { passive: true })
     );
 
     // Local-only AI mic (used when the streaming mic is off)
@@ -753,6 +756,11 @@
             talkbackAudio.muted = false;
             talkbackAudio.volume = 1.0;
             talkbackAudio.play().catch(() => {});
+            ev.track.addEventListener('ended', () => {
+              if (talkbackAudio.srcObject === ms) {
+                try { talkbackAudio.pause(); talkbackAudio.srcObject = null; } catch {}
+              }
+            });
             console.log('[SENDER] talkback audio attached');
           }
         } catch (e) {
@@ -858,7 +866,9 @@
       pc.onconnectionstatechange = () => {
         const st = pc.connectionState;
         console.log('[SENDER][PC]', peerId, st);
-        if (st === 'failed' || st === 'closed') cleanupPeer(peerId, 'pc-state:' + st);
+        if (st === 'failed' || st === 'closed' || st === 'disconnected') {
+          cleanupPeer(peerId, 'pc-state:' + st);
+        }
       };
 
       if (!rec) {
@@ -1122,6 +1132,8 @@
 
       try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
       try { ws && ws.close(); } catch {}
+
+      try { talkbackAudio.pause(); talkbackAudio.srcObject = null; } catch {}
 
       poseDCs.clear();
 
