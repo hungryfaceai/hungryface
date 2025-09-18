@@ -1,63 +1,109 @@
-// Generic alert banner with persistent, tunable snooze (dismiss) duration.
+// webrtc/receiver/shared/alerts/banner.js
+// Generic alert banner styled like the audio page (red, top-centered)
+// + free-form "dismiss for N minutes" input (default 10m).
 
-let bannerEl, timeEl, dismissBtn, minsSelect;
+const DEFAULT_SNOOZE_MIN = 10;                      // <— default 10 minutes
+const LS_KEY_SNOOZE_MIN  = 'naptio-alerts-snooze-mins';
+
+let bannerEl = null;
+let timeEl = null;
+let dismissBtn = null;
+let minsInput = null;
+
 let suppressUntil = 0;
 
-const LS_SNOOZE_MINS = 'alerts:snoozeMins';
+function injectStyleOnce(id, css) {
+  if (document.getElementById(id)) return;
+  const s = document.createElement('style');
+  s.id = id;
+  s.textContent = css;
+  document.head.appendChild(s);
+}
 
 function fmtHM(ms) {
-  const d = new Date(ms);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function getSavedSnoozeMinutes() {
-  const n = Number(localStorage.getItem(LS_SNOOZE_MINS));
-  return Number.isFinite(n) && n > 0 ? n : 15;
+  const raw = localStorage.getItem(LS_KEY_SNOOZE_MIN);
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_SNOOZE_MIN;
 }
-
 function setSavedSnoozeMinutes(mins) {
-  try { localStorage.setItem(LS_SNOOZE_MINS, String(Math.max(1, Math.floor(mins)))) } catch {}
+  const m = Math.max(1, Math.round(Number(mins) || DEFAULT_SNOOZE_MIN));
+  localStorage.setItem(LS_KEY_SNOOZE_MIN, String(m));
+  return m;
 }
 
-function setupAlertBanner(host = document.body) {
-  if (bannerEl) return;
+export function setupAlertBanner() {
+  // Styles copied to match audio banner look & feel
+  injectStyleOnce('shared-alert-banner-css', `
+    .alert-banner{
+      position: fixed;
+      top: 12px; left: 50%; transform: translateX(-50%);
+      background: #b91c1c; /* red-700 */
+      color: #fff;
+      padding: 10px 14px; border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.25);
+      box-shadow: 0 10px 20px rgba(0,0,0,.35);
+      z-index: 10000;
+      font-size: 14px; text-align: center;
+      max-width: min(92vw, 720px);
+    }
+    .alert-banner.hidden { display: none; }
+    .alert-banner__actions { margin-top: 6px; display: inline-flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
+    .banner-link {
+      background: none; border: 0; color: #fff; padding: 0;
+      font: inherit; cursor: pointer; text-decoration: underline;
+    }
+    .banner-link:active { transform: scale(0.98); }
+    .banner-inline { display: inline-flex; gap: 6px; align-items: center; }
+    .banner-input {
+      width: 64px; padding: 4px 6px; border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.35);
+      background: rgba(0,0,0,0.1); color: #fff;
+      font: inherit; -moz-appearance: textfield;
+    }
+    .banner-input::-webkit-outer-spin-button,
+    .banner-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  `);
+
+  // Mount HTML
+  const host = document.getElementById('alertBannerHost') || document.body;
   const wrap = document.createElement('div');
   wrap.innerHTML = `
-<div id="alertBanner" class="alert-banner hidden" style="position:fixed;left:16px;bottom:16px;z-index:9999;background:rgba(20,20,20,.92);border:1px solid rgba(255,255,255,.15);color:#fff;padding:10px 12px;border-radius:12px;backdrop-filter:blur(6px);font:13px/1.3 -apple-system,system-ui,Segoe UI,Roboto,sans-serif;">
-  <div>
-    <strong>Motion detected</strong>
-    <span style="opacity:.8">at <span id="alertBannerTime"></span></span>
-  </div>
-  <div style="margin-top:8px;display:flex;gap:10px;align-items:center;">
-    <label style="opacity:.9">Snooze
-      <select id="alertsDismissMins" style="margin-left:6px;">
-        <option value="5">5 min</option>
-        <option value="15">15 min</option>
-        <option value="30">30 min</option>
-        <option value="60">60 min</option>
-      </select>
-    </label>
-    <button id="alertDismissBtn" type="button" style="appearance:none;border:0;background:#2a2a2a;color:#fff;border-radius:10px;padding:6px 10px;cursor:pointer;">Dismiss</button>
-  </div>
-</div>
-`.trim();
-  bannerEl = wrap.firstChild;
-  host.appendChild(bannerEl);
+    <div id="alertBanner" class="alert-banner hidden" role="alert" aria-live="assertive">
+      <div class="alert-banner__text">
+        Alert — Motion detected at <span id="alertBannerTime">--:--</span>.
+      </div>
+      <div class="alert-banner__actions">
+        <label class="banner-inline" for="alertsDismissMins">
+          Dismiss for
+          <input id="alertsDismissMins" class="banner-input" type="number" min="1" step="1" inputmode="numeric" pattern="[0-9]*">
+          min
+        </label>
+        <button id="alertDismissBtn" class="banner-link" type="button">Dismiss</button>
+      </div>
+    </div>
+  `.trim();
+  const node = wrap.firstChild;
+  host.appendChild(node);
 
-  timeEl = bannerEl.querySelector('#alertBannerTime');
-  dismissBtn = bannerEl.querySelector('#alertDismissBtn');
-  minsSelect = bannerEl.querySelector('#alertsDismissMins');
+  bannerEl = node;
+  timeEl = node.querySelector('#alertBannerTime');
+  dismissBtn = node.querySelector('#alertDismissBtn');
+  minsInput = node.querySelector('#alertsDismissMins');
 
-  const saved = getSavedSnoozeMinutes();
-  if (minsSelect) minsSelect.value = String(saved);
-
-  minsSelect?.addEventListener('change', () => setSavedSnoozeMinutes(Number(minsSelect.value)));
+  // Initialize snooze minutes (default 10)
+  minsInput.value = String(getSavedSnoozeMinutes());
+  minsInput.addEventListener('change', () => {
+    const newVal = Math.max(1, Math.round(Number(minsInput.value) || DEFAULT_SNOOZE_MIN));
+    minsInput.value = String(setSavedSnoozeMinutes(newVal));
+  });
 
   dismissBtn?.addEventListener('click', () => {
-    const mins = Number(minsSelect?.value) || getSavedSnoozeMinutes();
-    setSavedSnoozeMinutes(mins);
+    const mins = Math.max(1, Math.round(Number(minsInput.value) || getSavedSnoozeMinutes()));
+    setSavedSnoozeMinutes(mins);            // persist the latest choice
     suppressUntil = Date.now() + mins * 60 * 1000;
     hideAlertBanner();
   });
@@ -65,7 +111,7 @@ function setupAlertBanner(host = document.body) {
 
 export function showAlertBanner(whenMs = Date.now()) {
   if (!bannerEl) setupAlertBanner();
-  if (Date.now() < suppressUntil) return; // currently snoozed
+  if (Date.now() < suppressUntil) return; // snoozed
   if (timeEl) timeEl.textContent = fmtHM(whenMs);
   bannerEl?.classList.remove('hidden');
 }
@@ -74,8 +120,11 @@ export function hideAlertBanner() {
   bannerEl?.classList.add('hidden');
 }
 
+// Optional external helpers (kept for compatibility with prior code)
 export function setSnoozeMinutes(mins) {
-  setSavedSnoozeMinutes(mins);
-  if (minsSelect) minsSelect.value = String(mins);
+  const m = setSavedSnoozeMinutes(mins);
+  if (minsInput) minsInput.value = String(m);
 }
-export function getSnoozeMinutes() { return getSavedSnoozeMinutes(); }
+export function getSnoozeMinutes() {
+  return getSavedSnoozeMinutes();
+}
