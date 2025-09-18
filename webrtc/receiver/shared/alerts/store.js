@@ -3,6 +3,18 @@
 
 const DB = 'naptioAlerts';
 const STORE = 'alerts';
+// Cross-tab notifications
+const _bc = ('BroadcastChannel' in self) ? new BroadcastChannel('alerts-bc') : null;
+function _notify(action, payload = {}) {
+  try {
+    //document.dispatchEvent(new CustomEvent('alerts:changed', { detail: { action, ...payload } }));
+    _notify('add',   { record: rec });          // when adding
+    _notify('update',{ id, record: next });     // when updating
+    _notify('clear');                           // when clearing
+
+    _bc?.postMessage({ type: 'changed', action, ...payload });
+  } catch {}
+}
 
 // Open (or create) the DB + object store
 let _db = null;
