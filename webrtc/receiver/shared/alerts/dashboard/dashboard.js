@@ -182,12 +182,13 @@ function ensureWindow() {
   if (!Number.isFinite(state.windowStartMs) || !Number.isFinite(state.windowEndMs)) {
     setRollingWindow(state.windowHours);
   }
+  // no sliding here — timers handle that
   // keep rolling windows fresh
-  if (state.rolling) {
+  /*if (state.rolling) {
     const span = (state.windowEndMs - state.windowStartMs) || (state.windowHours * 3600 * 1000);
     state.windowEndMs = Date.now();
     state.windowStartMs = state.windowEndMs - span;
-  }
+  }*/
 }
 function xToTime(x, box, startMs, endMs) {
   const t = x / Math.max(1, box.width);
