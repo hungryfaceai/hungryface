@@ -72,7 +72,9 @@ document.addEventListener('visibilitychange', async () => {
 // Sync chip “active” state with filter on first load
 for (const ch of els.chips) {
   const t = ch.dataset.type || '';
-  ch.classList.toggle('active', state.allowed.has(t));
+  const on = state.allowed.has(t);
+  ch.classList.toggle('active', on);
+  ch.setAttribute('aria-pressed', on ? 'true' : 'false');
 }
 
 // ------- Utils -------
@@ -122,6 +124,7 @@ function setRollingWindow(hours) {
   state.windowStartMs = now - state.windowHours * 3600 * 1000;
   state.rolling = true;
   startRolling(); 
+  syncWinBtnActive();
 }
 
 function setExplicitWindow(startMs, endMs) {
@@ -147,6 +150,14 @@ function xToTime(x, box, startMs, endMs) {
 function timeToX(t, box, startMs, endMs) {
   const r = (t - startMs) / Math.max(1, endMs - startMs);
   return box.x + clamp(r, 0, 1) * box.width;
+}
+
+function syncWinBtnActive() {
+  els.winBtns.forEach(btn => {
+    const isActive = Number(btn.dataset.win) === Number(state.windowHours);
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+  });
 }
 
 // ------- Data filtering/sorting -------
@@ -461,12 +472,15 @@ els.q?.addEventListener('input', () => { state.q = els.q.value; renderAll(); });
 els.chips.forEach(ch => ch.addEventListener('click', () => {
   const t = ch.dataset.type;
   if (state.allowed.has(t)) state.allowed.delete(t); else state.allowed.add(t);
-  ch.classList.toggle('active');
+  const on = state.allowed.has(t);
+  ch.classList.toggle('active', on);
+  ch.setAttribute('aria-pressed', on ? 'true' : 'false');
   renderAll();
 }));
 els.winBtns.forEach(b => b.addEventListener('click', () => {
   const h = Math.max(1, parseInt(b.dataset.win, 10) || 12);
   setRollingWindow(h);
+  syncWinBtnActive();
   renderAll();
 }));
 els.ths.forEach(th => th.addEventListener('click', () => {
@@ -500,6 +514,7 @@ function renderAll() {
 // ------- Boot -------
 async function boot() {
   setRollingWindow(state.windowHours);
+  syncWinBtnActive();
   state.rowsAll = await getAllAlerts();
   renderAll();
 }
