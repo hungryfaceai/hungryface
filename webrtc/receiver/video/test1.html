@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Baby Monitor – Receiver</title>
+  <link rel="icon" href="data:,">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+
+  <!-- ⬇️ Add shared sidebar stylesheet -->
+  <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
+
+  <style>
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; height: 100%;
+      background: #000; color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+      overflow: hidden;
+    }
+    /* Fullscreen wrapper so video scales */
+    #stage {
+      position: fixed; inset: 0;
+      width: 100vw; height: 100vh;   /* fallback */
+      width: 100dvw; height: 100dvh; /* dynamic viewport */
+      width: 100svw; height: 100svh; /* small viewport (iOS URL bar safe) */
+      z-index: 1; background: #000;
+    }
+    #stage > video {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: contain; background: #000;
+    }
+
+    .btn {
+      padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
+      background: transparent; color: #fff; font-size: 16px; font-weight: 600;
+      cursor: pointer; box-shadow: none;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+    .btn:active { transform: scale(0.99); }
+
+    /* Talk button states */
+    .btn.live {
+      border-color: #ff5252;
+      box-shadow: 0 0 0 2px rgba(255,82,82,0.2), 0 0 12px rgba(255,82,82,0.35);
+    }
+    .btn.ptt {
+      border-color: #ffa252;
+      box-shadow: 0 0 0 2px rgba(255,162,82,0.2), 0 0 12px rgba(255,162,82,0.35);
+    }
+
+    #controls {
+      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 12px; z-index: 6;
+      flex-wrap: wrap; justify-content: center;
+    }
+    #enableAudioBtn, #disableAudioBtn { display: none; }
+
+    .overlay {
+      position: fixed; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      pointer-events: none; z-index: 5;
+    }
+    .status {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
+      text-align: center; white-space: pre-line; max-width: 90vw;
+    }
+    .overlay.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <!-- ⬇️ Inject shared sidebar markup and behavior (kept separate from your code) -->
+  <script type="module">
+    (async () => {
+      try {
+        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
+        const html = await res.text();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html.trim();
+        document.body.prepend(...wrap.childNodes);
+
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      } catch (err) {
+        console.error('[Sidebar] failed to load shared assets:', err);
+      }
+    })();
+  </script>
+
+  <div id="controls">
+    <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
+    <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
+    <button id="fsBtn" class="btn" type="button">Fullscreen</button>
+    <!-- ⬇️ Hybrid Talk button (short press = toggle, long press = hold) -->
+    <button id="talkBtn" class="btn" type="button" aria-pressed="false" title="Short press = toggle • Long press = hold">Talk</button>
+  </div>
+
+  <div id="stage">
+    <video id="remote" autoplay playsinline></video>
+  </div>
+
+  <div id="overlay" class="overlay">
+    <div id="status" class="status">Idle</div>
+  </div>
+
+  <script type="module">
+    import { ReceiverCore } from '/hungryface/webrtc/receiver/shared/receiver-core.js';
+
+    /* ---------- Constants ---------- */
+    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const room = new URLSearchParams(location.search).get("room") || "Baby";
+    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
+
+    /* ---------- DOM ---------- */
+    const stage = document.getElementById('stage');
+    const remoteVideo = document.getElementById('remote');
+
+    const fsBtn = document.getElementById('fsBtn');
+    const enableAudioBtn = document.getElementById('enableAudioBtn');
+    const disableAudioBtn = document.getElementById('disableAudioBtn');
+    const overlay = document.getElementById('overlay');
+    const statusEl = document.getElementById('status');
+    const talkBtn = document.getElementById('talkBtn');
+
+    /* ---------- Status overlay ---------- */
+    let hideStatusTimer = null;
+    function showStatus(msg) {
+      statusEl.textContent = msg;
+      overlay.classList.remove('hidden');
+      if (msg === 'Connected') {
+        if (hideStatusTimer) clearTimeout(hideStatusTimer);
+        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
+      } else {
+        if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
+        overlay.classList.remove('hidden');
+      }
+    }
+
+    /* ---------- Audio UI ---------- */
+    function updateAudioButtons() {
+      if (remoteVideo.muted) {
+        enableAudioBtn.style.display = 'block';
+        disableAudioBtn.style.display = 'none';
+      } else {
+        enableAudioBtn.style.display = 'none';
+        disableAudioBtn.style.display = 'block';
+      }
+    }
+    enableAudioBtn.style.display = 'block';
+
+    async function tryStartMuted() {
+      try {
+        remoteVideo.muted = true;
+        remoteVideo.volume = 1.0;
+        await remoteVideo.play();
+      } catch {}
+      updateAudioButtons();
+    }
+    enableAudioBtn.addEventListener('click', async (e) => {
+      e?.preventDefault?.();
+      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
+      updateAudioButtons();
+    });
+    disableAudioBtn.addEventListener('click', (e) => {
+      e?.preventDefault?.();
+      remoteVideo.muted = true;
+      updateAudioButtons();
+    });
+
+    /* ---------- Fullscreen ---------- */
+    fsBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        if (!document.fullscreenElement) {
+          await (stage.requestFullscreen?.call(stage) || document.documentElement.requestFullscreen());
+          fsBtn.textContent = 'Exit fullscreen';
+        } else {
+          await document.exitFullscreen();
+          fsBtn.textContent = 'Fullscreen';
+        }
+      } catch {}
+      beginViewportSettle();
+    });
+    document.addEventListener('fullscreenchange', () => {
+      fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+      beginViewportSetle();
+    });
+
+    remoteVideo.addEventListener('loadedmetadata', beginViewportSettle);
+    remoteVideo.addEventListener('playing', () => { updateAudioButtons(); beginViewportSettle(); });
+    remoteVideo.addEventListener('resize', beginViewportSettle);
+
+    function beginViewportSettle(){ /* no-op for video-only */ }
+    function beginViewportSetle(){ beginViewportSettle(); } // typo guard
+
+    /* ---------- Talkback (receiver -> sender): short-press toggle + long-press hold ---------- */
+    const LONG_PRESS_MS = 450;           // hold ≥ this → push-to-talk
+    let pcRef = null;                    // RTCPeerConnection from ReceiverCore
+    let talkStream = null;               // local mic stream
+    let talkTrack = null;                // audio track from talkStream
+    let talkSender = null;               // RTCRtpSender
+
+    // UI state
+    let latched = false;                 // toggle mode ON/OFF
+    let pressed = false;                 // pointer is down
+    let pttSession = false;              // currently in PTT hold
+    let pressTimer = null;
+
+    async function ensureTalkStream() {
+      if (talkStream && talkTrack) return;
+      talkStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        },
+        video: false
+      });
+      talkTrack = talkStream.getAudioTracks()[0];
+      try { talkTrack.contentHint = 'speech'; } catch {}
+      talkTrack.enabled = false; // we toggle this; attach once
+    }
+
+    function tryAttachOnce() {
+      if (!pcRef || !talkTrack || talkSender) return;
+      talkSender = pcRef.addTrack(talkTrack, talkStream);
+      console.log('[Receiver] talkback track attached to PC');
+    }
+
+    async function prepareIfNeeded() {
+      await ensureTalkStream();
+      tryAttachOnce();
+    }
+
+    function setTalking(on) {
+      if (!talkTrack) return;
+      talkTrack.enabled = !!on;
+      // Optional duck to avoid echo on this device while talking
+      try {
+        if (on) remoteVideo.volume = 0.25;
+        else remoteVideo.volume = 1.0;
+      } catch {}
+    }
+
+    function updateTalkUI() {
+      talkBtn.classList.toggle('ptt', pttSession);
+      talkBtn.classList.toggle('live', latched && !pttSession);
+      talkBtn.setAttribute('aria-pressed', (pttSession || latched) ? 'true' : 'false');
+
+      if (pttSession) {
+        talkBtn.textContent = 'Talking… (hold)';
+      } else if (latched) {
+        talkBtn.textContent = 'Talking — tap to stop';
+      } else {
+        talkBtn.textContent = 'Talk';
+      }
+    }
+
+    async function handlePressStart(e) {
+      e.preventDefault();
+      pressed = true;
+      clearTimeout(pressTimer);
+      pressTimer = setTimeout(async () => {
+        if (!pressed) return;
+        // Long press → PTT session
+        pttSession = true;
+        await prepareIfNeeded();
+        setTalking(true);
+        updateTalkUI();
+      }, LONG_PRESS_MS);
+    }
+
+    function handlePressEnd(e) {
+      e.preventDefault();
+      if (!pressed) return;
+      pressed = false;
+
+      // If timer hasn't fired → short press (toggle)
+      if (!pttSession) {
+        clearTimeout(pressTimer);
+        latched = !latched;
+        if (latched) {
+          prepareIfNeeded().then(() => { setTalking(true); updateTalkUI(); }).catch(console.warn);
+        } else {
+          setTalking(false);
+          updateTalkUI();
+        }
+        return;
+      }
+
+      // If we were in PTT session → end hold, restore to latched state
+      setTalking(latched);
+      pttSession = false;
+      updateTalkUI();
+    }
+
+    // Pointer + touch handlers
+    ['pointerdown','touchstart','mousedown'].forEach(ev =>
+      talkBtn.addEventListener(ev, handlePressStart, { passive: false })
+    );
+    ['pointerup','pointercancel','touchend','touchcancel','mouseup','mouseleave'].forEach(ev =>
+      talkBtn.addEventListener(ev, handlePressEnd, { passive: false })
+    );
+
+    // Keyboard accessibility: Space/Enter supports both toggle and hold
+    talkBtn.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' || e.code === 'Enter') handlePressStart(e);
+    });
+    talkBtn.addEventListener('keyup', (e) => {
+      if (e.code === 'Space' || e.code === 'Enter') handlePressEnd(e);
+    });
+
+    // Cleanup on unload
+    window.addEventListener('beforeunload', () => {
+      try { setTalking(false); } catch {}
+      try { talkSender && pcRef && pcRef.removeTrack(talkSender); } catch {}
+      try { talkStream && talkStream.getTracks().forEach(t => t.stop()); } catch {}
+    });
+
+    /* ---------- Shared core ---------- */
+    const core = new ReceiverCore({
+      wsEndpoint: WS_ENDPOINT,
+      room,
+      onStatus: showStatus,
+      onStream: (stream) => {
+        if (remoteVideo.srcObject !== stream) {
+          remoteVideo.srcObject = stream;
+          tryStartMuted();
+        }
+      },
+      onCreatePC: (pc) => {
+        // Save PC for talkback and attach if mic already prepared
+        pcRef = pc;
+        tryAttachOnce();
+
+        // keep SDP shape consistent with other pages: create a 'pose' DC but ignore messages here
+        const ch = pc.createDataChannel('pose');
+        ch.onopen  = () => console.log('[DC][receiver] pose DC open (video-only)');
+        ch.onclose = () => console.log('[DC][receiver] pose DC close (video-only)');
+        ch.onmessage = () => {};
+      },
+      onDataChannel: (e) => {
+        console.log('[DC][receiver] inbound datachannel (leaving open):', e.channel?.label);
+      }
+    });
+
+    core.start().catch(console.warn);
+    window.addEventListener('beforeunload', () => core.close());
+  </script>
+</body>
+</html>
