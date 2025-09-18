@@ -63,10 +63,14 @@ if (!bc) {
 
 // Refresh when the tab becomes visible again
 document.addEventListener('visibilitychange', async () => {
-  if (!document.hidden) {
-    state.rowsAll = await getAllAlerts();
-    renderAll();
+  if (document.hidden) {
+    stopRolling();
+    return;
   }
+  // Became visible
+  state.rowsAll = await getAllAlerts();
+  if (state.rolling) startRolling();
+  renderAll();
 });
 
 // Sync chip “active” state with filter on first load
