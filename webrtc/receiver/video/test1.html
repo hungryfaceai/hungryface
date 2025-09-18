@@ -225,9 +225,18 @@
         video: false
       });
       talkTrack = talkStream.getAudioTracks()[0];
+    
+      // ⬇️ Inserted logs
+      const mic = talkTrack;
+      console.log('[RX] mic track:', { id: mic.id, enabled: mic.enabled, readyState: mic.readyState });
+      mic.addEventListener('mute',   () => console.log('[RX] mic muted'));
+      mic.addEventListener('unmute', () => console.log('[RX] mic unmuted'));
+      mic.addEventListener('ended',  () => console.log('[RX] mic ended'));
+    
       try { talkTrack.contentHint = 'speech'; } catch {}
       talkTrack.enabled = false; // we toggle this; attach once
     }
+
 
     function tryAttachOnce() {
       if (!pcRef || !talkTrack || talkSender) return;
@@ -242,7 +251,9 @@
 
     function setTalking(on) {
       if (!talkTrack) return;
+      console.log('[RX] setTalking:', on ? 'ENABLED' : 'DISABLED');
       talkTrack.enabled = !!on;
+      console.log('[RX] mic.enabled now =', talkTrack.enabled);
       // Optional duck to avoid echo on this device while talking
       try {
         if (on) remoteVideo.volume = 0.25;
