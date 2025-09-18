@@ -61,15 +61,34 @@ if (!bc) {
   }, 60_000);
 }
 
+setInterval(async () => {
+  try {
+    const fresh = await getAllAlerts();
+    // Only re-render if there’s an actual change to avoid extra work.
+    if (fresh.length !== state.rowsAll.length ||
+        (fresh[0]?.id !== state.rowsAll[0]?.id) ||
+        (fresh[0]?.startAt !== state.rowsAll[0]?.startAt) ) {
+      state.rowsAll = fresh;
+      renderAll();
+    }
+  } catch (e) {
+    // ignore
+  }
+}, 10_000);
+
 // Refresh when the tab becomes visible again
 document.addEventListener('visibilitychange', async () => {
   if (document.hidden) {
     stopRolling();
+    stopPaintTick();
     return;
   }
   // Became visible
   state.rowsAll = await getAllAlerts();
-  if (state.rolling) startRolling();
+  if (state.rolling) {
+    startRolling();
+    startPaintTick();
+  }
   renderAll();
 });
 
@@ -106,16 +125,36 @@ function download(name, type, text) {
 }
 
 let rollTimer = null;
-function startRolling() {
-  stopRolling();
-  rollTimer = setInterval(() => {
-    // Keep the same span, slide to "now"
+let paintTimer = null;
+
+function startPaintTick() {
+  stopPaintTick();
+  // Repaint the timeline frequently for a "live" feel (no DB fetch).
+  paintTimer = setInterval(() => {
+    if (!state.rolling) return;
+    // keep same span, slide to now, and re-render
     const span = Math.max(60_000, (state.windowEndMs - state.windowStartMs) || (state.windowHours * 3600_000));
     state.windowEndMs = Date.now();
     state.windowStartMs = state.windowEndMs - span;
     renderAll();
-  }, 30_000); // update every 30s; feel free to make it 10s
+  }, 1000); // 1s repaint
 }
+
+function stopPaintTick() {
+  if (paintTimer) { clearInterval(paintTimer); paintTimer = null; }
+}
+
+function startRolling() {
+  stopRolling();
+  // Keep a slower slide tick (every 5s) to be safe, even though paintTick runs per second.
+  rollTimer = setInterval(() => {
+    const span = Math.max(60_000, (state.windowEndMs - state.windowStartMs) || (state.windowHours * 3600_000));
+    state.windowEndMs = Date.now();
+    state.windowStartMs = state.windowEndMs - span;
+    renderAll();
+  }, 5_000);
+}
+
 function stopRolling() {
   if (rollTimer) { clearInterval(rollTimer); rollTimer = null; }
 }
@@ -128,6 +167,7 @@ function setRollingWindow(hours) {
   state.windowStartMs = now - state.windowHours * 3600 * 1000;
   state.rolling = true;
   startRolling(); 
+  startPaintTick();
   syncWinBtnActive();
 }
 
@@ -135,6 +175,8 @@ function setExplicitWindow(startMs, endMs) {
   state.windowStartMs = Math.min(startMs, endMs);
   state.windowEndMs   = Math.max(startMs, endMs);
   state.rolling = false; // user brushed → stop auto-updating with "now"
+  stopRolling();
+  stopPaintTick();
 }
 function ensureWindow() {
   if (!Number.isFinite(state.windowStartMs) || !Number.isFinite(state.windowEndMs)) {
