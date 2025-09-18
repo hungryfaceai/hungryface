@@ -107,6 +107,54 @@ export async function clearAllAlerts() {
   });
 }
 
+// ===== Export helpers (JSON/CSV) =====
+
+/** Build a CSV string from alert rows. */
+function _rowsToCSV(rows) {
+  const esc = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
+  const header = ['startAt','endAt','durationSec','avgScore','type','message'];
+  const lines = [header.join(',')];
+
+  for (const r of rows) {
+    const t0  = r.startAt ? +new Date(r.startAt) : NaN;
+    const t1  = r.endAt   ? +new Date(r.endAt)   : NaN;
+    const dur = (Number.isFinite(t0) && Number.isFinite(t1))
+      ? Math.round((t1 - t0) / 1000)
+      : '';
+    lines.push([
+      esc(r.startAt),
+      esc(r.endAt),
+      dur,
+      Number(r.avgScore || 0),
+      esc(r.type || ''),
+      esc(r.message || '')
+    ].join(','));
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Returns a pretty-printed JSON payload string.
+ * If `rows` not provided, fetches all via getAllAlerts().
+ */
+export async function exportAlertsJSON(rows) {
+  const data = rows ?? await getAllAlerts();
+  return JSON.stringify(
+    { version: 1, exportedAt: new Date().toISOString(), rows: data },
+    null,
+    2
+  );
+}
+
+/**
+ * Returns a CSV string of alerts.
+ * If `rows` not provided, fetches all via getAllAlerts().
+ */
+export async function exportAlertsCSV(rows) {
+  const data = rows ?? await getAllAlerts();
+  return _rowsToCSV(data);
+}
+
 export const AlertTypes = Object.freeze({
   Audio:  'Audio',
   Prone:  'Prone',
