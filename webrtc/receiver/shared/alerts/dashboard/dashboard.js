@@ -18,10 +18,11 @@ const state = {
   // sort
   sortKey: 'startAt',
   sortDir: 'desc',
-  // time window (rolling, default 12h)
+  // time window (rolling by default)
   windowHours: 12,
   windowStartMs: null,
-  windowEndMs: null, // usually "now"
+  windowEndMs: null,
+  rolling: true, // <- window tracks "now" unless user brushes
   // brush
   brushing: false,
   brushStartX: 0,
@@ -43,6 +44,12 @@ const els = {
   btnCSV: document.getElementById('btnExportCSV'),
   btnClear: document.getElementById('btnClearAll'),
 };
+
+// Sync chip “active” state with filter on first load
+for (const ch of els.chips) {
+  const t = ch.dataset.type || '';
+  ch.classList.toggle('active', state.allowed.has(t));
+}
 
 // ------- Utils -------
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
@@ -70,14 +77,27 @@ function download(name, type, text) {
 
 // ------- Time window helpers -------
 function setRollingWindow(hours) {
-  state.windowHours = hours;
+  state.windowHours = Math.max(1, Number(hours) || 12);
   const now = Date.now();
   state.windowEndMs = now;
-  state.windowStartMs = now - hours * 3600 * 1000;
+  state.windowStartMs = now - state.windowHours * 3600 * 1000;
+  state.rolling = true;
 }
 function setExplicitWindow(startMs, endMs) {
   state.windowStartMs = Math.min(startMs, endMs);
   state.windowEndMs   = Math.max(startMs, endMs);
+  state.rolling = false; // user brushed → stop auto-updating with "now"
+}
+function ensureWindow() {
+  if (!Number.isFinite(state.windowStartMs) || !Number.isFinite(state.windowEndMs)) {
+    setRollingWindow(state.windowHours);
+  }
+  // keep rolling windows fresh
+  if (state.rolling) {
+    const span = (state.windowEndMs - state.windowStartMs) || (state.windowHours * 3600 * 1000);
+    state.windowEndMs = Date.now();
+    state.windowStartMs = state.windowEndMs - span;
+  }
 }
 function xToTime(x, box, startMs, endMs) {
   const t = x / Math.max(1, box.width);
@@ -138,7 +158,6 @@ function binActivity(rows, binMs) {
     const a0 = Math.max(windowStartMs, Math.min(t0, t1));
     const a1 = Math.min(windowEndMs,   Math.max(t0, t1));
     if (a1 < windowStartMs || a0 > windowEndMs) continue;
-    // increment all bins touched by [a0,a1]
     let i0 = Math.floor((a0 - windowStartMs) / binMs);
     let i1 = Math.floor((a1 - windowStartMs) / binMs);
     i0 = clamp(i0, 0, nBins-1); i1 = clamp(i1, 0, nBins-1);
@@ -150,8 +169,11 @@ function binActivity(rows, binMs) {
 // ------- SVG timeline -------
 function renderTimeline(rows) {
   const svg = els.svg;
+  if (!svg) return;
+
+  // Provide a sane size even if the element has no CSS size yet.
   const W = svg.clientWidth || svg.viewBox.baseVal.width || 1000;
-  const H = svg.clientHeight || 300;
+  const H = svg.clientHeight || svg.viewBox.baseVal.height || 260;
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
   while (svg.firstChild) svg.removeChild(svg.firstChild);
 
@@ -160,44 +182,41 @@ function renderTimeline(rows) {
   const laneH = (H - PAD_T - PAD_B) / (lanes.length + 1); // +1 row for activity band
   const bandH = Math.max(14, Math.min(22, laneH * 0.5));
   const lanesTop = PAD_T + bandH + 8;
-  const plotX = PAD_L, plotY = lanesTop, plotW = W - PAD_L - PAD_R, plotH = H - lanesTop - PAD_B;
+  const plotX = PAD_L, plotY = lanesTop, plotW = Math.max(1, W - PAD_L - PAD_R), plotH = H - lanesTop - PAD_B;
 
   const startMs = state.windowStartMs, endMs = state.windowEndMs;
 
   // background
   const bg = rect(plotX, PAD_T, plotW, H - PAD_T - PAD_B, '#0a0a0a'); bg.setAttribute('rx','8'); svg.appendChild(bg);
-  // grid (hour ticks)
-  const hours = Math.max(1, Math.round((endMs - startMs)/3600000));
+
+  // grid (nice ticks)
   const tickEveryMs = pickNiceTick((endMs - startMs));
   for (let t = Math.ceil(startMs/tickEveryMs)*tickEveryMs; t <= endMs; t += tickEveryMs) {
     const x = plotX + (plotW * (t - startMs) / (endMs - startMs));
     const g = line(x, PAD_T, x, H - PAD_B, 'rgba(255,255,255,0.06)'); svg.appendChild(g);
-    const lab = text(new Date(t).toLocaleTimeString([], {hour12:false,hour:'2-digit',minute:'2-digit'}), x+2, H - 6, '#aaa', 'end');
+    const lab = text(new Date(t).toLocaleTimeString([], {hour12:false,hour:'2-digit',minute:'2-digit'}), x-4, H - 6, '#aaa');
     lab.setAttribute('text-anchor','end'); svg.appendChild(lab);
   }
 
   // activity band (alerts/min) above lanes
-  const bandX = plotX, bandY = PAD_T, bandW = plotW, bandTop = bandY, bandBot = bandY + bandH;
-  const { bins, binMs } = binActivity(rows, pickBin(endMs - startMs));
+  const { bins } = binActivity(rows, pickBin(endMs - startMs));
   const maxBin = Math.max(1, ...bins);
-  const bw = bandW / bins.length;
+  const bw = plotW / bins.length;
   for (let i=0;i<bins.length;i++){
     const v = bins[i] / maxBin;
     const h = Math.round(v * bandH);
-    const x = bandX + i*bw;
-    const y = bandBot - h;
-    const bar = rect(x, y, Math.max(1, bw-1), h, 'rgba(96,165,250,0.45)');
-    svg.appendChild(bar);
+    const x = plotX + i*bw;
+    const y = PAD_T + bandH - h;
+    svg.appendChild(rect(x, y, Math.max(1, bw-1), h, 'rgba(96,165,250,0.45)'));
   }
-  const capLine = line(bandX, bandBot+0.5, bandX+bandW, bandBot+0.5, 'rgba(255,255,255,0.15)'); svg.appendChild(capLine);
+  svg.appendChild(line(plotX, PAD_T + bandH + 0.5, plotX + plotW, PAD_T + bandH + 0.5, 'rgba(255,255,255,0.15)'));
 
-  // lanes labels
+  // lanes labels + separators
   lanes.forEach((name, idx) => {
     const y = laneY(idx);
-    const lbl = text(name, PAD_L - 8, y + laneH/2 + 4, '#ddd', 'end');
+    const lbl = text(name, PAD_L - 8, y + laneH/2 + 4, '#ddd');
     lbl.setAttribute('text-anchor','end'); svg.appendChild(lbl);
-    // separator
-    const sep = line(plotX, y + laneH, plotX + plotW, y + laneH, 'rgba(255,255,255,0.06)'); svg.appendChild(sep);
+    svg.appendChild(line(plotX, y + laneH, plotX + plotW, y + laneH, 'rgba(255,255,255,0.06)'));
   });
 
   // alert bars
@@ -221,25 +240,22 @@ function renderTimeline(rows) {
     bar.setAttribute('rx','4'); bar.setAttribute('ry','4');
     bar.setAttribute('data-tip', `${type} • ${fmtDT(r.startAt)} → ${fmtDT(r.endAt)} • ${(Number(r.avgScore)||0).toFixed(3)}\n${r.message||''}`);
     svg.appendChild(bar);
-
-    // a small dot at the start
-    const dot = circle(x0, y + (laneH/2), 2.2, colorFor(type), op);
-    svg.appendChild(dot);
+    svg.appendChild(circle(x0, y + (laneH/2), 2.2, colorFor(type), op));
   }
 
   // "now" marker
   const now = Date.now();
   if (now >= startMs && now <= endMs) {
     const x = plotX + plotW * (now - startMs) / (endMs - startMs);
-    const nline = line(x, PAD_T, x, H - PAD_B, 'rgba(239,68,68,0.85)');
-    svg.appendChild(nline);
+    svg.appendChild(line(x, PAD_T, x, H - PAD_B, 'rgba(239,68,68,0.85)'));
   }
 
   // brush overlay
   addBrushOverlay(svg, { x: plotX, y: PAD_T, width: plotW, height: H - PAD_T - PAD_B }, startMs, endMs);
 
   // label
-  els.winLabel.textContent = `${new Date(startMs).toLocaleString()} → ${new Date(endMs).toLocaleString()}`;
+  els.winLabel && (els.winLabel.textContent =
+    `${new Date(startMs).toLocaleString()} → ${new Date(endMs).toLocaleString()}`);
 
   function laneY(idx){ return lanesTop + idx * laneH; }
   function rect(x,y,w,h,fill,opacity) { const n = document.createElementNS('http://www.w3.org/2000/svg','rect'); n.setAttribute('x',x); n.setAttribute('y',y); n.setAttribute('width',w); n.setAttribute('height',h); n.setAttribute('fill',fill); if(opacity) n.setAttribute('fill-opacity',opacity); return n; }
@@ -249,7 +265,6 @@ function renderTimeline(rows) {
 }
 
 function pickNiceTick(spanMs){
-  // choose roughly 6–10 vertical grid lines
   const targets = [5*60e3, 10*60e3, 15*60e3, 30*60e3, 60*60e3, 2*60*60e3, 3*60*60e3, 6*60*60e3, 12*60*60e3];
   const approx = spanMs / 8;
   let best = targets[0], diff = Math.abs(targets[0]-approx);
@@ -257,7 +272,6 @@ function pickNiceTick(spanMs){
   return best;
 }
 function pickBin(spanMs){
-  // activity band bin ~ 50–120 bars
   const targetBins = 80;
   const raw = spanMs / targetBins;
   const nice = [60e3, 2*60e3, 5*60e3, 10*60e3, 15*60e3, 30*60e3]; // 1–30 min
@@ -292,14 +306,14 @@ function addBrushOverlay(svg, plotBox, startMs, endMs){
     return clamp(s.x - plotBox.x, 0, plotBox.width);
   };
 
-  overlay.addEventListener('mousedown', (e) => {
+  const onDown = (e) => {
     state.brushing = true;
     state.brushStartX = toLocalX(e);
     state.brushEndX = state.brushStartX;
     sel.style.display = '';
     e.preventDefault();
-  });
-  window.addEventListener('mousemove', (e) => {
+  };
+  const onMove = (e) => {
     if (!state.brushing) return;
     state.brushEndX = toLocalX(e);
     const x = Math.min(state.brushStartX, state.brushEndX);
@@ -308,8 +322,8 @@ function addBrushOverlay(svg, plotBox, startMs, endMs){
     sel.setAttribute('y', plotBox.y);
     sel.setAttribute('width', w);
     sel.setAttribute('height', plotBox.height);
-  });
-  const finish = () => {
+  };
+  const onUp = () => {
     if (!state.brushing) return;
     state.brushing = false;
     sel.style.display = 'none';
@@ -322,7 +336,10 @@ function addBrushOverlay(svg, plotBox, startMs, endMs){
     setExplicitWindow(t0, t1);
     renderAll();
   };
-  window.addEventListener('mouseup', finish);
+
+  overlay.addEventListener('mousedown', onDown, { passive:false });
+  window.addEventListener('mousemove', onMove, { passive:true, once:false });
+  window.addEventListener('mouseup',   onUp,   { passive:true, once:true });
   // reset zoom on double click
   svg.addEventListener('dblclick', () => { setRollingWindow(state.windowHours); renderAll(); });
 }
@@ -330,27 +347,28 @@ function addBrushOverlay(svg, plotBox, startMs, endMs){
 // ------- Table -------
 function renderTable(rows) {
   const tb = els.tbody;
+  if (!tb) return;
   tb.innerHTML = '';
   if (!rows.length) {
     tb.innerHTML = `<tr><td class="muted" colspan="6">No alerts in this window.</td></tr>`;
-    return;
+  } else {
+    for (const r of rows) {
+      const t0 = r.startAt ? new Date(r.startAt) : null;
+      const t1 = r.endAt   ? new Date(r.endAt)   : null;
+      const durMs = (t0 && t1) ? (t1 - t0) : null;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${fmtDT(r.startAt)}</td>
+        <td>${fmtDT(r.endAt)}</td>
+        <td>${fmtDur(durMs)}</td>
+        <td class="mono">${(Number(r.avgScore)||0).toFixed(4)}</td>
+        <td>${r.type || ''}</td>
+        <td>${r.message || ''}</td>
+      `;
+      tb.appendChild(tr);
+    }
   }
-  for (const r of rows) {
-    const t0 = r.startAt ? new Date(r.startAt) : null;
-    const t1 = r.endAt   ? new Date(r.endAt)   : null;
-    const durMs = (t0 && t1) ? (t1 - t0) : null;
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${fmtDT(r.startAt)}</td>
-      <td>${fmtDT(r.endAt)}</td>
-      <td>${fmtDur(durMs)}</td>
-      <td class="mono">${(Number(r.avgScore)||0).toFixed(4)}</td>
-      <td>${r.type || ''}</td>
-      <td>${r.message || ''}</td>
-    `;
-    tb.appendChild(tr);
-  }
-  els.count.textContent = String(rows.length);
+  if (els.count) els.count.textContent = String(rows.length);
 }
 
 // ------- Exports -------
@@ -374,7 +392,7 @@ els.btnClear?.addEventListener('click', async () => {
 
 // Fallback CSV
 function rowsToCSV(rows) {
-  const esc = s => `"${String(s??'').replace(/"/g,'""')}"`;
+  const esc = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
   const header = ['startAt','endAt','durationSec','avgScore','type','message'];
   const lines = [header.join(',')];
   for (const r of rows) {
@@ -418,11 +436,9 @@ document.addEventListener('alerts:changed', async () => {
 
 // ------- Render all -------
 function renderAll() {
-  // Filter rows by window + chips + q
+  ensureWindow();
   const rowsInWin = filterRowsInWindow(state.rowsAll);
-  // Timeline (render with all in window, not yet sorted)
   renderTimeline(rowsInWin);
-  // Table (sorted)
   renderTable(sortRows(rowsInWin));
 }
 
