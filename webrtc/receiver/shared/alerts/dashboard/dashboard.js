@@ -134,7 +134,7 @@ function unlockAudio() {
   if (audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
 }
 
-async function playAlert() {
+async function playPing() {
   if (!soundsEnabled) return;
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch {} }
