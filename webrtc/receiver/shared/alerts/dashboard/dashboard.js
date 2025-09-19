@@ -380,7 +380,7 @@ function pickBin(spanMs){
 }
 
 // ------- Brush (drag to zoom) -------
-function addBrushOverlay(svg, plotBox, startMs, endMs){
+/*function addBrushOverlay(svg, plotBox, startMs, endMs){
   const overlay = document.createElementNS('http://www.w3.org/2000/svg','rect');
   overlay.setAttribute('x', plotBox.x);
   overlay.setAttribute('y', plotBox.y);
@@ -452,6 +452,86 @@ function addBrushOverlay(svg, plotBox, startMs, endMs){
   //window.addEventListener('mousemove', onMove, { passive:true }); // keep global
   // reset zoom on double click
   svg.addEventListener('dblclick', () => { setRollingWindow(state.windowHours); renderAll(); });
+}*/
+
+function addBrushOverlay(svg, plotBox, startMs, endMs){
+  const overlay = document.createElementNS('http://www.w3.org/2000/svg','rect');
+  overlay.setAttribute('x', plotBox.x);
+  overlay.setAttribute('y', plotBox.y);
+  overlay.setAttribute('width',  plotBox.width);
+  overlay.setAttribute('height', plotBox.height);
+  overlay.setAttribute('fill','transparent');
+  overlay.style.cursor = 'crosshair';
+  // important for iOS: disable default touch gestures
+  overlay.style.touchAction = 'none';
+  svg.appendChild(overlay);
+
+  const sel = document.createElementNS('http://www.w3.org/2000/svg','rect');
+  sel.setAttribute('fill','rgba(255,255,255,0.12)');
+  sel.setAttribute('stroke','rgba(255,255,255,0.35)');
+  sel.setAttribute('stroke-width','1');
+  sel.style.display = 'none';
+  svg.appendChild(sel);
+
+  const toLocalX = (clientX) => {
+    const p = svg.createSVGPoint();
+    p.x = clientX; p.y = 0;
+    const m = svg.getScreenCTM().inverse();
+    const s = p.matrixTransform(m);
+    return clamp(s.x - plotBox.x, 0, plotBox.width);
+  };
+
+  const onMove = (e) => {
+    if (!state.brushing) return;
+    state.brushEndX = toLocalX(e.clientX);
+    const x = Math.min(state.brushStartX, state.brushEndX);
+    const w = Math.abs(state.brushEndX - state.brushStartX);
+    sel.setAttribute('x', plotBox.x + x);
+    sel.setAttribute('y', plotBox.y);
+    sel.setAttribute('width', w);
+    sel.setAttribute('height', plotBox.height);
+  };
+
+  const onUp = () => {
+    if (!state.brushing) return;
+    state.brushing = false;
+    sel.style.display = 'none';
+    const minSel = 8; // px
+    if (Math.abs(state.brushEndX - state.brushStartX) < minSel) return;
+    const x0 = Math.min(state.brushStartX, state.brushEndX);
+    const x1 = Math.max(state.brushStartX, state.brushEndX);
+    const t0 = xToTime(x0, { x:0, width:plotBox.width }, startMs, endMs);
+    const t1 = xToTime(x1, { x:0, width:plotBox.width }, startMs, endMs);
+    setExplicitWindow(t0, t1);  // this already stops timers
+    renderAll();
+  };
+
+  const onDown = (e) => {
+    // unify mouse/touch/pen
+    overlay.setPointerCapture?.(e.pointerId);
+    state.brushing = true;
+    state.brushStartX = toLocalX(e.clientX);
+    state.brushEndX = state.brushStartX;
+    sel.style.display = '';
+    e.preventDefault();
+  };
+
+  // pointer events handle mouse + touch + pen
+  overlay.addEventListener('pointerdown', onDown, { passive:false });
+  overlay.addEventListener('pointermove', onMove, { passive:false });
+  overlay.addEventListener('pointerup', onUp, { passive:true });
+  overlay.addEventListener('pointercancel', onUp, { passive:true });
+
+  // reset zoom on double tap / double click
+  let lastTap = 0;
+  overlay.addEventListener('pointerdown', (e) => {
+    const now = Date.now();
+    if (now - lastTap < 300) {
+      setRollingWindow(state.windowHours);
+      renderAll();
+    }
+    lastTap = now;
+  }, { passive:true });
 }
 
 // ------- Table -------
