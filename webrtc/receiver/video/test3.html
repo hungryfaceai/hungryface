@@ -334,7 +334,7 @@
     });
 
     // --------- Lullabies (shuffle playlist, mix with mic when Talking) ---------
-    const LULLABY_DIR = '/hungryface/lullaby/';   // ✅ correct base path as per your structure
+    const LULLABY_DIR = '/hungryface/lullaby/';   // base path per your hosting
     let lullabyEl = null;
     let lullabyCtx = null;
     let lullabyDest = null;
@@ -433,8 +433,12 @@
         musicNode = lullabyCtx.createMediaElementSource(lullabyEl);
         musicNode.connect(gMusic).connect(lullabyDest);
       }
+
       lullabyTrack = lullabyDest.stream.getAudioTracks()[0];
-      try { lullabyTrack.contentHint = 'music'; } catch {}
+      if (lullabyTrack) {
+        try { lullabyTrack.enabled = true; } catch {}
+        try { lullabyTrack.contentHint = 'music'; } catch {}
+      }
     }
 
     function reshufflePlaylist() {
@@ -491,7 +495,10 @@
     }
 
     async function startLullaby() {
+      // ensure we have a sender bound; try to adopt from pre-allocated transceiver if needed
+      if (!talkSender && talkTx?.sender) talkSender = talkTx.sender;
       if (!talkSender) { console.warn('[RX] no talkSender yet'); return; }
+
       await ensureLullabyGraph();
 
       // Discover tracks and build a shuffled playlist
@@ -499,7 +506,7 @@
       if (!lullabyList.length) return;
       reshufflePlaylist();
 
-      // Point the sender to the lullaby/mix track
+      // Bind lullaby/mix track to sender *before* playback
       await talkSender.replaceTrack(lullabyTrack);
 
       // Start playback of the first (shuffled) track
