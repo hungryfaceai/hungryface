@@ -49,23 +49,26 @@ const els = {
 const bc = ('BroadcastChannel' in window) ? new BroadcastChannel('alerts-bc') : null;
 bc && (bc.onmessage = async (ev) => {
   if (ev?.data?.type === 'changed') {
-    // Refresh rows
-    state.rowsAll = await getAllAlerts();
+    const prev = state.rowsAll;
+    const fresh = await getAllAlerts();
+    state.rowsAll = fresh;
     renderAll();
 
-    // Audio ping only for new alert additions, only if this tab is visible
-    if (document.visibilityState === 'visible' && ev.data.action === 'add') {
-      playPing();
+    if (document.visibilityState === 'visible') {
+      if (ev.data.action === 'add' || hasNewSince(fresh, prev)) playPing();
     }
   }
 });
 
 // Keep in sync with store updates (same-tab writes)
 document.addEventListener('alerts:changed', async (ev) => {
-  state.rowsAll = await getAllAlerts();
+  const prev = state.rowsAll;
+  const fresh = await getAllAlerts();
+  state.rowsAll = fresh;
   renderAll();
-  if (document.visibilityState === 'visible' && ev?.detail?.action === 'add') {
-    playPing();
+
+  if (document.visibilityState === 'visible') {
+    if (ev?.detail?.action === 'add' || hasNewSince(fresh, prev)) playPing();
   }
 });
 
@@ -129,10 +132,12 @@ function unlockAudio() {
   if (audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
 }
 
-function playPing() {
+async function playPing() {
   if (!soundsEnabled) return;
-  if (!audioCtx) return;
-  // rate-limit to avoid machine-gun pings if many alerts land together
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch {} }
+  if (audioCtx.state !== 'running') return;
+
   const now = performance.now();
   if (now - lastPingAt < 250) return;
   lastPingAt = now;
@@ -140,16 +145,22 @@ function playPing() {
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
   o.type = 'sine';
-  o.frequency.value = 880;        // A5
-  g.gain.value = 0.0001;          // start very quiet to avoid click
+  o.frequency.value = 880;
+  g.gain.value = 0.0001;
   o.connect(g).connect(audioCtx.destination);
 
   const t0 = audioCtx.currentTime;
   o.start(t0);
-  // quick attack/decay envelope (~120 ms)
   g.gain.exponentialRampToValueAtTime(0.08, t0 + 0.015);
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
   o.stop(t0 + 0.14);
+}
+
+function hasNewSince(fresh, prev) {
+  if (!prev || !prev.length) return false;          // don't ping on first paint
+  const prevTopId = prev[0]?.id;
+  const i = fresh.findIndex(r => r.id === prevTopId);
+  return i > 0 || i === -1;                         // new rows unshifted at front or entirely new set
 }
 
 // UI toggle wiring
@@ -242,15 +253,21 @@ function stopPolling() {
 
 async function fetchIfChanged() {
   try {
+    const prev = state.rowsAll;
     const fresh = await getAllAlerts();
-    if (fresh.length !== state.rowsAll.length ||
-        fresh[0]?.id !== state.rowsAll[0]?.id ||
-        fresh[0]?.startAt !== state.rowsAll[0]?.startAt) {
+
+    const changed = fresh.length !== prev.length ||
+                    fresh[0]?.id !== prev[0]?.id ||
+                    fresh[0]?.startAt !== prev[0]?.startAt;
+
+    if (changed) {
       state.rowsAll = fresh;
       renderAll();
+      if (document.visibilityState === 'visible' && hasNewSince(fresh, prev)) playPing();
     }
   } catch {}
 }
+
 
 // ------- Time window helpers -------
 function setRollingWindow(hours) {
