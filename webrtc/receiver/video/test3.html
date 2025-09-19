@@ -100,7 +100,7 @@
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
     <!-- ⬇️ Hybrid Talk button (short press = toggle, long press = hold) -->
     <button id="talkBtn" class="btn" type="button" aria-pressed="false" title="Short press = toggle • Long press = hold">Talk</button>
-    <!-- ⬇️ New: Lullaby button -->
+    <!-- ⬇️ Lullaby button -->
     <button id="lullabyBtn" class="btn" type="button" title="Play lullaby to baby (sender)">Lullaby</button>
   </div>
 
@@ -230,7 +230,6 @@
       });
       talkTrack = talkStream.getAudioTracks()[0];
     
-      // ⬇️ Inserted logs
       const mic = talkTrack;
       console.log('[RX] mic track:', { id: mic.id, enabled: mic.enabled, readyState: mic.readyState });
       mic.addEventListener('mute',   () => console.log('[RX] mic muted'));
@@ -264,16 +263,15 @@
       console.log('[RX] setTalking:', on ? 'ENABLED' : 'DISABLED');
       talkTrack.enabled = !!on;
       console.log('[RX] mic.enabled now =', talkTrack.enabled);
-      // Optional duck to avoid echo on this device while talking
-      try {
-        if (on) remoteVideo.volume = 0.25;
-        else remoteVideo.volume = 1.0;
-      } catch {}
+      try { remoteVideo.volume = on ? 0.25 : 1.0; } catch {}
+      // If lullaby is active, (dis)connect mic into the mix graph
+      updateMixRouting();
+      updateTalkUI();
     }
 
     function updateTalkUI() {
       talkBtn.classList.toggle('ptt', pttSession);
-      talkBtn.classList.toggle('live', latched && !pttSession);
+      talkBtn.classList.toggle('live', (pttSession || latched));
       talkBtn.setAttribute('aria-pressed', (pttSession || latched) ? 'true' : 'false');
 
       if (pttSession) {
@@ -295,7 +293,6 @@
         pttSession = true;
         await prepareIfNeeded();
         setTalking(true);
-        updateTalkUI();
       }, LONG_PRESS_MS);
     }
 
@@ -309,10 +306,9 @@
         clearTimeout(pressTimer);
         latched = !latched;
         if (latched) {
-          prepareIfNeeded().then(() => { setTalking(true); updateTalkUI(); }).catch(console.warn);
+          prepareIfNeeded().then(() => setTalking(true)).catch(console.warn);
         } else {
           setTalking(false);
-          updateTalkUI();
         }
         return;
       }
@@ -320,7 +316,6 @@
       // If we were in PTT session → end hold, restore to latched state
       setTalking(latched);
       pttSession = false;
-      updateTalkUI();
     }
 
     // Pointer + touch handlers
@@ -339,65 +334,107 @@
       if (e.code === 'Space' || e.code === 'Enter') handlePressEnd(e);
     });
 
-    // --------- Lullaby over the same sendonly transceiver (swap mic → music) ---------
-    const LULLABY_URL = '/hungryface/lullaby/lullaby1.mp3';
+    // --------- Lullaby over the same sendonly transceiver (swap mic → music, mix if Talking) ---------
+    const LULLABY_URL = '/assets/lullaby/lullaby1.mp3';
     let lullabyEl = null;
     let lullabyCtx = null;
     let lullabyDest = null;
     let lullabyTrack = null;
+    let musicNode = null;
+    let micNode = null;
+    let gMusic = null;
+    let gMic = null;
+    let micConnected = false;
     let sendingLullaby = false;
 
-    async function startLullaby() {
-      if (!talkSender) { console.warn('[RX] no talkSender yet'); return; }
+    async function ensureLullabyGraph() {
+      if (!lullabyCtx) {
+        lullabyCtx = new (window.AudioContext || window.webkitAudioContext)();
+        try { await lullabyCtx.resume(); } catch {}
+      }
+      if (!lullabyDest) lullabyDest = lullabyCtx.createMediaStreamDestination();
+      if (!gMusic) gMusic = lullabyCtx.createGain();
+      if (!gMic)   gMic   = lullabyCtx.createGain();
+      gMusic.gain.value = 0.8;
+      gMic.gain.value   = 1.0;
 
-      // Build/reuse element + graph
       if (!lullabyEl) {
         lullabyEl = new Audio();
         lullabyEl.crossOrigin = 'anonymous';
         lullabyEl.preload = 'auto';
+        lullabyEl.loop = true;                            // loop indefinitely
+        lullabyEl.addEventListener('ended', () => {       // extra safety on iOS
+          try { lullabyEl.play(); } catch {}
+        });
       }
-      lullabyEl.src = LULLABY_URL;
-      lullabyEl.loop = true;
-      lullabyEl.volume = 0.8;
-
-      if (!lullabyCtx) {
-        lullabyCtx = new (window.AudioContext || window.webkitAudioContext)();
-        try { await lullabyCtx.resume(); } catch {}
-        const src = lullabyCtx.createMediaElementSource(lullabyEl);
-        lullabyDest = lullabyCtx.createMediaStreamDestination();
-        src.connect(lullabyDest);
+      if (!musicNode) {
+        musicNode = lullabyCtx.createMediaElementSource(lullabyEl);
+        musicNode.connect(gMusic).connect(lullabyDest);
       }
-
       lullabyTrack = lullabyDest.stream.getAudioTracks()[0];
       try { lullabyTrack.contentHint = 'music'; } catch {}
+    }
 
-      // Swap the sender’s track: mic → music
+    function updateMixRouting() {
+      if (!sendingLullaby || !lullabyCtx || !lullabyDest || !gMic) return;
+      const talking = !!talkTrack?.enabled;
+      if (talking && !micConnected) {
+        try {
+          if (!micNode) micNode = new MediaStreamTrackAudioSourceNode(lullabyCtx, { mediaStreamTrack: talkTrack });
+          micNode.connect(gMic).connect(lullabyDest);
+          micConnected = true;
+          console.log('[RX] mix: mic + lullaby → sender');
+        } catch (e) { console.warn('[RX] mix connect failed:', e); }
+      } else if (!talking && micConnected) {
+        try {
+          gMic.disconnect();
+          micConnected = false;
+          console.log('[RX] mix: lullaby-only → sender');
+        } catch (e) { /* noop */ }
+      }
+    }
+
+    async function startLullaby() {
+      if (!talkSender) { console.warn('[RX] no talkSender yet'); return; }
+      await ensureLullabyGraph();
+
+      // Point the sender to the lullaby/mix track
       await talkSender.replaceTrack(lullabyTrack);
 
-      // Mute local downlink a bit to avoid feedback while playing
-      try { remoteVideo.volume = 0.2; } catch {}
-
+      // Start playback (muted locally; we only need the track)
+      lullabyEl.src = LULLABY_URL;
+      lullabyEl.volume = 0.8;
       try { await lullabyEl.play(); } catch (e) { console.warn('[RX] lullaby play blocked:', e); }
 
       sendingLullaby = true;
       lullabyBtn.textContent = 'Stop Lullaby';
-      console.log('[RX] lullaby → sender (music track)');
+      lullabyBtn.classList.add('live');       // red frame like Talking
+      try { remoteVideo.volume = 0.2; } catch {}
+
+      // If user is already Talking, mix mic into the same graph
+      updateMixRouting();
+      console.log('[RX] lullaby → sender (active)');
     }
 
     async function stopLullaby() {
       if (!sendingLullaby) return;
-      try { lullabyEl?.pause(); } catch {}
       sendingLullaby = false;
 
-      // Swap back to mic (ensure a mic track exists)
+      // Stop music and disconnect mic path from the mix graph
+      try { lullabyEl?.pause(); } catch {}
+      try { gMic && gMic.disconnect(); } catch {}
+      micConnected = false;
+
+      // Swap back to mic (enabled or not)
       await ensureTalkStream();
       if (talkSender && talkTrack) {
         try { talkTrack.contentHint = 'speech'; } catch {}
         await talkSender.replaceTrack(talkTrack);
       }
 
-      try { remoteVideo.volume = 1.0; } catch {}
       lullabyBtn.textContent = 'Lullaby';
+      lullabyBtn.classList.remove('live');
+      try { remoteVideo.volume = 1.0; } catch {}
       console.log('[RX] lullaby stopped → back to mic');
     }
 
@@ -406,7 +443,6 @@
       if (sendingLullaby) {
         await stopLullaby();
       } else {
-        // Ensure transceiver/sender exist (pc must be created)
         if (!talkSender && talkTx?.sender) talkSender = talkTx.sender;
         await startLullaby();
       }
