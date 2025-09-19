@@ -2,85 +2,130 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Naptio Alert Tone – Test Page</title>
+<title>Naptio Alert Tone – Loud Test</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
   :root { color-scheme: dark; }
   html, body { margin:0; padding:0; background:#000; color:#fff; font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
   .wrap { max-width:720px; margin:32px auto; padding:16px; }
-  h1 { margin:0 0 8px; font-size:1.25rem; }
+  h1 { margin:0 0 8px; font-size:1.2rem; }
   .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:12px 0; }
-  button, input[type="checkbox"] { cursor:pointer; }
-  button { background:#1b1b1b; color:#fff; border:1px solid #333; padding:10px 14px; border-radius:10px; }
+  button { background:#1b1b1b; color:#fff; border:1px solid #333; padding:10px 14px; border-radius:10px; cursor:pointer; }
   button:hover { background:#232323; }
-  .muted { opacity:.6 }
-  .meta { font-size:.9rem; opacity:.8; }
-  #log { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0b0b0b; border:1px solid #141414; border-radius:10px; padding:10px; height:160px; overflow:auto; }
   .pill { display:inline-block; padding:.2rem .5rem; border:1px solid #444; border-radius:999px; font-size:.8rem; }
+  #log { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0b0b0b; border:1px solid #141414; border-radius:10px; padding:10px; height:160px; overflow:auto; }
+  input[type="range"] { width:200px; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Naptio Alert Tone – Test</h1>
-  <p class="meta">Three-pip chirp (1.7→2.6&nbsp;kHz) with 250&nbsp;ms rate-limit. Use buttons below to trigger.</p>
-
+  <h1>Naptio Alert Tone – Loud Test</h1>
   <div class="row">
-    <button id="btnPlay">Play Alert</button>
-    <button id="btnBurst">Burst x10 (100&nbsp;ms)</button>
-    <label class="row"><input id="chkEnabled" type="checkbox" checked> <span>soundsEnabled</span></label>
-    <span class="pill">AudioContext: <span id="ctxState">—</span></span>
-    <span class="pill">lastPingAt: <span id="lastPingAt">—</span></span>
+    <button id="btnBeep">Test 1 kHz Beep (½ s)</button>
+    <button id="btnAlert">Play Alert (3 pips)</button>
+    <button id="btnBurst">Burst x10 (100 ms)</button>
   </div>
-
+  <div class="row">
+    <span class="pill">AudioContext: <span id="ctxState">none</span></span>
+    <span class="pill">SampleRate: <span id="sr">—</span></span>
+    <span class="pill">lastPingAt: <span id="lpa">—</span></span>
+    <label class="pill" style="border:none">Master gain
+      <input id="masterGain" type="range" min="0" max="1" step="0.01" value="0.6">
+    </label>
+  </div>
   <div id="log" aria-live="polite"></div>
 </div>
 
 <script>
-  // ---- Test harness state ----
   let soundsEnabled = true;
   let audioCtx = null;
   let lastPingAt = -Infinity;
+  let master = null; // master GainNode
 
-  const $ = (sel) => document.querySelector(sel);
-  const logEl = $("#log");
-  const ctxStateEl = $("#ctxState");
-  const lastPingEl = $("#lastPingAt");
+  const $ = s => document.querySelector(s);
+  const logEl = $("#log"), ctxStateEl = $("#ctxState"), lpaEl = $("#lpa"), srEl = $("#sr");
 
-  function log(msg) {
-    const t = new Date().toLocaleTimeString();
-    logEl.insertAdjacentHTML("afterbegin", `[${t}] ${msg}<br/>`);
-  }
+  function log(msg){ logEl.insertAdjacentHTML("afterbegin", `[${new Date().toLocaleTimeString()}] ${msg}<br/>`); }
   function tickUI() {
     ctxStateEl.textContent = audioCtx ? audioCtx.state : "none";
-    lastPingEl.textContent = Number.isFinite(lastPingAt) ? `${Math.round(lastPingAt)} ms` : "—";
+    srEl.textContent = audioCtx ? audioCtx.sampleRate : "—";
+    lpaEl.textContent = Number.isFinite(lastPingAt) ? `${Math.round(lastPingAt)} ms` : "—";
   }
 
-  // ---- Your alert function (unchanged) ----
+  function ensureCtx() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      master = audioCtx.createGain();
+      master.gain.value = parseFloat($("#masterGain").value); // adjustable loudness
+      master.connect(audioCtx.destination);
+      tickUI();
+      log("AudioContext created");
+    }
+    return audioCtx;
+  }
+
+  $("#masterGain").addEventListener("input", (e) => {
+    const v = parseFloat(e.target.value || "0.6");
+    if (master) master.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
+    log(`master gain = ${v.toFixed(2)}`);
+  });
+
+  async function unlockCtx() {
+    ensureCtx();
+    if (audioCtx.state === "suspended") {
+      try { await audioCtx.resume(); } catch {}
+    }
+    tickUI();
+    return audioCtx.state === "running";
+  }
+
+  // --- Sanity beep: 1 kHz, triangle, 0.5 s ---
+  async function testBeep() {
+    const ok = await unlockCtx();
+    if (!ok) { log("AudioContext not running"); return; }
+    const t0 = audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = "triangle";
+    o.frequency.setValueAtTime(1000, t0);
+
+    // Loud, but shaped
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.5, t0 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+
+    o.connect(g).connect(master);
+    o.start(t0);
+    o.stop(t0 + 0.52);
+    log("Played sanity beep (1 kHz, 0.5 s, triangle)");
+  }
+
+  // --- Your alert, but brighter + louder by default ---
   async function playAlert() {
     if (!soundsEnabled) { log("blocked: soundsEnabled=false"); return; }
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch(e) {} }
-    if (audioCtx.state !== 'running') { log("blocked: AudioContext not running"); tickUI(); return; }
+    const ok = await unlockCtx();
+    if (!ok) { log("blocked: AudioContext not running"); return; }
 
     const now = performance.now();
     if (now - lastPingAt < 250) { log(`rate-limited (${Math.round(now - lastPingAt)} ms since last)`); return; }
     lastPingAt = now;
 
     const t0 = audioCtx.currentTime;
-    const pip = (start, dur = 0.12) => {
-      // Chirp 1.7 kHz -> 2.6 kHz
+    const pip = (start, dur = 0.14) => {
       const o = audioCtx.createOscillator();
       const g = audioCtx.createGain();
-      o.type = 'sine';
+      // Brighter waveform helps audibility on laptop speakers
+      o.type = "triangle";
+      // Chirp 1.7 kHz -> 2.6 kHz
       o.frequency.setValueAtTime(1700, start);
       o.frequency.exponentialRampToValueAtTime(2600, start + dur);
 
-      // Envelope: very fast attack, quick decay
+      // Stronger envelope
       g.gain.setValueAtTime(0.0001, start);
-      g.gain.exponentialRampToValueAtTime(0.09, start + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.45, start + 0.012);
       g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
 
-      o.connect(g).connect(audioCtx.destination);
+      o.connect(g).connect(master);
       o.start(start);
       o.stop(start + dur + 0.02);
     };
@@ -90,34 +135,15 @@
     pip(t0 + 0.18);
     pip(t0 + 0.36);
 
-    log("played: 3-pip chirp");
+    log("played: 3-pip chirp (triangle, louder)");
     tickUI();
   }
 
-  // ---- UI wiring ----
-  $("#btnPlay").addEventListener("click", async () => {
-    // First interaction often needed to unlock audio on iOS
-    await playAlert();
+  $("#btnBeep").addEventListener("click", testBeep);
+  $("#btnAlert").addEventListener("click", playAlert);
+  $("#btnBurst").addEventListener("click", () => {
+    for (let i = 0; i < 10; i++) setTimeout(playAlert, i * 100);
   });
-
-  $("#btnBurst").addEventListener("click", async () => {
-    // Fire 10 attempts 100ms apart to demonstrate the 250ms rate-limit
-    for (let i = 0; i < 10; i++) {
-      setTimeout(playAlert, i * 100);
-    }
-  });
-
-  $("#chkEnabled").addEventListener("change", (e) => {
-    soundsEnabled = e.target.checked;
-    $("#btnPlay").classList.toggle("muted", !soundsEnabled);
-    $("#btnBurst").classList.toggle("muted", !soundsEnabled);
-    log(`soundsEnabled=${soundsEnabled}`);
-  });
-
-  // Keep context state label fresh
-  setInterval(() => {
-    if (audioCtx) ctxStateEl.textContent = audioCtx.state;
-  }, 300);
 
   tickUI();
 </script>
