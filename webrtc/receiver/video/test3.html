@@ -100,6 +100,8 @@
     <button id="fsBtn" class="btn" type="button">Fullscreen</button>
     <!-- ⬇️ Hybrid Talk button (short press = toggle, long press = hold) -->
     <button id="talkBtn" class="btn" type="button" aria-pressed="false" title="Short press = toggle • Long press = hold">Talk</button>
+    <!-- ⬇️ New: Lullaby button -->
+    <button id="lullabyBtn" class="btn" type="button" title="Play lullaby to baby (sender)">Lullaby</button>
   </div>
 
   <div id="stage">
@@ -128,6 +130,7 @@
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
     const talkBtn = document.getElementById('talkBtn');
+    const lullabyBtn = document.getElementById('lullabyBtn');
 
     /* ---------- Status overlay ---------- */
     let hideStatusTimer = null;
@@ -336,11 +339,85 @@
       if (e.code === 'Space' || e.code === 'Enter') handlePressEnd(e);
     });
 
+    // --------- Lullaby over the same sendonly transceiver (swap mic → music) ---------
+    const LULLABY_URL = '/lullaby/lullaby1.mp3';
+    let lullabyEl = null;
+    let lullabyCtx = null;
+    let lullabyDest = null;
+    let lullabyTrack = null;
+    let sendingLullaby = false;
+
+    async function startLullaby() {
+      if (!talkSender) { console.warn('[RX] no talkSender yet'); return; }
+
+      // Build/reuse element + graph
+      if (!lullabyEl) {
+        lullabyEl = new Audio();
+        lullabyEl.crossOrigin = 'anonymous';
+        lullabyEl.preload = 'auto';
+      }
+      lullabyEl.src = LULLABY_URL;
+      lullabyEl.loop = true;
+      lullabyEl.volume = 0.8;
+
+      if (!lullabyCtx) {
+        lullabyCtx = new (window.AudioContext || window.webkitAudioContext)();
+        try { await lullabyCtx.resume(); } catch {}
+        const src = lullabyCtx.createMediaElementSource(lullabyEl);
+        lullabyDest = lullabyCtx.createMediaStreamDestination();
+        src.connect(lullabyDest);
+      }
+
+      lullabyTrack = lullabyDest.stream.getAudioTracks()[0];
+      try { lullabyTrack.contentHint = 'music'; } catch {}
+
+      // Swap the sender’s track: mic → music
+      await talkSender.replaceTrack(lullabyTrack);
+
+      // Mute local downlink a bit to avoid feedback while playing
+      try { remoteVideo.volume = 0.2; } catch {}
+
+      try { await lullabyEl.play(); } catch (e) { console.warn('[RX] lullaby play blocked:', e); }
+
+      sendingLullaby = true;
+      lullabyBtn.textContent = 'Stop Lullaby';
+      console.log('[RX] lullaby → sender (music track)');
+    }
+
+    async function stopLullaby() {
+      if (!sendingLullaby) return;
+      try { lullabyEl?.pause(); } catch {}
+      sendingLullaby = false;
+
+      // Swap back to mic (ensure a mic track exists)
+      await ensureTalkStream();
+      if (talkSender && talkTrack) {
+        try { talkTrack.contentHint = 'speech'; } catch {}
+        await talkSender.replaceTrack(talkTrack);
+      }
+
+      try { remoteVideo.volume = 1.0; } catch {}
+      lullabyBtn.textContent = 'Lullaby';
+      console.log('[RX] lullaby stopped → back to mic');
+    }
+
+    lullabyBtn.addEventListener('click', async (e) => {
+      e?.preventDefault?.();
+      if (sendingLullaby) {
+        await stopLullaby();
+      } else {
+        // Ensure transceiver/sender exist (pc must be created)
+        if (!talkSender && talkTx?.sender) talkSender = talkTx.sender;
+        await startLullaby();
+      }
+    });
+
     // Cleanup on unload
     window.addEventListener('beforeunload', () => {
       try { setTalking(false); } catch {}
       try { talkSender && pcRef && pcRef.removeTrack(talkSender); } catch {}
       try { talkStream && talkStream.getTracks().forEach(t => t.stop()); } catch {}
+      try { lullabyEl && lullabyEl.pause(); } catch {}
     });
 
     /* ---------- Shared core ---------- */
