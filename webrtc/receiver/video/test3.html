@@ -39,7 +39,7 @@
     }
     .btn:active { transform: scale(0.99); }
 
-    /* Talk/Lullaby active states */
+    /* Talk/Lullaby active states (red frame) */
     .btn.live {
       border-color: #ff5252;
       box-shadow: 0 0 0 2px rgba(255,82,82,0.2), 0 0 12px rgba(255,82,82,0.35);
@@ -229,13 +229,13 @@
         video: false
       });
       talkTrack = talkStream.getAudioTracks()[0];
-    
+
       const mic = talkTrack;
       console.log('[RX] mic track:', { id: mic.id, enabled: mic.enabled, readyState: mic.readyState });
       mic.addEventListener('mute',   () => console.log('[RX] mic muted'));
       mic.addEventListener('unmute', () => console.log('[RX] mic unmuted'));
       mic.addEventListener('ended',  () => console.log('[RX] mic ended'));
-    
+
       try { talkTrack.contentHint = 'speech'; } catch {}
       talkTrack.enabled = false; // we toggle this; attach once
     }
@@ -334,7 +334,7 @@
     });
 
     // --------- Lullabies (shuffle playlist, mix with mic when Talking) ---------
-    const LULLABY_DIR = '/lullaby/';
+    const LULLABY_DIR = '/lullaby/';   // ✅ correct base path as per your structure
     let lullabyEl = null;
     let lullabyCtx = null;
     let lullabyDest = null;
@@ -346,7 +346,7 @@
     let micConnected = false;
     let sendingLullaby = false;
 
-    let lullabyList = [];   // full set of discovered tracks (absolute URLs)
+    let lullabyList = [];   // absolute URLs
     let playlist = [];      // current shuffled order
     let trackIdx = 0;
 
@@ -359,48 +359,55 @@
       return a;
     }
 
+    async function urlExists(url) {
+      try {
+        const h = await fetch(url, { method: 'HEAD', cache: 'no-cache' });
+        if (h.ok) return true;
+      } catch {}
+      // Fallback for hosts without HEAD: tiny range GET
+      try {
+        const g = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' }, cache: 'no-cache' });
+        return g.ok;
+      } catch {
+        return false;
+      }
+    }
+
     async function discoverLullabies() {
       if (lullabyList.length) return lullabyList;
-      // 1) Try playlist.json or manifest.json
-      const tryFiles = ['playlist.json', 'manifest.json'];
-      for (const f of tryFiles) {
-        try {
-          const res = await fetch(LULLABY_DIR + f, { cache: 'no-cache' });
-          if (res.ok) {
-            const data = await res.json();
-            const items = (Array.isArray(data) ? data : (Array.isArray(data.tracks) ? data.tracks : []))
-              .map(x => ('' + x).trim())
-              .filter(x => x.toLowerCase().endsWith('.mp3'))
-              .map(x => x.startsWith('http') ? x : (LULLABY_DIR + x.replace(/^\/+/, '')));
-            if (items.length) { lullabyList = items; break; }
+
+      // (A) Optional manifest: /lullaby/playlist.json (array) or {tracks:[...]}
+      try {
+        const res = await fetch(LULLABY_DIR + 'playlist.json', { cache: 'no-cache' });
+        if (res.ok) {
+          const data = await res.json();
+          const items = (Array.isArray(data) ? data : (Array.isArray(data.tracks) ? data.tracks : []))
+            .map(x => ('' + x).trim())
+            .filter(x => x.toLowerCase().endsWith('.mp3'))
+            .map(x => x.startsWith('http') ? x : (LULLABY_DIR + x.replace(/^\/+/, '')));
+          if (items.length) {
+            lullabyList = items;
+            console.log('[RX] discovered (playlist.json):', lullabyList);
+            return lullabyList;
           }
-        } catch {}
+        }
+      } catch {}
+
+      // (B) Probe numbered files: lullaby1.mp3 … lullabyN.mp3
+      const MAX_PROBE = 30; // adjust if you may add more tracks
+      const found = [];
+      for (let i = 1; i <= MAX_PROBE; i++) {
+        const url = `${LULLABY_DIR}lullaby${i}.mp3`;
+        if (await urlExists(url)) found.push(url);
       }
-      // 2) Try directory listing (if server exposes it)
-      if (!lullabyList.length) {
-        try {
-          const res = await fetch(LULLABY_DIR, { cache: 'no-cache' });
-          if (res.ok) {
-            const html = await res.text();
-            const re = /href="([^"]+\.mp3)"/gi;
-            const found = new Set();
-            let m;
-            while ((m = re.exec(html))) {
-              let href = m[1];
-              if (!href) continue;
-              if (!/^https?:\/\//i.test(href)) {
-                href = (href.startsWith('/')) ? href : (LULLABY_DIR + href);
-              }
-              found.add(href);
-            }
-            if (found.size) lullabyList = Array.from(found);
-          }
-        } catch {}
+      if (found.length) {
+        lullabyList = found;
+      } else {
+        // (C) Final fallback
+        lullabyList = [`${LULLABY_DIR}lullaby1.mp3`];
       }
-      // 3) Fallback to known naming if nothing found
-      if (!lullabyList.length) {
-        lullabyList = [LULLABY_DIR + 'lullaby1.mp3'];
-      }
+
+      console.log('[RX] discovered (probed):', lullabyList);
       return lullabyList;
     }
 
@@ -419,10 +426,8 @@
         lullabyEl = new Audio();
         lullabyEl.crossOrigin = 'anonymous';
         lullabyEl.preload = 'auto';
-        lullabyEl.loop = false;  // we handle looping/shuffle ourselves
-        lullabyEl.addEventListener('ended', () => {
-          nextTrack();
-        });
+        lullabyEl.loop = false;  // we handle looping/shuffle
+        lullabyEl.addEventListener('ended', () => { nextTrack(); });
       }
       if (!musicNode) {
         musicNode = lullabyCtx.createMediaElementSource(lullabyEl);
@@ -430,25 +435,6 @@
       }
       lullabyTrack = lullabyDest.stream.getAudioTracks()[0];
       try { lullabyTrack.contentHint = 'music'; } catch {}
-    }
-
-    function updateMixRouting() {
-      if (!sendingLullaby || !lullabyCtx || !lullabyDest || !gMic) return;
-      const talking = !!talkTrack?.enabled;
-      if (talking && !micConnected) {
-        try {
-          if (!micNode) micNode = new MediaStreamTrackAudioSourceNode(lullabyCtx, { mediaStreamTrack: talkTrack });
-          micNode.connect(gMic).connect(lullabyDest);
-          micConnected = true;
-          console.log('[RX] mix: mic + lullaby → sender');
-        } catch (e) { console.warn('[RX] mix connect failed:', e); }
-      } else if (!talking && micConnected) {
-        try {
-          gMic.disconnect();
-          micConnected = false;
-          console.log('[RX] mix: lullaby-only → sender');
-        } catch (e) { /* noop */ }
-      }
     }
 
     function reshufflePlaylist() {
@@ -461,7 +447,7 @@
       if (!playlist.length) return;
       trackIdx = ((i % playlist.length) + playlist.length) % playlist.length;
       const url = playlist[trackIdx];
-      lullabyEl.src = url;
+      lullabyEl.src = url;           // absolute path under /lullaby/
       try { await lullabyEl.play(); }
       catch (e) { console.warn('[RX] lullaby play blocked:', e); }
       console.log('[RX] playing lullaby:', url);
@@ -471,10 +457,37 @@
       if (!playlist.length) return;
       let next = trackIdx + 1;
       if (next >= playlist.length) {
-        reshufflePlaylist();  // when finishing a cycle, reshuffle and start over
+        reshufflePlaylist();  // reached end — shuffle a fresh cycle
         next = 0;
       }
       await playTrackAt(next);
+    }
+
+    function updateMixRouting() {
+      if (!sendingLullaby || !lullabyCtx || !lullabyDest || !gMic) return;
+      const talking = !!talkTrack?.enabled;
+      if (talking && !micConnected) {
+        try {
+          if (!micNode) micNode = new MediaStreamTrackAudioSourceNode(lullabyCtx, { mediaStreamTrack: talkTrack });
+        } catch {
+          // Fallback if constructor throws
+          try {
+            const tmp = new MediaStream([talkTrack]);
+            micNode = lullabyCtx.createMediaStreamSource(tmp);
+          } catch (e2) { console.warn('[RX] mic node create failed:', e2); }
+        }
+        try {
+          micNode && micNode.connect(gMic).connect(lullabyDest);
+          micConnected = true;
+          console.log('[RX] mix: mic + lullaby → sender');
+        } catch (e) { console.warn('[RX] mix connect failed:', e); }
+      } else if (!talking && micConnected) {
+        try {
+          gMic.disconnect();
+          micConnected = false;
+          console.log('[RX] mix: lullaby-only → sender');
+        } catch (e) { /* noop */ }
+      }
     }
 
     async function startLullaby() {
