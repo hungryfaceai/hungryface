@@ -206,6 +206,7 @@
     let talkStream = null;               // local mic stream
     let talkTrack = null;                // audio track from talkStream
     let talkSender = null;               // RTCRtpSender
+    let talkTx = null;                   // ⬅️ preallocated sendonly transceiver
 
     // UI state
     let latched = false;                 // toggle mode ON/OFF
@@ -237,11 +238,17 @@
       talkTrack.enabled = false; // we toggle this; attach once
     }
 
-
     function tryAttachOnce() {
-      if (!pcRef || !talkTrack || talkSender) return;
-      talkSender = pcRef.addTrack(talkTrack, talkStream);
-      console.log('[Receiver] talkback track attached to PC');
+      if (!talkTrack || !talkTx) return;
+      const sender = talkTx.sender || talkSender;
+      if (!sender) return;
+      if (sender.track === talkTrack) return;
+      sender.replaceTrack(talkTrack)
+        .then(() => {
+          talkSender = sender;
+          console.log('[Receiver] talkback track bound to preallocated sender');
+        })
+        .catch(err => console.warn('[Receiver] replaceTrack failed:', err));
     }
 
     async function prepareIfNeeded() {
@@ -350,6 +357,15 @@
       onCreatePC: (pc) => {
         // Save PC for talkback and attach if mic already prepared
         pcRef = pc;
+
+        // ⬇️ Pre-allocate a sendonly audio transceiver so talkback doesn't need renegotiation
+        try {
+          talkTx = pc.addTransceiver('audio', { direction: 'sendonly' });
+          talkSender = talkTx.sender;
+        } catch (e) {
+          console.warn('[Receiver] addTransceiver failed:', e);
+        }
+
         tryAttachOnce();
 
         // keep SDP shape consistent with other pages: create a 'pose' DC but ignore messages here
