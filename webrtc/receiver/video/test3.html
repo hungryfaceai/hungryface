@@ -39,7 +39,7 @@
     }
     .btn:active { transform: scale(0.99); }
 
-    /* Talk button states */
+    /* Talk/Lullaby active states */
     .btn.live {
       border-color: #ff5252;
       box-shadow: 0 0 0 2px rgba(255,82,82,0.2), 0 0 12px rgba(255,82,82,0.35);
@@ -101,7 +101,7 @@
     <!-- ⬇️ Hybrid Talk button (short press = toggle, long press = hold) -->
     <button id="talkBtn" class="btn" type="button" aria-pressed="false" title="Short press = toggle • Long press = hold">Talk</button>
     <!-- ⬇️ Lullaby button -->
-    <button id="lullabyBtn" class="btn" type="button" title="Play lullaby to baby (sender)">Lullaby</button>
+    <button id="lullabyBtn" class="btn" type="button" title="Play lullabies to baby (sender)">Lullaby</button>
   </div>
 
   <div id="stage">
@@ -264,8 +264,7 @@
       talkTrack.enabled = !!on;
       console.log('[RX] mic.enabled now =', talkTrack.enabled);
       try { remoteVideo.volume = on ? 0.25 : 1.0; } catch {}
-      // If lullaby is active, (dis)connect mic into the mix graph
-      updateMixRouting();
+      updateMixRouting();  // if lullaby active, (dis)connect mic into mix
       updateTalkUI();
     }
 
@@ -334,8 +333,8 @@
       if (e.code === 'Space' || e.code === 'Enter') handlePressEnd(e);
     });
 
-    // --------- Lullaby over the same sendonly transceiver (swap mic → music, mix if Talking) ---------
-    const LULLABY_URL = '/lullaby/lullaby1.mp3';
+    // --------- Lullabies (shuffle playlist, mix with mic when Talking) ---------
+    const LULLABY_DIR = '/assets/lullaby/';
     let lullabyEl = null;
     let lullabyCtx = null;
     let lullabyDest = null;
@@ -346,6 +345,64 @@
     let gMic = null;
     let micConnected = false;
     let sendingLullaby = false;
+
+    let lullabyList = [];   // full set of discovered tracks (absolute URLs)
+    let playlist = [];      // current shuffled order
+    let trackIdx = 0;
+
+    function shuffle(arr) {
+      const a = arr.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    async function discoverLullabies() {
+      if (lullabyList.length) return lullabyList;
+      // 1) Try playlist.json or manifest.json
+      const tryFiles = ['playlist.json', 'manifest.json'];
+      for (const f of tryFiles) {
+        try {
+          const res = await fetch(LULLABY_DIR + f, { cache: 'no-cache' });
+          if (res.ok) {
+            const data = await res.json();
+            const items = (Array.isArray(data) ? data : (Array.isArray(data.tracks) ? data.tracks : []))
+              .map(x => ('' + x).trim())
+              .filter(x => x.toLowerCase().endsWith('.mp3'))
+              .map(x => x.startsWith('http') ? x : (LULLABY_DIR + x.replace(/^\/+/, '')));
+            if (items.length) { lullabyList = items; break; }
+          }
+        } catch {}
+      }
+      // 2) Try directory listing (if server exposes it)
+      if (!lullabyList.length) {
+        try {
+          const res = await fetch(LULLABY_DIR, { cache: 'no-cache' });
+          if (res.ok) {
+            const html = await res.text();
+            const re = /href="([^"]+\.mp3)"/gi;
+            const found = new Set();
+            let m;
+            while ((m = re.exec(html))) {
+              let href = m[1];
+              if (!href) continue;
+              if (!/^https?:\/\//i.test(href)) {
+                href = (href.startsWith('/')) ? href : (LULLABY_DIR + href);
+              }
+              found.add(href);
+            }
+            if (found.size) lullabyList = Array.from(found);
+          }
+        } catch {}
+      }
+      // 3) Fallback to known naming if nothing found
+      if (!lullabyList.length) {
+        lullabyList = [LULLABY_DIR + 'lullaby1.mp3'];
+      }
+      return lullabyList;
+    }
 
     async function ensureLullabyGraph() {
       if (!lullabyCtx) {
@@ -362,9 +419,9 @@
         lullabyEl = new Audio();
         lullabyEl.crossOrigin = 'anonymous';
         lullabyEl.preload = 'auto';
-        lullabyEl.loop = true;                            // loop indefinitely
-        lullabyEl.addEventListener('ended', () => {       // extra safety on iOS
-          try { lullabyEl.play(); } catch {}
+        lullabyEl.loop = false;  // we handle looping/shuffle ourselves
+        lullabyEl.addEventListener('ended', () => {
+          nextTrack();
         });
       }
       if (!musicNode) {
@@ -394,17 +451,46 @@
       }
     }
 
+    function reshufflePlaylist() {
+      playlist = shuffle(lullabyList);
+      trackIdx = 0;
+      console.log('[RX] reshuffled lullabies:', playlist);
+    }
+
+    async function playTrackAt(i) {
+      if (!playlist.length) return;
+      trackIdx = ((i % playlist.length) + playlist.length) % playlist.length;
+      const url = playlist[trackIdx];
+      lullabyEl.src = url;
+      try { await lullabyEl.play(); }
+      catch (e) { console.warn('[RX] lullaby play blocked:', e); }
+      console.log('[RX] playing lullaby:', url);
+    }
+
+    async function nextTrack() {
+      if (!playlist.length) return;
+      let next = trackIdx + 1;
+      if (next >= playlist.length) {
+        reshufflePlaylist();  // when finishing a cycle, reshuffle and start over
+        next = 0;
+      }
+      await playTrackAt(next);
+    }
+
     async function startLullaby() {
       if (!talkSender) { console.warn('[RX] no talkSender yet'); return; }
       await ensureLullabyGraph();
 
+      // Discover tracks and build a shuffled playlist
+      await discoverLullabies();
+      if (!lullabyList.length) return;
+      reshufflePlaylist();
+
       // Point the sender to the lullaby/mix track
       await talkSender.replaceTrack(lullabyTrack);
 
-      // Start playback (muted locally; we only need the track)
-      lullabyEl.src = LULLABY_URL;
-      lullabyEl.volume = 0.8;
-      try { await lullabyEl.play(); } catch (e) { console.warn('[RX] lullaby play blocked:', e); }
+      // Start playback of the first (shuffled) track
+      await playTrackAt(0);
 
       sendingLullaby = true;
       lullabyBtn.textContent = 'Stop Lullaby';
@@ -413,14 +499,14 @@
 
       // If user is already Talking, mix mic into the same graph
       updateMixRouting();
-      console.log('[RX] lullaby → sender (active)');
+      console.log('[RX] lullabies → sender (shuffle loop active)');
     }
 
     async function stopLullaby() {
       if (!sendingLullaby) return;
       sendingLullaby = false;
 
-      // Stop music and disconnect mic path from the mix graph
+      // Stop playback and disconnect mic path
       try { lullabyEl?.pause(); } catch {}
       try { gMic && gMic.disconnect(); } catch {}
       micConnected = false;
