@@ -173,8 +173,8 @@ async function playPing() {
     const o = audioCtx.createOscillator();
     const g = audioCtx.createGain();
     o.type = 'sine';
-    o.frequency.setValueAtTime(700, start);  //was 1700
-    o.frequency.exponentialRampToValueAtTime(2600, start + dur); //was 2600
+    o.frequency.setValueAtTime(1700, start); 
+    o.frequency.exponentialRampToValueAtTime(2600, start + dur);
 
     // Envelope: very fast attack, quick decay
     g.gain.setValueAtTime(0.0001, start);
