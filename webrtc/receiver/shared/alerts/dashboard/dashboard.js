@@ -48,6 +48,7 @@ const els = {
 // Cross-tab updates
 const bc = ('BroadcastChannel' in window) ? new BroadcastChannel('alerts-bc') : null;
 bc && (bc.onmessage = async (ev) => {
+  console.log('[BC] at', new Date().toISOString(), ev?.data);
   if (ev?.data?.type === 'changed') {
     const prev = state.rowsAll;
     const fresh = await getAllAlerts();
@@ -62,6 +63,7 @@ bc && (bc.onmessage = async (ev) => {
 
 // Keep in sync with store updates (same-tab writes)
 document.addEventListener('alerts:changed', async (ev) => {
+  console.log('[evt] alerts:changed at', new Date().toISOString(), ev?.detail);
   const prev = state.rowsAll;
   const fresh = await getAllAlerts();
   state.rowsAll = fresh;
@@ -259,7 +261,7 @@ async function fetchIfChanged() {
     const changed = fresh.length !== prev.length ||
                     fresh[0]?.id !== prev[0]?.id ||
                     fresh[0]?.startAt !== prev[0]?.startAt;
-
+    console.log('[poll] +', Math.round(performance.now()-t0),'ms; changed:', changed);
     if (changed) {
       state.rowsAll = fresh;
       renderAll();
