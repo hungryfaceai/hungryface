@@ -147,7 +147,7 @@ async function playPing() {
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
   o.type = 'sine';
-  o.frequency.value = 2400;
+  o.frequency.value = 880;
   g.gain.value = 0.0001;
   o.connect(g).connect(audioCtx.destination);
 
