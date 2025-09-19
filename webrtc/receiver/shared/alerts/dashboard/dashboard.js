@@ -141,32 +141,21 @@ async function playPing() {
   if (audioCtx.state !== 'running') return;
 
   const now = performance.now();
-  if (now - lastPingAt < 250) return;      // rate-limit
+  if (now - lastPingAt < 250) return;
   lastPingAt = now;
 
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = 'sine';
+  o.frequency.value = 2400;
+  g.gain.value = 0.0001;
+  o.connect(g).connect(audioCtx.destination);
+
   const t0 = audioCtx.currentTime;
-  const pip = (start, dur = 0.12) => {
-    // Chirp 1.7 kHz -> 2.6 kHz
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(1700, start);
-    o.frequency.exponentialRampToValueAtTime(2600, start + dur);
-
-    // Envelope: very fast attack, quick decay
-    g.gain.setValueAtTime(0.0001, start);
-    g.gain.exponentialRampToValueAtTime(0.09, start + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
-
-    o.connect(g).connect(audioCtx.destination);
-    o.start(start);
-    o.stop(start + dur + 0.02);
-  };
-
-  // 3 pips: t0, t0+0.18s, t0+0.36s
-  pip(t0);
-  pip(t0 + 0.18);
-  pip(t0 + 0.36);
+  o.start(t0);
+  g.gain.exponentialRampToValueAtTime(0.08, t0 + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+  o.stop(t0 + 0.14);
 }
 
 function hasNewSince(fresh, prev) {
