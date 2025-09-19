@@ -231,8 +231,6 @@ function stopRolling() {
   if (rollTimer) { clearInterval(rollTimer); rollTimer = null; }
 }
 
-let pollTimer = null;
-
 function startPolling() {
   stopPolling();
   pollTimer = setInterval(fetchIfChanged, 10_000);
