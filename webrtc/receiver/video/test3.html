@@ -281,6 +281,13 @@
       }
     }
 
+    // ---- Mutual exclusivity helpers (Talk vs Lullaby) ----
+    async function ensureLullabyStoppedIfNeeded() {
+      if (sendingLullaby) {
+        await stopLullaby();
+      }
+    }
+
     async function handlePressStart(e) {
       e.preventDefault();
       pressed = true;
@@ -288,6 +295,7 @@
       pressTimer = setTimeout(async () => {
         if (!pressed) return;
         // Long press → PTT session
+        await ensureLullabyStoppedIfNeeded();   // ⬅️ stop lullaby before talking
         pttSession = true;
         await prepareIfNeeded();
         setTalking(true);
@@ -304,7 +312,11 @@
         clearTimeout(pressTimer);
         latched = !latched;
         if (latched) {
-          prepareIfNeeded().then(() => setTalking(true)).catch(console.warn);
+          (async () => {
+            await ensureLullabyStoppedIfNeeded();   // ⬅️ stop lullaby before talking
+            await prepareIfNeeded();
+            setTalking(true);
+          })().catch(console.warn);
         } else {
           setTalking(false);
         }
@@ -455,6 +467,11 @@
     }
 
     async function startLullaby() {
+      // ⬅️ If talking, stop it first (mutual exclusivity)
+      if (pttSession || latched || talkTrack?.enabled) {
+        latched = false; pttSession = false; setTalking(false);
+      }
+
       if (!talkSender) { console.warn('[RX] no talkSender yet'); return; }
       await ensureLullabyGraph();
 
@@ -472,6 +489,7 @@
       lullabyBtn.textContent = 'Stop Lullaby';
       lullabyBtn.classList.add('live'); // red frame like Talking
       try { remoteVideo.volume = 0.2; } catch {}
+      updateTalkUI(); // reflect that we're not talking now
       console.log('[RX] lullabies → sender (shuffle loop active)');
     }
 
@@ -482,7 +500,7 @@
       // Stop music
       try { lullabyEl?.pause(); } catch {}
 
-      // Swap back to mic
+      // Swap back to mic (not auto-enabling; user must press Talk)
       await ensureTalkStream();
       if (talkSender && talkTrack) {
         try { talkTrack.contentHint = 'speech'; } catch {}
@@ -500,6 +518,10 @@
       if (sendingLullaby) {
         await stopLullaby();
       } else {
+        // ⬅️ Stop talking if active, then play lullaby
+        if (pttSession || latched || talkTrack?.enabled) {
+          latched = false; pttSession = false; setTalking(false);
+        }
         if (!talkSender && talkTx?.sender) talkSender = talkTx.sender;
         await startLullaby();
       }
