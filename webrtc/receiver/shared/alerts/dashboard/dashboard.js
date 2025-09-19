@@ -49,19 +49,35 @@ const els = {
 const bc = ('BroadcastChannel' in window) ? new BroadcastChannel('alerts-bc') : null;
 bc && (bc.onmessage = async (ev) => {
   if (ev?.data?.type === 'changed') {
+    // Refresh rows
     state.rowsAll = await getAllAlerts();
     renderAll();
+
+    // Audio ping only for new alert additions, only if this tab is visible
+    if (document.visibilityState === 'visible' && ev.data.action === 'add') {
+      playPing();
+    }
   }
 });
 
-if (!bc) {
+// Keep in sync with store updates (same-tab writes)
+document.addEventListener('alerts:changed', async (ev) => {
+  state.rowsAll = await getAllAlerts();
+  renderAll();
+  if (document.visibilityState === 'visible' && ev?.detail?.action === 'add') {
+    playPing();
+  }
+});
+
+
+/*if (!bc) {
   setInterval(async () => {
     state.rowsAll = await getAllAlerts();
     renderAll();
   }, 60_000);
-}
+}*/
 
-setInterval(async () => {
+/*setInterval(async () => {
   try {
     const fresh = await getAllAlerts();
     // Only re-render if there’s an actual change to avoid extra work.
@@ -74,13 +90,14 @@ setInterval(async () => {
   } catch (e) {
     // ignore
   }
-}, 10_000);
+}, 10_000);*/
 
 // Refresh when the tab becomes visible again
 document.addEventListener('visibilitychange', async () => {
   if (document.hidden) {
     stopRolling();
     stopPaintTick();
+    stopPolling();
     return;
   }
   // Became visible
@@ -89,6 +106,7 @@ document.addEventListener('visibilitychange', async () => {
     startRolling();
     startPaintTick();
   }
+  startPolling();
   renderAll();
 });
 
@@ -99,6 +117,59 @@ for (const ch of els.chips) {
   ch.classList.toggle('active', on);
   ch.setAttribute('aria-pressed', on ? 'true' : 'false');
 }
+
+// ------- Audio ping (no asset needed) -------
+let audioCtx = null;
+let soundsEnabled = (localStorage.getItem('alerts_sounds_enabled') || '0') === '1';
+let lastPingAt = 0;
+
+function unlockAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  // Some browsers keep it suspended until first resume after a gesture
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
+}
+
+function playPing() {
+  if (!soundsEnabled) return;
+  if (!audioCtx) return;
+  // rate-limit to avoid machine-gun pings if many alerts land together
+  const now = performance.now();
+  if (now - lastPingAt < 250) return;
+  lastPingAt = now;
+
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = 'sine';
+  o.frequency.value = 880;        // A5
+  g.gain.value = 0.0001;          // start very quiet to avoid click
+  o.connect(g).connect(audioCtx.destination);
+
+  const t0 = audioCtx.currentTime;
+  o.start(t0);
+  // quick attack/decay envelope (~120 ms)
+  g.gain.exponentialRampToValueAtTime(0.08, t0 + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+  o.stop(t0 + 0.14);
+}
+
+// UI toggle wiring
+const btnSound = document.getElementById('toggleSound');
+function refreshSoundBtn() {
+  if (!btnSound) return;
+  btnSound.textContent = soundsEnabled ? '🔔 Sounds: On' : '🔕 Sounds: Off';
+}
+btnSound?.addEventListener('click', () => {
+  unlockAudio();
+  soundsEnabled = !soundsEnabled;
+  localStorage.setItem('alerts_sounds_enabled', soundsEnabled ? '1' : '0');
+  refreshSoundBtn();
+});
+refreshSoundBtn();
+
+// “unlock” audio context on any first user gesture
+['click','touchstart','keydown'].forEach(ev =>
+  window.addEventListener(ev, unlockAudio, { once:true, passive:true })
+);
 
 // ------- Utils -------
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
@@ -126,6 +197,7 @@ function download(name, type, text) {
 
 let rollTimer = null;
 let paintTimer = null;
+let pollTimer = null;
 
 function startPaintTick() {
   stopPaintTick();
@@ -157,6 +229,29 @@ function startRolling() {
 
 function stopRolling() {
   if (rollTimer) { clearInterval(rollTimer); rollTimer = null; }
+}
+
+let pollTimer = null;
+
+function startPolling() {
+  stopPolling();
+  pollTimer = setInterval(fetchIfChanged, 10_000);
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+async function fetchIfChanged() {
+  try {
+    const fresh = await getAllAlerts();
+    if (fresh.length !== state.rowsAll.length ||
+        fresh[0]?.id !== state.rowsAll[0]?.id ||
+        fresh[0]?.startAt !== state.rowsAll[0]?.startAt) {
+      state.rowsAll = fresh;
+      renderAll();
+    }
+  } catch {}
 }
 
 // ------- Time window helpers -------
@@ -433,7 +528,8 @@ function pickBin(spanMs){
     sel.setAttribute('width', w);
     sel.setAttribute('height', plotBox.height);
   };
-  const onUp = () => {
+  const onUp = (e) => {
+    overlay.releasePointerCapture?.(e.pointerId);
     if (!state.brushing) return;
     state.brushing = false;
     sel.style.display = 'none';
@@ -454,7 +550,7 @@ function pickBin(spanMs){
   svg.addEventListener('dblclick', () => { setRollingWindow(state.windowHours); renderAll(); });
 }*/
 
-function addBrushOverlay(svg, plotBox, startMs, endMs){
+/*function addBrushOverlay(svg, plotBox, startMs, endMs){
   const overlay = document.createElementNS('http://www.w3.org/2000/svg','rect');
   overlay.setAttribute('x', plotBox.x);
   overlay.setAttribute('y', plotBox.y);
@@ -532,6 +628,83 @@ function addBrushOverlay(svg, plotBox, startMs, endMs){
     }
     lastTap = now;
   }, { passive:true });
+}*/
+
+  function addBrushOverlay(svg, plotBox, startMs, endMs){
+  const overlay = document.createElementNS('http://www.w3.org/2000/svg','rect');
+  overlay.setAttribute('x', plotBox.x);
+  overlay.setAttribute('y', plotBox.y);
+  overlay.setAttribute('width',  plotBox.width);
+  overlay.setAttribute('height', plotBox.height);
+  overlay.setAttribute('fill','transparent');
+  overlay.style.cursor = 'crosshair';
+  overlay.style.touchAction = 'none'; // iOS: disable default gestures
+  svg.appendChild(overlay);
+
+  const sel = document.createElementNS('http://www.w3.org/2000/svg','rect');
+  sel.setAttribute('fill','rgba(255,255,255,0.12)');
+  sel.setAttribute('stroke','rgba(255,255,255,0.35)');
+  sel.setAttribute('stroke-width','1');
+  sel.style.display = 'none';
+  svg.appendChild(sel);
+
+  const toLocalX = (clientX) => {
+    const p = svg.createSVGPoint();
+    p.x = clientX; p.y = 0;
+    const m = svg.getScreenCTM().inverse();
+    const s = p.matrixTransform(m);
+    return clamp(s.x - plotBox.x, 0, plotBox.width);
+  };
+
+  const onMove = (e) => {
+    if (!state.brushing) return;
+    state.brushEndX = toLocalX(e.clientX);
+    const x = Math.min(state.brushStartX, state.brushEndX);
+    const w = Math.abs(state.brushEndX - state.brushStartX);
+    sel.setAttribute('x', plotBox.x + x);
+    sel.setAttribute('y', plotBox.y);
+    sel.setAttribute('width', w);
+    sel.setAttribute('height', plotBox.height);
+  };
+
+  const onUp = (e) => {
+    overlay.releasePointerCapture?.(e.pointerId);   // ← release capture
+    if (!state.brushing) return;
+    state.brushing = false;
+    sel.style.display = 'none';
+    const minSel = 8; // px
+    if (Math.abs(state.brushEndX - state.brushStartX) < minSel) return;
+    const x0 = Math.min(state.brushStartX, state.brushEndX);
+    const x1 = Math.max(state.brushStartX, state.brushEndX);
+    const t0 = xToTime(x0, { x:0, width:plotBox.width }, startMs, endMs);
+    const t1 = xToTime(x1, { x:0, width:plotBox.width }, startMs, endMs);
+    setExplicitWindow(t0, t1);  // stops timers
+    renderAll();
+  };
+
+  let lastTap = 0;
+  overlay.addEventListener('pointerdown', (e) => {
+    const now = Date.now();
+    // Double-tap reset (only if not already brushing)
+    if (!state.brushing && (now - lastTap) < 300) {
+      setRollingWindow(state.windowHours);
+      renderAll();
+      lastTap = 0;
+      return;
+    }
+    lastTap = now;
+
+    overlay.setPointerCapture?.(e.pointerId);
+    state.brushing = true;
+    state.brushStartX = toLocalX(e.clientX);
+    state.brushEndX = state.brushStartX;
+    sel.style.display = '';
+    e.preventDefault();
+  }, { passive:false });
+
+  overlay.addEventListener('pointermove', onMove, { passive:false });
+  overlay.addEventListener('pointerup', onUp, { passive:true });
+  overlay.addEventListener('pointercancel', onUp, { passive:true });
 }
 
 // ------- Table -------
@@ -621,12 +794,6 @@ els.ths.forEach(th => th.addEventListener('click', () => {
   renderAll();
 }));
 
-// Keep in sync with store updates
-document.addEventListener('alerts:changed', async () => {
-  state.rowsAll = await getAllAlerts();
-  renderAll();
-});
-
 // Re-render on resize
 window.addEventListener('resize', () => renderAll());
 
@@ -643,6 +810,7 @@ async function boot() {
   setRollingWindow(state.windowHours);
   syncWinBtnActive();
   state.rowsAll = await getAllAlerts();
+  startPolling();
   renderAll();
 }
 boot();
