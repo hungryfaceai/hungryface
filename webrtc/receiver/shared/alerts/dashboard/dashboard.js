@@ -164,7 +164,7 @@ async function playPing() {
   if (audioCtx.state !== 'running') return;
 
   const now = performance.now();
-  if (now - lastPingAt < 250) return;      // rate-limit
+  if (now - lastPingAt < 1000) return;      // rate-limit
   lastPingAt = now;
 
   const t0 = audioCtx.currentTime;
