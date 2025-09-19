@@ -334,7 +334,6 @@
 
     // --------- Lullaby playlist over the same sendonly transceiver (no mic mixing) ---------
     const LULLABY_DIR = '/hungryface/lullaby/';
-    const LULLABY_FILES = ['lullaby1.mp3', 'lullaby2.mp3', 'lullaby3.mp3']; // same naming as before
 
     let lullabyEl = null;
     let lullabyCtx = null;
@@ -343,7 +342,8 @@
     let musicNode = null;
 
     let sendingLullaby = false;
-    let playlist = [];
+    let lullabyList = [];   // discovered absolute URLs
+    let playlist = [];      // shuffled order
     let trackIdx = 0;
 
     function shuffle(arr) {
@@ -355,9 +355,58 @@
       return a;
     }
 
+    async function urlExists(url) {
+      try {
+        const h = await fetch(url, { method: 'HEAD', cache: 'no-cache' });
+        if (h.ok) return true;
+      } catch {}
+      try {
+        const g = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' }, cache: 'no-cache' });
+        return g.ok;
+      } catch { return false; }
+    }
+
+    async function discoverLullabies() {
+      if (lullabyList.length) return lullabyList;
+
+      // (A) Try JSON manifest: /hungryface/lullaby/playlist.json
+      try {
+        const res = await fetch(LULLABY_DIR + 'playlist.json', { cache: 'no-cache' });
+        if (res.ok) {
+          const data = await res.json();
+          const items = (Array.isArray(data) ? data : (Array.isArray(data.tracks) ? data.tracks : []))
+            .map(x => ('' + x).trim())
+            .filter(x => x.toLowerCase().endsWith('.mp3'))
+            .map(x => x.startsWith('http') ? x : (LULLABY_DIR + x.replace(/^\/+/, '')));
+          if (items.length) {
+            lullabyList = items;
+            console.log('[RX] discovered lullabies via playlist.json:', lullabyList);
+            return lullabyList;
+          }
+        }
+      } catch {
+        // ignore; fall through to probing
+      }
+
+      // (B) Fallback: numbered files lullaby1.mp3 … lullaby30.mp3
+      const found = [];
+      for (let i = 1; i <= 30; i++) {
+        const url = `${LULLABY_DIR}lullaby${i}.mp3`;
+        /* eslint-disable no-await-in-loop */
+        if (await urlExists(url)) found.push(url);
+      }
+      if (found.length) {
+        lullabyList = found;
+      } else {
+        // (C) last resort: assume at least lullaby1.mp3 exists
+        lullabyList = [`${LULLABY_DIR}lullaby1.mp3`];
+      }
+      console.log('[RX] discovered lullabies via probing:', lullabyList);
+      return lullabyList;
+    }
+
     function buildPlaylist() {
-      const urls = LULLABY_FILES.map(name => LULLABY_DIR + name);
-      playlist = shuffle(urls);
+      playlist = shuffle(lullabyList);
       trackIdx = 0;
       console.log('[RX] reshuffled lullabies:', playlist);
     }
@@ -373,7 +422,7 @@
         lullabyEl = new Audio();
         lullabyEl.crossOrigin = 'anonymous';
         lullabyEl.preload = 'auto';
-        lullabyEl.loop = false; // we handle looping via playlist
+        lullabyEl.loop = false; // loop handled by playlist order
         lullabyEl.addEventListener('ended', () => { nextTrack(); });
       }
       if (!musicNode) {
@@ -399,7 +448,7 @@
       if (!playlist.length) return;
       let next = trackIdx + 1;
       if (next >= playlist.length) {
-        buildPlaylist(); // reached end — shuffle again
+        buildPlaylist(); // reached end — shuffle fresh cycle
         next = 0;
       }
       await playTrackAt(next);
@@ -409,13 +458,14 @@
       if (!talkSender) { console.warn('[RX] no talkSender yet'); return; }
       await ensureLullabyGraph();
 
-      // Build a fresh shuffled playlist each time you start
+      // Discover tracks (JSON first, else numbered), then shuffle
+      await discoverLullabies();
       buildPlaylist();
 
       // Swap the sender’s track: mic → lullaby
       await talkSender.replaceTrack(lullabyTrack);
 
-      // Start playback of the first (shuffled) track
+      // Start playback of the first track
       await playTrackAt(0);
 
       sendingLullaby = true;
@@ -429,7 +479,7 @@
       if (!sendingLullaby) return;
       sendingLullaby = false;
 
-      // Stop the music
+      // Stop music
       try { lullabyEl?.pause(); } catch {}
 
       // Swap back to mic
