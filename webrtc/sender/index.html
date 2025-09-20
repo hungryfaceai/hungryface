@@ -247,6 +247,8 @@
   <div id="tap" aria-hidden="true"></div>
   <div class="overlay"><div class="status" id="status">Idle</div></div>
 
+  <audio id="talkbackAudio" autoplay playsinline style="display:none;"></audio>
+
   <!-- Debug UI -->
   <button id="debugToggle" title="Toggle debug (or press D)">Debug</button>
   <div id="debugPanel">
@@ -301,6 +303,8 @@
     const ui        = document.getElementById('ui');
     const tap       = document.getElementById('tap');
     const stage     = document.getElementById('stage');
+    const talkbackAudio = document.getElementById('talkbackAudio'); //https://chatgpt.com/c/68cbdcf2-d4f8-8330-97d8-a97eb665eb33
+
 
     // Debug elements
     const elDbgPanel = document.getElementById('debugPanel');
@@ -464,7 +468,10 @@
 
     // 🔓 WebAudio unlock on any user gesture (sender)
     ['click','touchstart'].forEach(ev =>
-      document.addEventListener(ev, () => audioCtx?.resume?.(), { passive: true })
+      document.addEventListener(ev, () => {
+        audioCtx?.resume?.();
+        talkbackAudio?.play?.().catch(()=>{});
+      }, { passive: true })
     );
 
     // Local-only AI mic (used when the streaming mic is off)
@@ -739,6 +746,28 @@
         sdpSemantics: 'unified-plan'
       });
 
+      pc.ontrack = (ev) => {
+        // Receiver may send only audio (talkback). Attach and play.
+        try {
+          if (ev.track.kind === 'audio') {
+            const ms = ev.streams?.[0] || new MediaStream([ev.track]);
+            // If you support multiple receivers, you could mix or keep a map per peer.
+            talkbackAudio.srcObject = ms;
+            talkbackAudio.muted = false;
+            talkbackAudio.volume = 1.0;
+            talkbackAudio.play().catch(() => {});
+            ev.track.addEventListener('ended', () => {
+              if (talkbackAudio.srcObject === ms) {
+                try { talkbackAudio.pause(); talkbackAudio.srcObject = null; } catch {}
+              }
+            });
+            console.log('[SENDER] talkback audio attached');
+          }
+        } catch (e) {
+          console.warn('[SENDER] ontrack error:', e);
+        }
+      };
+
       if (localStream) {
         localStream.getTracks().forEach(track => {
           console.log('[TRACK][sender] addTrack', track.kind, '→', peerId);
@@ -837,7 +866,12 @@
       pc.onconnectionstatechange = () => {
         const st = pc.connectionState;
         console.log('[SENDER][PC]', peerId, st);
-        if (st === 'failed' || st === 'closed') cleanupPeer(peerId, 'pc-state:' + st);
+        if (st === 'failed' || st === 'closed') return cleanupPeer(peerId, 'pc-state:' + st);
+        if (st === 'disconnected') {
+          setTimeout(() => {
+            if (pc.connectionState === 'disconnected') cleanupPeer(peerId, 'pc-state:disconnected');
+          }, 3000);
+        }
       };
 
       if (!rec) {
@@ -857,13 +891,23 @@
       return pc;
     }
 
-    function cleanupPeer(peerId, reason = 'cleanup') {
+    function cleanupPeer(peerId, reason='cleanup') {
       const rec = peers.get(peerId);
       if (!rec) return;
       try { rec.pc.close(); } catch {}
+      // If this peer’s stream is what the audio element is playing, clear it
+      try {
+        const ms = talkbackAudio.srcObject;
+        if (ms && ms.getAudioTracks().length && rec.pc) {
+          // crude: if we only ever had one inbound stream, just clear
+          talkbackAudio.pause();
+          talkbackAudio.srcObject = null;
+        }
+      } catch {}
       peers.delete(peerId);
       console.log('[SENDER] cleaned', peerId, reason);
     }
+
 
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
@@ -1101,6 +1145,8 @@
 
       try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
       try { ws && ws.close(); } catch {}
+
+      try { talkbackAudio.pause(); talkbackAudio.srcObject = null; } catch {}
 
       poseDCs.clear();
 
