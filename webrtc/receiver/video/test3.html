@@ -494,38 +494,38 @@
       console.log('[RX] lullabies → sender (shuffle loop active)');
     }
 
-async function stopLullaby() {
-  if (!sendingLullaby) return;
-  sendingLullaby = false;
-
-  // Stop music
-  try { lullabyEl?.pause(); } catch {}
-
-  // Swap back: if we ALREADY have a mic track (user has talked before), use it.
-  // Otherwise do NOT ask for permission here — detach the track (or send silence).
-  if (talkSender) {
-    if (talkTrack) {
-      try { talkTrack.contentHint = 'speech'; } catch {}
-      await talkSender.replaceTrack(talkTrack);
-    } else {
-      try {
-        await talkSender.replaceTrack(null);        // most browsers: OK
-      } catch (e) {
-        // Fallback for older Safari: send a silent track (no permission needed)
-        try {
-          const silentCtx = new (window.AudioContext || window.webkitAudioContext)();
-          const silentTrack = silentCtx.createMediaStreamDestination().stream.getAudioTracks()[0];
-          await talkSender.replaceTrack(silentTrack);
-        } catch {}
+    async function stopLullaby() {
+      if (!sendingLullaby) return;
+      sendingLullaby = false;
+    
+      // Stop music
+      try { lullabyEl?.pause(); } catch {}
+    
+      // Swap back: if we ALREADY have a mic track (user has talked before), use it.
+      // Otherwise do NOT ask for permission here — detach the track (or send silence).
+      if (talkSender) {
+        if (talkTrack) {
+          try { talkTrack.contentHint = 'speech'; } catch {}
+          await talkSender.replaceTrack(talkTrack);
+        } else {
+          try {
+            await talkSender.replaceTrack(null);        // most browsers: OK
+          } catch (e) {
+            // Fallback for older Safari: send a silent track (no permission needed)
+            try {
+              const silentCtx = new (window.AudioContext || window.webkitAudioContext)();
+              const silentTrack = silentCtx.createMediaStreamDestination().stream.getAudioTracks()[0];
+              await talkSender.replaceTrack(silentTrack);
+            } catch {}
+          }
+        }
       }
+    
+      lullabyBtn.textContent = 'Lullaby';
+      lullabyBtn.classList.remove('live');
+      try { remoteVideo.volume = 1.0; } catch {}
+      console.log('[RX] lullaby stopped → back to', talkTrack ? 'mic' : 'silence (no mic permission yet)');
     }
-  }
-
-  lullabyBtn.textContent = 'Lullaby';
-  lullabyBtn.classList.remove('live');
-  try { remoteVideo.volume = 1.0; } catch {}
-  console.log('[RX] lullaby stopped → back to', talkTrack ? 'mic' : 'silence (no mic permission yet)');
-}
 
 
     lullabyBtn.addEventListener('click', async (e) => {
