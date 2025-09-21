@@ -19,6 +19,7 @@
     a { color: #fff; text-decoration: none; opacity: 0.9; }
     a:hover, a:focus { text-decoration: underline; opacity: 1; }
 
+    /* Visually hidden but accessible text */
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
@@ -28,7 +29,7 @@
 
     header {
       display: grid;
-      grid-template-columns: 1fr auto 1fr;
+      grid-template-columns: 1fr auto 1fr; /* left | center | right (wide screens) */
       align-items: center;
       padding: 14px 20px;
       gap: 12px;
@@ -44,12 +45,15 @@
     .nav-left  { justify-self: start; }
     .nav-right { justify-self: end;  }
 
+    /* Home icon link (uses shared sprite) */
     .home-link { display: inline-flex; align-items: center; line-height: 1; }
-    .home-link:hover, .home-link:focus { text-decoration: none; }
+    .home-link:hover, .home-link:focus { text-decoration: none; } /* avoid underline on SVG */
 
+    /* Reusable icon sizing: change --icon-size to adjust everywhere */
     .icon { width: var(--icon-size, 24px); height: var(--icon-size, 24px); display: block; }
-    .icon-home { --icon-size: 26px; }
+    .icon-home { --icon-size: 26px; } /* Bigger Home icon */
 
+    /* Center buttons: shrink via clamp; don't wrap */
     .nav-center {
       justify-self: center;
       gap: 12px;
@@ -72,6 +76,7 @@
     .tagline { font-size: clamp(1.05rem, 2.5vw, 1.5rem); margin: 0 0 12px; opacity: 0.95; }
     .subcopy { font-size: clamp(0.98rem, 2vw, 1.15rem); margin: 0 auto; opacity: 0.9; }
 
+    /* Safety note (smaller, centered) */
     .safety-note {
       font-size: 0.8rem;
       opacity: 0.8;
@@ -79,6 +84,7 @@
       text-align: center;
     }
 
+    /* Footer */
     footer {
       display: flex;
       justify-content: space-between;
@@ -89,13 +95,14 @@
     }
     .footer-note {
       font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-      font-size: 0.75rem;
+      font-size: 0.75rem;  /* smaller footer note */
       color: #fff;
       opacity: 0.85;
       text-decoration: none;
     }
     .footer-note:hover, .footer-note:focus { text-decoration: none; opacity: 0.85; }
 
+    /* Small screens: move center buttons BELOW */
     @media (max-width: 560px) {
       header {
         grid-template-columns: 1fr 1fr;
@@ -104,27 +111,23 @@
       }
       .nav-left  { grid-column: 1; grid-row: 1; justify-self: start; }
       .nav-right { grid-column: 2; grid-row: 1; justify-self: end; }
-      .nav-center { grid-column: 1 / -1; grid-row: 2; justify-content: center; gap: 10px; }
+      .nav-center{
+        grid-column: 1 / -1;  /* span both columns */
+        grid-row: 2;          /* second row */
+        justify-content: center;
+        gap: 10px;
+      }
       .nav-left, .nav-right { font-size: 0.9rem; }
       footer { gap: 10px; }
     }
 
+    /* iPhone 12 mini (~360px): spacing tweaks */
     @media (max-width: 380px) {
       .nav-left a, .nav-right a { font-size: 0.82rem; }
       .nav-left, .nav-right { gap: 12px; }
       .nav-center { gap: 8px; }
       header { padding: 12px 14px; }
     }
-
-    /* Chip */
-    .sound-chip {
-      position: fixed; right: 12px; bottom: 12px;
-      padding: 8px 12px; border-radius: 9999px;
-      background: #111; color: #fff; border: 1px solid #2a2a2a;
-      font-weight: 600; font-size: 0.9rem; cursor: pointer; z-index: 9999;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-    }
-    .sound-chip:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
   </style>
 </head>
 <body>
@@ -133,6 +136,7 @@
       <nav class="nav-left" aria-label="Primary">
         <a href="https://hungryfaceai.github.io/hungryface/home"
            class="home-link" aria-label="Home" title="Home">
+          <!-- Reused from shared sprite -->
           <svg class="icon icon-home" aria-hidden="true" focusable="false">
             <use href="/hungryface/assets/icons.svg#icon-cradle-ai"
                  xlink:href="/hungryface/assets/icons.svg#icon-cradle-ai"></use>
@@ -178,49 +182,5 @@
       <a class="footer-right footer-note" href="https://hungryfaceai.github.io/hungryface/legal">Legal</a>
     </footer>
   </div>
-
-  <!-- Background audio: plays once (no loop). Update src to your file path. -->
-  <audio id="bgAudio"
-         src="/hungryface/song/naptio.mp3"
-         preload="auto"
-         aria-hidden="true"></audio>
-
-  <script>
-  (() => {
-    const audio = document.getElementById('bgAudio');
-    audio.loop = false;      // play only once
-    audio.volume = 0.25;     // adjust to taste
-
-    // Create the chip (starts as "Play Song")
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'sound-chip';
-    chip.textContent = 'Play Song';
-    document.body.appendChild(chip);
-
-    // Click behavior:
-    // - "Play Song" → start playback, label becomes "Mute"
-    // - "Mute"      → mute audio and remove chip
-    chip.addEventListener('click', async () => {
-      if (chip.textContent === 'Play Song') {
-        try {
-          await audio.play();      // user gesture → allowed
-          chip.textContent = 'Mute';
-        } catch (e) {
-          // If something fails, stay as "Play Song"
-        }
-        return;
-      }
-      // "Mute" case
-      audio.muted = true;
-      chip.remove();
-    });
-
-    // When the song finishes, remove the chip if still visible
-    audio.addEventListener('ended', () => {
-      if (chip.isConnected) chip.remove();
-    });
-  })();
-  </script>
 </body>
 </html>
