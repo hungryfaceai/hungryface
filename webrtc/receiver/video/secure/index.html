@@ -88,8 +88,9 @@
           s.onerror = reject;
           document.body.appendChild(s);
         });
+        console.log('[RX][Sidebar]', new Date().toISOString(), 'Shared sidebar loaded');
       } catch (err) {
-        console.error('[Sidebar] failed to load shared assets:', err);
+        console.error('[RX][Sidebar]', new Date().toISOString(), 'Failed to load shared assets:', err);
       }
     })();
   </script>
@@ -113,6 +114,15 @@
   </div>
 
   <script type="module">
+    /* ---------- Logging helpers ---------- */
+    const _ts = () => new Date().toISOString();
+    const _info = (...args) => console.log('[RX]', _ts(), ...args);
+    const _warn = (...args) => console.warn('[RX][WARN]', _ts(), ...args);
+    const _err  = (...args) => console.error('[RX][ERR]', _ts(), ...args);
+    const _evt  = (name, extra={}) => _info('EVT', name, extra);
+
+    _info('Booting Receiver script. UA:', navigator.userAgent, 'Page:', location.href);
+
     /* ---------- NEW: SecureSignal + secure-webrtc (trusted only) ---------- */
     import { SecureSignal } from '/hungryface/webrtc/shared/secure-signal.js';
     import { connectToPeer } from '/hungryface/webrtc/shared/secure-webrtc.js';
@@ -121,6 +131,8 @@
     const SS_WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const desiredRoom = (new URLSearchParams(location.search).get("room") || "Baby").trim();
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
+
+    _info('Config:', { SS_WS_ENDPOINT, desiredRoom });
 
     /* ---------- DOM ---------- */
     const stage = document.getElementById('stage');
@@ -137,11 +149,15 @@
     /* ---------- Status overlay ---------- */
     let hideStatusTimer = null;
     function showStatus(msg) {
+      _info('Status:', msg);
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
       if (msg === 'Connected') {
         if (hideStatusTimer) clearTimeout(hideStatusTimer);
-        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
+        hideStatusTimer = setTimeout(() => {
+          _info('Status overlay auto-hide after', STATUS_HIDE_AFTER_CONNECTED_MS, 'ms');
+          overlay.classList.add('hidden');
+        }, STATUS_HIDE_AFTER_CONNECTED_MS);
       } else {
         if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
         overlay.classList.remove('hidden');
@@ -150,6 +166,7 @@
 
     /* ---------- Audio UI ---------- */
     function updateAudioButtons() {
+      _info('updateAudioButtons()', { muted: remoteVideo.muted, volume: remoteVideo.volume });
       if (remoteVideo.muted) {
         enableAudioBtn.style.display = 'block';
         disableAudioBtn.style.display = 'none';
@@ -159,22 +176,34 @@
       }
     }
     enableAudioBtn.style.display = 'block';
+    _info('Initial audio state:', { muted: remoteVideo.muted, volume: remoteVideo.volume });
 
     async function tryStartMuted() {
       try {
         remoteVideo.muted = true;
         remoteVideo.volume = 1.0;
         await remoteVideo.play();
-      } catch {}
+        _info('tryStartMuted(): video.play() OK while muted');
+      } catch (e) {
+        _warn('tryStartMuted(): video.play() failed (autoplay policy likely).', e && (e.name || e.message));
+      }
       updateAudioButtons();
     }
     enableAudioBtn.addEventListener('click', async (e) => {
       e?.preventDefault?.();
-      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
+      _evt('EnableAudioBtn.click');
+      try {
+        remoteVideo.muted = false; remoteVideo.volume = 1.0;
+        await remoteVideo.play();
+        _info('Audio enabled; video.play() resolved');
+      } catch (e) {
+        _warn('Audio enable: video.play() rejected', e && (e.name || e.message));
+      }
       updateAudioButtons();
     });
     disableAudioBtn.addEventListener('click', (e) => {
       e?.preventDefault?.();
+      _evt('DisableAudioBtn.click');
       remoteVideo.muted = true;
       updateAudioButtons();
     });
@@ -182,25 +211,43 @@
     /* ---------- Fullscreen ---------- */
     fsBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
+      _evt('FullscreenBtn.click', { inFS: !!document.fullscreenElement });
       try {
         if (!document.fullscreenElement) {
           await (stage.requestFullscreen?.call(stage) || document.documentElement.requestFullscreen());
           fsBtn.textContent = 'Exit fullscreen';
+          _info('Entered fullscreen');
         } else {
           await document.exitFullscreen();
           fsBtn.textContent = 'Fullscreen';
+          _info('Exited fullscreen');
         }
-      } catch {}
+      } catch (e) {
+        _warn('Fullscreen toggle failed', e && (e.name || e.message));
+      }
       beginViewportSettle();
     });
     document.addEventListener('fullscreenchange', () => {
+      _evt('fullscreenchange', { inFS: !!document.fullscreenElement });
       fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
       beginViewportSetle();
     });
 
-    remoteVideo.addEventListener('loadedmetadata', beginViewportSettle);
-    remoteVideo.addEventListener('playing', () => { updateAudioButtons(); beginViewportSettle(); });
-    remoteVideo.addEventListener('resize', beginViewportSettle);
+    remoteVideo.addEventListener('loadedmetadata', () => {
+      _evt('video.loadedmetadata', { width: remoteVideo.videoWidth, height: remoteVideo.videoHeight, readyState: remoteVideo.readyState });
+      beginViewportSettle();
+    });
+    remoteVideo.addEventListener('playing', () => {
+      _evt('video.playing', { t: remoteVideo.currentTime, readyState: remoteVideo.readyState });
+      updateAudioButtons(); beginViewportSettle();
+    });
+    remoteVideo.addEventListener('resize', () => {
+      _evt('video.resize', { width: remoteVideo.videoWidth, height: remoteVideo.videoHeight });
+      beginViewportSettle();
+    });
+    remoteVideo.addEventListener('error', (e) => {
+      _err('video.error', e?.message || e);
+    });
 
     function beginViewportSettle(){ /* no-op for video-only */ }
     function beginViewportSetle(){ beginViewportSettle(); } // typo guard
@@ -214,11 +261,16 @@
     function attachStream(stream) {
       if (remoteVideo.srcObject !== stream) {
         remoteVideo.srcObject = stream;
+        const tracks = stream ? stream.getTracks().map(t => ({ kind: t.kind, id: t.id, enabled: t.enabled, readyState: t.readyState })) : [];
+        _info('attachStream()', { hasStream: !!stream, tracks });
         tryStartMuted();
+      } else {
+        _info('attachStream(): stream already attached');
       }
     }
 
     function selectSession(sid) {
+      _info('selectSession()', { sid, totalSessions: sessions.size });
       for (const [id, s] of sessions) s.selected = (id === sid);
       const s = sessions.get(sid);
       if (s?.stream) attachStream(s.stream);
@@ -232,7 +284,11 @@
     }
 
     async function ensureTalkStreamOn(s) {
-      if (s.talkStream && s.talkTrack) return;
+      if (s.talkStream && s.talkTrack) {
+        _info('ensureTalkStreamOn(): reuse existing talk track', { enabled: s.talkTrack.enabled, id: s.talkTrack.id });
+        return;
+      }
+      _info('ensureTalkStreamOn(): requesting getUserMedia({audio}) …');
       s.talkStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -245,11 +301,15 @@
       s.talkTrack = s.talkStream.getAudioTracks()[0];
       try { s.talkTrack.contentHint = 'speech'; } catch {}
       s.talkTrack.enabled = false;
+      _info('Talk track acquired', { id: s.talkTrack.id, settings: s.talkTrack.getSettings?.(), constraints: s.talkTrack.getConstraints?.() });
 
       const sender = s.talkTx?.sender || s.talkSender;
       if (sender && sender.track !== s.talkTrack) {
+        _info('Replacing sender track with mic', { old: sender.track?.id, new: s.talkTrack.id });
         await sender.replaceTrack(s.talkTrack);
         s.talkSender = sender;
+      } else {
+        _info('No sender available yet for talk track');
       }
     }
 
@@ -260,20 +320,29 @@
     let pressTimer = null;
 
     async function ensureLullabyStoppedIfNeeded() {
-      if (sendingLullaby) await stopLullaby();
+      if (sendingLullaby) {
+        _info('ensureLullabyStoppedIfNeeded(): stopping lullaby before talkback');
+        await stopLullaby();
+      }
     }
 
     async function handlePressStart(e) {
       e.preventDefault();
       pressed = true;
       clearTimeout(pressTimer);
+      _evt('Talk.pressStart');
       pressTimer = setTimeout(async () => {
         if (!pressed) return;
         await ensureLullabyStoppedIfNeeded();
         pttSession = true;
-        const [, s] = currentSession(); if (!s) return;
-        await ensureTalkStreamOn(s);
-        setTalking(true);
+        const [, s] = currentSession(); if (!s) { _warn('Talk: no current session on long-press'); return; }
+        try {
+          await ensureTalkStreamOn(s);
+          setTalking(true);
+          _info('PTT started (hold)');
+        } catch (err) {
+          _err('PTT start failed', err);
+        }
       }, LONG_PRESS_MS);
     }
 
@@ -281,6 +350,7 @@
       e.preventDefault();
       if (!pressed) return;
       pressed = false;
+      _evt('Talk.pressEnd', { pttSession, latched });
 
       if (!pttSession) {
         clearTimeout(pressTimer);
@@ -288,18 +358,21 @@
         if (latched) {
           (async () => {
             await ensureLullabyStoppedIfNeeded();
-            const [, s] = currentSession(); if (!s) return;
+            const [, s] = currentSession(); if (!s) { _warn('Talk toggle: no current session'); return; }
             await ensureTalkStreamOn(s);
             setTalking(true);
-          })().catch(console.warn);
+            _info('Talk latched=ON');
+          })().catch(err => _warn('Talk toggle ON failed', err));
         } else {
           setTalking(false);
+          _info('Talk latched=OFF');
         }
         return;
       }
 
       setTalking(latched);
       pttSession = false;
+      _info('PTT ended; latched now =', latched);
       updateTalkUI();  
     }
 
@@ -319,9 +392,10 @@
 
     function setTalking(on) {
       const [, s] = currentSession();
-      if (!s || !s.talkTrack) return;
+      if (!s || !s.talkTrack) { _warn('setTalking(): no session or talkTrack'); return; }
       s.talkTrack.enabled = !!on;
       try { remoteVideo.volume = on ? 0.25 : 1.0; } catch {}
+      _info('setTalking()', { on, trackId: s.talkTrack.id });
       updateTalkUI();
     }
 
@@ -362,11 +436,11 @@
       try {
         const h = await fetch(url, { method: 'HEAD', cache: 'no-cache' });
         if (h.ok) return true;
-      } catch {}
+      } catch (e) { _warn('HEAD failed for', url, e?.message); }
       try {
         const g = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' }, cache: 'no-cache' });
         return g.ok;
-      } catch { return false; }
+      } catch (e) { _warn('GET range failed for', url, e?.message); return false; }
     }
 
     async function discoverLullabies() {
@@ -374,6 +448,7 @@
 
       try {
         const res = await fetch(LULLABY_DIR + 'playlist.json', { cache: 'no-cache' });
+        _info('playlist.json fetch', { ok: res.ok, status: res.status });
         if (res.ok) {
           const data = await res.json();
           const items = (Array.isArray(data) ? data : (Array.isArray(data.tracks) ? data.tracks : []))
@@ -382,53 +457,57 @@
             .map(x => x.startsWith('http') ? x : (LULLABY_DIR + x.replace(/^\/+/, '')));
           if (items.length) {
             lullabyList = items;
-            console.log('[RX] discovered lullabies via playlist.json:', lullabyList);
+            _info('discovered lullabies via playlist.json:', lullabyList);
             return lullabyList;
           }
         }
-      } catch {}
+      } catch (e) { _warn('playlist.json load failed', e?.message); }
 
       const found = [];
       for (let i = 1; i <= 30; i++) {
         const url = `${LULLABY_DIR}lullaby${i}.mp3`;
         if (await urlExists(url)) found.push(url);
       }
-      if (found.length) {
-        lullabyList = found;
-      } else {
-        lullabyList = [`${LULLABY_DIR}lullaby1.mp3`];
-      }
-      console.log('[RX] discovered lullabies via probing:', lullabyList);
+      lullabyList = found.length ? found : [`${LULLABY_DIR}lullaby1.mp3`];
+      _info('discovered lullabies via probing:', lullabyList);
       return lullabyList;
     }
 
     function buildPlaylist() {
       playlist = shuffle(lullabyList);
       trackIdx = 0;
-      console.log('[RX] reshuffled lullabies:', playlist);
+      _info('playlist shuffled:', playlist);
     }
 
     async function ensureLullabyGraph() {
       if (!lullabyCtx) {
         lullabyCtx = new (window.AudioContext || window.webkitAudioContext)();
         try { await lullabyCtx.resume(); } catch {}
+        _info('AudioContext ready for lullaby', { state: lullabyCtx.state });
       }
-      if (!lullabyDest) lullabyDest = lullabyCtx.createMediaStreamDestination();
+      if (!lullabyDest) {
+        lullabyDest = lullabyCtx.createMediaStreamDestination();
+        _info('Created lullaby MediaStreamDestination');
+      }
 
       if (!lullabyEl) {
         lullabyEl = new Audio();
         lullabyEl.crossOrigin = 'anonymous';
         lullabyEl.preload = 'auto';
         lullabyEl.loop = false;
-        lullabyEl.addEventListener('ended', () => { nextTrack(); });
+        lullabyEl.addEventListener('ended', () => { _evt('lullaby.ended'); nextTrack(); });
+        lullabyEl.addEventListener('error', (e) => _err('lullaby.audio.error', e?.message || e));
+        _info('Audio element created for lullaby');
       }
       if (!musicNode) {
         musicNode = lullabyCtx.createMediaElementSource(lullabyEl);
         musicNode.connect(lullabyDest);
+        _info('Connected Audio element → MediaStreamDestination');
       }
 
       lullabyTrack = lullabyDest.stream.getAudioTracks()[0];
       try { lullabyTrack.contentHint = 'music'; } catch {}
+      _info('Lullaby track ready', { id: lullabyTrack?.id });
     }
 
     async function playTrackAt(i) {
@@ -437,8 +516,8 @@
       const url = playlist[trackIdx];
       lullabyEl.src = url;
       lullabyEl.volume = 0.8;
-      try { await lullabyEl.play(); } catch (e) { console.warn('[RX] lullaby play blocked:', e); }
-      console.log('[RX] playing lullaby:', url);
+      try { await lullabyEl.play(); _info('Playing lullaby', { url }); }
+      catch (e) { _warn('lullaby play blocked', e && (e.name || e.message)); }
     }
 
     async function nextTrack() {
@@ -448,20 +527,26 @@
         buildPlaylist();
         next = 0;
       }
+      _info('Advancing to next lullaby track', { nextIndex: next });
       await playTrackAt(next);
     }
 
     async function startLullaby() {
-      if (pttSession || latched) { latched = false; pttSession = false; setTalking(false); }
+      if (pttSession || latched) { latched = false; pttSession = false; setTalking(false); _info('Stopped talkback before starting lullaby'); }
 
-      const [, s] = currentSession(); if (!s) return;
+      const [, s] = currentSession(); if (!s) { _warn('startLullaby(): no current session'); return; }
       if (!s.talkSender && s.talkTx?.sender) s.talkSender = s.talkTx.sender;
 
       await ensureLullabyGraph();
       await discoverLullabies();
       buildPlaylist();
 
-      if (s.talkSender) await s.talkSender.replaceTrack(lullabyTrack);
+      if (s.talkSender) {
+        _info('Replacing talk sender track with lullaby', { lullabyTrackId: lullabyTrack?.id });
+        await s.talkSender.replaceTrack(lullabyTrack);
+      } else {
+        _warn('No talk sender available to send lullaby');
+      }
       await playTrackAt(0);
 
       sendingLullaby = true;
@@ -469,98 +554,157 @@
       lullabyBtn.classList.add('live');
       try { remoteVideo.volume = 0.2; } catch {}
       updateTalkUI();
-      console.log('[RX] lullabies → sender (shuffle loop active)');
+      _info('Lullabies → sender (shuffle loop active)');
     }
 
     async function stopLullaby() {
-      if (!sendingLullaby) return;
+      if (!sendingLullaby) { _info('stopLullaby(): no-op, not sending'); return; }
       sendingLullaby = false;
     
-      try { lullabyEl?.pause(); } catch {}
+      try { lullabyEl?.pause(); _info('Lullaby paused'); } catch (e) { _warn('Pause lullaby failed', e?.message); }
     
-      const [, s] = currentSession(); if (!s) return;
+      const [, s] = currentSession(); if (!s) { _warn('stopLullaby(): no current session'); return; }
       if (s.talkSender) {
         if (s.talkTrack) {
           try { s.talkTrack.contentHint = 'speech'; } catch {}
+          _info('Replacing lullaby with mic track', { micTrackId: s.talkTrack.id });
           await s.talkSender.replaceTrack(s.talkTrack);
         } else {
+          _info('No mic track; replacing with null/silent track');
           try {
             await s.talkSender.replaceTrack(null);
           } catch (e) {
+            _warn('replaceTrack(null) failed, trying silent track fallback', e?.message);
             try {
               const silentCtx = new (window.AudioContext || window.webkitAudioContext)();
               const silentTrack = silentCtx.createMediaStreamDestination().stream.getAudioTracks()[0];
               await s.talkSender.replaceTrack(silentTrack);
-            } catch {}
+              _info('Silent track fallback attached');
+            } catch (e2) { _err('Silent track fallback failed', e2?.message || e2); }
           }
         }
+      } else {
+        _warn('stopLullaby(): no talkSender present');
       }
     
       lullabyBtn.textContent = 'Lullaby';
       lullabyBtn.classList.remove('live');
       try { remoteVideo.volume = 1.0; } catch {}
-      console.log('[RX] lullaby stopped → back to', (s.talkTrack ? 'mic' : 'silence'));
+      _info('Lullaby stopped');
     }
 
     lullabyBtn.addEventListener('click', async (e) => {
       e?.preventDefault?.();
+      _evt('LullabyBtn.click', { sendingLullaby });
       if (sendingLullaby) {
         await stopLullaby();
       } else {
-        if (pttSession || latched) { latched = false; pttSession = false; setTalking(false); }
+        if (pttSession || latched) { latched = false; pttSession = false; setTalking(false); _info('Disabled talkback before starting lullaby via click'); }
         await startLullaby();
       }
     });
 
     window.addEventListener('beforeunload', () => {
-      try { setTalking(false); } catch {}
-      try { for (const [, s] of sessions) s.pc && s.pc.close(); } catch {}
-      try { for (const [, s] of sessions) s.talkStream && s.talkStream.getTracks().forEach(t => t.stop()); } catch {}
-      try { lullabyEl && lullabyEl.pause(); } catch {}
+      _evt('beforeunload');
+      try { setTalking(false); } catch (e) { _warn('setTalking(false) on unload failed', e?.message); }
+      try { for (const [, s] of sessions) s.pc && s.pc.close(); } catch (e) { _warn('pc.close() on unload failed', e?.message); }
+      try { for (const [, s] of sessions) s.talkStream && s.talkStream.getTracks().forEach(t => t.stop()); } catch (e) { _warn('stop talk tracks on unload failed', e?.message); }
+      try { lullabyEl && lullabyEl.pause(); } catch (e) { _warn('pause lullaby on unload failed', e?.message); }
     });
 
     /* ---------- Start SecureSignal and accept only trusted sessions ---------- */
+    _info('Creating SecureSignal', { endpoint: SS_WS_ENDPOINT });
     const ss = new SecureSignal({ url: SS_WS_ENDPOINT, onOpen: () => showStatus('Waiting for sender…') });
-    await ss.init();
+    try {
+      await ss.init();
+      _info('SecureSignal.init() resolved', { me: ss?.me, trustedCount: ss?.trusted?.length });
+    } catch (e) {
+      _err('SecureSignal.init() failed', e?.message || e);
+    }
+
+    // Optional SecureSignal lifecycle logs (if exposed)
+    try {
+      if (ss?.onClose) ss.onClose = (ev) => _warn('SecureSignal WS closed', ev);
+      if (ss?.onError) ss.onError = (err) => _err('SecureSignal WS error', err);
+    } catch {}
 
     ss.onSession = async ({ sid, peerFp, role }) => {
-      if (role !== 'responder') return;
+      _info('SecureSignal.onSession()', { sid, peerFp, role, trustedCount: ss?.trusted?.length });
+      if (role !== 'responder') { _info('Ignoring session not from responder role'); return; }
 
       // defensive: only accept if peer is in trusted
-      if (!ss.trusted.find(d => d.fp === peerFp)) return;
+      const isTrusted = !!ss.trusted.find(d => d.fp === peerFp);
+      _info('Peer trust check', { peerFp, isTrusted });
+      if (!isTrusted) { _warn('Rejecting untrusted peer', { peerFp }); return; }
 
-      const { pc, dc } = await connectToPeer(ss, peerFp, {
-        initiator: false,
-        rtcConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
-        onTrack: (e) => {
-          const s = sessions.get(sid);
-          if (!s) return;
-          s.stream = e.streams?.[0];
-          if (s.selected && s.stream) attachStream(s.stream);
-        },
-        label: 'pose',
-        onData: (msg, ch) => { /* ignore or extend later */ }
-      });
+      let pc, dc;
+      try {
+        ({ pc, dc } = await connectToPeer(ss, peerFp, {
+          initiator: false,
+          rtcConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
+          onTrack: (e) => {
+            _evt('pc.onTrack', { sid, streams: e.streams?.length, trackKind: e.track?.kind, trackId: e.track?.id });
+            const s = sessions.get(sid);
+            if (!s) { _warn('onTrack: session not found', { sid }); return; }
+            s.stream = e.streams?.[0];
+            if (s.selected && s.stream) attachStream(s.stream);
+          },
+          label: 'pose',
+          onData: (msg, ch) => { _evt('dc.onMessage', { sid, label: ch?.label, length: (msg && (msg.byteLength || msg.length)) }); /* ignore or extend later */ }
+        }));
+        _info('connectToPeer() resolved', { sid, pcExists: !!pc, dcLabel: dc?.label });
+      } catch (e) {
+        _err('connectToPeer() failed', e?.message || e);
+        return;
+      }
+
+      // Add detailed PC/DC diagnostics
+      try {
+        pc.addEventListener('icecandidate', (ev) => _evt('pc.icecandidate', { candidate: !!ev.candidate, sid }));
+        pc.addEventListener('icegatheringstatechange', () => _evt('pc.icegatheringstatechange', { state: pc.iceGatheringState, sid }));
+        pc.addEventListener('connectionstatechange', () => _evt('pc.connectionstatechange', { state: pc.connectionState, sid }));
+        pc.addEventListener('signalingstatechange', () => _evt('pc.signalingstatechange', { state: pc.signalingState, sid }));
+        pc.addEventListener('iceconnectionstatechange', () => _evt('pc.iceconnectionstatechange', { state: pc.iceConnectionState, sid }));
+        pc.addEventListener('track', (e) => _evt('pc.track', { kind: e.track?.kind, id: e.track?.id, streams: e.streams?.length, sid }));
+
+        if (dc) {
+          dc.addEventListener('open', () => _evt('dc.open', { label: dc.label, sid }));
+          dc.addEventListener('close', () => _evt('dc.close', { label: dc.label, sid }));
+          dc.addEventListener('error', (e) => _err('dc.error', e?.message || e));
+          dc.addEventListener('message', (e) => _evt('dc.message', { label: dc.label, size: (e.data && (e.data.byteLength || e.data.length)) || 0, sid }));
+        }
+      } catch (e) { _warn('Attaching PC/DC listeners failed', e?.message); }
 
       let talkTx = null;
-      try { talkTx = pc.addTransceiver('audio', { direction: 'sendonly' }); } catch {}
+      try {
+        talkTx = pc.addTransceiver('audio', { direction: 'sendonly' });
+        _info('Added audio transceiver (sendonly)', { mid: talkTx?.mid });
+      } catch (e) {
+        _warn('addTransceiver(audio, sendonly) failed', e?.message);
+      }
 
       sessions.set(sid, {
         pc, dc, peerFp, room: null, selected: false,
         talkTx, talkSender: talkTx?.sender || null,
         talkTrack: null, talkStream: null, stream: null
       });
+      _info('Session stored', { sid, count: sessions.size });
 
       // listen for the sender's room announcement (encrypted)
       ss.onEncrypted(sid, (msg) => {
+        _evt('ss.onEncrypted', { sid, msgType: msg?.type, role: msg?.role, hasRoom: !!msg?.room });
         if (msg?.type === 'announce' && msg?.role === 'sender') {
-          const s = sessions.get(sid); if (!s) return;
+          const s = sessions.get(sid); if (!s) { _warn('onEncrypted: session not found', { sid }); return; }
           s.room = (msg.room || '').trim();
+          _info('Sender announced room', { sid, room: s.room, desiredRoom });
 
           // auto-select first match to ?room=
           const alreadySelected = Array.from(sessions.values()).some(x => x.selected);
           if (!alreadySelected && s.room === desiredRoom) {
+            _info('Auto-selecting session for desired room', { sid, room: s.room });
             selectSession(sid);
+          } else {
+            _info('Not selecting session', { alreadySelected, match: s.room === desiredRoom });
           }
         }
       });
