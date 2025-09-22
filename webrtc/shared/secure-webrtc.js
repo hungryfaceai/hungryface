@@ -19,6 +19,7 @@ export async function connectToPeer(
     label = 'app',                  // datachannel label (initiator creates it)
     verifyDataChannel = false,      // optional DC proof
     onBeforeAnswer,
+    sid: knownSid,
   } = {}
 ) {
   // 1) Make sure we're paired
@@ -28,7 +29,7 @@ export async function connectToPeer(
   // 2) Establish encrypted signaling session
   const sid = initiator
     ? (await ss.startSession(peerFp)).sid
-    : await waitForSessionFrom(ss, peerFp);
+    : (knownSid || await waitForSessionFrom(ss, peerFp));
 
   // 3) Create RTCPeerConnection
   const pc = new RTCPeerConnection(rtcConfig);
