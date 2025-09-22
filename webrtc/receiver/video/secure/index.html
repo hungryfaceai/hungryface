@@ -638,10 +638,12 @@
       if (!isTrusted) { _warn('Rejecting untrusted peer', { peerFp }); return; }
 
       let pc, dc;
-      try {
+      let talkTx = null;   // <-- declare here so onBeforeAnswer can assign
+      try {      
         ({ pc, dc } = await connectToPeer(ss, peerFp, {
           initiator: false,
           rtcConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
+          label: 'pose',
           onTrack: (e) => {
             _evt('pc.onTrack', { sid, streams: e.streams?.length, trackKind: e.track?.kind, trackId: e.track?.id });
             const s = sessions.get(sid);
@@ -649,9 +651,17 @@
             s.stream = e.streams?.[0];
             if (s.selected && s.stream) attachStream(s.stream);
           },
-          label: 'pose',
-          onData: (msg, ch) => { _evt('dc.onMessage', { sid, label: ch?.label, length: (msg && (msg.byteLength || msg.length)) }); /* ignore or extend later */ }
+          onData: (msg, ch) => {
+            _evt('dc.onMessage', { sid, label: ch?.label, length: (msg && (msg.byteLength || msg.length)) });
+          },
+          onBeforeAnswer: (pc) => {
+            // create the uplink BEFORE answering so the m=audio is in the SDP
+            try { talkTx = pc.addTransceiver('audio', { direction: 'sendonly' }); }
+            catch (e) { _warn('onBeforeAnswer: addTransceiver failed', e?.message); }
+          }
         }));
+
+        
         _info('connectToPeer() resolved', { sid, pcExists: !!pc, dcLabel: dc?.label });
       } catch (e) {
         _err('connectToPeer() failed', e?.message || e);
@@ -674,14 +684,6 @@
           dc.addEventListener('message', (e) => _evt('dc.message', { label: dc.label, size: (e.data && (e.data.byteLength || e.data.length)) || 0, sid }));
         }
       } catch (e) { _warn('Attaching PC/DC listeners failed', e?.message); }
-
-      let talkTx = null;
-      try {
-        talkTx = pc.addTransceiver('audio', { direction: 'sendonly' });
-        _info('Added audio transceiver (sendonly)', { mid: talkTx?.mid });
-      } catch (e) {
-        _warn('addTransceiver(audio, sendonly) failed', e?.message);
-      }
 
       sessions.set(sid, {
         pc, dc, peerFp, room: null, selected: false,
