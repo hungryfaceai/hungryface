@@ -38,9 +38,15 @@ export async function connectToPeer(
   let makingOffer = false;
   const polite = !initiator; // responder is polite
 
+  // ---- Small nicety: tolerant send helper (sendJSON or send) ----
+  const send = (sessionId, payload) =>
+    (typeof ss.sendJSON === 'function')
+      ? ss.sendJSON(sessionId, payload)
+      : (typeof ss.send === 'function' ? ss.send(sessionId, payload) : (() => { throw new Error('SecureSignal.sendJSON/send not available'); })());
+
   // Forward local ICE via encrypted signaling
   pc.onicecandidate = ({ candidate }) => {
-    ss.sendJSON(sid, { webrtc: 'ice', candidate });
+    send(sid, { webrtc: 'ice', candidate });
   };
 
   // Optional media
@@ -77,7 +83,7 @@ export async function connectToPeer(
       makingOffer = true;
       const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
       await pc.setLocalDescription(offer);
-      await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
+      await send(sid, { webrtc: 'offer', desc: pc.localDescription });
     } finally {
       makingOffer = false;
     }
@@ -100,13 +106,13 @@ export async function connectToPeer(
           try {
             if (pc.signalingState === 'have-local-offer' && pc.localDescription) {
               // Resend the existing offer so the responder (now ready) can answer
-              await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
+              await send(sid, { webrtc: 'offer', desc: pc.localDescription });
             } else if (pc.signalingState === 'stable' && !makingOffer) {
               // No pending offer — create a fresh one
               makingOffer = true;
               const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
               await pc.setLocalDescription(offer);
-              await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
+              await send(sid, { webrtc: 'offer', desc: pc.localDescription });
             }
           } finally {
             makingOffer = false;
@@ -134,7 +140,7 @@ export async function connectToPeer(
         }
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        await ss.sendJSON(sid, { webrtc: 'answer', desc: pc.localDescription });
+        await send(sid, { webrtc: 'answer', desc: pc.localDescription });
         return; // handled
       }
 
@@ -164,6 +170,14 @@ export async function connectToPeer(
     try { prevHandler && prevHandler(msg); } catch {}
   });
 
+  // ---- Small nicety: restore previous encrypted handler when PC is done ----
+  const restoreHandler = () => { try { if (prevHandler) ss.onEncrypted(sid, prevHandler); } catch {} };
+  pc.addEventListener('connectionstatechange', () => {
+    if (['closed', 'failed', 'disconnected'].includes(pc.connectionState)) {
+      restoreHandler();
+    }
+  });
+
   // 4) Kick off initial negotiation from initiator if no tracks were provided yet.
   // (If tracks were added above, onnegotiationneeded already fired.)
   if (initiator && (!localStreams || localStreams.length === 0)) {
@@ -171,7 +185,7 @@ export async function connectToPeer(
       makingOffer = true;
       const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
       await pc.setLocalDescription(offer);
-      await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
+      await send(sid, { webrtc: 'offer', desc: pc.localDescription });
     } finally {
       makingOffer = false;
     }
