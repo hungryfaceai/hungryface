@@ -661,7 +661,13 @@
             catch (e) { _warn('onBeforeAnswer: addTransceiver failed', e?.message); }
           }
         }));
-
+        try {
+          // Tell the initiator we’re now listening for signaling messages
+          ss.sendJSON(sid, { webrtc: 'ready' });
+          _info('Sent webrtc:ready to initiator', { sid });
+        } catch (e) {
+          _warn('Failed to send webrtc:ready', e?.message || e);
+        }
         
         _info('connectToPeer() resolved', { sid, pcExists: !!pc, dcLabel: dc?.label });
       } catch (e) {
