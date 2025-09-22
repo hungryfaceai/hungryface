@@ -9,8 +9,8 @@ export async function connectToPeer(ss, peerFp, {
   onData,            // (message, dc) => {}
   label = 'app',     // datachannel label (initiator creates it)
   verifyDataChannel = false, // optional DC proof (see note)
-  localStream = null,        // NEW: add tracks before first offer
-  localTracks = null,        // NEW: optional alternative to localStream
+  localStream = null,        // add tracks before first offer
+  localTracks = null,        // optional alternative to localStream
 } = {}) {
   // 1) Make sure we're paired
   const peer = ss.trusted.find(d => d.fp === peerFp);
@@ -37,8 +37,6 @@ export async function connectToPeer(ss, peerFp, {
                   : localStream ? localStream.getTracks()
                   : [];
     if (tracks.length) {
-      const ms = localStream || new MediaStream();
-      // If localStream not given but tracks are, build a temporary stream for addTrack’s 2nd arg.
       const streamForSender = localStream || new MediaStream(tracks);
       for (const t of tracks) pc.addTrack(t, streamForSender);
     }
@@ -46,7 +44,7 @@ export async function connectToPeer(ss, peerFp, {
 
   // Drive negotiation from the initiator only
   pc.onnegotiationneeded = async () => {
-    if (!initiator) return; // only initiator starts offers
+    if (!initiator) return;
     try {
       makingOffer = true;
       const offer = await pc.createOffer({
@@ -81,7 +79,6 @@ export async function connectToPeer(ss, peerFp, {
   // Handle incoming encrypted signaling on this sid only (role-gated + rollback)
   ss.onEncrypted(sid, async (msg) => {
     if (msg.webrtc === 'offer') {
-      // Only the responder handles remote offers
       if (initiator) return;
 
       const offer = new RTCSessionDescription(msg.desc);
@@ -89,19 +86,10 @@ export async function connectToPeer(ss, peerFp, {
 
       if (offerCollision) {
         if (!polite) return;                 // impolite side ignores glare
-        try {
-          await pc.setLocalDescription({ type: 'rollback' }); // polite side rolls back
-        } catch (e) {
-          // benign if not in a state allowing rollback
-        }
+        try { await pc.setLocalDescription({ type: 'rollback' }); } catch {}
       }
 
-      try {
-        await setRemoteWithTimeout(pc, offer);
-      } catch (e) {
-        // If we hit a timing edge, drop the offer (polite flow should resend)
-        return;
-      }
+      try { await setRemoteWithTimeout(pc, offer); } catch { return; }
 
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -110,15 +98,9 @@ export async function connectToPeer(ss, peerFp, {
     }
 
     if (msg.webrtc === 'answer') {
-      // Only the initiator expects/handles an answer
       if (!initiator) return;
-      // Ignore late/duplicate answers if we no longer have a local offer pending
-      if (pc.signalingState !== 'have-local-offer') return;
-      try {
-        await setRemoteWithTimeout(pc, new RTCSessionDescription(msg.desc));
-      } catch (e) {
-        // Likely a race or late answer; safe to ignore
-      }
+      if (pc.signalingState !== 'have-local-offer') return; // ignore late/dup
+      try { await setRemoteWithTimeout(pc, new RTCSessionDescription(msg.desc)); } catch {}
       return;
     }
 
@@ -127,16 +109,13 @@ export async function connectToPeer(ss, peerFp, {
         if (msg.candidate) await pc.addIceCandidate(msg.candidate);
         else await pc.addIceCandidate(null); // end-of-candidates
       } catch (err) {
-        // benign if it arrives early / after close
         console.debug('ICE add error:', err);
       }
       return;
     }
   });
 
-  // NOTE: No manual "kick off" initial offer here.
-  // Adding tracks (or creating the data channel) will trigger onnegotiationneeded,
-  // and only the initiator will generate/signal the offer.
+  // NOTE: No manual "kick off" offer; onnegotiationneeded drives offers.
 
   return { pc, dc, sid };
 }
@@ -149,30 +128,47 @@ async function setRemoteWithTimeout(pc, desc, ms = 5000) {
   ]);
 }
 
-// Wait for SecureSignal to create a responder session from a trusted peer
+// Wait for SecureSignal to create *or already have* a responder session from a trusted peer
 function waitForSessionFrom(ss, peerFp, timeoutMs = 15000) {
+  // 1) Resolve immediately if a responder session for this peer already exists.
+  try {
+    if (ss && ss.sessions && typeof ss.sessions.forEach === 'function') {
+      let existingSid = null;
+      ss.sessions.forEach((v, k) => {
+        if (v && v.role === 'responder' && (v.toFp === peerFp || v.peerFp === peerFp)) existingSid = k;
+      });
+      if (existingSid) return Promise.resolve(existingSid);
+    }
+  } catch {}
+
+  // 2) Otherwise, await the next matching onSession event.
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       cleanup();
       reject(new Error('Timed out waiting for session'));
     }, timeoutMs);
 
-    function onSession(e) {
-      if (e.role === 'responder' && e.peerFp === peerFp) {
+    const originalOnSession = ss.onSession; // save original
+
+    function handle(e) {
+      const evt = e && e.sid ? e : (e && e[0]) ? e[0] : e; // guard against odd callers
+      if (evt && evt.role === 'responder' && evt.peerFp === peerFp) {
         cleanup();
-        resolve(e.sid);
+        resolve(evt.sid);
       }
     }
+
     function cleanup() {
-      clearTimeout(t);
-      // Re-wrap onSession while preserving any existing hook:
-      const prev = ss.onSession;
-      ss.onSession = prev; // no-op if you bound directly; otherwise app should re-attach
+      clearTimeout(timer);
+      // restore the original handler
+      ss.onSession = originalOnSession;
     }
 
-    // Wrap existing ss.onSession so we don't clobber app behavior
-    const prev = ss.onSession;
-    ss.onSession = (...args) => { try { prev && prev(...args); } catch {} ; onSession(...(args[0] || args)); };
+    // Wrap to preserve app behavior, then call our handler
+    ss.onSession = (...args) => {
+      try { originalOnSession && originalOnSession(...args); } catch {}
+      try { handle(args[0]); } catch {}
+    };
   });
 }
 
@@ -180,7 +176,6 @@ function waitForSessionFrom(ss, peerFp, timeoutMs = 15000) {
 function attachDcHandlers(dc, onData, verifyDataChannel) {
   dc.onopen = () => {
     if (!verifyDataChannel) return;
-    // Simple liveness proof: both sides echo a small token before sending real data
     const token = Math.random().toString(36).slice(2, 10);
     const timer = setTimeout(() => { try { dc.close(); } catch {} }, 5000);
     function handler(ev) {
