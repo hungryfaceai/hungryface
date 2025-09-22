@@ -698,38 +698,31 @@
         talkTrack: null, talkStream: null, stream: null
       });
       _info('Session stored', { sid, count: sessions.size });
-
-      // listen for the sender's room announcement (encrypted)
-    const prevHandler = ss.getEncryptedHandler?.(sid); // if your SecureSignal exposes it
-    sessions.set(sid, {
-      pc, dc, peerFp, room: null, selected: false,
-      talkTx, talkSender: talkTx?.sender || null,
-      talkTrack: null, talkStream: null, stream: null
-    });
-    _info('Session stored', { sid, count: sessions.size });
-    
-    /* ⬇️ Chain to the WebRTC handler that connectToPeer installed */
-    const prevHandler = ss.getEncryptedHandler?.(sid); // if your SecureSignal exposes it
-    ss.onEncrypted(sid, (msg) => {
-      // 1) Let secure-webrtc process offers/answers/ice/ready
-      try { prevHandler && prevHandler(msg); } catch (e) { _warn('prevHandler threw', e?.message || e); }
-    
-      // 2) Your app-level messages (room announce, etc.)
-      _evt('ss.onEncrypted', { sid, msgType: msg?.type, role: msg?.role, hasRoom: !!msg?.room });
-      if (msg?.type === 'announce' && msg?.role === 'sender') {
-        const s = sessions.get(sid); if (!s) { _warn('onEncrypted: session not found', { sid }); return; }
-        s.room = (msg.room || '').trim();
-        _info('Sender announced room', { sid, room: s.room, desiredRoom });
-    
-        const alreadySelected = Array.from(sessions.values()).some(x => x.selected);
-        if (!alreadySelected && s.room === desiredRoom) {
-          _info('Auto-selecting session for desired room', { sid, room: s.room });
-          selectSession(sid);
-        } else {
-          _info('Not selecting session', { alreadySelected, match: s.room === desiredRoom });
+      
+      /* App-level encrypted messages for THIS sid (ignore WebRTC ones). 
+         secure-webrtc.js is already handling webrtc: offer/answer/ice/ready. */
+      ss.onEncrypted(sid, (msg) => {
+        if (msg && msg.webrtc) return; // ← let secure-webrtc.js handle WebRTC
+      
+        _evt('ss.onEncrypted', { sid, msgType: msg?.type, role: msg?.role, hasRoom: !!msg?.room });
+      
+        if (msg?.type === 'announce' && msg?.role === 'sender') {
+          const s = sessions.get(sid); 
+          if (!s) { _warn('onEncrypted: session not found', { sid }); return; }
+      
+          s.room = (msg.room || '').trim();
+          _info('Sender announced room', { sid, room: s.room, desiredRoom });
+      
+          // Auto-select the first session that matches ?room=
+          const alreadySelected = Array.from(sessions.values()).some(x => x.selected);
+          if (!alreadySelected && s.room === desiredRoom) {
+            _info('Auto-selecting session for desired room', { sid, room: s.room });
+            selectSession(sid);
+          } else {
+            _info('Not selecting session', { alreadySelected, match: s.room === desiredRoom });
+          }
         }
-      }
-    });
+      });
 
     };
   </script>
