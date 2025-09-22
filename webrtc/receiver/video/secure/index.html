@@ -699,21 +699,31 @@
       });
       _info('Session stored', { sid, count: sessions.size });
       
-      /* App-level encrypted messages for THIS sid (ignore WebRTC ones). 
-         secure-webrtc.js is already handling webrtc: offer/answer/ice/ready. */
-      ss.onEncrypted(sid, (msg) => {
-        if (msg && msg.webrtc) return; // ← let secure-webrtc.js handle WebRTC
+      // Chain the handler secure-webrtc.js installed for this sid
+      const prevHandler =
+        (typeof ss.getEncryptedHandler === 'function' && ss.getEncryptedHandler(sid)) ||
+        (ss._sidHandlers && typeof ss._sidHandlers.get === 'function' && ss._sidHandlers.get(sid)) ||
+        null;
       
+      ss.onEncrypted(sid, (msg) => {
+        // Let secure-webrtc.js handle WebRTC messages first
+        if (msg && msg.webrtc) {
+          try { prevHandler && prevHandler(msg); }
+          catch (e) { _warn('prevHandler threw', e?.message || e); }
+          return;
+        }
+      
+        // ---- Your app-level messages (room announce, etc.) ----
         _evt('ss.onEncrypted', { sid, msgType: msg?.type, role: msg?.role, hasRoom: !!msg?.room });
       
         if (msg?.type === 'announce' && msg?.role === 'sender') {
-          const s = sessions.get(sid); 
+          const s = sessions.get(sid);
           if (!s) { _warn('onEncrypted: session not found', { sid }); return; }
       
           s.room = (msg.room || '').trim();
           _info('Sender announced room', { sid, room: s.room, desiredRoom });
       
-          // Auto-select the first session that matches ?room=
+          // Auto-select the first matching room
           const alreadySelected = Array.from(sessions.values()).some(x => x.selected);
           if (!alreadySelected && s.room === desiredRoom) {
             _info('Auto-selecting session for desired room', { sid, room: s.room });
@@ -723,6 +733,7 @@
           }
         }
       });
+
 
     };
   </script>
