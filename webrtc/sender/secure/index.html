@@ -735,43 +735,49 @@
     async function connectTrustedReceiver() {
       const peerFp = chooseTrustedPeer();
       console.log(__LOG_SCOPE, '[connect] to trusted receiver', { peerFp });
-
+    
+      // ✅ Pass localStreams so tracks are added BEFORE the first offer
       const { pc, dc, sid } = await connectToPeer(ss, peerFp, {
         initiator: true,
+        localStreams: [localStream],            // <-- add this line
         rtcConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
         label: 'pose',
-        onData: (msg, ch) => { /* handled by dc.onmessage wired in setupPoseDC */ },
+        onData: (msg, ch) => { /* handled in setupPoseDC */ },
         onTrack: (e) => {
           try {
             const stream = e.streams?.[0];
-            console.log(__LOG_SCOPE, '[connect] onTrack handler', { streams: e.streams?.length || 0, kind: e.track?.kind, id: e.track?.id });
+            console.log(__LOG_SCOPE, '[connect] onTrack handler', {
+              streams: e.streams?.length || 0, kind: e.track?.kind, id: e.track?.id
+            });
             if (stream) {
               talkbackAudio.srcObject = stream;
               talkbackAudio.muted = false;
               talkbackAudio.volume = 1.0;
-              talkbackAudio.play().catch(err => console.warn(__LOG_SCOPE, '[talkback] play failed', err?.message||err));
+              talkbackAudio.play().catch(err =>
+                console.warn(__LOG_SCOPE, '[talkback] play failed', err?.message||err)
+              );
             }
           } catch (err) {
             console.warn(__LOG_SCOPE, '[connect] onTrack err', err);
           }
         }
       });
-
+    
       console.log(__LOG_SCOPE, '[connect] connectedToPeer()', { sid, havePC: !!pc, haveDC: !!dc });
       wirePCDebug(pc);
-
-      // add local tracks
-      if (localStream) {
-        console.log(__LOG_SCOPE, '[connect] add local tracks', localStream.getTracks().map(t=>({kind:t.kind,id:t.id,enabled:t.enabled})));
-        localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-      }
-
-      // remember
+    
+      // ❌ REMOVE this entire block (tracks are now added by secure-webrtc before the offer)
+      // if (localStream) {
+      //   console.log(__LOG_SCOPE, '[connect] add local tracks',
+      //     localStream.getTracks().map(t=>({kind:t.kind,id:t.id,enabled:t.enabled})));
+      //   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+      // }
+    
+      // remember + wire DC
       rtc = { pc, dc, sid, peerFp };
-
-      // wire our datachannel behaviors
       setupPoseDC(dc);
     }
+
 
     const send = (_obj) => {}; // legacy no-op
 
