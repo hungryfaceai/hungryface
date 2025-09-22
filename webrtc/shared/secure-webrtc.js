@@ -18,6 +18,7 @@ export async function connectToPeer(
     onData,                         // (message, dc) => {}
     label = 'app',                  // datachannel label (initiator creates it)
     verifyDataChannel = false,      // optional DC proof
+    onBeforeAnswer,
   } = {}
 ) {
   // 1) Make sure we're paired
@@ -96,6 +97,10 @@ export async function connectToPeer(
       }
 
       await pc.setRemoteDescription(offer);
+      // Allow responder to add transceivers/tracks before answering
+      if (typeof onBeforeAnswer === 'function') {
+        try { await onBeforeAnswer(pc); } catch {}
+      }
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       await ss.sendJSON(sid, { webrtc: 'answer', desc: pc.localDescription });
