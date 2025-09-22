@@ -22,6 +22,23 @@ export async function connectToPeer(ss, peerFp, {
   // 3) Wire encrypted handler for WebRTC messages on this sid
   const pc = new RTCPeerConnection(rtcConfig);
 
+  // --- Perfect negotiation helpers ---
+  let makingOffer = false;
+  const polite = !initiator; // responder is polite; initiator is impolite
+
+  // Drive negotiation from the initiator only
+  pc.onnegotiationneeded = async () => {
+    if (!initiator) return; // only initiator starts offers
+    try {
+      makingOffer = true;
+      const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+      await pc.setLocalDescription(offer);
+      await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
+    } finally {
+      makingOffer = false;
+    }
+  };
+
   // Forward local ICE to the peer via encrypted signaling
   pc.onicecandidate = ({ candidate }) => {
     ss.sendJSON(sid, { webrtc: 'ice', candidate });
@@ -42,19 +59,34 @@ export async function connectToPeer(ss, peerFp, {
     };
   }
 
-  // Handle incoming encrypted signaling on this sid only
+  // Handle incoming encrypted signaling on this sid only (role-gated + rollback)
   ss.onEncrypted(sid, async (msg) => {
     if (msg.webrtc === 'offer') {
-      await pc.setRemoteDescription(new RTCSessionDescription(msg.desc));
+      // Only the responder handles remote offers
+      if (initiator) return;
+
+      const offer = new RTCSessionDescription(msg.desc);
+      const offerCollision = makingOffer || pc.signalingState !== 'stable';
+
+      if (offerCollision) {
+        if (!polite) return;                 // impolite side ignores glare
+        await pc.setLocalDescription({ type: 'rollback' }); // polite side rolls back
+      }
+
+      await pc.setRemoteDescription(offer);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       await ss.sendJSON(sid, { webrtc: 'answer', desc: pc.localDescription });
       return;
     }
+
     if (msg.webrtc === 'answer') {
+      // Only the initiator expects/handles an answer
+      if (!initiator) return;
       await pc.setRemoteDescription(new RTCSessionDescription(msg.desc));
       return;
     }
+
     if (msg.webrtc === 'ice') {
       try {
         if (msg.candidate) await pc.addIceCandidate(msg.candidate);
@@ -67,11 +99,18 @@ export async function connectToPeer(ss, peerFp, {
     }
   });
 
-  // 4) If we're the initiator, create the offer and send it (encrypted)
+  // 4) Kick off the initial negotiation from the initiator
   if (initiator) {
-    const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-    await pc.setLocalDescription(offer);
-    await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
+    // Trigger onnegotiationneeded by creating an offer flow immediately
+    // (safe even if no transceivers/tracks yet; SDP will be updated on next renegotiation)
+    try {
+      makingOffer = true;
+      const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+      await pc.setLocalDescription(offer);
+      await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
+    } finally {
+      makingOffer = false;
+    }
   }
 
   return { pc, dc, sid };
