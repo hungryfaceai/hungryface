@@ -170,7 +170,7 @@ function waitForSessionFrom(ss, peerFp, timeoutMs = 15000) {
     const prev = ss.onSession;
     ss.onSession = (...args) => {
       try { prev && prev(...args); } catch {}
-      onSession(...(args[0] || args));
+      onSession(args[0]); 
     };
   });
 }
