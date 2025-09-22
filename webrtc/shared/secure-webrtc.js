@@ -85,6 +85,26 @@ export async function connectToPeer(
 
   // Encrypted signaling handler (role-gated + glare-safe)
   ss.onEncrypted(sid, async (msg) => {
+    // Responder lets us know it has installed its handlers.
+    // Initiator should (re)start negotiation now.
+    if (msg.webrtc === 'ready') {
+      if (initiator) {
+        try {
+          // If tracks weren’t added yet, you can add them here (optional).
+          // Then (re)kick negotiation safely if we’re stable.
+          if (pc.signalingState === 'stable' && !makingOffer) {
+            makingOffer = true;
+            const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+            await pc.setLocalDescription(offer);
+            await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
+          }
+        } finally {
+          makingOffer = false;
+        }
+      }
+      return;
+    }
+
     if (msg.webrtc === 'offer') {
       // Only responder handles remote offers
       if (initiator) return;
