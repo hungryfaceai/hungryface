@@ -1,5 +1,5 @@
 // secure-webrtc.js — Gate WebRTC on pairing + encrypted signaling via SecureSignal
-// Usage (initiator): const {pc, dc} = await connectToPeer(ss, peerFp, {initiator:true});
+// Usage (initiator): const {pc, dc} = await connectToPeer(ss, peerFp, { initiator:true, localStream });
 // Usage (responder): waits for ss.onSession({role:'responder'}) and auto-accepts only for that peer.
 
 export async function connectToPeer(ss, peerFp, {
@@ -9,6 +9,8 @@ export async function connectToPeer(ss, peerFp, {
   onData,            // (message, dc) => {}
   label = 'app',     // datachannel label (initiator creates it)
   verifyDataChannel = false, // optional DC proof (see note)
+  localStream = null,        // NEW: add tracks before first offer
+  localTracks = null,        // NEW: optional alternative to localStream
 } = {}) {
   // 1) Make sure we're paired
   const peer = ss.trusted.find(d => d.fp === peerFp);
@@ -19,19 +21,38 @@ export async function connectToPeer(ss, peerFp, {
     ? (await ss.startSession(peerFp)).sid
     : await waitForSessionFrom(ss, peerFp); // waits for role:'responder' with this peer
 
-  // 3) Wire encrypted handler for WebRTC messages on this sid
+  // 3) Create RTCPeerConnection
   const pc = new RTCPeerConnection(rtcConfig);
 
   // --- Perfect negotiation helpers ---
   let makingOffer = false;
   const polite = !initiator; // responder is polite; initiator is impolite
 
+  // Optional media (remote)
+  if (onTrack) pc.ontrack = onTrack;
+
+  // --- Add local media BEFORE any offer is created (prevents glare) ---
+  if (initiator) {
+    const tracks = Array.isArray(localTracks) ? localTracks
+                  : localStream ? localStream.getTracks()
+                  : [];
+    if (tracks.length) {
+      const ms = localStream || new MediaStream();
+      // If localStream not given but tracks are, build a temporary stream for addTrack’s 2nd arg.
+      const streamForSender = localStream || new MediaStream(tracks);
+      for (const t of tracks) pc.addTrack(t, streamForSender);
+    }
+  }
+
   // Drive negotiation from the initiator only
   pc.onnegotiationneeded = async () => {
     if (!initiator) return; // only initiator starts offers
     try {
       makingOffer = true;
-      const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true
+      });
       await pc.setLocalDescription(offer);
       await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
     } finally {
@@ -44,14 +65,12 @@ export async function connectToPeer(ss, peerFp, {
     ss.sendJSON(sid, { webrtc: 'ice', candidate });
   };
 
-  // Optional media
-  if (onTrack) pc.ontrack = onTrack;
-
   // Data channel setup
   let dc;
   if (initiator) {
     dc = pc.createDataChannel(label, { ordered: true });
     attachDcHandlers(dc, onData, verifyDataChannel);
+    // Creating a DC will also fire onnegotiationneeded → initiator will send the first offer.
   } else {
     pc.ondatachannel = (e) => {
       dc = e.channel;
@@ -70,10 +89,20 @@ export async function connectToPeer(ss, peerFp, {
 
       if (offerCollision) {
         if (!polite) return;                 // impolite side ignores glare
-        await pc.setLocalDescription({ type: 'rollback' }); // polite side rolls back
+        try {
+          await pc.setLocalDescription({ type: 'rollback' }); // polite side rolls back
+        } catch (e) {
+          // benign if not in a state allowing rollback
+        }
       }
 
-      await pc.setRemoteDescription(offer);
+      try {
+        await setRemoteWithTimeout(pc, offer);
+      } catch (e) {
+        // If we hit a timing edge, drop the offer (polite flow should resend)
+        return;
+      }
+
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       await ss.sendJSON(sid, { webrtc: 'answer', desc: pc.localDescription });
@@ -83,7 +112,13 @@ export async function connectToPeer(ss, peerFp, {
     if (msg.webrtc === 'answer') {
       // Only the initiator expects/handles an answer
       if (!initiator) return;
-      await pc.setRemoteDescription(new RTCSessionDescription(msg.desc));
+      // Ignore late/duplicate answers if we no longer have a local offer pending
+      if (pc.signalingState !== 'have-local-offer') return;
+      try {
+        await setRemoteWithTimeout(pc, new RTCSessionDescription(msg.desc));
+      } catch (e) {
+        // Likely a race or late answer; safe to ignore
+      }
       return;
     }
 
@@ -99,21 +134,19 @@ export async function connectToPeer(ss, peerFp, {
     }
   });
 
-  // 4) Kick off the initial negotiation from the initiator
-  if (initiator) {
-    // Trigger onnegotiationneeded by creating an offer flow immediately
-    // (safe even if no transceivers/tracks yet; SDP will be updated on next renegotiation)
-    try {
-      makingOffer = true;
-      const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-      await pc.setLocalDescription(offer);
-      await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
-    } finally {
-      makingOffer = false;
-    }
-  }
+  // NOTE: No manual "kick off" initial offer here.
+  // Adding tracks (or creating the data channel) will trigger onnegotiationneeded,
+  // and only the initiator will generate/signal the offer.
 
   return { pc, dc, sid };
+}
+
+// Defensive timeout wrapper for applying remote descriptions
+async function setRemoteWithTimeout(pc, desc, ms = 5000) {
+  return await Promise.race([
+    pc.setRemoteDescription(desc),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('setRemoteDescription timeout')), ms)),
+  ]);
 }
 
 // Wait for SecureSignal to create a responder session from a trusted peer
@@ -139,7 +172,7 @@ function waitForSessionFrom(ss, peerFp, timeoutMs = 15000) {
 
     // Wrap existing ss.onSession so we don't clobber app behavior
     const prev = ss.onSession;
-    ss.onSession = (...args) => { try { prev && prev(...args); } catch {} ; onSession(...args[0] || args); };
+    ss.onSession = (...args) => { try { prev && prev(...args); } catch {} ; onSession(...(args[0] || args)); };
   });
 }
 
