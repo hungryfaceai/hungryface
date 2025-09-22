@@ -90,9 +90,11 @@ export async function connectToPeer(
     if (msg.webrtc === 'ready') {
       if (initiator) {
         try {
-          // If tracks weren’t added yet, you can add them here (optional).
-          // Then (re)kick negotiation safely if we’re stable.
-          if (pc.signalingState === 'stable' && !makingOffer) {
+          if (pc.signalingState === 'have-local-offer' && pc.localDescription) {
+            // Resend the existing offer so the responder (now ready) can answer
+            await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
+          } else if (pc.signalingState === 'stable' && !makingOffer) {
+            // No pending offer — create a fresh one
             makingOffer = true;
             const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
             await pc.setLocalDescription(offer);
