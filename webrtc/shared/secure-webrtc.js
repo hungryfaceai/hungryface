@@ -13,7 +13,7 @@ export async function connectToPeer(
   {
     initiator = false,
     rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
-    localStreams = [],              // NEW: streams whose tracks will be added before creating an offer
+    localStreams = [],              // streams whose tracks will be added before creating an offer
     onTrack,                        // (event) => {}
     onData,                         // (message, dc) => {}
     label = 'app',                  // datachannel label (initiator creates it)
@@ -83,74 +83,85 @@ export async function connectToPeer(
     }
   };
 
-  // Encrypted signaling handler (role-gated + glare-safe)
+  // --- Encrypted signaling handler (role-gated + glare-safe) ---
+  // IMPORTANT: do not steal app-level handlers. Chain any existing one.
+  const prevHandler =
+    (typeof ss.getEncryptedHandler === 'function' && ss.getEncryptedHandler(sid)) ||
+    (ss._sidHandlers && typeof ss._sidHandlers.get === 'function' && ss._sidHandlers.get(sid)) ||
+    null;
+
   ss.onEncrypted(sid, async (msg) => {
-    // Responder lets us know it has installed its handlers.
-    // Initiator should (re)start negotiation now.
-    if (msg.webrtc === 'ready') {
-      if (initiator) {
-        try {
-          if (pc.signalingState === 'have-local-offer' && pc.localDescription) {
-            // Resend the existing offer so the responder (now ready) can answer
-            await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
-          } else if (pc.signalingState === 'stable' && !makingOffer) {
-            // No pending offer — create a fresh one
-            makingOffer = true;
-            const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-            await pc.setLocalDescription(offer);
-            await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
+    // Handle only our WebRTC messages here; let the app see its own messages.
+    if (msg && msg.webrtc) {
+      // Responder lets us know it has installed its handlers.
+      // Initiator should (re)start negotiation now.
+      if (msg.webrtc === 'ready') {
+        if (initiator) {
+          try {
+            if (pc.signalingState === 'have-local-offer' && pc.localDescription) {
+              // Resend the existing offer so the responder (now ready) can answer
+              await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
+            } else if (pc.signalingState === 'stable' && !makingOffer) {
+              // No pending offer — create a fresh one
+              makingOffer = true;
+              const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+              await pc.setLocalDescription(offer);
+              await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
+            }
+          } finally {
+            makingOffer = false;
           }
-        } finally {
-          makingOffer = false;
         }
-      }
-      return;
-    }
-
-    if (msg.webrtc === 'offer') {
-      // Only responder handles remote offers
-      if (initiator) return;
-
-      const offer = new RTCSessionDescription(msg.desc);
-      const offerCollision = makingOffer || pc.signalingState !== 'stable';
-
-      if (offerCollision) {
-        if (!polite) return; // impolite side ignores glare
-        try { await pc.setLocalDescription({ type: 'rollback' }); } catch {}
+        return; // handled
       }
 
-      await pc.setRemoteDescription(offer);
-      // Allow responder to add transceivers/tracks before answering
-      if (typeof onBeforeAnswer === 'function') {
-        try { await onBeforeAnswer(pc); } catch {}
+      if (msg.webrtc === 'offer') {
+        // Only responder handles remote offers
+        if (initiator) return;
+
+        const offer = new RTCSessionDescription(msg.desc);
+        const offerCollision = makingOffer || pc.signalingState !== 'stable';
+
+        if (offerCollision) {
+          if (!polite) return; // impolite side ignores glare
+          try { await pc.setLocalDescription({ type: 'rollback' }); } catch {}
+        }
+
+        await pc.setRemoteDescription(offer);
+        // Allow responder to add transceivers/tracks before answering
+        if (typeof onBeforeAnswer === 'function') {
+          try { await onBeforeAnswer(pc); } catch {}
+        }
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await ss.sendJSON(sid, { webrtc: 'answer', desc: pc.localDescription });
+        return; // handled
       }
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      await ss.sendJSON(sid, { webrtc: 'answer', desc: pc.localDescription });
-      return;
-    }
 
-    if (msg.webrtc === 'answer') {
-      // Only the initiator expects/handles an answer
-      if (!initiator) return;
-
-      // Hardening: ignore duplicates/out-of-order answers
-      if (pc.signalingState !== 'have-local-offer') return;
-
-      await pc.setRemoteDescription(new RTCSessionDescription(msg.desc));
-      return;
-    }
-
-    if (msg.webrtc === 'ice') {
-      try {
-        if (msg.candidate) await pc.addIceCandidate(msg.candidate);
-        else await pc.addIceCandidate(null); // end-of-candidates
-      } catch (err) {
-        // benign if it arrives early / after close
-        console.debug('ICE add error:', err);
+      if (msg.webrtc === 'answer') {
+        // Only the initiator expects/handles an answer
+        if (!initiator) return;
+        // Hardening: ignore duplicates/out-of-order answers
+        if (pc.signalingState !== 'have-local-offer') return;
+        await pc.setRemoteDescription(new RTCSessionDescription(msg.desc));
+        return; // handled
       }
-      return;
+
+      if (msg.webrtc === 'ice') {
+        try {
+          if (msg.candidate) await pc.addIceCandidate(msg.candidate);
+          else await pc.addIceCandidate(null); // end-of-candidates
+        } catch (err) {
+          // benign if it arrives early / after close
+          console.debug('ICE add error:', err);
+        }
+        return; // handled
+      }
+      // Unknown webrtc subtype: fall through to app just in case
     }
+
+    // Not a WebRTC message (or we chose to fall through): let the previous app handler see it.
+    try { prevHandler && prevHandler(msg); } catch {}
   });
 
   // 4) Kick off initial negotiation from initiator if no tracks were provided yet.
@@ -192,7 +203,7 @@ function waitForSessionFrom(ss, peerFp, timeoutMs = 15000) {
     const prev = ss.onSession;
     ss.onSession = (...args) => {
       try { prev && prev(...args); } catch {}
-      onSession(args[0]); 
+      onSession(args[0]);
     };
   });
 }
