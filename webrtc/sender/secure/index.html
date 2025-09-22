@@ -712,7 +712,7 @@
     function wirePCDebug(pc) {
       const id = __gid();
       console.log(__LOG_SCOPE, '[PC'+id+'] wire debug listeners');
-
+    
       pc.addEventListener('connectionstatechange', () => console.log(__LOG_SCOPE,'[PC'+id+'] connectionstate', pc.connectionState));
       pc.addEventListener('iceconnectionstatechange', () => console.log(__LOG_SCOPE,'[PC'+id+'] iceconnectionstate', pc.iceConnectionState));
       pc.addEventListener('signalingstatechange', () => console.log(__LOG_SCOPE,'[PC'+id+'] signalingstate', pc.signalingState));
@@ -722,15 +722,21 @@
         const t = ev.track;
         console.log(__LOG_SCOPE,'[PC'+id+'] ontrack', { kind: t.kind, id: t.id, streams: ev.streams?.length || 0, ready: t.readyState });
       });
-      pc.onicecandidate = (e) => {
+    
+      // ✅ use addEventListener — do NOT assign pc.onicecandidate
+      pc.addEventListener('icecandidate', (e) => {
         const c = e.candidate;
         if (c) console.log(__LOG_SCOPE,'[PC'+id+'] icecandidate', { type: c.type, proto: c.protocol, addr: c.address, relay: c.relayProtocol, candidate: (c.candidate||'').slice(0,80)+'…' });
         else console.log(__LOG_SCOPE,'[PC'+id+'] icecandidate = null (gathering complete)');
-      };
-      pc.onicecandidateerror = (e) => {
-        console.error(__LOG_SCOPE,'[PC'+id+'] icecandidateerror', { address: e.address, port: e.port, url: e.url, errorCode: e.errorCode, text: e.errorText });
-      };
+      });
+    
+      pc.addEventListener('icecandidateerror', (e) => {
+        console.error(__LOG_SCOPE,'[PC'+id+'] icecandidateerror', {
+          address: e.address, port: e.port, url: e.url, errorCode: e.errorCode, text: e.errorText || e.text
+        });
+      });
     }
+
 
     async function connectTrustedReceiver() {
       const peerFp = chooseTrustedPeer();
