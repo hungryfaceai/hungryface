@@ -20,6 +20,7 @@ export async function connectToPeer(
     verifyDataChannel = false,      // optional DC proof
     onBeforeAnswer,
     sid: knownSid,
+    streamMeta,
   } = {}
 ) {
   // 1) Make sure we're paired
@@ -57,6 +58,12 @@ export async function connectToPeer(
   if (initiator) {
     dc = pc.createDataChannel(label, { ordered: true });
     attachDcHandlers(dc, onData, verifyDataChannel);
+    // ⬇️ NEW: send metadata once the DC opens (if provided)
+    if (streamMeta && typeof streamMeta === 'object') {
+      dc.addEventListener('open', () => {
+        try { dc.send(JSON.stringify({ type: 'meta', ...streamMeta })); } catch {}
+      });
+    }
   } else {
     pc.ondatachannel = (e) => {
       dc = e.channel;
