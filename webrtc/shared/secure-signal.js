@@ -7,13 +7,16 @@ export class SecureSignal {
     this.url = url; this.ws = null;
     this.pending = new Map();
     this.trusted = [];
-    this.sessions = new Map(); // sid -> { toFp, key, onmsg, role }
+    this.sessions = new Map(); // sid -> { toFp, key, role, handlers: Function[], onmsg (legacy) }
     this.onPairPrompt = onPairPrompt || (()=>{});
     this.onTrustedList = onTrustedList || (()=>{});
     this.onOpen = onOpen || (()=>{});
     this.onSession = onSession || (()=>{});
     this._qrNonce = null;         // stored when we render QR
     this._openWaiters = [];       // waiters for WS "open"
+
+    // New: keep a stable, chainable per-sid dispatcher reference
+    this._sidHandlers = new Map(); // sid -> dispatcher function(msg, from)
   }
 
   async init() {
@@ -190,11 +193,18 @@ export class SecureSignal {
       if (m.kind === 'eph-reply') { this._resolveWaiter(`eph-reply:${m.sid}`, m); return; }
       if (m.kind === 'eph-hello') { await this._handleEphHello(m); return; }
       if (m.kind === 'enc') {
-        const s = this.sessions.get(m.sid); if (!s) return;
+        const s = this.sessions.get(m.sid); if (!s || !s.key) return;
         try {
           const pt = await aesGcmDecrypt(s.key, b64uToBytes(m.iv), b64uToBytes(m.ct));
           const obj = JSON.parse(td.decode(pt));
-          s.onmsg && s.onmsg(obj, m.from);
+          // Fan-out to all registered handlers for this sid
+          const dispatcher = this._sidHandlers.get(m.sid);
+          if (dispatcher) {
+            try { dispatcher(obj, m.from); } catch {}
+          } else if (typeof s.onmsg === 'function') {
+            // Back-compat: if only legacy single handler exists
+            try { s.onmsg(obj, m.from); } catch {}
+          }
         } catch {}
         return;
       }
@@ -257,8 +267,11 @@ export class SecureSignal {
       concatBytes(tag, ephSpki, te.encode(peer.fp), nonce)
     ));
 
-    const sess = { toFp, key:null, onmsg:null, role:'initiator' };
+    // Prepare session container (no handlers yet)
+    const sess = { toFp, key:null, role:'initiator', handlers: [], onmsg: null };
     this.sessions.set(sid, sess);
+    // Ensure a stable dispatcher is present (even if empty) so others can chain
+    this._ensureDispatcher(sid);
 
     const reply = await this._waitFor(`eph-reply:${sid}`, 15000, async () => {
       await this._whenOpen();
@@ -302,7 +315,10 @@ export class SecureSignal {
     ));
     const sessionKey = await this._deriveSessionKey(eph.privateKey, b64uToBytes(m.ephSpki), concatBytes(b64uToBytes(m.nonce), nonce));
 
-    this.sessions.set(sid, { toFp: m.from, key: sessionKey, onmsg:null, role:'responder' });
+    // Prepare session container (no handlers yet)
+    this.sessions.set(sid, { toFp: m.from, key: sessionKey, role:'responder', handlers: [], onmsg: null });
+    this._ensureDispatcher(sid);
+
     await this._whenOpen();
     this.ws.send(JSON.stringify({ op:'relay', to: peer.fp, from:this.me.fingerprint, kind:'eph-reply', sid, ephSpki: b64u(ephSpki), nonce: b64u(nonce), sig: b64u(sig) }));
     this.onSession({ sid, peerFp: m.from, role:'responder' });
@@ -321,9 +337,42 @@ export class SecureSignal {
     await this._whenOpen();
     this.ws.send(JSON.stringify({ op:'relay', to: s.toFp, from:this.me.fingerprint, kind:'enc', sid, iv: b64u(iv), ct: b64u(ct) }));
   }
+
+  // New: add a handler without overwriting others (fan-out)
   onEncrypted(sid, handler) {
     const s = this.sessions.get(sid); if (!s) throw new Error('Unknown sid');
-    s.onmsg = handler;
+    if (!s.handlers) s.handlers = [];
+    s.handlers.push(handler);
+    // Keep legacy field pointing to the dispatcher for older code paths
+    this._ensureDispatcher(sid);
+  }
+
+  // New: allow chaining — return the stable dispatcher currently used
+  getEncryptedHandler(sid) {
+    return this._sidHandlers.get(sid) || null;
+  }
+
+  // Ensure a stable per-sid dispatcher exists and is recorded in _sidHandlers (and legacy s.onmsg)
+  _ensureDispatcher(sid) {
+    const s = this.sessions.get(sid);
+    if (!s) return null;
+    const dispatcher = (msg, from) => {
+      // Fan-out to all registered handlers
+      if (Array.isArray(s.handlers)) {
+        for (const fn of s.handlers) {
+          try { fn(msg, from); } catch {}
+        }
+      }
+      // For extreme back-compat: if someone later sets s.onmsg directly, call it too (but avoid recursion)
+      if (s._legacyOnMsg && s._legacyOnMsg !== dispatcher) {
+        try { s._legacyOnMsg(msg, from); } catch {}
+      }
+    };
+    // Preserve any existing legacy handler if present before we replace s.onmsg
+    if (s.onmsg && s.onmsg !== dispatcher) s._legacyOnMsg = s.onmsg;
+    s.onmsg = dispatcher; // legacy entry point points to dispatcher
+    this._sidHandlers.set(sid, dispatcher);
+    return dispatcher;
   }
 
   _waitFor(key, timeout, firstSend) {
