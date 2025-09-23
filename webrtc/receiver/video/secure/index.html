@@ -650,7 +650,14 @@
             const s = sessions.get(sid);
             if (!s) { _warn('onTrack: session not found', { sid }); return; }
             s.stream = e.streams?.[0];
-            if (s.selected && s.stream) attachStream(s.stream);
+    
+            const anySelected = Array.from(sessions.values()).some(x => x.selected);
+            if (!anySelected) {
+              _info('Auto-selecting first session on first track', { sid });
+              selectSession(sid);
+            } else if (s.selected && s.stream) {
+              attachStream(s.stream);
+            }
           },
           onData: (msg, ch) => {
             _evt('dc.onMessage', { sid, label: ch?.label, length: (msg && (msg.byteLength || msg.length)) });
