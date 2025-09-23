@@ -714,15 +714,24 @@
         }
       
         // If we cannot chain, DO NOT overwrite the handler — you'd break WebRTC.
+        // Try to fetch the handler connectToPeer installed
+        const prevHandler =
+          (typeof ss.getEncryptedHandler === 'function' && ss.getEncryptedHandler(sid)) ||
+          (ss._sidHandlers && typeof ss._sidHandlers.get === 'function' && ss._sidHandlers.get(sid)) ||
+          null;
+        
+        // If we cannot chain, DO NOT overwrite the handler — you'd break WebRTC.
         if (!prevHandler) {
           _warn('No prev encrypted handler available; not installing page-level handler for sid', sid);
         } else {
+          // Install a single chained handler:
           ss.onEncrypted(sid, (msg) => {
             // Always forward first so secure-webrtc sees offers/answers/ice/ready
             try { prevHandler(msg); } catch (e) { _warn('prevHandler threw', e?.message || e); }
         
             // Then handle your non-WebRTC messages
             if (msg && msg.webrtc) return; // secure-webrtc already handled
+        
             _evt('ss.onEncrypted', { sid, msgType: msg?.type, role: msg?.role, hasRoom: !!msg?.room });
         
             if (msg?.type === 'announce' && msg?.role === 'sender') {
@@ -730,6 +739,7 @@
               if (!s) { _warn('onEncrypted: session not found', { sid }); return; }
               s.room = (msg.room || '').trim();
               _info('Sender announced room', { sid, room: s.room, desiredRoom });
+        
               const alreadySelected = Array.from(sessions.values()).some(x => x.selected);
               if (!alreadySelected && s.room === desiredRoom) {
                 _info('Auto-selecting session for desired room', { sid, room: s.room });
@@ -740,7 +750,7 @@
             }
           });
         }
-    };
+
   </script>
 </body>
 </html>
