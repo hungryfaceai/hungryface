@@ -698,16 +698,16 @@
     const send = (obj) => { /* ws disabled */ };
 
     function getOrCreatePC(peerId) {
-      // Not used in paired mode (secure-webrtc creates the PC). Keep for compatibility if needed.
       let rec = peers.get(peerId);
       if (rec && rec.pc) return rec.pc;
-
+    
+      // (kept for compatibility even in paired mode)
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
         bundlePolicy: 'max-bundle',
         sdpSemantics: 'unified-plan'
       });
-
+    
       pc.ontrack = (ev) => {
         try {
           if (ev.track.kind === 'audio') {
@@ -727,19 +727,19 @@
           console.warn('[SENDER] ontrack error:', e);
         }
       };
-
+    
       if (localStream) {
         localStream.getTracks().forEach(track => {
           console.log('[TRACK][sender] addTrack', track.kind, '→', peerId);
           pc.addTrack(track, localStream);
         });
       }
-
+    
       pc.ondatachannel = (ev) => {
         if (ev.channel?.label === 'pose') {
           const ch = ev.channel;
           if (LOG.dc) console.log('[DC][sender] ondatachannel: pose from', peerId);
-      
+    
           ch.onopen  = () => {
             if (LOG.dc) console.log('[POSE][sender] DC open', peerId);
             poseDCs.add(ch);
@@ -749,21 +749,14 @@
             if (lastFacePayload)  { try { ch.send(lastFacePayload);  } catch {} }
             try { ch.send(JSON.stringify({ type: 'need-face-config' })); } catch {}
           };
-      
-          ch.onclose = () => {
-            if (LOG.dc) console.log('[POSE][sender] DC close', peerId);
-            poseDCs.delete(ch);
-          };
-      
-          ch.onerror = (e) => {
-            if (LOG.dc) console.log('[POSE][sender] DC error', peerId, e);
-          };
-      
+    
+          ch.onclose = () => { if (LOG.dc) console.log('[POSE][sender] DC close', peerId); poseDCs.delete(ch); };
+          ch.onerror = (e) => { if (LOG.dc) console.log('[POSE][sender] DC error', peerId, e); };
+    
           ch.onmessage = async (ev2) => {
-            let msg;
-            try { msg = JSON.parse(ev2.data); } catch { return; }
+            let msg; try { msg = JSON.parse(ev2.data); } catch { return; }
             if (!msg || !msg.type) return;
-      
+    
             if (msg.type === 'need-modes') {
               announceAIModes();
               if (lastAudioPayload) { try { ch.send(lastAudioPayload); } catch {} }
@@ -771,11 +764,10 @@
               if (lastFacePayload)  { try { ch.send(lastFacePayload);  } catch {} }
               return;
             }
-
             if (msg.type === 'face-config') {
               let changed = false;
               if (typeof msg.minDet  === 'number' && msg.minDet  !== FACE_OPTS.minDet)  { FACE_OPTS.minDet  = msg.minDet;  changed = true; }
-              if (typeof msg.minTrack=== 'number' && msg.minTrack!== FACE_OPTS.minTrack){ FACE_OPTS.minTrack= msg.minTrack;changed = true; }
+              if (typeof msg.minTrack=== 'number' && msg.minTrack!== FACE_OPTS.minTrack){ FACE_OPTS.minTrack= msg.minTrack; changed = true; }
               if (typeof msg.minPres === 'number' && msg.minPres !== FACE_OPTS.minPres) { FACE_OPTS.minPres = msg.minPres; changed = true; }
               if (changed) {
                 await recreateSenderFaceTask();
@@ -792,9 +784,9 @@
           };
         }
       };
-
-      pc.onicecandidate = () => { /* no WS in paired mode */ };
-
+    
+      pc.onicecandidate = () => { /* paired mode: no WS */ };
+    
       pc.onconnectionstatechange = () => {
         const st = pc.connectionState;
         console.log('[SENDER][PC]', peerId, st);
@@ -805,8 +797,8 @@
           }, 3000);
         }
       };
-
-      let rec = peers.get(peerId);
+    
+      // ✅ use the existing `rec` variable (no redeclare)
       if (!rec) {
         rec = { pc, remoteDescriptionSet: false, candidateQueue: [], lastOfferSdp: null, processingOffer: false };
       } else {
