@@ -261,6 +261,16 @@
   </div>
 
   <script type="module">
+    /* ===== PAIRED-ONLY imports & flags ===== */
+    import { SecureSignal } from '/hungryface/webrtc/shared/secure-signal.js';
+    import { connectToPeer } from '/hungryface/webrtc/shared/secure-webrtc.js';
+    const PAIRED_MODE = true;
+    const URLQS = new URLSearchParams(location.search);
+    const PAIRED_PEER_FP = URLQS.get('peer') || localStorage.getItem('naptio:lastPeerFp') || '';
+    if (!PAIRED_PEER_FP) {
+      console.warn('[Sender] Missing ?peer=<fingerprint>. Pair devices and open with the peer fingerprint.');
+    }
+
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
 
@@ -344,9 +354,8 @@
     function getAudioSender(pc) {
       return pc?.getSenders?.().find(s => s.track && s.track.kind === 'audio') || null;
     }
-    function nudgePeerForOffer(peerId) {
-      try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: peerId })); } catch {}
-    }
+    // Paired-only: no WS nudge; renegotiation happens via secure-webrtc
+    function nudgePeerForOffer(peerId) { /* no-op in paired mode */ }
 
     /** Ensure we have a mic track in localStream, attach to all PCs, and trigger renegotiation. */
     async function ensureSenderHasAudioTrack() {
@@ -362,14 +371,15 @@
 
       if (peers?.size) {
         for (const [peerId, rec] of peers) {
-          const pc = rec.pc || getOrCreatePC(peerId);
+          const pc = rec.pc /* paired pc from secure-webrtc */;
+          if (!pc) continue;
           const snd = getAudioSender(pc);
           if (snd) {
             await snd.replaceTrack(track);
           } else {
             pc.addTrack(track, localStream);
           }
-          nudgePeerForOffer(peerId);
+          // no WS nudge here; secure-webrtc handles negotiationneeded
         }
       }
       return track;
@@ -609,10 +619,11 @@
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
         beginViewportSettle();
-    
-        // 👉 If we were streaming and WS got closed while backgrounded, kick a reconnect.
-        if (started && (!ws || ws.readyState !== WebSocket.OPEN)) {
-          scheduleWSReconnect('tab-visible');
+        // Paired-only: no WS reconnect logic
+        if (!PAIRED_MODE) {
+          if (started && (!ws || ws.readyState !== WebSocket.OPEN)) {
+            scheduleWSReconnect('tab-visible');
+          }
         }
       }
     });
@@ -669,7 +680,6 @@
     videoOn.addEventListener('change', applyVideoToggle);
     audioOn.addEventListener('change', async () => {
       await applyAudioToggle();
-      //applyAudioUI(); //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
       // force the AI loop to re-pick its source (tap vs separate)
       if (audioAiOn?.checked && audioAiWhere?.value === 'sender') {
         stopSenderAudioLoop();
@@ -680,65 +690,17 @@
     });
     cameraSel.addEventListener('change', () => { updateMirrorClass(); beginViewportSettle(); });
 
-    function connectWS(room) {
-      return new Promise((resolve, reject) => {
-        const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
-        setStatus('Connecting to signaling…');
-        const sock = new WebSocket(url);
-        ws = sock;
-
-        let opened = false;
-        const t = setTimeout(() => {
-          if (!opened) { try { sock.close(); } catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); }
-        }, 15000);
-
-        sock.onopen = () => {
-          opened = true; clearTimeout(t);
-          setStatus('Signaling: connected');
-          send({ type: 'join', room, role: 'sender' });
-          send({ type: 'need-offer' }); // nudge any already-open receivers
-          startWSHeartbeat();
-          resolve();
-        };
-        sock.onmessage = onSignal;
-        sock.onerror = (e) => { console.warn('[WS error]', e); scheduleWSReconnect();};
-        sock.onclose = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); stopWSHeartbeat(); ws = null; scheduleWSReconnect();};
-      });
-    }
-
-    function startWSHeartbeat() {
-      stopWSHeartbeat();
-      wsHeartbeat = setInterval(() => { send({ type: 'keepalive' }); }, 25000);
-    }
-    function stopWSHeartbeat() {
-      if (wsHeartbeat) { clearInterval(wsHeartbeat); wsHeartbeat = null; }
-    }
-    function scheduleWSReconnect(reason = 'retry') {
-      if (!started) return;                 // only while streaming
-      if (wsReconnectTimer) return;         // already queued
-      console.log('[WS] scheduling reconnect:', reason);
-      wsReconnectTimer = setTimeout(async () => {
-        wsReconnectTimer = null;
-        try {
-          await connectWS(currentRoom());   // rejoin room
-          send({ type: 'need-offer' });     // nudge any receivers
-        } catch (e) {
-          // backoff and try again
-          scheduleWSReconnect();
-        }
-      }, 1500);
-    }
-
-    
-    const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
+    /* ======== (kept as dead code; not used in paired mode) ======== */
+    function connectWS(room) { /* unused in paired mode */ return Promise.reject(new Error('WS disabled (paired mode)')); }
+    function startWSHeartbeat() {}
+    function stopWSHeartbeat() { if (wsHeartbeat) { clearInterval(wsHeartbeat); wsHeartbeat = null; } }
+    function scheduleWSReconnect(reason = 'retry') {}
+    const send = (obj) => { /* ws disabled */ };
 
     function getOrCreatePC(peerId) {
+      // Not used in paired mode (secure-webrtc creates the PC). Keep for compatibility if needed.
       let rec = peers.get(peerId);
       if (rec && rec.pc) return rec.pc;
-
-      if (!localStream) {
-        console.warn('[SENDER] localStream missing; startOrStop() must run first');
-      }
 
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
@@ -747,11 +709,9 @@
       });
 
       pc.ontrack = (ev) => {
-        // Receiver may send only audio (talkback). Attach and play.
         try {
           if (ev.track.kind === 'audio') {
             const ms = ev.streams?.[0] || new MediaStream([ev.track]);
-            // If you support multiple receivers, you could mix or keep a map per peer.
             talkbackAudio.srcObject = ms;
             talkbackAudio.muted = false;
             talkbackAudio.volume = 1.0;
@@ -783,19 +743,11 @@
           ch.onopen  = () => {
             if (LOG.dc) console.log('[POSE][sender] DC open', peerId);
             poseDCs.add(ch);
-            // Tell late joiners what modes are active
             announceAIModes();
-            // Immediately replay the latest score so the receiver doesn't wait a whole window
-            if (lastAudioPayload) {
-              try { ch.send(lastAudioPayload); } catch {}
-            }
-            if (lastPosePayload) {
-              try { ch.send(lastPosePayload); } catch {}
-            }
-            if (lastFacePayload) {
-              try { ch.send(lastFacePayload); } catch {}
-            }
-            try { ch.send(JSON.stringify({ type: 'need-face-config' })); } catch {}  //ask receiver to send its FaceLandmarker thresholds
+            if (lastAudioPayload) { try { ch.send(lastAudioPayload); } catch {} }
+            if (lastPosePayload)  { try { ch.send(lastPosePayload);  } catch {} }
+            if (lastFacePayload)  { try { ch.send(lastFacePayload);  } catch {} }
+            try { ch.send(JSON.stringify({ type: 'need-face-config' })); } catch {}
           };
       
           ch.onclose = () => {
@@ -813,12 +765,7 @@
             if (!msg || !msg.type) return;
       
             if (msg.type === 'need-modes') {
-              // Receiver is asking for the current AI modes after it opens
               announceAIModes();
-              // Also push a fresh score if we have one and audio is running on the sender
-              /*if (lastAudioPayload && audioAiOn?.checked && audioAiWhere?.value === 'sender') {
-                try { ch.send(lastAudioPayload); } catch {}
-              }*/
               if (lastAudioPayload) { try { ch.send(lastAudioPayload); } catch {} }
               if (lastPosePayload)  { try { ch.send(lastPosePayload);  } catch {} }
               if (lastFacePayload)  { try { ch.send(lastFacePayload);  } catch {} }
@@ -832,7 +779,6 @@
               if (typeof msg.minPres === 'number' && msg.minPres !== FACE_OPTS.minPres) { FACE_OPTS.minPres = msg.minPres; changed = true; }
               if (changed) {
                 await recreateSenderFaceTask();
-                // If sender-side face loop is running, keep it running with new opts
                 if (started && faceOn?.checked && faceWhere?.value === 'sender') {
                   stopSenderFaceLoop();
                   startSenderFaceLoop();
@@ -840,28 +786,14 @@
               }
               return;
             }
-            if (msg.type === 'audio') {
-              onAudioMessageFromReceiver(ev2, ch);
-              return;
-            }
-            if (msg.type === 'pose') {
-              // Existing echo path used for overlay/debug
-              onPoseMessageFromReceiver(ev2, ch);   // <-- pass origin channel
-              return;
-            }
-            if (msg.type === 'face') {
-              onFaceMessageFromReceiver(ev2, ch);
-              return;
-            }
+            if (msg.type === 'audio') return onAudioMessageFromReceiver(ev2, ch);
+            if (msg.type === 'pose')  return onPoseMessageFromReceiver(ev2, ch);
+            if (msg.type === 'face')  return onFaceMessageFromReceiver(ev2, ch);
           };
         }
       };
 
-      pc.onicecandidate = (e) => {
-        if (e.candidate && ws?.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'candidate', to: peerId, candidate: e.candidate }));
-        }
-      };
+      pc.onicecandidate = () => { /* no WS in paired mode */ };
 
       pc.onconnectionstatechange = () => {
         const st = pc.connectionState;
@@ -874,20 +806,14 @@
         }
       };
 
+      let rec = peers.get(peerId);
       if (!rec) {
-        rec = {
-          pc,
-          remoteDescriptionSet: false,
-          candidateQueue: [],
-          lastOfferSdp: null,
-          processingOffer: false
-        };
+        rec = { pc, remoteDescriptionSet: false, candidateQueue: [], lastOfferSdp: null, processingOffer: false };
       } else {
         rec.pc = pc;
         if (rec.processingOffer == null) rec.processingOffer = false;
       }
       peers.set(peerId, rec);
-
       return pc;
     }
 
@@ -895,11 +821,9 @@
       const rec = peers.get(peerId);
       if (!rec) return;
       try { rec.pc.close(); } catch {}
-      // If this peer’s stream is what the audio element is playing, clear it
       try {
         const ms = talkbackAudio.srcObject;
         if (ms && ms.getAudioTracks().length && rec.pc) {
-          // crude: if we only ever had one inbound stream, just clear
           talkbackAudio.pause();
           talkbackAudio.srcObject = null;
         }
@@ -908,91 +832,107 @@
       console.log('[SENDER] cleaned', peerId, reason);
     }
 
+    /* ======= paired connect (no room signaling) ======= */
+    async function pairedConnectAndAttach(localStream) {
+      if (!PAIRED_PEER_FP) throw new Error('Missing ?peer=<fingerprint>');
 
-    async function onSignal(evt) {
-      let msg; try { msg = JSON.parse(evt.data); } catch { return; }
-      const t = msg?.type;
+      const ss = new SecureSignal({
+        url: WS_ENDPOINT,
+        onOpen: () => setStatus('Connected to signaling (secure)'),
+      });
+      await ss.init();
 
-      if (t === 'peer-left' && msg.id) { cleanupPeer(msg.id, 'peer-left'); return; }
-      if (t === 'bye' && msg.from) { cleanupPeer(msg.from, 'bye'); return; }
+      const peer = ss.trusted.find(d => d.fp === PAIRED_PEER_FP);
+      if (!peer) throw new Error(`Peer ${PAIRED_PEER_FP} is not in Trusted devices. Pair first.`);
 
-      if (t === 'peer-joined' && msg.id && msg.role === 'receiver') {
-        ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: msg.id }));
-        return;
-      }
+      try { localStorage.setItem('naptio:lastPeerFp', PAIRED_PEER_FP); } catch {}
 
-      if (t === 'roster' && Array.isArray(msg.peers)) {
-        for (const p of msg.peers) {
-          if (p.role === 'receiver') {
-            ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: p.id }));
+      const { pc, dc, sid } = await connectToPeer(ss, PAIRED_PEER_FP, {
+        initiator: true,
+        localStreams: [localStream],
+        label: 'pose',
+        streamMeta: { room: currentRoom() },   // room rides as secured metadata
+        onTrack: (ev) => {
+          try {
+            if (ev.track.kind === 'audio') {
+              const ms = ev.streams?.[0] || new MediaStream([ev.track]);
+              talkbackAudio.srcObject = ms;
+              talkbackAudio.muted = false;
+              talkbackAudio.volume = 1.0;
+              talkbackAudio.play().catch(() => {});
+              ev.track.addEventListener('ended', () => {
+                if (talkbackAudio.srcObject === ms) {
+                  try { talkbackAudio.pause(); talkbackAudio.srcObject = null; } catch {}
+                }
+              });
+              console.log('[SENDER] talkback audio attached (paired)');
+            }
+          } catch (e) {
+            console.warn('[SENDER] ontrack error (paired):', e);
           }
+        },
+        onData: (msgRaw, ch) => {
+          try {
+            const msg = (typeof msgRaw === 'string') ? JSON.parse(msgRaw) : msgRaw;
+            if (!msg || !msg.type) return;
+            if (msg.type === 'audio') return onAudioMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
+            if (msg.type === 'pose')  return onPoseMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
+            if (msg.type === 'face')  return onFaceMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
+          } catch {}
         }
-        return;
-      }
+      });
 
-      if (t === 'offer' && msg.from) {
-        setStatus('Got offer, creating answer…');
-
-        let rec = peers.get(msg.from);
-        if (!rec) { getOrCreatePC(msg.from); rec = peers.get(msg.from); }
-
-        if (rec.lastOfferSdp === msg.sdp) { console.log('[DUP] identical offer ignored from', msg.from); return; }
-        if (rec.processingOffer) { console.log('[SENDER] skipping offer from', msg.from, '(answer in progress)'); return; }
-        rec.processingOffer = true;
-
-        const pc = rec.pc || getOrCreatePC(msg.from);
-
-        try {
-          if (pc.signalingState === 'have-local-offer') { try { await pc.setLocalDescription({ type: 'rollback' }); } catch {} }
-
-          await pc.setRemoteDescription(new RTCSessionDescription(msg));
-
-          if (pc.signalingState !== 'have-remote-offer') {
-            console.warn('[SENDER] unexpected signalingState before answer:', pc.signalingState);
+      (function attachPoseChannelFromSender(ch) {
+        if (!ch) return;
+        ch.onopen  = () => {
+          if (LOG.dc) console.log('[POSE][sender] DC open (paired)');
+          poseDCs.add(ch);
+          announceAIModes();
+          if (lastAudioPayload) { try { ch.send(lastAudioPayload); } catch {} }
+          if (lastPosePayload)  { try { ch.send(lastPosePayload);  } catch {} }
+          if (lastFacePayload)  { try { ch.send(lastFacePayload);  } catch {} }
+          try { ch.send(JSON.stringify({ type: 'need-face-config' })); } catch {}
+        };
+        ch.onclose = () => { if (LOG.dc) console.log('[POSE][sender] DC close (paired)'); poseDCs.delete(ch); };
+        ch.onerror = (e) => { if (LOG.dc) console.log('[POSE][sender] DC error (paired)', e); };
+        ch.onmessage = (ev2) => {
+          let msg; try { msg = JSON.parse(ev2.data); } catch { return; }
+          if (!msg || !msg.type) return;
+          if (msg.type === 'need-modes') {
+            announceAIModes();
+            if (lastAudioPayload) { try { ch.send(lastAudioPayload); } catch {} }
+            if (lastPosePayload)  { try { ch.send(lastPosePayload);  } catch {} }
+            if (lastFacePayload)  { try { ch.send(lastFacePayload);  } catch {} }
             return;
           }
-
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-
-          ws.send(JSON.stringify({ type: answer.type, sdp: answer.sdp, to: msg.from }));
-          console.log('[WS OUT] answer →', msg.from);
-
-          rec.remoteDescriptionSet = true;
-          rec.lastOfferSdp = msg.sdp;
-
-          for (const c of rec.candidateQueue) {
-            try { await pc.addIceCandidate(c); } catch (err) { console.warn('[SENDER] late ICE add failed', msg.from, err); }
+          if (msg.type === 'face-config') {
+            let changed = false;
+            if (typeof msg.minDet  === 'number' && msg.minDet  !== FACE_OPTS.minDet)  { FACE_OPTS.minDet  = msg.minDet;  changed = true; }
+            if (typeof msg.minTrack=== 'number' && msg.minTrack!== FACE_OPTS.minTrack){ FACE_OPTS.minTrack= msg.minTrack; changed = true; }
+            if (typeof msg.minPres === 'number' && msg.minPres !== FACE_OPTS.minPres) { FACE_OPTS.minPres = msg.minPres; changed = true; }
+            (async () => {
+              if (changed) {
+                await recreateSenderFaceTask();
+                if (started && faceOn?.checked && faceWhere?.value === 'sender') {
+                  stopSenderFaceLoop();
+                  startSenderFaceLoop();
+                }
+              }
+            })();
+            return;
           }
-          rec.candidateQueue.length = 0;
+          if (msg.type === 'audio') return onAudioMessageFromReceiver(ev2, ch);
+          if (msg.type === 'pose')  return onPoseMessageFromReceiver(ev2, ch);
+          if (msg.type === 'face')  return onFaceMessageFromReceiver(ev2, ch);
+        };
+      })(dc);
 
-        } finally {
-          rec.processingOffer = false;
-        }
-        return;
-      }
+      // single peer entry for stopStreaming()
+      peers.set('paired:' + PAIRED_PEER_FP, {
+        pc, remoteDescriptionSet: true, candidateQueue: [], lastOfferSdp: null, processingOffer: false
+      });
 
-      if (t === 'candidate' && msg.from && msg.candidate) {
-        const rec = peers.get(msg.from);
-        if (!rec) {
-          peers.set(msg.from, {
-            pc: null, remoteDescriptionSet: false,
-            candidateQueue: [new RTCIceCandidate(msg.candidate)],
-            lastOfferSdp: null, processingOffer: false
-          });
-          return;
-        }
-        const pc = rec.pc || getOrCreatePC(msg.from);
-        const cand = new RTCIceCandidate(msg.candidate);
-        if (rec.remoteDescriptionSet) {
-          try { await pc.addIceCandidate(cand); } catch (err) { console.warn('[SENDER] ICE add failed', msg.from, err); }
-        } else {
-          rec.candidateQueue.push(cand);
-        }
-        return;
-      }
-
-      if (t === 'hello' || t === 'keepalive') return;
+      return { pc, dc, sid, ss };
     }
 
     function beginPreviewWindow(minutes) {
@@ -1069,7 +1009,6 @@
         startBtn.disabled = true;
 
         updateMirrorClass();
-        const room = currentRoom();
         setStatus('Starting camera…');
         localStream = await getMedia();
         localVideo.srcObject = localStream;
@@ -1078,8 +1017,12 @@
 
         beginPreviewWindow(Number(previewMinsInput.value) || 1);
 
-        await connectWS(room);
+        // ⬇️ paired-only connect (no room signaling)
+        setStatus('Connecting to paired device…');
+        await pairedConnectAndAttach(localStream);
         started = true;
+        setStatus('Streaming (paired)…');
+
         startBtn.textContent = 'Stop streaming';
         startBtn.disabled = false;
 
@@ -1087,12 +1030,10 @@
         await applyAudioToggle();
         announceAIModes();
 
-        // Ensure AI mic starts under this user gesture if it should run on the sender
         if (audioAiOn?.checked && audioAiWhere?.value === 'sender') {
           try { await startSenderAudioLoop(); } catch {}
         }
 
-        // turn on debug panel by default when starting, can be toggled
         if (DEBUG_UI) elDbgPanel.style.display = 'block';
 
       } catch (err) {
@@ -1104,8 +1045,9 @@
     }
 
     async function stopStreaming() {
-      try { send({ type: 'bye' }); } catch {}
-      started = false;                        // so scheduleWSReconnect() bails out
+      try { /* send({ type: 'bye' }); */ } catch {}
+      started = false;
+
       stopWSHeartbeat();
       if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
 
@@ -1153,8 +1095,6 @@
       try { localStream = null; } catch {}
       try { ws = null; } catch {}
       try { if (typeof pc !== 'undefined') pc = null; } catch {}
-
-      //started = false;
 
       document.body.classList.remove('previewing','streaming','ui-visible');
       document.body.classList.add('blackout');
@@ -1370,7 +1310,7 @@
     
       // 3) (optional) rebroadcast to other receivers (avoid echo to origin)
       for (const ch of poseDCs) {
-        if (ch === originChannel) continue;      // don't echo back to the same receiver
+        if (ch === originChannel) continue;
         if (ch.readyState === 'open') {
           try { ch.send(ev.data); } catch {}
         }
@@ -1514,28 +1454,17 @@
       const streamedTrack = getLocalAudioTrack();
       const canTap = !!(streamedTrack && streamedTrack.readyState === 'live' && streamedTrack.enabled);
 
-      //let originLabel = 'separate mic'; //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
-      //let tapUsed = false;
-      //let useSeparateMic = !DEBUG_AUDIO.FORCE_TAP; // default: prefer separate RAW mic
-      //let openedSeparate = false;
       const sendingAudio = !!(getLocalAudioTrack()?.enabled);
-      // If we're sending audio, avoid a second hardware capture.
       const preferTap = DEBUG_AUDIO.FORCE_TAP || sendingAudio;
       let originLabel = preferTap ? 'tap: streaming track' : 'separate mic';
       let tapUsed = false;
       let openedSeparate = false;
 
-      // Build muted sink
       const sink = audioCtx.createGain();
       sink.gain.value = 0;
-      //sink.connect(audioCtx.destination); //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
-      // Keep the graph alive without opening the output device
       const blackhole = audioCtx.createMediaStreamDestination();
       sink.connect(blackhole);
 
-      // Try separate RAW mic first (AEC/NS/AGC OFF), unless FORCE_TAP //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
-      //if (useSeparateMic) {
-      // Only open a second capture when we are NOT already sending audio
       if (!preferTap) {
         try {
           aiMicStream = await navigator.mediaDevices.getUserMedia({
@@ -1551,21 +1480,16 @@
         }
       }
 
-      // Fallback or FORCE_TAP → tap the processed streaming track
       if (!openedSeparate) {
-        //if (DEBUG_AUDIO.FORCE_TAP && !canTap) { //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
         if (preferTap && !canTap) {
           console.warn('[AUDIO][sender] FORCE_TAP requested but no live enabled streaming track to tap.');
         }
         if (canTap) {
           try {
-            //audioSource = makeSourceFromTrack(audioCtx, streamedTrack); //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
-            // Clone so the AI graph lifecycle can’t affect the sender’s live track.
             aiTapTrack = streamedTrack.clone();
             aiTapTrack.enabled = true;
             audioSource = makeSourceFromTrack(audioCtx, aiTapTrack);
             tapUsed = true;
-            //originLabel = DEBUG_AUDIO.FORCE_TAP ? 'tap: streaming track (forced)' : 'tap: streaming track (fallback)'; //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
             originLabel = preferTap ? 'tap: streaming track (preferred)' : 'tap: streaming track (fallback)';
           } catch (e) {
             console.warn('[AUDIO][sender] unable to tap streamed track:', e);
@@ -1579,14 +1503,12 @@
         return;
       }
 
-      // (Optional) hint channels on the source node
       try {
         audioSource.channelCount = 2;
         audioSource.channelCountMode = 'explicit';
         audioSource.channelInterpretation = 'discrete';
       } catch {}
 
-      // Prepare resampling + ring
       const SR_DEVICE = audioCtx.sampleRate;
       const SR_TARGET = 16000;
       const WINDOW_SEC = 0.975;
@@ -1594,13 +1516,11 @@
       let ring16 = new Float32Array(0);
       let _seriesClips = 0;
 
-      // Silence watchdog
       aiSilentFrames = 0;
       streamSilentFrames = 0;
-      const SILENCE_RMS = 1e-4;   // ~ -80 dBFS
-      const SILENCE_LIMIT = 60;   // ~ 0.8–1.5s depending on callback size
+      const SILENCE_RMS = 1e-4;
+      const SILENCE_LIMIT = 60;
 
-      // Worklet modules (classifier + RMS)
       try {
         const modURL = URL.createObjectURL(new Blob([`
           class AICapture extends AudioWorkletProcessor {
@@ -1650,7 +1570,6 @@
         console.warn('[AUDIO][sender] Worklet addModule failed, will use ScriptProcessor fallback.', e);
       }
 
-      // --- Classification path
       const onChunk = async (frameFloat32) => {
         if (!audioLoopRunning || !started || !audioAiOn.checked || audioAiWhere.value !== 'sender') {
           try {
@@ -1662,7 +1581,6 @@
           return;
         }
 
-        // live RMS before resample
         lastAIRmsDev = rmsOf(frameFloat32);
         if (lastAIRmsDev < SILENCE_RMS) {
           if (++aiSilentFrames >= SILENCE_LIMIT) {
@@ -1682,9 +1600,7 @@
           }
         }
 
-        // resample -> 16k mono
         let x16 = resampleLinear(frameFloat32, SR_DEVICE, SR_TARGET);
-        // pre-gain (classifier only)
         const pregainLin = Math.pow(10, (DEBUG_AUDIO.PREGAIN_DB || 0) / 20);
         if (pregainLin !== 1) {
           for (let i = 0; i < x16.length; i++) {
@@ -1723,7 +1639,6 @@
             }
 
             const payload = JSON.stringify({ type:'audio', categories: classifications, ts: performance.now() });
-            // Remember the last payload so new data channels get an immediate score //https://chatgpt.com/c/68c1d349-17d8-832f-9534-fcb6826946a4
             lastAudioPayload = payload;
             let sent = 0;
             for (const ch of poseDCs) if (ch.readyState === 'open') { ch.send(payload); sent++; }
@@ -1741,10 +1656,8 @@
 
       audioLoopRunning = true;
       audioStarting = false;
-      //lastAIMode = tapUsed ? (DEBUG_AUDIO.FORCE_TAP ? 'tap-forced' : 'tap-fallback') : 'separate'; //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
       lastAIMode = tapUsed ? (DEBUG_AUDIO.FORCE_TAP ? 'tap-forced' : (preferTap ? 'tap-preferred' : 'tap-fallback')) : 'separate';
 
-      // Try worklet for classification
       try {
         audioProcessor = new AudioWorkletNode(audioCtx, 'ai-capture', {
           numberOfInputs: 1,
@@ -1757,7 +1670,6 @@
         audioSource.connect(audioProcessor).connect(sink);
         console.log('[AUDIO][sender] using AudioWorklet for classifier @', SR_DEVICE, 'Hz | src =', originLabel);
       } catch {
-        // Fallback to ScriptProcessor
         audioProcessor = audioCtx.createScriptProcessor(2048, 2, 1);
         audioProcessor.onaudioprocess = (e) => {
           const ib = e.inputBuffer;
@@ -1775,8 +1687,6 @@
         console.log('[AUDIO][sender] using ScriptProcessor for classifier @', SR_DEVICE, 'Hz | src =', originLabel);
       }
 
-      // --- Parallel RMS monitor for the *streaming track* (always from localStream track)
-      //if (streamedTrack) { //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
       const ENABLE_RMS_MONITOR = false; // set true when debugging
       if (streamedTrack && ENABLE_RMS_MONITOR) {
         try {
@@ -1796,7 +1706,6 @@
           };
           monSource.connect(monProcessor).connect(sink);
         } catch {
-          // scriptprocessor fallback
           const sp = audioCtx.createScriptProcessor(2048, 2, 1);
           sp.onaudioprocess = (e) => {
             const ib = e.inputBuffer;
@@ -1867,7 +1776,6 @@
           return;
         }
     
-        // Keep preview overlay tidy
         if (document.body.classList.contains('previewing') && ts !== lastClearedTs) {
           ctx.setTransform(1,0,0,1,0,0);
           ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
@@ -1882,18 +1790,16 @@
           const mats = result?.facialTransformationMatrixes || result?.facialTransformationMatrices || null;
     
           if (landmarks) {
-            // Optional preview drawing on the sender phone
             if (document.body.classList.contains('previewing')) {
               drawFaceOnSender([landmarks]);
             }
     
-            // Extract 4x4 pose matrix (row-major float32[16]) if provided
             let rotMat = null, yawDeg = NaN, pitchDeg = NaN, rollDeg = NaN;
             if (mats && mats.length) {
               const mat = mats[0];
               const m = (mat instanceof Float32Array || Array.isArray(mat)) ? mat : (mat?.data || []);
               if (m && m.length >= 16) {
-                rotMat = Array.from(m.slice(0,16)); // serialize to plain array for DC
+                rotMat = Array.from(m.slice(0,16));
                 const e = computeEulerXYZ(m);
                 yawDeg = e.yaw; pitchDeg = e.pitch; rollDeg = e.roll;
               }
@@ -1904,19 +1810,15 @@
             payload = {
               type: 'face',
               present: true,
-              landmarks,       // keep for optional overlay on receiver
-              rotMat,          // 4x4 (optional but great for axes/arrow)
+              landmarks,
+              rotMat,
               yawDeg, pitchDeg, rollDeg,
               centroid: cen,
               ts
             };
           }
-        } catch (e) {
-          // If anything fails this frame, we still ship a "present:false" so the receiver can drive occlusion logic
-          // console.warn('[FACE][sender] detect error:', e);
-        }
+        } catch (e) {}
     
-        // Ship to all open receivers
         const json = JSON.stringify(payload);
         lastFacePayload = json;  
         for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(json);
