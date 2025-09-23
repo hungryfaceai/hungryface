@@ -445,6 +445,20 @@
       if (qsRoomVal) { try { localStorage.setItem(PREFIX + 'room', qsRoomVal); } catch {} }
     })();
 
+    // helper near your other top-level consts (after "const poseDCs = new Set();")
+    function broadcastMeta() {
+      const msg = JSON.stringify({ type: 'meta', room: currentRoom() });
+      for (const ch of poseDCs) if (ch.readyState === 'open') {
+        try { ch.send(msg); } catch {}
+      }
+    }
+    
+    // after the PERSISTENCE IIFE ends:
+    roomInput.addEventListener('change', () => {
+      try { localStorage.setItem('bm_sender_room', currentRoom()); } catch {}
+      broadcastMeta();
+    });
+
     let ws = null, localStream = null;
     let started = false, hideUITimer = null;
     let wsHeartbeat = null;
@@ -879,6 +893,8 @@
         ch.onopen  = () => {
           if (LOG.dc) console.log('[POSE][sender] DC open (paired)');
           poseDCs.add(ch);
+          // Advertise the current room as metadata for receivers that persist it
+          try { ch.send(JSON.stringify({ type: 'meta', room: currentRoom() })); } catch {}
           announceAIModes();
           if (lastAudioPayload) { try { ch.send(lastAudioPayload); } catch {} }
           if (lastPosePayload)  { try { ch.send(lastPosePayload);  } catch {} }
@@ -927,6 +943,79 @@
       return { pc, dc, sid, ss };
     }
 
+    async function pairedConnectAndAttachMany(localStream) {
+      const ss = new SecureSignal({ url: WS_ENDPOINT, onOpen: () => setStatus('Connected (secure)') });
+      await ss.init();
+    
+      // Pick who to stream to:
+      /*const targets = (ss.trusted || [])        // all trusted
+        // .filter(d => (loadLastMeta(d.fp).room === currentRoom())) // optional: same "room" meta
+        .map(d => d.fp);*/
+      const selfFp = ss.self?.fp || '';
+      const targets = (ss.trusted || [])
+        .map(d => d.fp)
+        .filter(fp => fp && fp !== selfFp)
+        .filter(fp => !peers.has(`paired:${fp}`)); // skip if already connected
+    
+      for (const fp of targets) {
+        try {
+          const { pc, dc } = await connectToPeer(ss, fp, {
+            initiator: true,
+            localStreams: [localStream],          // add tracks before offer
+            label: 'pose',
+            streamMeta: { room: currentRoom() },  // your room as metadata only
+            onTrack: (ev) => {
+              if (ev.track.kind === 'audio') {
+                const ms = ev.streams?.[0] || new MediaStream([ev.track]);
+                talkbackAudio.srcObject = ms; talkbackAudio.muted = false;
+                talkbackAudio.play().catch(()=>{});
+              }
+            },
+            onData: (msg, ch) => {
+              try {
+                const m = typeof msg === 'string' ? JSON.parse(msg) : msg;
+                if (!m?.type) return;
+                if (m.type === 'audio') return onAudioMessageFromReceiver({ data: JSON.stringify(m) }, ch);
+                if (m.type === 'pose')  return onPoseMessageFromReceiver({ data: JSON.stringify(m) }, ch);
+                if (m.type === 'face')  return onFaceMessageFromReceiver({ data: JSON.stringify(m) }, ch);
+              } catch {}
+            }
+          });
+    
+          // track per-peer for cleanup
+          peers.set(`paired:${fp}`, { pc, dc, remoteDescriptionSet: true, candidateQueue: [], lastOfferSdp: null, processingOffer: false });
+    
+          // add to your existing broadcast set
+          dc?.addEventListener('open', () => {
+            poseDCs.add(dc);
+            try { dc.send(JSON.stringify({ type: 'meta', room: currentRoom() })); } catch {}
+            announceAIModes();
+            if (lastAudioPayload) try { dc.send(lastAudioPayload); } catch {}
+            if (lastPosePayload)  try { dc.send(lastPosePayload);  } catch {}
+            if (lastFacePayload)  try { dc.send(lastFacePayload);  } catch {}
+          });
+          dc?.addEventListener('close', () => poseDCs.delete(dc));
+    
+          // optional: auto-reconnect a dropped peer
+          pc.addEventListener('connectionstatechange', () => {
+            if (['failed','disconnected','closed'].includes(pc.connectionState)) {
+              poseDCs.delete(dc);
+              peers.delete(`paired:${fp}`);
+              // lightweight retry after a bit (guard against spam)
+              setTimeout(() => {
+                if (!started) return;
+                pairedConnectAndAttachMany(localStream); // idempotent: will reconnect missing peers
+              }, 2500);
+            }
+          });
+    
+        } catch (e) {
+          // peer likely offline → ignore; you can retry later
+          console.warn('[sender] connect failed for', fp, e?.message || e);
+        }
+      }
+    }
+
     function beginPreviewWindow(minutes) {
       const ms = Math.max(0, Math.round((Number(minutes) || 1) * 60000));
       if (ms === 0) { enterBlackout(); return; }
@@ -963,6 +1052,7 @@
       localVideo.style.display = 'none';
       poseCanvas.style.display = 'none';
       setStatus('Streaming...');
+      broadcastMeta();
       clearTimeout(hideUITimer); hideUITimer = null;
     }
 
@@ -1011,7 +1101,8 @@
 
         // ⬇️ paired-only connect (no room signaling)
         setStatus('Connecting to paired device…');
-        await pairedConnectAndAttach(localStream);
+        //await pairedConnectAndAttach(localStream);
+        await pairedConnectAndAttachMany(localStream); //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959
         started = true;
         setStatus('Streaming (paired)…');
 
