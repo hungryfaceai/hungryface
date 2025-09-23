@@ -113,9 +113,15 @@
   </div>
 
   <script type="module">
-    import { ReceiverCore } from '/hungryface/webrtc/receiver/shared/receiver-core.js';
+    import { SecureSignal } from '/hungryface/webrtc/shared/secure-signal.js'; //pairing code
+    import { connectToPeer } from '/hungryface/webrtc/shared/secure-webrtc.js'; //pairing code
 
     /* ---------- Constants ---------- */
+    // Receiver: paired-only
+    const URLQS = new URLSearchParams(location.search); //pairing code
+    const PAIRED_PEER_FP = URLQS.get('peer') || localStorage.getItem('naptio:lastPeerFp') || ''; //pairing code
+    const desiredRoom = URLQS.get('room') || 'Baby';     // stays as metadata preference (optional) //pairing code
+
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const room = new URLSearchParams(location.search).get("room") || "Baby";
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
@@ -145,6 +151,74 @@
         overlay.classList.remove('hidden');
       }
     }
+
+    //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959 //pairing code
+    async function startPairedReceiver() {
+    if (!PAIRED_PEER_FP) {
+      showStatus('Missing ?peer=<fingerprint>. Pair devices and open with the peer fingerprint.');
+      return;
+    }
+  
+    showStatus('Connecting to paired device…');
+  
+    const ss = new SecureSignal({
+      url: WS_ENDPOINT,
+      onOpen: () => console.log('[SecureSignal] open (receiver)'),
+    });
+    await ss.init();
+  
+    const peer = ss.trusted.find(d => d.fp === PAIRED_PEER_FP);
+    if (!peer) {
+      showStatus(`Peer ${PAIRED_PEER_FP} is not in Trusted devices. Pair first.`);
+      return;
+    }
+  
+    try { localStorage.setItem('naptio:lastPeerFp', PAIRED_PEER_FP); } catch {}
+  
+    const { pc } = await connectToPeer(ss, PAIRED_PEER_FP, {
+      initiator: false,
+      onTrack: (ev) => {
+        const stream = ev.streams?.[0] || new MediaStream([ev.track]);
+        if (remoteVideo.srcObject !== stream) {
+          remoteVideo.srcObject = stream;
+          tryStartMuted();
+        }
+        showStatus('Connected');
+      },
+      onData: (msgRaw, dc) => {
+        // Optional: if you want to enforce room filtering here, watch for {type:'meta', room}
+        try {
+          const msg = (typeof msgRaw === 'string') ? JSON.parse(msgRaw) : msgRaw;
+          if (msg?.type === 'meta' && typeof msg.room === 'string') {
+            console.log('[Receiver] sender room meta =', msg.room);
+            // Example (optional): if desiredRoom mismatches, you could reduce volume, show a warning, etc.
+            // if (desiredRoom && msg.room !== desiredRoom) { /* no-op, or hint */ }
+          }
+        } catch {}
+      }
+    });
+  
+    // Pre-allocate talkback sendonly transceiver (keeps your talk/lullaby logic unchanged)
+    try {
+      talkTx = pc.addTransceiver('audio', { direction: 'sendonly' });
+      talkSender = talkTx.sender;
+    } catch (e) {
+      console.warn('[Receiver] addTransceiver failed:', e);
+    }
+  
+    // If the sender created a 'pose' DC, we receive it here; we keep it open (video-only page ignores messages)
+    pc.ondatachannel = (e) => {
+      console.log('[DC][receiver] inbound datachannel (paired):', e.channel?.label);
+      if (e.channel?.label === 'pose') {
+        const ch = e.channel;
+        ch.onopen = () => console.log('[DC][receiver] pose DC open (video-only, paired)');
+        ch.onclose = () => console.log('[DC][receiver] pose DC close (video-only, paired)');
+        ch.onmessage = () => {};
+      }
+    };
+  
+    pcRef = pc; // talk/lullaby keeps working
+  }
 
     /* ---------- Audio UI ---------- */
     function updateAudioButtons() {
@@ -551,7 +625,7 @@
     });
 
     /* ---------- Shared core ---------- */
-    const core = new ReceiverCore({
+    /*const core = new ReceiverCore({ //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959
       wsEndpoint: WS_ENDPOINT,
       room,
       onStatus: showStatus,
@@ -584,10 +658,23 @@
       onDataChannel: (e) => {
         console.log('[DC][receiver] inbound datachannel (leaving open):', e.channel?.label);
       }
+    });*/
+
+    //core.start().catch(console.warn); //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959
+    //window.addEventListener('beforeunload', () => core.close()); //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959
+
+    //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959
+    startPairedReceiver().catch((e) => {
+      console.warn(e);
+      showStatus(e?.message || 'Failed to connect');
+    });
+    window.addEventListener('beforeunload', () => {
+      try { setTalking(false); } catch {}
+      try { talkSender && pcRef && pcRef.removeTrack(talkSender); } catch {}
+      try { talkStream && talkStream.getTracks().forEach(t => t.stop()); } catch {}
+      try { lullabyEl && lullabyEl.pause(); } catch {}
     });
 
-    core.start().catch(console.warn);
-    window.addEventListener('beforeunload', () => core.close());
   </script>
 </body>
 </html>
