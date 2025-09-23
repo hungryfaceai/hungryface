@@ -97,77 +97,83 @@ export async function connectToPeer(
     null;
 
   ss.onEncrypted(sid, async (msg) => {
-    // Handle only our WebRTC messages here; let the app see its own messages.
-    if (msg && msg.webrtc) {
-      // Responder lets us know it has installed its handlers.
-      // Initiator should (re)start negotiation now.
-      if (msg.webrtc === 'ready') {
-        if (initiator) {
-          try {
-            if (pc.signalingState === 'have-local-offer' && pc.localDescription) {
-              // Resend the existing offer so the responder (now ready) can answer
-              await send(sid, { webrtc: 'offer', desc: pc.localDescription });
-            } else if (pc.signalingState === 'stable' && !makingOffer) {
-              // No pending offer — create a fresh one
-              makingOffer = true;
-              const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-              await pc.setLocalDescription(offer);
-              await send(sid, { webrtc: 'offer', desc: pc.localDescription });
+    try {
+      // Handle only our WebRTC messages here; let the app see its own messages.
+      if (msg && msg.webrtc) {
+        if (msg.webrtc === 'ready') {
+          if (initiator) {
+            try {
+              if (pc.signalingState === 'have-local-offer' && pc.localDescription) {
+                await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
+              } else if (pc.signalingState === 'stable' && !makingOffer) {
+                makingOffer = true;
+                try {
+                  const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+                  await pc.setLocalDescription(offer);
+                  await ss.sendJSON(sid, { webrtc: 'offer', desc: pc.localDescription });
+                } finally {
+                  makingOffer = false;
+                }
+              }
+            } catch (e) {
+              console.debug('[webrtc] ready->offer path error:', e?.message || e);
             }
-          } finally {
-            makingOffer = false;
           }
+          return;
         }
-        return; // handled
-      }
-
-      if (msg.webrtc === 'offer') {
-        // Only responder handles remote offers
-        if (initiator) return;
-
-        const offer = new RTCSessionDescription(msg.desc);
-        const offerCollision = makingOffer || pc.signalingState !== 'stable';
-
-        if (offerCollision) {
-          if (!polite) return; // impolite side ignores glare
-          try { await pc.setLocalDescription({ type: 'rollback' }); } catch {}
+  
+        if (msg.webrtc === 'offer') {
+          if (initiator) return; // initiator never handles remote offers
+          try {
+            const offer = new RTCSessionDescription(msg.desc);
+            const offerCollision = makingOffer || pc.signalingState !== 'stable';
+            if (offerCollision) {
+              if (!polite) return; // impolite ignores glare
+              try { await pc.setLocalDescription({ type: 'rollback' }); } catch {}
+            }
+            await pc.setRemoteDescription(offer);
+            if (typeof onBeforeAnswer === 'function') {
+              try { await onBeforeAnswer(pc); } catch {}
+            }
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            await ss.sendJSON(sid, { webrtc: 'answer', desc: pc.localDescription });
+          } catch (e) {
+            console.debug('[webrtc] handle offer error:', e?.name || e?.message || e);
+          }
+          return;
         }
-
-        await pc.setRemoteDescription(offer);
-        // Allow responder to add transceivers/tracks before answering
-        if (typeof onBeforeAnswer === 'function') {
-          try { await onBeforeAnswer(pc); } catch {}
+  
+        if (msg.webrtc === 'answer') {
+          if (!initiator) return;
+          try {
+            if (pc.signalingState !== 'have-local-offer') return; // ignore dup/late answers
+            await pc.setRemoteDescription(new RTCSessionDescription(msg.desc));
+          } catch (e) {
+            console.debug('[webrtc] handle answer error:', e?.name || e?.message || e);
+          }
+          return;
         }
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        await send(sid, { webrtc: 'answer', desc: pc.localDescription });
-        return; // handled
-      }
-
-      if (msg.webrtc === 'answer') {
-        // Only the initiator expects/handles an answer
-        if (!initiator) return;
-        // Hardening: ignore duplicates/out-of-order answers
-        if (pc.signalingState !== 'have-local-offer') return;
-        await pc.setRemoteDescription(new RTCSessionDescription(msg.desc));
-        return; // handled
-      }
-
-      if (msg.webrtc === 'ice') {
-        try {
-          if (msg.candidate) await pc.addIceCandidate(msg.candidate);
-          else await pc.addIceCandidate(null); // end-of-candidates
-        } catch (err) {
-          // benign if it arrives early / after close
-          console.debug('ICE add error:', err);
+  
+        if (msg.webrtc === 'ice') {
+          try {
+            if (msg.candidate) await pc.addIceCandidate(msg.candidate);
+            else await pc.addIceCandidate(null);
+          } catch (err) {
+            console.debug('ICE add error (benign if early/closed):', err?.message || err);
+          }
+          return;
         }
-        return; // handled
+        // Unknown webrtc subtype: fall through
       }
-      // Unknown webrtc subtype: fall through to app just in case
+  
+      // Not a WebRTC message: forward to any previous app handler.
+      try { prevHandler && prevHandler(msg); } catch (e) {
+        console.debug('[webrtc] prevHandler error:', e?.message || e);
+      }
+    } catch (outer) {
+      console.debug('[webrtc] onEncrypted outer error:', outer?.message || outer);
     }
-
-    // Not a WebRTC message (or we chose to fall through): let the previous app handler see it.
-    try { prevHandler && prevHandler(msg); } catch {}
   });
 
   // ---- Small nicety: restore previous encrypted handler when PC is done ----
