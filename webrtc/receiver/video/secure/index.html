@@ -126,7 +126,6 @@
     const desiredRoom = URLQS.get('room') || 'Baby';     // stays as metadata preference (optional) //pairing code
 
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
-    const room = new URLSearchParams(location.search).get("room") || "Baby";
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
     /* ---------- DOM ---------- */
@@ -160,9 +159,10 @@
       currentPeer: PAIRED_PEER_FP,
       desiredRoom,
       onPick: (fp) => {
+        try { localStorage.setItem('naptio:lastPeerFp', fp); } catch {}
         const url = new URL(location.href);
         url.searchParams.set('peer', fp);
-        // preserve ?room= if user set it; otherwise try to use the peer’s last seen room (the switcher UI shows it)
+        // (optional) keep the current ?room= if present
         location.href = url.toString();
       }
     });
@@ -206,7 +206,8 @@
           const msg = (typeof msgRaw === 'string') ? JSON.parse(msgRaw) : msgRaw;
           if (msg?.type === 'meta' && typeof msg.room === 'string') {
             saveLastMeta(PAIRED_PEER_FP, { room: msg.room });
-            console.log('[Receiver] sender room meta =', msg.room);
+            console.log('[Receiver] meta room:', msg.room, '| desired:', desiredRoom || '(none)');
+
             // Example (optional): if desiredRoom mismatches, you could reduce volume, show a warning, etc.
             // if (desiredRoom && msg.room !== desiredRoom) { /* no-op, or hint */ }
           }
@@ -631,53 +632,6 @@
         await startLullaby();
       }
     });
-
-    // Cleanup on unload
-    window.addEventListener('beforeunload', () => {
-      try { setTalking(false); } catch {}
-      try { talkSender && pcRef && pcRef.removeTrack(talkSender); } catch {}
-      try { talkStream && talkStream.getTracks().forEach(t => t.stop()); } catch {}
-      try { lullabyEl && lullabyEl.pause(); } catch {}
-    });
-
-    /* ---------- Shared core ---------- */
-    /*const core = new ReceiverCore({ //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959
-      wsEndpoint: WS_ENDPOINT,
-      room,
-      onStatus: showStatus,
-      onStream: (stream) => {
-        if (remoteVideo.srcObject !== stream) {
-          remoteVideo.srcObject = stream;
-          tryStartMuted();
-        }
-      },
-      onCreatePC: (pc) => {
-        // Save PC for talkback and attach if mic already prepared
-        pcRef = pc;
-
-        // ⬇️ Pre-allocate a sendonly audio transceiver so talkback doesn't need renegotiation
-        try {
-          talkTx = pc.addTransceiver('audio', { direction: 'sendonly' });
-          talkSender = talkTx.sender;
-        } catch (e) {
-          console.warn('[Receiver] addTransceiver failed:', e);
-        }
-
-        tryAttachOnce();
-
-        // keep SDP shape consistent with other pages: create a 'pose' DC but ignore messages here
-        const ch = pc.createDataChannel('pose');
-        ch.onopen  = () => console.log('[DC][receiver] pose DC open (video-only)');
-        ch.onclose = () => console.log('[DC][receiver] pose DC close (video-only)');
-        ch.onmessage = () => {};
-      },
-      onDataChannel: (e) => {
-        console.log('[DC][receiver] inbound datachannel (leaving open):', e.channel?.label);
-      }
-    });*/
-
-    //core.start().catch(console.warn); //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959
-    //window.addEventListener('beforeunload', () => core.close()); //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959
 
     //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959
     startPairedReceiver().catch((e) => {
