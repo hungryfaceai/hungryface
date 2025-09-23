@@ -155,14 +155,18 @@
     }
 
     initTrustedSwitcher({
-      wsEndpoint: WS_ENDPOINT,
       currentPeer: PAIRED_PEER_FP,
       desiredRoom,
+      getTrusted: async () => {
+        const ss = new SecureSignal({ url: WS_ENDPOINT });
+        await ss.init();
+        // ss.trusted is the authoritative list
+        return ss.trusted || [];
+      },
       onPick: (fp) => {
         try { localStorage.setItem('naptio:lastPeerFp', fp); } catch {}
         const url = new URL(location.href);
         url.searchParams.set('peer', fp);
-        // (optional) keep the current ?room= if present
         location.href = url.toString();
       }
     });
