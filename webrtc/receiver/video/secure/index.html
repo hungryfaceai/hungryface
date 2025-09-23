@@ -115,6 +115,9 @@
   <script type="module">
     import { SecureSignal } from '/hungryface/webrtc/shared/secure-signal.js'; //pairing code
     import { connectToPeer } from '/hungryface/webrtc/shared/secure-webrtc.js'; //pairing code
+    import { initTrustedSwitcher } from '/hungryface/webrtc/receiver/shared/switcher.js';
+    import { saveLastMeta } from '/hungryface/webrtc/shared/device-registry.js';
+
 
     /* ---------- Constants ---------- */
     // Receiver: paired-only
@@ -151,6 +154,18 @@
         overlay.classList.remove('hidden');
       }
     }
+
+    initTrustedSwitcher({
+      wsEndpoint: WS_ENDPOINT,
+      currentPeer: PAIRED_PEER_FP,
+      desiredRoom,
+      onPick: (fp) => {
+        const url = new URL(location.href);
+        url.searchParams.set('peer', fp);
+        // preserve ?room= if user set it; otherwise try to use the peer’s last seen room (the switcher UI shows it)
+        location.href = url.toString();
+      }
+    });
 
     //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959 //pairing code
     async function startPairedReceiver() {
@@ -190,6 +205,7 @@
         try {
           const msg = (typeof msgRaw === 'string') ? JSON.parse(msgRaw) : msgRaw;
           if (msg?.type === 'meta' && typeof msg.room === 'string') {
+            saveLastMeta(PAIRED_PEER_FP, { room: msg.room });
             console.log('[Receiver] sender room meta =', msg.room);
             // Example (optional): if desiredRoom mismatches, you could reduce volume, show a warning, etc.
             // if (desiredRoom && msg.room !== desiredRoom) { /* no-op, or hint */ }
