@@ -947,7 +947,9 @@
     async function pairedConnectAndAttachMany(localStream) {
       const ss = new SecureSignal({ url: WS_ENDPOINT, onOpen: () => setStatus('Connected (secure)') });
       await ss.init();
-      console.log('[SecureSignal] self fp (sender):', ss.self?.fp);
+      console.log('[SecureSignal] self:', ss.self);
+      console.log('[SecureSignal] trusted:', (ss.trusted || []).map(d => d.fp));
+
     
       // Pick who to stream to:
       /*const targets = (ss.trusted || [])        // all trusted
@@ -958,7 +960,7 @@
         .map(d => d.fp)
         .filter(fp => fp && fp !== selfFp)
         .filter(fp => !peers.has(`paired:${fp}`)); // skip if already connected
-    
+      console.log('[sender] dialing targets =', targets);
       for (const fp of targets) {
         try {
           console.log('[sender] trying secure connect to', fp);
