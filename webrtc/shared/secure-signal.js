@@ -311,6 +311,12 @@ export class SecureSignal {
 
     const sessionKey = await this._deriveSessionKey(eph.privateKey, b64uToBytes(reply.ephSpki), concatBytes(nonce, b64uToBytes(reply.nonce)));
     sess.key = sessionKey;
+    const sessionKey = await this._deriveSessionKey(...);
+    sess.key = sessionKey;
+    // NEW: pin routing to the responder tab that replied
+    if (reply && reply.fromInstance) {
+      sess.toInstance = reply.fromInstance;
+    }
     this.onSession({ sid, peerFp: toFp, role:'initiator' });
     return { sid, sessionKey };
   }
@@ -339,7 +345,7 @@ export class SecureSignal {
     const sessionKey = await this._deriveSessionKey(eph.privateKey, b64uToBytes(m.ephSpki), concatBytes(b64uToBytes(m.nonce), nonce));
 
     // Prepare session container (no handlers yet)
-    this.sessions.set(sid, { toFp: m.from, key: sessionKey, role:'responder', handlers: [], onmsg: null });
+    this.sessions.set(sid, { toFp: m.from, key: sessionKey, role:'responder', handlers: [], onmsg: null, toInstance: m.fromInstance || null });
     this._ensureDispatcher(sid);
 
     await this._whenOpen();
