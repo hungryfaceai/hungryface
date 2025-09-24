@@ -358,7 +358,16 @@ export class SecureSignal {
     const s = this.sessions.get(sid); if (!s || !s.key) throw new Error('Missing session');
     const { iv, ct } = await aesGcmEncrypt(s.key, te.encode(JSON.stringify(obj)));
     await this._whenOpen();
-    this.ws.send(JSON.stringify({ op:'relay', to: s.toFp, from:this.me.fingerprint, kind:'enc', sid, iv: b64u(iv), ct: b64u(ct) }));
+    this.ws.send(JSON.stringify({
+      op: 'relay',
+      to: s.toFp,
+      from: this.me.fingerprint,
+      fromInstance: this.instanceId,   // <-- add this
+      kind: 'enc',
+      sid,
+      iv: b64u(iv),
+      ct: b64u(ct)
+    }));
   }
 
   // New: add a handler without overwriting others (fan-out)
