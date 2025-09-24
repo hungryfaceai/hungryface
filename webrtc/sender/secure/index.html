@@ -944,17 +944,12 @@
       return { pc, dc, sid, ss };
     }
 
-    async function pairedConnectAndAttachMany(localStream) {
+    /*async function pairedConnectAndAttachMany(localStream) {
       const ss = new SecureSignal({ url: WS_ENDPOINT, onOpen: () => setStatus('Connected (secure)') });
       await ss.init();
       console.log('[SecureSignal] self:', ss.self);
       console.log('[SecureSignal] trusted:', (ss.trusted || []).map(d => d.fp));
 
-    
-      // Pick who to stream to:
-      /*const targets = (ss.trusted || [])        // all trusted
-        // .filter(d => (loadLastMeta(d.fp).room === currentRoom())) // optional: same "room" meta
-        .map(d => d.fp);*/
       const selfFp = ss.self?.fp || '';
       const targets = (ss.trusted || [])
         .map(d => d.fp)
@@ -1018,6 +1013,109 @@
           // peer likely offline → ignore; you can retry later
           console.warn('[sender] connect failed for', fp, e?.message || e);
         }
+      }
+    }*/
+
+    async function pairedConnectAndAttachMany(localStream) {
+      // Ensure SecureSignal is up and we know our own fp
+      const ss = new SecureSignal({ url: WS_ENDPOINT, onOpen: () => setStatus('Connected (secure)') });
+      await ss.init();
+      const SELF_FP = ss.me?.fingerprint;     // <-- use ss.me (or ss.self.fp if you added the alias)
+      if (!SELF_FP) throw new Error('No self fingerprint');
+    
+      // Targets = all trusted except self and except those already connected
+      const targets = (ss.trusted || [])
+        .map(d => d.fp)
+        .filter(fp => fp && fp !== SELF_FP)
+        .filter(fp => !peers.has(`paired:${fp}`));
+    
+      if (!targets.length) {
+        console.log('[sender] no trusted targets to dial (others may connect later)');
+        return;
+      }
+    
+      for (const fp of targets) {
+        try {
+          const { pc, dc } = await connectToPeer(ss, fp, {
+            initiator: true,
+            localStreams: [localStream],
+            label: 'pose',
+            streamMeta: { room: currentRoom() },   // your meta fanout
+            onTrack: (ev) => {
+              // Receiver → talkback (keep latest; change if you prefer "first wins")
+              try {
+                if (ev.track.kind === 'audio') {
+                  const ms = ev.streams?.[0] || new MediaStream([ev.track]);
+                  talkbackAudio.srcObject = ms;
+                  talkbackAudio.muted = false;
+                  talkbackAudio.volume = 1.0;
+                  talkbackAudio.play().catch(()=>{});
+                  ev.track.addEventListener('ended', () => {
+                    if (talkbackAudio.srcObject === ms) {
+                      try { talkbackAudio.pause(); talkbackAudio.srcObject = null; } catch {}
+                    }
+                  });
+                  console.log('[SENDER] talkback attached from', fp);
+                }
+              } catch (e) { console.warn('[SENDER] ontrack error (paired many):', e); }
+            },
+            onData: (msgRaw, ch) => {
+              // keep whatever you already do here (AI payload, etc.)
+              try {
+                const msg = (typeof msgRaw === 'string') ? JSON.parse(msgRaw) : msgRaw;
+                if (!msg || !msg.type) return;
+                if (msg.type === 'audio') return onAudioMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
+                if (msg.type === 'pose')  return onPoseMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
+                if (msg.type === 'face')  return onFaceMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
+              } catch {}
+            },
+          });
+    
+          // Save peer objects
+          peers.set(`paired:${fp}`, { pc, dc });
+    
+          // Prime newly-opened DC with current AI/meta so late joiners get state
+          if (dc) {
+            dc.addEventListener('open', () => {
+              poseDCs.add(dc);
+              try { dc.send(JSON.stringify({ type:'meta', room: currentRoom() })); } catch {}
+              announceAIModes?.();
+              if (lastAudioPayload) try { dc.send(lastAudioPayload); } catch {}
+              if (lastPosePayload)  try { dc.send(lastPosePayload);  } catch {}
+              if (lastFacePayload)  try { dc.send(lastFacePayload);  } catch {}
+            });
+            dc.addEventListener('close',  () => poseDCs.delete(dc));
+            dc.addEventListener('error',  () => poseDCs.delete(dc));
+          }
+    
+          // Gentle auto-reconnect
+          pc.addEventListener('connectionstatechange', () => {
+            const st = pc.connectionState;
+            console.log('[SENDER][PC]', fp, st);
+            if (['failed','disconnected','closed'].includes(st)) {
+              poseDCs.delete(dc);
+              peers.delete(`paired:${fp}`);
+              setTimeout(() => {
+                if (!started) return;
+                if (!peers.has(`paired:${fp}`)) {
+                  console.log('[sender] retrying dropped peer', fp);
+                  pairedConnectAndAttachMany(localStream);
+                }
+              }, 2500);
+            }
+          });
+    
+        } catch (err) {
+          console.warn('[sender] connect failed for', fp, err?.message || err);
+        }
+      }
+    
+      // Periodic sweep for receivers that open later
+      if (!window._bmSweepTimer) {
+        window._bmSweepTimer = setInterval(() => {
+          if (!started) { clearInterval(window._bmSweepTimer); window._bmSweepTimer = null; return; }
+          pairedConnectAndAttachMany(localStream);
+        }, 8000);
       }
     }
 
