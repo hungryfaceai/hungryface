@@ -20,11 +20,10 @@ export class SecureSignal {
     this._sidHandlers = new Map(); // sid -> dispatcher function(msg, from)
     this._sessionHandlers = new Set();
     if (this.onSession) this._sessionHandlers.add(this.onSession); // keep legacy
-    addSessionListener(fn) { this._sessionHandlers.add(fn); return () => this._sessionHandlers.delete(fn); }
-    _emitSession(evt) { for (const fn of this._sessionHandlers) { try { fn(evt); } catch {} } }
-
   }
-
+  addSessionListener(fn) { this._sessionHandlers.add(fn); return () => this._sessionHandlers.delete(fn); }
+  _emitSession(evt) { for (const fn of this._sessionHandlers) { try { fn(evt); } catch {} } }
+  
   async init() {
     this.me = await ensureIdentity({});
     this.self = this.me;
