@@ -172,7 +172,7 @@
     });
 
     //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959 //pairing code
-    async function startPairedReceiver() {
+    /*async function startPairedReceiver() {
     if (!PAIRED_PEER_FP) {
       showStatus('Missing ?peer=<fingerprint>. Pair devices and open with the peer fingerprint.');
       return;
@@ -215,7 +215,7 @@
             console.log('[Receiver] meta room:', msg.room, '| desired:', desiredRoom || '(none)');
 
             // Example (optional): if desiredRoom mismatches, you could reduce volume, show a warning, etc.
-            // if (desiredRoom && msg.room !== desiredRoom) { /* no-op, or hint */ }
+            // if (desiredRoom && msg.room !== desiredRoom) { *** }
           }
         } catch {}
       }
@@ -251,6 +251,71 @@
     };
   
     pcRef = pc; // talk/lullaby keeps working
+  }
+  */
+  async function startReceiverPeerless() {
+    showStatus('Waiting for sender…');
+  
+    const ss = new SecureSignal({
+      url: WS_ENDPOINT,
+      onOpen: () => console.log('[SecureSignal] open (receiver)'),
+    });
+    await ss.init();
+  
+    // When any trusted sender opens a session to us, accept it immediately
+    const handleSession = async ({ sid, peerFp, role }) => {
+      if (role !== 'responder') return; // only inbound sessions
+      try {
+        const { pc } = await connectToPeer(ss, peerFp, {
+          initiator: false,
+          sid,                                   // <-- use the actual session we just got
+          onTrack: (ev) => {
+            const stream = ev.streams?.[0] || new MediaStream([ev.track]);
+            if (remoteVideo.srcObject !== stream) {
+              remoteVideo.srcObject = stream;
+              tryStartMuted();
+            }
+            showStatus('Connected');
+          },
+          onData: (msgRaw, dc) => {
+            try {
+              const msg = (typeof msgRaw === 'string') ? JSON.parse(msgRaw) : msgRaw;
+              if (msg?.type === 'meta' && typeof msg.room === 'string') {
+                saveLastMeta(peerFp, { room: msg.room });
+                console.log('[Receiver] meta room:', msg.room, '| desired:', desiredRoom || '(none)');
+              }
+            } catch {}
+          }
+        });
+  
+        // (optional) debug hooks
+        pc.addEventListener('icecandidate', e => {
+          if (e.candidate) console.log('[RX][ICE] new candidate', e.candidate.type || e.candidate.candidate);
+        });
+        pc.addEventListener('iceconnectionstatechange', () => {
+          console.log('[RX][ICE] state =', pc.iceConnectionState);
+        });
+        pc.addEventListener('connectionstatechange', () => {
+          console.log('[RX][PC] state =', pc.connectionState);
+        });
+  
+        // Preallocate talkback transceiver as you already do
+        try {
+          talkTx = pc.addTransceiver('audio', { direction: 'sendonly' });
+          talkSender = talkTx.sender;
+        } catch (e) {
+          console.warn('[Receiver] addTransceiver failed:', e);
+        }
+  
+        pcRef = pc;
+      } catch (e) {
+        console.warn('[receiver] failed to accept session from', peerFp, e?.message || e);
+      }
+    };
+  
+    // Chain into your single-callback `onSession`
+    const prev = ss.onSession;
+    ss.onSession = (evt) => { try { prev && prev(evt); } catch {} handleSession(evt); };
   }
 
     /* ---------- Audio UI ---------- */
@@ -650,10 +715,16 @@
     });
 
     //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959
-    startPairedReceiver().catch((e) => {
+    /*startPairedReceiver().catch((e) => {
+      console.warn(e);
+      showStatus(e?.message || 'Failed to connect');
+    });*/
+    startReceiverPeerless().catch((e) => {
       console.warn(e);
       showStatus(e?.message || 'Failed to connect');
     });
+
+    
     window.addEventListener('beforeunload', () => {
       try { setTalking(false); } catch {}
       try { talkSender && pcRef && pcRef.removeTrack(talkSender); } catch {}
