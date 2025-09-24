@@ -311,8 +311,6 @@ export class SecureSignal {
 
     const sessionKey = await this._deriveSessionKey(eph.privateKey, b64uToBytes(reply.ephSpki), concatBytes(nonce, b64uToBytes(reply.nonce)));
     sess.key = sessionKey;
-    const sessionKey = await this._deriveSessionKey(...);
-    sess.key = sessionKey;
     // NEW: pin routing to the responder tab that replied
     if (reply && reply.fromInstance) {
       sess.toInstance = reply.fromInstance;
@@ -369,6 +367,7 @@ export class SecureSignal {
       to: s.toFp,
       from: this.me.fingerprint,
       fromInstance: this.instanceId,   // <-- add this
+      toInstance: s.toInstance || null,
       kind: 'enc',
       sid,
       iv: b64u(iv),
