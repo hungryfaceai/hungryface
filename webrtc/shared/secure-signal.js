@@ -18,6 +18,11 @@ export class SecureSignal {
 
     // New: keep a stable, chainable per-sid dispatcher reference
     this._sidHandlers = new Map(); // sid -> dispatcher function(msg, from)
+    this._sessionHandlers = new Set();
+    if (this.onSession) this._sessionHandlers.add(this.onSession); // keep legacy
+    addSessionListener(fn) { this._sessionHandlers.add(fn); return () => this._sessionHandlers.delete(fn); }
+    _emitSession(evt) { for (const fn of this._sessionHandlers) { try { fn(evt); } catch {} } }
+
   }
 
   async init() {
@@ -315,7 +320,8 @@ export class SecureSignal {
     if (reply && reply.fromInstance) {
       sess.toInstance = reply.fromInstance;
     }
-    this.onSession({ sid, peerFp: toFp, role:'initiator' });
+    //this.onSession({ sid, peerFp: toFp, role:'initiator' });
+    this._emitSession({ sid, peerFp: toFp, role:'initiator' });
     return { sid, sessionKey };
   }
 
@@ -348,7 +354,8 @@ export class SecureSignal {
 
     await this._whenOpen();
     this.ws.send(JSON.stringify({ op:'relay', to: peer.fp, from:this.me.fingerprint, fromInstance: this.instanceId, kind:'eph-reply', sid, ephSpki: b64u(ephSpki), nonce: b64u(nonce), sig: b64u(sig) }));
-    this.onSession({ sid, peerFp: m.from, role:'responder' });
+    //this.onSession({ sid, peerFp: m.from, role:'responder' });
+    this._emitSession({ sid, peerFp: m.from, role:'responder' });
   }
 
   async _deriveSessionKey(privEcdh, peerSpkiBytes, salt) {
