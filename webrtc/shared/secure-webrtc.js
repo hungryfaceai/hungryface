@@ -227,11 +227,12 @@ function waitForSessionFrom(ss, peerFp, timeoutMs = 15000) {
       ss.onSession = prev;
     }
 
-    const prev = ss.onSession;
+    /*const prev = ss.onSession;
     ss.onSession = (...args) => {
       try { prev && prev(...args); } catch {}
       onSession(args[0]);
-    };
+    };*/
+    const unsubscribe = ss.addSessionListener((e) => onSession(e));
   });
 }
 
