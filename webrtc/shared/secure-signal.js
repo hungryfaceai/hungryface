@@ -21,6 +21,7 @@ export class SecureSignal {
 
   async init() {
     this.me = await ensureIdentity({});
+    this.self = this.me;
     this.trusted = (await this._loadTrusted()) || [];
     this._connect();
   }
