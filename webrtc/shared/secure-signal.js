@@ -32,7 +32,12 @@ export class SecureSignal {
           sessionStorage.setItem('naptio:instanceId', id);
           return id;
         })();
-    } catch { /* non-fatal */ }
+    } catch { 
+      // Fallback when sessionStorage is unavailable
+      const b = new Uint8Array(8);
+      crypto.getRandomValues(b);
+      this.instanceId = Array.from(b).map(x => x.toString(16).padStart(2,'0')).join('');
+    }
     
     this.trusted = (await this._loadTrusted()) || [];
     this._connect();
