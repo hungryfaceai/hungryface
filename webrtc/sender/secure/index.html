@@ -347,6 +347,17 @@
       elDbgToggle.style.display = 'none';
     }
 
+    let SS = null;
+    
+    async function ensureSS() {
+      if (SS) return SS;
+      SS = new SecureSignal({
+        url: WS_ENDPOINT,
+        onOpen: () => setStatus('Connected (secure)'),
+      });
+      await SS.init();
+      return SS;
+    }
 
     function getLocalAudioTrack() {
       return localStream?.getAudioTracks?.()[0] || null;
@@ -1018,8 +1029,9 @@
 
     async function pairedConnectAndAttachMany(localStream) {
       // Ensure SecureSignal is up and we know our own fp
-      const ss = new SecureSignal({ url: WS_ENDPOINT, onOpen: () => setStatus('Connected (secure)') });
-      await ss.init();
+      //const ss = new SecureSignal({ url: WS_ENDPOINT, onOpen: () => setStatus('Connected (secure)') });
+      //await ss.init();
+      const ss = await ensureSS(); 
       const SELF_FP = ss.me?.fingerprint;     // <-- use ss.me (or ss.self.fp if you added the alias)
       if (!SELF_FP) throw new Error('No self fingerprint');
     
