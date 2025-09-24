@@ -14,6 +14,7 @@ export class SecureSignal {
     this.onSession = onSession || (()=>{});
     this._qrNonce = null;         // stored when we render QR
     this._openWaiters = [];       // waiters for WS "open"
+    this.instanceId = null;
 
     // New: keep a stable, chainable per-sid dispatcher reference
     this._sidHandlers = new Map(); // sid -> dispatcher function(msg, from)
@@ -22,6 +23,17 @@ export class SecureSignal {
   async init() {
     this.me = await ensureIdentity({});
     this.self = this.me;
+    try {
+      this.instanceId =
+        sessionStorage.getItem('naptio:instanceId') ||
+        (() => {
+          const b = crypto.getRandomValues(new Uint8Array(8));
+          const id = Array.from(b).map(x => x.toString(16).padStart(2,'0')).join('');
+          sessionStorage.setItem('naptio:instanceId', id);
+          return id;
+        })();
+    } catch { /* non-fatal */ }
+    
     this.trusted = (await this._loadTrusted()) || [];
     this._connect();
   }
