@@ -44,7 +44,12 @@ export class SecureSignal {
     ws.onopen = () => {
       const w = this._openWaiters.splice(0);
       for (const res of w) try { res(); } catch {}
-      ws.send(JSON.stringify({ op:'register', fp:this.me.fingerprint, device:this.me.deviceName }));
+      ws.send(JSON.stringify({
+        op: 'register',
+        fp: this.me.fingerprint,
+        instance: this.instanceId,   // <-- NEW
+        device: this.me.deviceName
+      }));
       this.onOpen();
       this._emitTrusted();
     };
