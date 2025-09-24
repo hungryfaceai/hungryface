@@ -298,7 +298,7 @@ export class SecureSignal {
 
     const reply = await this._waitFor(`eph-reply:${sid}`, 15000, async () => {
       await this._whenOpen();
-      this.ws.send(JSON.stringify({ op:'relay', to: peer.fp, from:this.me.fingerprint, kind:'eph-hello', sid, ephSpki: b64u(ephSpki), nonce: b64u(nonce), sig: b64u(sig) }));
+      this.ws.send(JSON.stringify({ op:'relay', to: peer.fp, from:this.me.fingerprint, fromInstance: this.instanceId, kind:'eph-hello', sid, ephSpki: b64u(ephSpki), nonce: b64u(nonce), sig: b64u(sig) }));
     });
 
     const ok = await crypto.subtle.verify(
@@ -343,7 +343,7 @@ export class SecureSignal {
     this._ensureDispatcher(sid);
 
     await this._whenOpen();
-    this.ws.send(JSON.stringify({ op:'relay', to: peer.fp, from:this.me.fingerprint, kind:'eph-reply', sid, ephSpki: b64u(ephSpki), nonce: b64u(nonce), sig: b64u(sig) }));
+    this.ws.send(JSON.stringify({ op:'relay', to: peer.fp, from:this.me.fingerprint, fromInstance: this.instanceId, kind:'eph-reply', sid, ephSpki: b64u(ephSpki), nonce: b64u(nonce), sig: b64u(sig) }));
     this.onSession({ sid, peerFp: m.from, role:'responder' });
   }
 
