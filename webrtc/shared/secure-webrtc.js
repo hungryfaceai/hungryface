@@ -15,7 +15,7 @@ export async function connectToPeer(
     rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
     localStreams = [],              // streams whose tracks will be added before creating an offer
     onTrack,                        // (event) => {}
-    onData,                         // (message, dc) => {}
+    onData,                         // (message, dc, sid) => {}
     label = 'app',                  // datachannel label (initiator creates it)
     verifyDataChannel = false,      // optional DC proof
     onBeforeAnswer,
@@ -57,6 +57,7 @@ export async function connectToPeer(
   let dc;
   if (initiator) {
     dc = pc.createDataChannel(label, { ordered: true });
+    dc.sid = sid; // <-- tag with session ID
     attachDcHandlers(dc, onData, verifyDataChannel);
     // ⬇️ NEW: send metadata once the DC opens (if provided)
     if (streamMeta && typeof streamMeta === 'object') {
@@ -67,12 +68,12 @@ export async function connectToPeer(
   } else {
     pc.ondatachannel = (e) => {
       dc = e.channel;
+      dc.sid = sid; // <-- tag with session ID
       attachDcHandlers(dc, onData, verifyDataChannel);
     };
   }
 
   // ---- Add tracks BEFORE any offer is created ----
-  // Adding tracks triggers onnegotiationneeded on the initiator.
   try {
     for (const stream of (localStreams || [])) {
       for (const track of stream.getTracks()) {
@@ -97,7 +98,6 @@ export async function connectToPeer(
   };
 
   // --- Encrypted signaling handler (role-gated + glare-safe) ---
-  // IMPORTANT: do not steal app-level handlers. Chain any existing one.
   const prevHandler =
     (typeof ss.getEncryptedHandler === 'function' && ss.getEncryptedHandler(sid)) ||
     (ss._sidHandlers && typeof ss._sidHandlers.get === 'function' && ss._sidHandlers.get(sid)) ||
@@ -105,7 +105,6 @@ export async function connectToPeer(
 
   ss.onEncrypted(sid, async (msg) => {
     try {
-      // Handle only our WebRTC messages here; let the app see its own messages.
       if (msg && msg.webrtc) {
         if (msg.webrtc === 'ready') {
           if (initiator) {
@@ -130,12 +129,12 @@ export async function connectToPeer(
         }
   
         if (msg.webrtc === 'offer') {
-          if (initiator) return; // initiator never handles remote offers
+          if (initiator) return;
           try {
             const offer = new RTCSessionDescription(msg.desc);
             const offerCollision = makingOffer || pc.signalingState !== 'stable';
             if (offerCollision) {
-              if (!polite) return; // impolite ignores glare
+              if (!polite) return;
               try { await pc.setLocalDescription({ type: 'rollback' }); } catch {}
             }
             await pc.setRemoteDescription(offer);
@@ -154,7 +153,7 @@ export async function connectToPeer(
         if (msg.webrtc === 'answer') {
           if (!initiator) return;
           try {
-            if (pc.signalingState !== 'have-local-offer') return; // ignore dup/late answers
+            if (pc.signalingState !== 'have-local-offer') return;
             await pc.setRemoteDescription(new RTCSessionDescription(msg.desc));
           } catch (e) {
             console.debug('[webrtc] handle answer error:', e?.name || e?.message || e);
@@ -171,10 +170,8 @@ export async function connectToPeer(
           }
           return;
         }
-        // Unknown webrtc subtype: fall through
       }
   
-      // Not a WebRTC message: forward to any previous app handler.
       try { prevHandler && prevHandler(msg); } catch (e) {
         console.debug('[webrtc] prevHandler error:', e?.message || e);
       }
@@ -183,7 +180,7 @@ export async function connectToPeer(
     }
   });
 
-  // ---- Small nicety: restore previous encrypted handler when PC is done ----
+  // ---- Restore handler when PC closes ----
   const restoreHandler = () => { try { if (prevHandler) ss.onEncrypted(sid, prevHandler); } catch {} };
   pc.addEventListener('connectionstatechange', () => {
     if (['closed', 'failed', 'disconnected'].includes(pc.connectionState)) {
@@ -191,8 +188,7 @@ export async function connectToPeer(
     }
   });
 
-  // 4) Kick off initial negotiation from initiator if no tracks were provided yet.
-  // (If tracks were added above, onnegotiationneeded already fired.)
+  // 4) Kick off initial negotiation if no tracks yet
   if (initiator && (!localStreams || localStreams.length === 0)) {
     try {
       makingOffer = true;
@@ -211,28 +207,18 @@ export async function connectToPeer(
 function waitForSessionFrom(ss, peerFp, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => {
-      cleanup();
+      unsubscribe();
+      clearTimeout(t);
       reject(new Error('Timed out waiting for session'));
     }, timeoutMs);
 
-    function onSession(e) {
+    const unsubscribe = ss.addSessionListener((e) => {
       if (e.role === 'responder' && e.peerFp === peerFp) {
-        cleanup();
+        unsubscribe();
+        clearTimeout(t);
         resolve(e.sid);
       }
-    }
-    function cleanup() {
-      clearTimeout(t);
-      const prev = ss.onSession;
-      ss.onSession = prev;
-    }
-
-    /*const prev = ss.onSession;
-    ss.onSession = (...args) => {
-      try { prev && prev(...args); } catch {}
-      onSession(args[0]);
-    };*/
-    const unsubscribe = ss.addSessionListener((e) => onSession(e));
+    });
   });
 }
 
@@ -257,8 +243,8 @@ function attachDcHandlers(dc, onData, verifyDataChannel) {
 
   dc.onmessage = (ev) => {
     if (onData) {
-      try { onData(JSON.parse(ev.data), dc); }
-      catch { onData(ev.data, dc); }
+      try { onData(JSON.parse(ev.data), dc, dc.sid || undefined); }
+      catch { onData(ev.data, dc, dc.sid || undefined); }
     }
   };
 }
