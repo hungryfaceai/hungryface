@@ -1126,6 +1126,86 @@
       }
     }
 
+    /* ======= accept inbound sessions from receivers (receiver-initiated) ======= */
+    async function listenForReceivers(localStream) {
+      const ss = await ensureSS();
+      setStatus('Connected (secure) — waiting for receivers…');
+
+      // Preserve any existing onSession and chain ours after it
+      const prevOnSession = ss.onSession;
+      ss.onSession = async (evt) => {
+        try { prevOnSession && prevOnSession(evt); } catch {}
+        const { sid, peerFp, role } = evt || {};
+        // We accept sessions where the *receiver* wants us to be the responder.
+        if (role !== 'responder') return;
+
+        try {
+          const { pc, dc } = await connectToPeer(ss, peerFp, {
+            initiator: false,          // <-- sender acts as responder
+            sid,                       // <-- bind to this specific inbound session
+            localStreams: [localStream],
+            label: 'pose',
+            streamMeta: { room: currentRoom() },
+            onTrack: (ev) => {
+              try {
+                if (ev.track.kind === 'audio') {
+                  const ms = ev.streams?.[0] || new MediaStream([ev.track]);
+                  talkbackAudio.srcObject = ms;
+                  talkbackAudio.muted = false;
+                  talkbackAudio.volume = 1.0;
+                  talkbackAudio.play().catch(() => {});
+                  ev.track.addEventListener('ended', () => {
+                    if (talkbackAudio.srcObject === ms) {
+                      try { talkbackAudio.pause(); talkbackAudio.srcObject = null; } catch {}
+                    }
+                  });
+                  console.log('[SENDER] talkback attached from', peerFp);
+                }
+              } catch (e) { console.warn('[SENDER] ontrack error (inbound):', e); }
+            },
+            onData: (msgRaw, ch) => {
+              try {
+                const msg = (typeof msgRaw === 'string') ? JSON.parse(msgRaw) : msgRaw;
+                if (!msg || !msg.type) return;
+                if (msg.type === 'audio') return onAudioMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
+                if (msg.type === 'pose')  return onPoseMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
+                if (msg.type === 'face')  return onFaceMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
+              } catch {}
+            },
+          });
+
+          // Stable key so multiple tabs of the same receiver don't collide
+          const key = `paired:${peerFp}:${sid || Math.random().toString(36).slice(2,8)}`;
+          peers.set(key, { pc, dc });
+
+          if (dc) {
+            dc.addEventListener('open', () => {
+              poseDCs.add(dc);
+              try { dc.send(JSON.stringify({ type:'meta', room: currentRoom() })); } catch {}
+              announceAIModes?.();
+              if (lastAudioPayload) try { dc.send(lastAudioPayload); } catch {}
+              if (lastPosePayload)  try { dc.send(lastPosePayload);  } catch {}
+              if (lastFacePayload)  try { dc.send(lastFacePayload);  } catch {}
+              console.log('[POSE][sender] DC open (inbound)', key);
+            });
+            dc.addEventListener('close',  () => { poseDCs.delete(dc); peers.delete(key); });
+            dc.addEventListener('error',  () => { poseDCs.delete(dc); peers.delete(key); });
+          }
+
+          pc.addEventListener('connectionstatechange', () => {
+            const st = pc.connectionState;
+            console.log('[SENDER][PC]', key, st);
+            if (['failed','disconnected','closed'].includes(st)) {
+              poseDCs.delete(dc);
+              peers.delete(key);
+            }
+          });
+
+        } catch (err) {
+          console.warn('[sender] failed to accept inbound from', peerFp, err?.message || err);
+        }
+      };
+    }
 
     function beginPreviewWindow(minutes) {
       const ms = Math.max(0, Math.round((Number(minutes) || 1) * 60000));
@@ -1211,9 +1291,13 @@
         beginPreviewWindow(Number(previewMinsInput.value) || 1);
 
         // ⬇️ paired-only connect (no room signaling)
-        setStatus('Connecting to paired device…');
-        //await pairedConnectAndAttach(localStream);
+        /*setStatus('Connecting to paired device…');
+        //await pairedConnectAndAttach(localStream); // old (single, sender-initiated)
         await pairedConnectAndAttachMany(localStream); //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959
+        */
+        // Switch to receiver-initiated flow: we wait and accept inbound sessions.
+        setStatus('Waiting for receivers…');
+        await listenForReceivers(localStream);              // new (receiver-initiated)
         started = true;
         setStatus('Streaming (paired)…');
 
