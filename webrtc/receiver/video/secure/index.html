@@ -195,9 +195,13 @@
     }
   
     try { localStorage.setItem('naptio:lastPeerFp', PAIRED_PEER_FP); } catch {}
-  
+
+    // ⬅️ Pre-create a silent audio track so the very first O/A has an m=audio section
+    const silentTrack  = makeSilentTrack();
+    const silentStream = new MediaStream([silentTrack]);
     const { pc } = await connectToPeer(ss, PAIRED_PEER_FP, {
       initiator: true, //was: false https://chatgpt.com/c/68d3f9bc-d8a4-8323-b314-1f11bbcc01de
+      localStreams: [silentStream], // ⬅️ keeps m-line order stable across renegotiations
       onTrack: (ev) => {
         const stream = ev.streams?.[0] || new MediaStream([ev.track]);
         if (remoteVideo.srcObject !== stream) {
@@ -231,12 +235,11 @@
   pc.addEventListener('connectionstatechange', () => {
     console.log('[RX][PC] state =', pc.connectionState);
   });
-    // Pre-allocate talkback sendonly transceiver (keeps your talk/lullaby logic unchanged)
+    // Grab the audio RTCRtpSender created from our silent local stream
     try {
-      talkTx = pc.addTransceiver('audio', { direction: 'sendonly' });
-      talkSender = talkTx.sender;
+      talkSender = pc.getSenders().find(s => s.track && s.track.kind === 'audio') || null;
     } catch (e) {
-      console.warn('[Receiver] addTransceiver failed:', e);
+      console.warn('[Receiver] failed to get audio sender:', e);
     }
   
     // If the sender created a 'pose' DC, we receive it here; we keep it open (video-only page ignores messages)
@@ -266,9 +269,14 @@
     const handleSession = async ({ sid, peerFp, role }) => {
       if (role !== 'responder') return; // only inbound sessions
       try {
+        // ⬅️ Pre-create a silent audio track so the first O/A has an m=audio section
+        const silentTrack  = makeSilentTrack();
+        const silentStream = new MediaStream([silentTrack]);
+        
         const { pc } = await connectToPeer(ss, peerFp, {
           initiator: false,
           sid,                                   // <-- use the actual session we just got
+          localStreams: [silentStream],          // ⬅️ keeps m-line order stable
           onTrack: (ev) => {
             const stream = ev.streams?.[0] || new MediaStream([ev.track]);
             if (remoteVideo.srcObject !== stream) {
@@ -299,12 +307,11 @@
           console.log('[RX][PC] state =', pc.connectionState);
         });
   
-        // Preallocate talkback transceiver as you already do
+        // Grab the audio RTCRtpSender created from our silent local stream
         try {
-          talkTx = pc.addTransceiver('audio', { direction: 'sendonly' });
-          talkSender = talkTx.sender;
+          talkSender = pc.getSenders().find(s => s.track && s.track.kind === 'audio') || null;
         } catch (e) {
-          console.warn('[Receiver] addTransceiver failed:', e);
+          console.warn('[Receiver] failed to get audio sender:', e);
         }
   
         pcRef = pc;
@@ -381,7 +388,13 @@
     let talkStream = null;               // local mic stream
     let talkTrack = null;                // audio track from talkStream
     let talkSender = null;               // RTCRtpSender
-    let talkTx = null;                   // ⬅️ preallocated sendonly transceiver
+    // No transceiver pre-allocation; we create a silent m-line up front instead.
+
+    function makeSilentTrack() {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const dest = ctx.createMediaStreamDestination();
+      return dest.stream.getAudioTracks()[0];
+    }
 
     // UI state
     let latched = false;                 // toggle mode ON/OFF
@@ -413,17 +426,23 @@
     }
 
     function tryAttachOnce() {
-      if (!talkTrack || !talkTx) return;
-      const sender = talkTx.sender || talkSender;
+      if (!talkTrack) return;
+      // If talkSender hasn't been captured yet, try to pull it from the PC now
+      if (!talkSender && pcRef) {
+        try {
+          talkSender = pcRef.getSenders().find(s => s.track && s.track.kind === 'audio') || null;
+        } catch {}
+      }
+      const sender = talkSender;
       if (!sender) return;
       if (sender.track === talkTrack) return;
       sender.replaceTrack(talkTrack)
         .then(() => {
-          talkSender = sender;
-          console.log('[Receiver] talkback track bound to preallocated sender');
+          console.log('[Receiver] talkback track bound to existing audio sender');
         })
         .catch(err => console.warn('[Receiver] replaceTrack failed:', err));
     }
+
 
     async function prepareIfNeeded() {
       await ensureTalkStream();
