@@ -269,6 +269,18 @@
     // When any trusted sender opens a session to us, accept it immediately
     const handleSession = async ({ sid, peerFp, role }) => {
       if (role !== 'responder') return; // only inbound sessions
+    
+      // ⬇️ NEW: if a preferred peer is set (?peer= or localStorage), ignore others
+      if (PAIRED_PEER_FP && peerFp !== PAIRED_PEER_FP) {
+        console.log('[RX] ignoring session from non-preferred peer', peerFp);
+        return;
+      }
+    
+      try {
+        // ⬇️ NEW: remember the actual peer we accepted
+        localStorage.setItem('naptio:lastPeerFp', peerFp);
+      } catch {}
+      
       try {
         // ⬅️ Pre-create a silent audio track so the first O/A has an m=audio section
         const silentTrack  = makeSilentTrack();
@@ -735,14 +747,14 @@
     });
 
     //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959
-    startPairedReceiver().catch((e) => {
-      console.warn(e);
-      showStatus(e?.message || 'Failed to connect');
-    });
-    /*startReceiverPeerless().catch((e) => {
+    /*startPairedReceiver().catch((e) => {
       console.warn(e);
       showStatus(e?.message || 'Failed to connect');
     });*/
+    startReceiverPeerless().catch((e) => {
+      console.warn(e);
+      showStatus(e?.message || 'Failed to connect');
+    });
 
     
     window.addEventListener('beforeunload', () => {
