@@ -267,12 +267,19 @@
     await ss.init();
     if (!ss.self?.fp) {
       console.warn('[RX] No local identity (self.fp is undefined). Storage may be blocked or pairing not completed.');
-      showStatus('Receiver has no local identity.\nCheck browser storage settings or re-pair this device.');
+      showStatus('Receiver has no local identity');
       return;
     }
     console.log('[RX] self =', ss.self?.fp, 'preferred =', PAIRED_PEER_FP);
     console.log('[RX] trusted =', (ss.trusted || []).map(d => d.fp));
-
+    // 🔍 log every onSession event (even if your handler filters by role)
+    const prev = ss.onSession;
+    ss.onSession = (evt) => {
+      try { prev && prev(evt); } catch {}
+      try {
+        console.log('[RX][SESSION] event:', JSON.stringify(evt));
+      } catch { console.log('[RX][SESSION] event (non-JSON):', evt); }
+    };
   
     // When any trusted sender opens a session to us, accept it immediately
     const handleSession = async ({ sid, peerFp, role }) => {
