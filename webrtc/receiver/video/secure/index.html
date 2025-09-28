@@ -265,14 +265,18 @@
       onOpen: () => console.log('[SecureSignal] open (receiver)'),
     });
     await ss.init();
+    console.log('[RX] self =', ss.self?.fp, 'preferred =', PAIRED_PEER_FP);
+    console.log('[RX] trusted =', (ss.trusted || []).map(d => d.fp));
+
   
     // When any trusted sender opens a session to us, accept it immediately
     const handleSession = async ({ sid, peerFp, role }) => {
-      console.log('[RX] inbound session from', peerFp, 'role=', role, 'preferred=', PAIRED_PEER_FP || '(any)');
+      console.log('[RX] onSession', { sid, peerFp, role, preferred: PAIRED_PEER_FP || '(any)' });
       console.log('[RX] inbound session:', { sid, peerFp, role, preferred: PAIRED_PEER_FP || '(any)' });
       if (role !== 'responder') return; // only inbound sessions
     
       // ⬇️ NEW: if a preferred peer is set (?peer= or localStorage), ignore others
+      console.log('[RX] checking preferred filter: inbound=', peerFp, 'preferred=', PAIRED_PEER_FP);
       if (PAIRED_PEER_FP && peerFp !== PAIRED_PEER_FP) {
         console.warn('[RX] ignoring session from non-preferred peer', { got: peerFp, want: PAIRED_PEER_FP });
         return;
