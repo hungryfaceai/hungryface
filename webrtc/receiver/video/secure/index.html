@@ -272,14 +272,6 @@
     }
     console.log('[RX] self =', ss.self?.fp, 'preferred =', PAIRED_PEER_FP);
     console.log('[RX] trusted =', (ss.trusted || []).map(d => d.fp));
-    // 🔍 log every onSession event (even if your handler filters by role)
-    const prev = ss.onSession;
-    ss.onSession = (evt) => {
-      try { prev && prev(evt); } catch {}
-      try {
-        console.log('[RX][SESSION] event:', JSON.stringify(evt));
-      } catch { console.log('[RX][SESSION] event (non-JSON):', evt); }
-    };
   
     // When any trusted sender opens a session to us, accept it immediately
     const handleSession = async ({ sid, peerFp, role }) => {
@@ -385,9 +377,17 @@
       }
     };
   
-    // Chain into your single-callback `onSession`
+    // Chain into your single-callback `onSession` (with logging)
     const prev = ss.onSession;
-    ss.onSession = (evt) => { try { prev && prev(evt); } catch {} handleSession(evt); };
+    ss.onSession = (evt) => {
+      try { prev && prev(evt); } catch {}
+      try {
+        console.log('[RX][SESSION] event:', JSON.stringify(evt));
+      } catch {
+        console.log('[RX][SESSION] event (non-JSON):', evt);
+      }
+      handleSession(evt);
+    };
   }
 
     /* ---------- Audio UI ---------- */
