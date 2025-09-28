@@ -982,78 +982,6 @@
       return { pc, dc, sid, ss };
     }
 
-    /*async function pairedConnectAndAttachMany(localStream) {
-      const ss = new SecureSignal({ url: WS_ENDPOINT, onOpen: () => setStatus('Connected (secure)') });
-      await ss.init();
-      console.log('[SecureSignal] self:', ss.self);
-      console.log('[SecureSignal] trusted:', (ss.trusted || []).map(d => d.fp));
-
-      const selfFp = ss.self?.fp || '';
-      const targets = (ss.trusted || [])
-        .map(d => d.fp)
-        .filter(fp => fp && fp !== selfFp)
-        .filter(fp => !peers.has(`paired:${fp}`)); // skip if already connected
-      console.log('[sender] dialing targets =', targets);
-      for (const fp of targets) {
-        try {
-          console.log('[sender] trying secure connect to', fp);
-          const { pc, dc } = await connectToPeer(ss, fp, {
-            initiator: true,
-            localStreams: [localStream],          // add tracks before offer
-            label: 'pose',
-            streamMeta: { room: currentRoom() },  // your room as metadata only
-            onTrack: (ev) => {
-              if (ev.track.kind === 'audio') {
-                const ms = ev.streams?.[0] || new MediaStream([ev.track]);
-                talkbackAudio.srcObject = ms; talkbackAudio.muted = false;
-                talkbackAudio.play().catch(()=>{});
-              }
-            },
-            onData: (msg, ch) => {
-              try {
-                const m = typeof msg === 'string' ? JSON.parse(msg) : msg;
-                if (!m?.type) return;
-                if (m.type === 'audio') return onAudioMessageFromReceiver({ data: JSON.stringify(m) }, ch);
-                if (m.type === 'pose')  return onPoseMessageFromReceiver({ data: JSON.stringify(m) }, ch);
-                if (m.type === 'face')  return onFaceMessageFromReceiver({ data: JSON.stringify(m) }, ch);
-              } catch {}
-            }
-          });
-    
-          // track per-peer for cleanup
-          peers.set(`paired:${fp}`, { pc, dc, remoteDescriptionSet: true, candidateQueue: [], lastOfferSdp: null, processingOffer: false });
-    
-          // add to your existing broadcast set
-          dc?.addEventListener('open', () => {
-            poseDCs.add(dc);
-            try { dc.send(JSON.stringify({ type: 'meta', room: currentRoom() })); } catch {}
-            announceAIModes();
-            if (lastAudioPayload) try { dc.send(lastAudioPayload); } catch {}
-            if (lastPosePayload)  try { dc.send(lastPosePayload);  } catch {}
-            if (lastFacePayload)  try { dc.send(lastFacePayload);  } catch {}
-          });
-          dc?.addEventListener('close', () => poseDCs.delete(dc));
-    
-          // optional: auto-reconnect a dropped peer
-          pc.addEventListener('connectionstatechange', () => {
-            if (['failed','disconnected','closed'].includes(pc.connectionState)) {
-              poseDCs.delete(dc);
-              peers.delete(`paired:${fp}`);
-              // lightweight retry after a bit (guard against spam)
-              setTimeout(() => {
-                if (!started) return;
-                pairedConnectAndAttachMany(localStream); // idempotent: will reconnect missing peers
-              }, 2500);
-            }
-          });
-    
-        } catch (e) {
-          // peer likely offline → ignore; you can retry later
-          console.warn('[sender] connect failed for', fp, e?.message || e);
-        }
-      }
-    }*/
-
     async function pairedConnectAndAttachMany(localStream) {
       const ss = await ensureSS(); 
       const SELF_FP = ss.self?.fingerprint || ss.self?.fp;
@@ -1105,17 +1033,16 @@
               } catch {}
             },
           });
-          console.log('[SENDER] connected (many)', {
-            to: fp,
-            pcSignaling: pc.signalingState,
-            pcConn: pc.connectionState,
-            senders: pc.getSenders().map(s => ({
-              kind: s.track?.kind, id: s.track?.id, enabled: s.track?.enabled
-            }))
-												
-																			 
-			   
-          });
+		  try {
+		    console.log('[SENDER] connected (many)', {
+		      to: fp,
+		      pcSignaling: pc.signalingState,
+		      pcConn: pc.connectionState,
+		      senders: pc.getSenders().map(s => ({
+		        kind: s.track?.kind, id: s.track?.id, enabled: s.track?.enabled
+		      }))
+		    });
+		  } catch {}
 															  
           pc.addEventListener('icegatheringstatechange', () => console.log('[SENDER][ICE] gathering =', pc.iceGatheringState, '→', fp));
 			
