@@ -27,6 +27,10 @@ export class SecureSignal {
   async init() {
     this.me = await ensureIdentity({});
     this.self = this.me;
+    // ✅ Back-compat alias for callers that expect `.fp`
+    if (this.self && !this.self.fp && this.self.fingerprint) {
+      this.self.fp = this.self.fingerprint;
+    }    
     try {
       this.instanceId =
         sessionStorage.getItem('naptio:instanceId') ||
