@@ -269,11 +269,12 @@
     // When any trusted sender opens a session to us, accept it immediately
     const handleSession = async ({ sid, peerFp, role }) => {
       console.log('[RX] inbound session from', peerFp, 'role=', role, 'preferred=', PAIRED_PEER_FP || '(any)');
+      console.log('[RX] inbound session:', { sid, peerFp, role, preferred: PAIRED_PEER_FP || '(any)' });
       if (role !== 'responder') return; // only inbound sessions
     
       // ⬇️ NEW: if a preferred peer is set (?peer= or localStorage), ignore others
       if (PAIRED_PEER_FP && peerFp !== PAIRED_PEER_FP) {
-        console.log('[RX] ignoring session from non-preferred peer', peerFp);
+        console.warn('[RX] ignoring session from non-preferred peer', { got: peerFp, want: PAIRED_PEER_FP });
         return;
       }
     
@@ -292,10 +293,26 @@
           sid,                                   // <-- use the actual session we just got
           localStreams: [silentStream],          // ⬅️ keeps m-line order stable
           onTrack: (ev) => {
+            try {
+              pc.getReceivers && console.log('[RX] receivers:',
+                pc.getReceivers().map(r => ({
+                  kind: r.track?.kind,
+                  id: r.track?.id,
+                  state: r.track?.readyState
+                }))
+              );
+            } catch {}
+            console.log('[RX] ontrack:', ev.track?.kind, {
+              streamId: ev.streams?.[0]?.id,
+              settings: ev.track?.getSettings ? ev.track.getSettings() : null
+            });
             const stream = ev.streams?.[0] || new MediaStream([ev.track]);
             if (remoteVideo.srcObject !== stream) {
+              console.log('[RX] attaching remote stream to <video>');
               remoteVideo.srcObject = stream;
-              tryStartMuted();
+              tryStartMuted()
+                .then(() => console.log('[RX] video play() resolved'))
+                .catch(e => console.warn('[RX] video play() failed:', e));
             }
             showStatus('Connected');
           },
@@ -309,6 +326,17 @@
             } catch {}
           }
         });
+        console.log('[RX] connected via secure-webrtc', {
+          sid, from: peerFp,
+          pcSignaling: pc.signalingState,
+          pcConn: pc.connectionState
+        });
+        pc.addEventListener('icegatheringstatechange', () =>
+          console.log('[RX][ICE] gathering =', pc.iceGatheringState)
+        );
+        pc.addEventListener('signalingstatechange', () =>
+          console.log('[RX][PC] signaling =', pc.signalingState)
+        );
   
         // (optional) debug hooks
         pc.addEventListener('icecandidate', e => {
@@ -329,6 +357,13 @@
         }
   
         pcRef = pc;
+        setInterval(() => {
+          if (!pcRef) return;
+          console.log('[RX] pc state:', pcRef.connectionState, 'ice:', pcRef.iceConnectionState);
+          const ms = remoteVideo.srcObject;
+          const vt = ms?.getVideoTracks?.()[0];
+          if (vt) console.log('[RX] remote video track:', { id: vt.id, enabled: vt.enabled, state: vt.readyState });
+        }, 3000);
       } catch (e) {
         console.warn('[receiver] failed to accept session from', peerFp, e?.message || e);
       }
