@@ -141,6 +141,7 @@ export class SecureSignal {
   }
 
   async _onmsg(m) {
+    try { console.debug('[SS][RX][raw]', m); } catch {}
     // Host receives scanner's init
     if (m.op === 'pair-init' && m.to === this.me.fingerprint) {
       const nonceQR = m.nonceQR ? b64uToBytes(m.nonceQR) : this._qrNonce;
