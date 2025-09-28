@@ -223,7 +223,7 @@ export class SecureSignal {
     // ===== Encrypted signaling + session setup =====
     if (m.op === 'relay' && m.to === this.me.fingerprint) {
       if (m.kind === 'eph-reply') { this._resolveWaiter(`eph-reply:${m.sid}`, m); return; }
-      if (m.kind === 'eph-hello') { await this._handleEphHello(m); return; }
+      if (m.kind === 'eph-hello') { await this._handleEphHello(m); console.debug('[SS][RX] eph-hello from', m.from, '→ ok; replying'); return; }
       if (m.kind === 'enc') {
         const s = this.sessions.get(m.sid); if (!s || !s.key) return;
         try {
@@ -330,6 +330,7 @@ export class SecureSignal {
   }
 
   async _handleEphHello(m) {
+    console.debug('[SS][_handleEphHello] from', m.from, '| trusted?', !!this.trusted.find(d=>d.fp===m.from));
     const peer = this.trusted.find(d => d.fp === m.from); if (!peer) return;
     const tag = te.encode('naptio-ephemeral-v1');
 
