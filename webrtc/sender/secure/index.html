@@ -378,17 +378,26 @@
         track = s.getAudioTracks()[0];
         if (!localStream) localStream = new MediaStream();
         localStream.addTrack(track);
+        try {
+          console.log('[AUDIO][sender] acquired mic track', {
+            id: track?.id,
+            settings: track?.getSettings?.() || null
+          });
+        } catch {}
       }
 
       if (peers?.size) {
         for (const [peerId, rec] of peers) {
           const pc = rec.pc /* paired pc from secure-webrtc */;
-          if (!pc) continue;
+          if (!pc) { console.warn('[AUDIO][sender] no RTCPeerConnection for', peerId); continue; }
           const snd = getAudioSender(pc);
+          console.log('[AUDIO][sender] attach to', peerId, '| hasSender =', !!snd);
           if (snd) {
-            await snd.replaceTrack(track);
+            try { await snd.replaceTrack(track); console.log('[AUDIO][sender] replaceTrack OK →', peerId); }
+            catch (e) { console.warn('[AUDIO][sender] replaceTrack failed →', peerId, e?.message || e); }
           } else {
-            pc.addTrack(track, localStream);
+            try { pc.addTrack(track, localStream); console.log('[AUDIO][sender] addTrack →', peerId); }
+            catch (e) { console.warn('[AUDIO][sender] addTrack failed →', peerId, e?.message || e); }
           }
           // no WS nudge here; secure-webrtc handles negotiationneeded
         }
@@ -667,6 +676,7 @@
         } : false,
         audio: wantAudio ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true } : false
       };
+      console.log('[MEDIA][sender] requesting getUserMedia with', constraints);
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       const vt = stream.getVideoTracks()[0];
       const at = stream.getAudioTracks()[0];
@@ -674,6 +684,12 @@
       if (at && 'contentHint' in at) { try { at.contentHint = 'speech'; } catch {} }
       if (vt) vt.enabled = wantVideo;
       if (at) at.enabled = wantAudio;
+      try {
+        console.log('[MEDIA][sender] got tracks', {
+          video: vt ? { id: vt.id, settings: vt.getSettings?.() || null } : null,
+          audio: at ? { id: at.id, settings: at.getSettings?.() || null } : null
+        });
+      } catch {}
       return stream;
     }
 
@@ -692,10 +708,12 @@
           const t = await ensureSenderHasAudioTrack();
           if (t) t.enabled = true;
           setStatus('Audio ON');
+          console.log('[AUDIO][sender] enabled streaming audio');
         } else {
           const t = getLocalAudioTrack();
           if (t) t.enabled = false;
           setStatus('Audio OFF');
+          console.log('[AUDIO][sender] disabled streaming audio');
         }
       } catch (e) {
         console.warn('[AUDIO][sender] toggle failed:', e);
@@ -899,6 +917,15 @@
           } catch {}
         }
       });
+      console.log('[SENDER] connected', {
+        sid, to: PAIRED_PEER_FP,
+        pcSignaling: pc.signalingState,
+        pcConn: pc.connectionState
+      });
+      pc.addEventListener('icegatheringstatechange', () => console.log('[SENDER][ICE] gathering =', pc.iceGatheringState));
+      pc.addEventListener('signalingstatechange',   () => console.log('[SENDER][PC] signaling =', pc.signalingState));
+      pc.addEventListener('iceconnectionstatechange',() => console.log('[SENDER][ICE] state =', pc.iceConnectionState));
+      pc.addEventListener('icecandidate', (e) => { if (e.candidate) console.log('[SENDER][ICE] new candidate', e.candidate.type || e.candidate.candidate); });
 
       (function attachPoseChannelFromSender(ch) {
         if (!ch) return;
@@ -1078,6 +1105,24 @@
               } catch {}
             },
           });
+          console.log('[SENDER] connected (many)', {
+            to: fp,
+            pcSignaling: pc.signalingState,
+            pcConn: pc.connectionState,
+            senders: pc.getSenders().map(s => ({
+              kind: s.track?.kind, id: s.track?.id, enabled: s.track?.enabled
+            }))
+												
+																			 
+			   
+          });
+															  
+          pc.addEventListener('icegatheringstatechange', () => console.log('[SENDER][ICE] gathering =', pc.iceGatheringState, '→', fp));
+			
+														   
+          pc.addEventListener('signalingstatechange',   () => console.log('[SENDER][PC] signaling =', pc.signalingState, '→', fp));
+          pc.addEventListener('iceconnectionstatechange',() => console.log('[SENDER][ICE] state =', pc.iceConnectionState, '→', fp));
+          pc.addEventListener('icecandidate', (e) => { if (e.candidate) console.log('[SENDER][ICE] new candidate', e.candidate.type || e.candidate.candidate, '→', fp); });
     
           // 🔑 Unique key = fingerprint + random instanceId (so same-fp tabs don’t overwrite)
           const key = `paired:${fp}:${Math.random().toString(36).slice(2, 8)}`; //https://chatgpt.com/c/68d692cc-57c8-8332-8902-e4fe3c2dca5f
@@ -1085,6 +1130,7 @@
     
           if (dc) {
             dc.addEventListener('open', () => {
+																									
               poseDCs.add(dc);
               try { dc.send(JSON.stringify({ type:'meta', room: currentRoom() })); } catch {}
               announceAIModes?.();
@@ -1138,7 +1184,7 @@
         const { sid, peerFp, role } = evt || {};
         // We accept sessions where the *receiver* wants us to be the responder.
         if (role !== 'responder') return;
-
+        console.log('[SENDER] inbound session', { sid, from: peerFp, role });
         try {
           const { pc, dc } = await connectToPeer(ss, peerFp, {
             initiator: false,          // <-- sender acts as responder
@@ -1173,6 +1219,15 @@
               } catch {}
             },
           });
+          console.log('[SENDER] accepted inbound', {
+            sid, from: peerFp,
+            pcSignaling: pc.signalingState,
+            pcConn: pc.connectionState
+          });
+          pc.addEventListener('icegatheringstatechange', () => console.log('[SENDER][ICE] gathering =', pc.iceGatheringState, '<-', peerFp));
+          pc.addEventListener('signalingstatechange',   () => console.log('[SENDER][PC] signaling =', pc.signalingState, '<-', peerFp));
+          pc.addEventListener('iceconnectionstatechange',() => console.log('[SENDER][ICE] state =', pc.iceConnectionState, '<-', peerFp));
+          pc.addEventListener('icecandidate', (e) => { if (e.candidate) console.log('[SENDER][ICE] new candidate', e.candidate.type || e.candidate.candidate, '<-', peerFp); });
 
           // Stable key so multiple tabs of the same receiver don't collide
           const key = `paired:${peerFp}:${sid || Math.random().toString(36).slice(2,8)}`;
@@ -1284,9 +1339,23 @@
         updateMirrorClass();
         setStatus('Starting camera…');
         localStream = await getMedia();
+											 
+											 
+																		   
+			 
+		  
+		
         localVideo.srcObject = localStream;
+			 
+								  
+														
+					 
         try { await localVideo.play(); } catch (e) { console.warn('local play blocked', e); }
+		 
         beginViewportSettle();
+        try {
+          console.log('[SENDER] localStream tracks:', localStream.getTracks().map(t => (t.kind + ':' + (t.id||''))));
+        } catch {}
 
         beginPreviewWindow(Number(previewMinsInput.value) || 1);
 
@@ -1297,6 +1366,7 @@
         await listenForReceivers(localStream);
         started = true;
         setStatus('Streaming (paired)…');
+        try { console.log('[SENDER] peers connected =', Array.from(peers.keys())); } catch {}
 
         startBtn.textContent = 'Stop streaming';
         startBtn.disabled = false;
