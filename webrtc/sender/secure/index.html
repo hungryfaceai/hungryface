@@ -527,14 +527,13 @@
     const setStatus = (t) => { statusEl.textContent = t; if (LOG.status) console.log('[STATUS]', t); };
     const currentRoom = () => (roomInput.value || 'Baby').trim();
     const isFront = () => (cameraSel.value === 'user');
-
-    const auth = new RoomAuth({  //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
+    
+    const auth = new RoomAuth({ ////https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
       role: 'sender',
       room: currentRoom(),
-      send,                                    // your existing function that ws.send(JSON.stringify(obj))
+      send: (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} },
       onAuthed: (peerId) => console.log('[AUTH][sender] OK:', peerId)
     });
-
 
     function updateMirrorClass() {
       document.body.classList.toggle('mirror', isFront());
