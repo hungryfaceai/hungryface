@@ -114,6 +114,7 @@
 
   <script type="module">
     import { ReceiverCore } from '/hungryface/webrtc/receiver/shared/receiver-core.js';
+    import { RoomAuth } from '/hungryface/webrtc/shared/room-auth.js';  //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
 
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
@@ -585,6 +586,20 @@
         console.log('[DC][receiver] inbound datachannel (leaving open):', e.channel?.label);
       }
     });
+
+    // Build a tiny room sender wrapper that routes via core
+    const sendRoom = (obj) => core.send?.(obj) || ws?.send?.(JSON.stringify(obj));
+    
+    // Create auth helper (receiver role)
+    const auth = new RoomAuth({
+      role: 'receiver',
+      room,
+      send: sendRoom,
+      onAuthed: (peerId) => showStatus('Authenticated sender')
+    });
+    
+    // Passively listen to room messages from the core (no core changes needed)
+    auth.attachToCore(core);
 
     core.start().catch(console.warn);
     window.addEventListener('beforeunload', () => core.close());
