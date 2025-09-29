@@ -9,7 +9,7 @@
 //
 // Optional convenience:
 //   auth.attachToWS(ws)          // passive listener, won’t block your handler
-//   auth.attachToCore(core)      // attaches to ReceiverCore (passive)
+//   auth.attachToCore(core, { wsEndpoint }) // attaches w/out requiring core changes
 //
 // Requires server to relay 'auth-hello' and 'auth-reply' in rooms.
 
@@ -53,6 +53,10 @@ export class RoomAuth {
     this.NONCES  = new Map();   // peerId -> Uint8Array we sent (receiver) or they sent (sender)
     this._started = false;
     this._me = null;
+
+    // passive-tap WS (created by attachToCore when core has no hook)
+    this._tapWS = null;
+
     this._init();
   }
 
@@ -77,7 +81,14 @@ export class RoomAuth {
   }
 
   /** Handle every room message early; returns true if consumed. */
-  handleRoomMessage(msg) {
+  handleRoomMessage(rawMsg) {
+    let msg = rawMsg;
+
+    // NEW: unwrap { type:'app', data:{...}, from, to } envelope if present
+    if (msg?.type === 'app' && msg?.data && typeof msg.data === 'object') {
+      msg = { ...msg.data, from: msg.from, to: msg.to };
+    }
+
     const t = msg?.type;
     if (!t) return false;
 
@@ -119,18 +130,71 @@ export class RoomAuth {
     });
   }
 
-  /** Attach to ReceiverCore; falls back to ws hook if exposed. */
-  attachToCore(core) {
+  /**
+   * Attach to ReceiverCore (or similar) without requiring core changes.
+   * Strategy:
+   *  1) If core exposes onRoomMessage → use it.
+   *  2) Else if core._ws exists → attachToWS.
+   *  3) Else → open a passive WS tap (join same room+role) and consume messages.
+   *
+   * @param {any} core
+   * @param {{ wsEndpoint?: string }} [opts]
+   */
+  attachToCore(core, opts = {}) {
     if (!core) return;
-    // If the core exposes a hook, use it.
+
+    // 1) official hook
     if (typeof core.onRoomMessage === 'function') {
       core.onRoomMessage((msg) => this.handleRoomMessage(msg));
       return;
     }
-    // Fallback: try to tap its ws if present (non-fatal if not found).
+
+    // 2) hidden ws handle
     if (core._ws && typeof core._ws.addEventListener === 'function') {
       this.attachToWS(core._ws);
+      return;
     }
+
+    // 3) passive WS tap (no ReceiverCore edits required)
+    const endpoint =
+      opts.wsEndpoint ||
+      core.wsEndpoint ||
+      core._opts?.wsEndpoint ||
+      core.options?.wsEndpoint;
+
+    if (!endpoint) {
+      // Silently skip — we cannot discover the WS URL.
+      return;
+    }
+
+    try {
+      // Close any previous tap
+      try { this._tapWS?.close?.(); } catch {}
+      this._tapWS = new WebSocket(`${endpoint}?room=${encodeURIComponent(this.room)}`);
+
+      this._tapWS.onopen = () => {
+        try {
+          this._tapWS.send(JSON.stringify({ type: 'join', room: this.room, role: this.role }));
+        } catch {}
+      };
+      this._tapWS.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          this.handleRoomMessage(msg);
+        } catch {}
+      };
+      // Auto-cleanup on unload
+      const cleanup = () => { try { this._tapWS?.close?.(); } catch {} };
+      window.addEventListener('beforeunload', cleanup, { once: true });
+    } catch {
+      // ignore; passive tap is best-effort
+    }
+  }
+
+  /** Attach to ReceiverCore; falls back to ws hook if exposed. */
+  attachToReceiverCore(core, opts) {
+    // alias kept for compatibility; now calls attachToCore
+    this.attachToCore(core, opts);
   }
 
   // ---------- Internals ----------
@@ -223,11 +287,8 @@ export async function authHandshakeOverRooms({
       role,
       room,
       send,
-      // Note: onAuthed only passes peerId; fingerprint is available in messages below.
       onAuthed: (peerId) => {
         if (onEvent) try { onEvent({ type: 'authed', peerId }); } catch {}
-        // We still gate with allowFp (if provided) by watching the auth-reply message below
-        // to read msg.fromFp before resolving.
       }
     });
 
@@ -238,7 +299,8 @@ export async function authHandshakeOverRooms({
 
     ws.onmessage = (e) => {
       let msg; try { msg = JSON.parse(e.data); } catch { return; }
-      // feed all room messages to RoomAuth
+
+      // feed all room messages to RoomAuth (it will unwrap 'app' if present)
       ra.handleRoomMessage(msg);
 
       // proactively challenge senders as soon as we learn about them
