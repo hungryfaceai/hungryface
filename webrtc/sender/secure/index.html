@@ -261,16 +261,6 @@
   </div>
 
   <script type="module">
-    /* ===== PAIRED-ONLY imports & flags ===== */
-    import { SecureSignal } from '/hungryface/webrtc/shared/secure-signal.js';
-    import { connectToPeer } from '/hungryface/webrtc/shared/secure-webrtc.js';
-    const PAIRED_MODE = true;
-    const URLQS = new URLSearchParams(location.search);
-    const PAIRED_PEER_FP = URLQS.get('peer') || localStorage.getItem('naptio:lastPeerFp') || '';
-    /*if (!PAIRED_PEER_FP) {
-      console.warn('[Sender] Missing ?peer=<fingerprint>. Pair devices and open with the peer fingerprint.');
-    }*/
-
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
 
@@ -347,17 +337,6 @@
       elDbgToggle.style.display = 'none';
     }
 
-    let SS = null;
-    
-    async function ensureSS() {
-      if (SS) return SS;
-      SS = new SecureSignal({
-        url: WS_ENDPOINT,
-        onOpen: () => setStatus('Connected (secure)'),
-      });
-      await SS.init();
-      return SS;
-    }
 
     function getLocalAudioTrack() {
       return localStream?.getAudioTracks?.()[0] || null;
@@ -365,8 +344,9 @@
     function getAudioSender(pc) {
       return pc?.getSenders?.().find(s => s.track && s.track.kind === 'audio') || null;
     }
-    // Paired-only: no WS nudge; renegotiation happens via secure-webrtc
-    function nudgePeerForOffer(peerId) { /* no-op in paired mode */ }
+    function nudgePeerForOffer(peerId) {
+      try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: peerId })); } catch {}
+    }
 
     /** Ensure we have a mic track in localStream, attach to all PCs, and trigger renegotiation. */
     async function ensureSenderHasAudioTrack() {
@@ -378,28 +358,18 @@
         track = s.getAudioTracks()[0];
         if (!localStream) localStream = new MediaStream();
         localStream.addTrack(track);
-        try {
-          console.log('[AUDIO][sender] acquired mic track', {
-            id: track?.id,
-            settings: track?.getSettings?.() || null
-          });
-        } catch {}
       }
 
       if (peers?.size) {
         for (const [peerId, rec] of peers) {
-          const pc = rec.pc /* paired pc from secure-webrtc */;
-          if (!pc) { console.warn('[AUDIO][sender] no RTCPeerConnection for', peerId); continue; }
+          const pc = rec.pc || getOrCreatePC(peerId);
           const snd = getAudioSender(pc);
-          console.log('[AUDIO][sender] attach to', peerId, '| hasSender =', !!snd);
           if (snd) {
-            try { await snd.replaceTrack(track); console.log('[AUDIO][sender] replaceTrack OK →', peerId); }
-            catch (e) { console.warn('[AUDIO][sender] replaceTrack failed →', peerId, e?.message || e); }
+            await snd.replaceTrack(track);
           } else {
-            try { pc.addTrack(track, localStream); console.log('[AUDIO][sender] addTrack →', peerId); }
-            catch (e) { console.warn('[AUDIO][sender] addTrack failed →', peerId, e?.message || e); }
+            pc.addTrack(track, localStream);
           }
-          // no WS nudge here; secure-webrtc handles negotiationneeded
+          nudgePeerForOffer(peerId);
         }
       }
       return track;
@@ -465,21 +435,6 @@
       if (qsRoomVal) { try { localStorage.setItem(PREFIX + 'room', qsRoomVal); } catch {} }
     })();
 
-    const poseDCs = new Set();
-    // helper near your other top-level consts (after "const poseDCs = new Set();")
-    function broadcastMeta() {
-      const msg = JSON.stringify({ type: 'meta', room: currentRoom() });
-      for (const ch of poseDCs) if (ch.readyState === 'open') {
-        try { ch.send(msg); } catch {}
-      }
-    }
-    
-    // after the PERSISTENCE IIFE ends:
-    roomInput.addEventListener('change', () => {
-      try { localStorage.setItem('bm_sender_room', currentRoom()); } catch {}
-      broadcastMeta();
-    });
-
     let ws = null, localStream = null;
     let started = false, hideUITimer = null;
     let wsHeartbeat = null;
@@ -488,18 +443,9 @@
 
     // One RTCPeerConnection per receiver
     const peers = new Map();
-	// Track fingerprints we’re actively dialing to avoid parallel dials
-	const dialing = new Set();
-	// Prevent duplicate outbound dials to the same fingerprint
-	const dialingFps = new Set();     // fprints currently being dialed (outbound)
-	const connectedFps = new Set();   // fprints that already have at least one live PC
-	  
-	
-	// Helper: deterministic peer key per fingerprint
-	const peerKeyFor = (fp) => `paired:${fp}`;
 
     let previewTimer = null, previewTicker = null, previewEnd = 0;
-
+    const poseDCs = new Set();
     // Cache the most recent audio score payload so late-joining receivers get one instantly. //https://chatgpt.com/c/68c1d349-17d8-832f-9534-fcb6826946a4
     let lastAudioPayload = null;
     let lastPosePayload = null;
@@ -663,11 +609,10 @@
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
         beginViewportSettle();
-        // Paired-only: no WS reconnect logic
-        if (!PAIRED_MODE) {
-          if (started && (!ws || ws.readyState !== WebSocket.OPEN)) {
-            scheduleWSReconnect('tab-visible');
-          }
+    
+        // 👉 If we were streaming and WS got closed while backgrounded, kick a reconnect.
+        if (started && (!ws || ws.readyState !== WebSocket.OPEN)) {
+          scheduleWSReconnect('tab-visible');
         }
       }
     });
@@ -685,7 +630,6 @@
         } : false,
         audio: wantAudio ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true } : false
       };
-      console.log('[MEDIA][sender] requesting getUserMedia with', constraints);
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       const vt = stream.getVideoTracks()[0];
       const at = stream.getAudioTracks()[0];
@@ -693,12 +637,6 @@
       if (at && 'contentHint' in at) { try { at.contentHint = 'speech'; } catch {} }
       if (vt) vt.enabled = wantVideo;
       if (at) at.enabled = wantAudio;
-      try {
-        console.log('[MEDIA][sender] got tracks', {
-          video: vt ? { id: vt.id, settings: vt.getSettings?.() || null } : null,
-          audio: at ? { id: at.id, settings: at.getSettings?.() || null } : null
-        });
-      } catch {}
       return stream;
     }
 
@@ -717,12 +655,10 @@
           const t = await ensureSenderHasAudioTrack();
           if (t) t.enabled = true;
           setStatus('Audio ON');
-          console.log('[AUDIO][sender] enabled streaming audio');
         } else {
           const t = getLocalAudioTrack();
           if (t) t.enabled = false;
           setStatus('Audio OFF');
-          console.log('[AUDIO][sender] disabled streaming audio');
         }
       } catch (e) {
         console.warn('[AUDIO][sender] toggle failed:', e);
@@ -733,6 +669,7 @@
     videoOn.addEventListener('change', applyVideoToggle);
     audioOn.addEventListener('change', async () => {
       await applyAudioToggle();
+      //applyAudioUI(); //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
       // force the AI loop to re-pick its source (tap vs separate)
       if (audioAiOn?.checked && audioAiWhere?.value === 'sender') {
         stopSenderAudioLoop();
@@ -743,28 +680,78 @@
     });
     cameraSel.addEventListener('change', () => { updateMirrorClass(); beginViewportSettle(); });
 
-    /* ======== (kept as dead code; not used in paired mode) ======== */
-    function connectWS(room) { /* unused in paired mode */ return Promise.reject(new Error('WS disabled (paired mode)')); }
-    function startWSHeartbeat() {}
-    function stopWSHeartbeat() { if (wsHeartbeat) { clearInterval(wsHeartbeat); wsHeartbeat = null; } }
-    function scheduleWSReconnect(reason = 'retry') {}
-    const send = (obj) => { /* ws disabled */ };
+    function connectWS(room) {
+      return new Promise((resolve, reject) => {
+        const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
+        setStatus('Connecting to signaling…');
+        const sock = new WebSocket(url);
+        ws = sock;
+
+        let opened = false;
+        const t = setTimeout(() => {
+          if (!opened) { try { sock.close(); } catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); }
+        }, 15000);
+
+        sock.onopen = () => {
+          opened = true; clearTimeout(t);
+          setStatus('Signaling: connected');
+          send({ type: 'join', room, role: 'sender' });
+          send({ type: 'need-offer' }); // nudge any already-open receivers
+          startWSHeartbeat();
+          resolve();
+        };
+        sock.onmessage = onSignal;
+        sock.onerror = (e) => { console.warn('[WS error]', e); scheduleWSReconnect();};
+        sock.onclose = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); stopWSHeartbeat(); ws = null; scheduleWSReconnect();};
+      });
+    }
+
+    function startWSHeartbeat() {
+      stopWSHeartbeat();
+      wsHeartbeat = setInterval(() => { send({ type: 'keepalive' }); }, 25000);
+    }
+    function stopWSHeartbeat() {
+      if (wsHeartbeat) { clearInterval(wsHeartbeat); wsHeartbeat = null; }
+    }
+    function scheduleWSReconnect(reason = 'retry') {
+      if (!started) return;                 // only while streaming
+      if (wsReconnectTimer) return;         // already queued
+      console.log('[WS] scheduling reconnect:', reason);
+      wsReconnectTimer = setTimeout(async () => {
+        wsReconnectTimer = null;
+        try {
+          await connectWS(currentRoom());   // rejoin room
+          send({ type: 'need-offer' });     // nudge any receivers
+        } catch (e) {
+          // backoff and try again
+          scheduleWSReconnect();
+        }
+      }, 1500);
+    }
+
+    
+    const send = (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} };
 
     function getOrCreatePC(peerId) {
       let rec = peers.get(peerId);
       if (rec && rec.pc) return rec.pc;
-    
-      // (kept for compatibility even in paired mode)
+
+      if (!localStream) {
+        console.warn('[SENDER] localStream missing; startOrStop() must run first');
+      }
+
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
         bundlePolicy: 'max-bundle',
         sdpSemantics: 'unified-plan'
       });
-    
+
       pc.ontrack = (ev) => {
+        // Receiver may send only audio (talkback). Attach and play.
         try {
           if (ev.track.kind === 'audio') {
             const ms = ev.streams?.[0] || new MediaStream([ev.track]);
+            // If you support multiple receivers, you could mix or keep a map per peer.
             talkbackAudio.srcObject = ms;
             talkbackAudio.muted = false;
             talkbackAudio.volume = 1.0;
@@ -780,50 +767,72 @@
           console.warn('[SENDER] ontrack error:', e);
         }
       };
-    
+
       if (localStream) {
         localStream.getTracks().forEach(track => {
           console.log('[TRACK][sender] addTrack', track.kind, '→', peerId);
           pc.addTrack(track, localStream);
         });
       }
-    
+
       pc.ondatachannel = (ev) => {
         if (ev.channel?.label === 'pose') {
           const ch = ev.channel;
           if (LOG.dc) console.log('[DC][sender] ondatachannel: pose from', peerId);
-    
+      
           ch.onopen  = () => {
             if (LOG.dc) console.log('[POSE][sender] DC open', peerId);
             poseDCs.add(ch);
+            // Tell late joiners what modes are active
             announceAIModes();
-            if (lastAudioPayload) { try { ch.send(lastAudioPayload); } catch {} }
-            if (lastPosePayload)  { try { ch.send(lastPosePayload);  } catch {} }
-            if (lastFacePayload)  { try { ch.send(lastFacePayload);  } catch {} }
-            try { ch.send(JSON.stringify({ type: 'need-face-config' })); } catch {}
+            // Immediately replay the latest score so the receiver doesn't wait a whole window
+            if (lastAudioPayload) {
+              try { ch.send(lastAudioPayload); } catch {}
+            }
+            if (lastPosePayload) {
+              try { ch.send(lastPosePayload); } catch {}
+            }
+            if (lastFacePayload) {
+              try { ch.send(lastFacePayload); } catch {}
+            }
+            try { ch.send(JSON.stringify({ type: 'need-face-config' })); } catch {}  //ask receiver to send its FaceLandmarker thresholds
           };
-    
-          ch.onclose = () => { if (LOG.dc) console.log('[POSE][sender] DC close', peerId); poseDCs.delete(ch); };
-          ch.onerror = (e) => { if (LOG.dc) console.log('[POSE][sender] DC error', peerId, e); };
-    
+      
+          ch.onclose = () => {
+            if (LOG.dc) console.log('[POSE][sender] DC close', peerId);
+            poseDCs.delete(ch);
+          };
+      
+          ch.onerror = (e) => {
+            if (LOG.dc) console.log('[POSE][sender] DC error', peerId, e);
+          };
+      
           ch.onmessage = async (ev2) => {
-            let msg; try { msg = JSON.parse(ev2.data); } catch { return; }
+            let msg;
+            try { msg = JSON.parse(ev2.data); } catch { return; }
             if (!msg || !msg.type) return;
-    
+      
             if (msg.type === 'need-modes') {
+              // Receiver is asking for the current AI modes after it opens
               announceAIModes();
+              // Also push a fresh score if we have one and audio is running on the sender
+              /*if (lastAudioPayload && audioAiOn?.checked && audioAiWhere?.value === 'sender') {
+                try { ch.send(lastAudioPayload); } catch {}
+              }*/
               if (lastAudioPayload) { try { ch.send(lastAudioPayload); } catch {} }
               if (lastPosePayload)  { try { ch.send(lastPosePayload);  } catch {} }
               if (lastFacePayload)  { try { ch.send(lastFacePayload);  } catch {} }
               return;
             }
+
             if (msg.type === 'face-config') {
               let changed = false;
               if (typeof msg.minDet  === 'number' && msg.minDet  !== FACE_OPTS.minDet)  { FACE_OPTS.minDet  = msg.minDet;  changed = true; }
-              if (typeof msg.minTrack=== 'number' && msg.minTrack!== FACE_OPTS.minTrack){ FACE_OPTS.minTrack= msg.minTrack; changed = true; }
+              if (typeof msg.minTrack=== 'number' && msg.minTrack!== FACE_OPTS.minTrack){ FACE_OPTS.minTrack= msg.minTrack;changed = true; }
               if (typeof msg.minPres === 'number' && msg.minPres !== FACE_OPTS.minPres) { FACE_OPTS.minPres = msg.minPres; changed = true; }
               if (changed) {
                 await recreateSenderFaceTask();
+                // If sender-side face loop is running, keep it running with new opts
                 if (started && faceOn?.checked && faceWhere?.value === 'sender') {
                   stopSenderFaceLoop();
                   startSenderFaceLoop();
@@ -831,15 +840,29 @@
               }
               return;
             }
-            if (msg.type === 'audio') return onAudioMessageFromReceiver(ev2, ch);
-            if (msg.type === 'pose')  return onPoseMessageFromReceiver(ev2, ch);
-            if (msg.type === 'face')  return onFaceMessageFromReceiver(ev2, ch);
+            if (msg.type === 'audio') {
+              onAudioMessageFromReceiver(ev2, ch);
+              return;
+            }
+            if (msg.type === 'pose') {
+              // Existing echo path used for overlay/debug
+              onPoseMessageFromReceiver(ev2, ch);   // <-- pass origin channel
+              return;
+            }
+            if (msg.type === 'face') {
+              onFaceMessageFromReceiver(ev2, ch);
+              return;
+            }
           };
         }
       };
-    
-      pc.onicecandidate = () => { /* paired mode: no WS */ };
-    
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate && ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'candidate', to: peerId, candidate: e.candidate }));
+        }
+      };
+
       pc.onconnectionstatechange = () => {
         const st = pc.connectionState;
         console.log('[SENDER][PC]', peerId, st);
@@ -850,15 +873,21 @@
           }, 3000);
         }
       };
-    
-      // ✅ use the existing `rec` variable (no redeclare)
+
       if (!rec) {
-        rec = { pc, remoteDescriptionSet: false, candidateQueue: [], lastOfferSdp: null, processingOffer: false };
+        rec = {
+          pc,
+          remoteDescriptionSet: false,
+          candidateQueue: [],
+          lastOfferSdp: null,
+          processingOffer: false
+        };
       } else {
         rec.pc = pc;
         if (rec.processingOffer == null) rec.processingOffer = false;
       }
       peers.set(peerId, rec);
+
       return pc;
     }
 
@@ -866,9 +895,11 @@
       const rec = peers.get(peerId);
       if (!rec) return;
       try { rec.pc.close(); } catch {}
+      // If this peer’s stream is what the audio element is playing, clear it
       try {
         const ms = talkbackAudio.srcObject;
         if (ms && ms.getAudioTracks().length && rec.pc) {
+          // crude: if we only ever had one inbound stream, just clear
           talkbackAudio.pause();
           talkbackAudio.srcObject = null;
         }
@@ -877,353 +908,91 @@
       console.log('[SENDER] cleaned', peerId, reason);
     }
 
-    /* ======= paired connect (no room signaling) ======= */
-    async function pairedConnectAndAttach(localStream) {
-      if (!PAIRED_PEER_FP) throw new Error('Missing ?peer=<fingerprint>');
 
-      const ss = new SecureSignal({
-        url: WS_ENDPOINT,
-        onOpen: () => setStatus('Connected to signaling (secure)'),
-      });
-      await ss.init();
+    async function onSignal(evt) {
+      let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+      const t = msg?.type;
 
-      const peer = ss.trusted.find(d => d.fp === PAIRED_PEER_FP);
-      if (!peer) throw new Error(`Peer ${PAIRED_PEER_FP} is not in Trusted devices. Pair first.`);
+      if (t === 'peer-left' && msg.id) { cleanupPeer(msg.id, 'peer-left'); return; }
+      if (t === 'bye' && msg.from) { cleanupPeer(msg.from, 'bye'); return; }
 
-      try { localStorage.setItem('naptio:lastPeerFp', PAIRED_PEER_FP); } catch {}
+      if (t === 'peer-joined' && msg.id && msg.role === 'receiver') {
+        ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: msg.id }));
+        return;
+      }
 
-      const { pc, dc, sid } = await connectToPeer(ss, PAIRED_PEER_FP, {
-        initiator: true,
-        localStreams: [localStream],
-        label: 'pose',
-        streamMeta: { room: currentRoom() },   // room rides as secured metadata
-        onTrack: (ev) => {
-          try {
-            if (ev.track.kind === 'audio') {
-              const ms = ev.streams?.[0] || new MediaStream([ev.track]);
-              talkbackAudio.srcObject = ms;
-              talkbackAudio.muted = false;
-              talkbackAudio.volume = 1.0;
-              talkbackAudio.play().catch(() => {});
-              ev.track.addEventListener('ended', () => {
-                if (talkbackAudio.srcObject === ms) {
-                  try { talkbackAudio.pause(); talkbackAudio.srcObject = null; } catch {}
-                }
-              });
-              console.log('[SENDER] talkback audio attached (paired)');
-            }
-          } catch (e) {
-            console.warn('[SENDER] ontrack error (paired):', e);
+      if (t === 'roster' && Array.isArray(msg.peers)) {
+        for (const p of msg.peers) {
+          if (p.role === 'receiver') {
+            ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: p.id }));
           }
-        },
-        onData: (msgRaw, ch) => {
-          try {
-            const msg = (typeof msgRaw === 'string') ? JSON.parse(msgRaw) : msgRaw;
-            if (!msg || !msg.type) return;
-            if (msg.type === 'audio') return onAudioMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
-            if (msg.type === 'pose')  return onPoseMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
-            if (msg.type === 'face')  return onFaceMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
-          } catch {}
         }
-      });
-      console.log('[SENDER] connected', {
-        sid, to: PAIRED_PEER_FP,
-        pcSignaling: pc.signalingState,
-        pcConn: pc.connectionState
-      });
-      pc.addEventListener('icegatheringstatechange', () => console.log('[SENDER][ICE] gathering =', pc.iceGatheringState));
-      pc.addEventListener('signalingstatechange',   () => console.log('[SENDER][PC] signaling =', pc.signalingState));
-      pc.addEventListener('iceconnectionstatechange',() => console.log('[SENDER][ICE] state =', pc.iceConnectionState));
-      pc.addEventListener('icecandidate', (e) => { if (e.candidate) console.log('[SENDER][ICE] new candidate', e.candidate.type || e.candidate.candidate); });
+        return;
+      }
 
-      (function attachPoseChannelFromSender(ch) {
-        if (!ch) return;
-        ch.onopen  = () => {
-          if (LOG.dc) console.log('[POSE][sender] DC open (paired)');
-          poseDCs.add(ch);
-          // Advertise the current room as metadata for receivers that persist it
-          try { ch.send(JSON.stringify({ type: 'meta', room: currentRoom() })); } catch {}
-          announceAIModes();
-          if (lastAudioPayload) { try { ch.send(lastAudioPayload); } catch {} }
-          if (lastPosePayload)  { try { ch.send(lastPosePayload);  } catch {} }
-          if (lastFacePayload)  { try { ch.send(lastFacePayload);  } catch {} }
-          try { ch.send(JSON.stringify({ type: 'need-face-config' })); } catch {}
-        };
-        ch.onclose = () => { if (LOG.dc) console.log('[POSE][sender] DC close (paired)'); poseDCs.delete(ch); };
-        ch.onerror = (e) => { if (LOG.dc) console.log('[POSE][sender] DC error (paired)', e); };
-        ch.onmessage = (ev2) => {
-          let msg; try { msg = JSON.parse(ev2.data); } catch { return; }
-          if (!msg || !msg.type) return;
-          if (msg.type === 'need-modes') {
-            announceAIModes();
-            if (lastAudioPayload) { try { ch.send(lastAudioPayload); } catch {} }
-            if (lastPosePayload)  { try { ch.send(lastPosePayload);  } catch {} }
-            if (lastFacePayload)  { try { ch.send(lastFacePayload);  } catch {} }
-            return;
-          }
-          if (msg.type === 'face-config') {
-            let changed = false;
-            if (typeof msg.minDet  === 'number' && msg.minDet  !== FACE_OPTS.minDet)  { FACE_OPTS.minDet  = msg.minDet;  changed = true; }
-            if (typeof msg.minTrack=== 'number' && msg.minTrack!== FACE_OPTS.minTrack){ FACE_OPTS.minTrack= msg.minTrack; changed = true; }
-            if (typeof msg.minPres === 'number' && msg.minPres !== FACE_OPTS.minPres) { FACE_OPTS.minPres = msg.minPres; changed = true; }
-            (async () => {
-              if (changed) {
-                await recreateSenderFaceTask();
-                if (started && faceOn?.checked && faceWhere?.value === 'sender') {
-                  stopSenderFaceLoop();
-                  startSenderFaceLoop();
-                }
-              }
-            })();
-            return;
-          }
-          if (msg.type === 'audio') return onAudioMessageFromReceiver(ev2, ch);
-          if (msg.type === 'pose')  return onPoseMessageFromReceiver(ev2, ch);
-          if (msg.type === 'face')  return onFaceMessageFromReceiver(ev2, ch);
-        };
-      })(dc);
+      if (t === 'offer' && msg.from) {
+        setStatus('Got offer, creating answer…');
 
-      // single peer entry for stopStreaming()
-      peers.set('paired:' + PAIRED_PEER_FP, {
-        pc, remoteDescriptionSet: true, candidateQueue: [], lastOfferSdp: null, processingOffer: false
-      });
+        let rec = peers.get(msg.from);
+        if (!rec) { getOrCreatePC(msg.from); rec = peers.get(msg.from); }
 
-      return { pc, dc, sid, ss };
-    }
+        if (rec.lastOfferSdp === msg.sdp) { console.log('[DUP] identical offer ignored from', msg.from); return; }
+        if (rec.processingOffer) { console.log('[SENDER] skipping offer from', msg.from, '(answer in progress)'); return; }
+        rec.processingOffer = true;
 
-	async function pairedConnectAndAttachMany(localStream) {
-	  const ss = await ensureSS();
-	  const SELF_FP = ss.self?.fingerprint || ss.self?.fp;
-	  if (!SELF_FP) throw new Error('No self fingerprint');
-	
-	  // Targets = all trusted except self
-	  const targets = (ss.trusted || [])
-	    .map(d => d.fp)
-	    .filter(fp => fp && fp !== SELF_FP);
-	
-	  if (!targets.length) {
-	    console.log('[sender] no trusted targets to dial (others may connect later)');
-	    return;
-	  }
-	
-	  console.log('[sender] dialing targets:', targets);
-	
-	  for (const fp of targets) {
-	    // ----- SKIP if we already have a live or pending connection to this fingerprint -----
-	    if (dialingFps.has(fp)) {
-	      console.log('[sender] skip (already dialing):', fp);
-	      continue;
-	    }
-	    if (connectedFps.has(fp)) {
-	      console.log('[sender] skip (already connected):', fp);
-	      continue;
-	    }
-	    // Also skip if peers map already has any key for this fp
-	    const alreadyHavePc = [...peers.keys()].some(k => typeof k === 'string' && k.startsWith(`paired:${fp}:`));
-	    if (alreadyHavePc) {
-	      console.log('[sender] skip (pc exists for fp):', fp);
-	      continue;
-	    }
-	
-	    dialingFps.add(fp);
-	
-	    // predeclare so catch/finally never see an undeclared identifier
-	    let key = null;
-	    let pc  = null;
-	    let dc  = null;
-	
-	    try {
-	      // assign into the predeclared locals (do NOT redeclare with const)
-	      ({ pc, dc } = await connectToPeer(ss, fp, {
-	        initiator: true,
-	        localStreams: [localStream],
-	        label: 'pose',
-	        streamMeta: { room: currentRoom() },
-	        onTrack: (ev) => {
-	          try {
-	            if (ev.track.kind === 'audio') {
-	              const ms = ev.streams?.[0] || new MediaStream([ev.track]);
-	              talkbackAudio.srcObject = ms;
-	              talkbackAudio.muted = false;
-	              talkbackAudio.volume = 1.0;
-	              talkbackAudio.play().catch(() => {});
-	              ev.track.addEventListener('ended', () => {
-	                if (talkbackAudio.srcObject === ms) {
-	                  try { talkbackAudio.pause(); talkbackAudio.srcObject = null; } catch {}
-	                }
-	              });
-	              console.log('[SENDER] talkback attached from', fp);
-	            }
-	          } catch (e) { console.warn('[SENDER] ontrack error (paired many):', e); }
-	        },
-	        onData: (msgRaw, ch) => {
-	          try {
-	            const msg = (typeof msgRaw === 'string') ? JSON.parse(msgRaw) : msgRaw;
-	            if (!msg || !msg.type) return;
-	            if (msg.type === 'audio') return onAudioMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
-	            if (msg.type === 'pose')  return onPoseMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
-	            if (msg.type === 'face')  return onFaceMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
-	          } catch {}
-	        },
-	      }));
-	
-	      // create a stable key ONLY AFTER pc/dc exist
-	      key = `paired:${fp}:${Math.random().toString(36).slice(2, 8)}`;
-	      peers.set(key, { pc, dc });
-	      connectedFps.add(fp);
-	
-	      // capture stable references for listeners
-	      const myKey = key;
-	      const myDc  = dc;
-	      const myFp  = fp;
-	
-	      if (dc) {
-	        dc.addEventListener('open', () => {
-	          poseDCs.add(myDc);
-	          try { myDc.send(JSON.stringify({ type:'meta', room: currentRoom() })); } catch {}
-	          announceAIModes?.();
-	          if (lastAudioPayload) try { myDc.send(lastAudioPayload); } catch {}
-	          if (lastPosePayload)  try { myDc.send(lastPosePayload);  } catch {}
-	          if (lastFacePayload)  try { myDc.send(lastFacePayload);  } catch {}
-	          console.log('[POSE][sender] DC open (paired many)', myKey);
-	        });
-	        dc.addEventListener('close',  () => { poseDCs.delete(myDc); peers.delete(myKey); });
-	        dc.addEventListener('error',  () => { poseDCs.delete(myDc); peers.delete(myKey); });
-	      }
-	
-	      pc.addEventListener('connectionstatechange', () => {
-	        const st = pc.connectionState;
-	        console.log('[SENDER][PC]', myKey, st);
-	        if (['failed','disconnected','closed'].includes(st)) {
-	          poseDCs.delete(myDc);
-	          peers.delete(myKey);
-	          // if no other PCs remain for this fingerprint, allow redial later
-	          const stillAny = [...peers.keys()].some(k => typeof k === 'string' && k.startsWith(`paired:${myFp}:`));
-	          if (!stillAny) connectedFps.delete(myFp);
-	        }
-	      });
-	
-	      console.log('[SENDER] connected (many)', {
-	        to: fp,
-	        pcSignaling: pc.signalingState,
-	        pcConn: pc.connectionState,
-	        senders: pc.getSenders().map(s => ({ kind: s.track?.kind, id: s.track?.id, enabled: s.track?.enabled }))
-	      });
-	
-	    } catch (err) {
-	      console.warn('[sender] connect failed for', fp, err?.message || err);
-	    } finally {
-	      dialingFps.delete(fp);
-	    }
-	  }
-	
-	  // Clean up any accidental non-string/null keys (defensive sweep)
-	  for (const [k] of peers) {
-	    if (k == null || typeof k !== 'string') peers.delete(k);
-	  }
-	
-	  // Periodic sweep (once)
-	  if (!window._bmSweepTimer) {
-	    window._bmSweepTimer = setInterval(() => {
-	      if (!started) {
-	        clearInterval(window._bmSweepTimer);
-	        window._bmSweepTimer = null;
-	        return;
-	      }
-	      pairedConnectAndAttachMany(localStream); // idempotent due to peers.has() + dialing/connected guards
-	    }, 8000);
-	  }
-	}
+        const pc = rec.pc || getOrCreatePC(msg.from);
 
-
-    /* ======= accept inbound sessions from receivers (receiver-initiated) ======= */
-    async function listenForReceivers(localStream) {
-      const ss = await ensureSS();
-      setStatus('Connected (secure) — waiting for receivers…');
-
-      // Preserve any existing onSession and chain ours after it
-      const prevOnSession = ss.onSession;
-      ss.onSession = async (evt) => {
-        try { prevOnSession && prevOnSession(evt); } catch {}
-        const { sid, peerFp, role } = evt || {};
-        // We accept sessions where the *receiver* wants us to be the responder.
-        if (role !== 'responder') return;
-        console.log('[SENDER] inbound session', { sid, from: peerFp, role });
         try {
-          const { pc, dc } = await connectToPeer(ss, peerFp, {
-            initiator: false,          // <-- sender acts as responder
-            sid,                       // <-- bind to this specific inbound session
-            localStreams: [localStream],
-            label: 'pose',
-            streamMeta: { room: currentRoom() },
-            onTrack: (ev) => {
-              try {
-                if (ev.track.kind === 'audio') {
-                  const ms = ev.streams?.[0] || new MediaStream([ev.track]);
-                  talkbackAudio.srcObject = ms;
-                  talkbackAudio.muted = false;
-                  talkbackAudio.volume = 1.0;
-                  talkbackAudio.play().catch(() => {});
-                  ev.track.addEventListener('ended', () => {
-                    if (talkbackAudio.srcObject === ms) {
-                      try { talkbackAudio.pause(); talkbackAudio.srcObject = null; } catch {}
-                    }
-                  });
-                  console.log('[SENDER] talkback attached from', peerFp);
-                }
-              } catch (e) { console.warn('[SENDER] ontrack error (inbound):', e); }
-            },
-            onData: (msgRaw, ch) => {
-              try {
-                const msg = (typeof msgRaw === 'string') ? JSON.parse(msgRaw) : msgRaw;
-                if (!msg || !msg.type) return;
-                if (msg.type === 'audio') return onAudioMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
-                if (msg.type === 'pose')  return onPoseMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
-                if (msg.type === 'face')  return onFaceMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
-              } catch {}
-            },
-          });
-          console.log('[SENDER] accepted inbound', {
-            sid, from: peerFp,
-            pcSignaling: pc.signalingState,
-            pcConn: pc.connectionState
-          });
-          pc.addEventListener('icegatheringstatechange', () => console.log('[SENDER][ICE] gathering =', pc.iceGatheringState, '<-', peerFp));
-          pc.addEventListener('signalingstatechange',   () => console.log('[SENDER][PC] signaling =', pc.signalingState, '<-', peerFp));
-          pc.addEventListener('iceconnectionstatechange',() => console.log('[SENDER][ICE] state =', pc.iceConnectionState, '<-', peerFp));
-          pc.addEventListener('icecandidate', (e) => { if (e.candidate) console.log('[SENDER][ICE] new candidate', e.candidate.type || e.candidate.candidate, '<-', peerFp); });
+          if (pc.signalingState === 'have-local-offer') { try { await pc.setLocalDescription({ type: 'rollback' }); } catch {} }
 
-          // Stable key so multiple tabs of the same receiver don't collide
-          const key = `paired:${peerFp}:${sid || Math.random().toString(36).slice(2,8)}`;
-          peers.set(key, { pc, dc });
+          await pc.setRemoteDescription(new RTCSessionDescription(msg));
 
-          if (dc) {
-            dc.addEventListener('open', () => {
-              poseDCs.add(dc);
-              try { dc.send(JSON.stringify({ type:'meta', room: currentRoom() })); } catch {}
-              announceAIModes?.();
-              if (lastAudioPayload) try { dc.send(lastAudioPayload); } catch {}
-              if (lastPosePayload)  try { dc.send(lastPosePayload);  } catch {}
-              if (lastFacePayload)  try { dc.send(lastFacePayload);  } catch {}
-              console.log('[POSE][sender] DC open (inbound)', key);
-            });
-            dc.addEventListener('close',  () => { poseDCs.delete(dc); peers.delete(key); });
-            dc.addEventListener('error',  () => { poseDCs.delete(dc); peers.delete(key); });
+          if (pc.signalingState !== 'have-remote-offer') {
+            console.warn('[SENDER] unexpected signalingState before answer:', pc.signalingState);
+            return;
           }
 
-          pc.addEventListener('connectionstatechange', () => {
-            const st = pc.connectionState;
-            console.log('[SENDER][PC]', key, st);
-            if (['failed','disconnected','closed'].includes(st)) {
-              poseDCs.delete(dc);
-              peers.delete(key);
-            }
-          });
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
 
-        } catch (err) {
-          console.warn('[sender] failed to accept inbound from', peerFp, err?.message || err);
+          ws.send(JSON.stringify({ type: answer.type, sdp: answer.sdp, to: msg.from }));
+          console.log('[WS OUT] answer →', msg.from);
+
+          rec.remoteDescriptionSet = true;
+          rec.lastOfferSdp = msg.sdp;
+
+          for (const c of rec.candidateQueue) {
+            try { await pc.addIceCandidate(c); } catch (err) { console.warn('[SENDER] late ICE add failed', msg.from, err); }
+          }
+          rec.candidateQueue.length = 0;
+
+        } finally {
+          rec.processingOffer = false;
         }
-      };
+        return;
+      }
+
+      if (t === 'candidate' && msg.from && msg.candidate) {
+        const rec = peers.get(msg.from);
+        if (!rec) {
+          peers.set(msg.from, {
+            pc: null, remoteDescriptionSet: false,
+            candidateQueue: [new RTCIceCandidate(msg.candidate)],
+            lastOfferSdp: null, processingOffer: false
+          });
+          return;
+        }
+        const pc = rec.pc || getOrCreatePC(msg.from);
+        const cand = new RTCIceCandidate(msg.candidate);
+        if (rec.remoteDescriptionSet) {
+          try { await pc.addIceCandidate(cand); } catch (err) { console.warn('[SENDER] ICE add failed', msg.from, err); }
+        } else {
+          rec.candidateQueue.push(cand);
+        }
+        return;
+      }
+
+      if (t === 'hello' || t === 'keepalive') return;
     }
 
     function beginPreviewWindow(minutes) {
@@ -1262,7 +1031,6 @@
       localVideo.style.display = 'none';
       poseCanvas.style.display = 'none';
       setStatus('Streaming...');
-      broadcastMeta();
       clearTimeout(hideUITimer); hideUITimer = null;
     }
 
@@ -1301,37 +1069,17 @@
         startBtn.disabled = true;
 
         updateMirrorClass();
+        const room = currentRoom();
         setStatus('Starting camera…');
         localStream = await getMedia();
-											 
-											 
-																		   
-			 
-		  
-		
         localVideo.srcObject = localStream;
-			 
-								  
-														
-					 
         try { await localVideo.play(); } catch (e) { console.warn('local play blocked', e); }
-		 
         beginViewportSettle();
-        try {
-          console.log('[SENDER] localStream tracks:', localStream.getTracks().map(t => (t.kind + ':' + (t.id||''))));
-        } catch {}
 
         beginPreviewWindow(Number(previewMinsInput.value) || 1);
 
-        // ⬇️ paired-only connect (no room signaling)
-        setStatus('Connecting to trusted receivers…');
-        await pairedConnectAndAttachMany(localStream);      // sender-initiated broadcast
-        // (optional but nice): also accept inbound as a safety net
-        await listenForReceivers(localStream);
+        await connectWS(room);
         started = true;
-        setStatus('Streaming (paired)…');
-        try { console.log('[SENDER] peers connected =', Array.from(peers.keys())); } catch {}
-
         startBtn.textContent = 'Stop streaming';
         startBtn.disabled = false;
 
@@ -1339,10 +1087,12 @@
         await applyAudioToggle();
         announceAIModes();
 
+        // Ensure AI mic starts under this user gesture if it should run on the sender
         if (audioAiOn?.checked && audioAiWhere?.value === 'sender') {
           try { await startSenderAudioLoop(); } catch {}
         }
 
+        // turn on debug panel by default when starting, can be toggled
         if (DEBUG_UI) elDbgPanel.style.display = 'block';
 
       } catch (err) {
@@ -1354,9 +1104,8 @@
     }
 
     async function stopStreaming() {
-      try { /* send({ type: 'bye' }); */ } catch {}
-      started = false;
-
+      try { send({ type: 'bye' }); } catch {}
+      started = false;                        // so scheduleWSReconnect() bails out
       stopWSHeartbeat();
       if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
 
@@ -1364,9 +1113,6 @@
       if (previewTicker) clearInterval(previewTicker);
       if (hideUITimer)   clearTimeout(hideUITimer);
       previewTimer = previewTicker = hideUITimer = null;
-	  try {
-	    if (window._bmSweepTimer) { clearInterval(window._bmSweepTimer); window._bmSweepTimer = null; }
-	  } catch {}
 
       try { poseLoopRunning = false; } catch {}
       try { poseTask && poseTask.close && poseTask.close(); } catch {}
@@ -1387,8 +1133,6 @@
             try { rec.pc && rec.pc.close(); } catch {}
           }
           peers.clear();
-		  try { dialingFps.clear(); } catch {}
-		  try { connectedFps.clear(); } catch {}			
         }
       } catch {}
 
@@ -1409,6 +1153,8 @@
       try { localStream = null; } catch {}
       try { ws = null; } catch {}
       try { if (typeof pc !== 'undefined') pc = null; } catch {}
+
+      //started = false;
 
       document.body.classList.remove('previewing','streaming','ui-visible');
       document.body.classList.add('blackout');
@@ -1624,7 +1370,7 @@
     
       // 3) (optional) rebroadcast to other receivers (avoid echo to origin)
       for (const ch of poseDCs) {
-        if (ch === originChannel) continue;
+        if (ch === originChannel) continue;      // don't echo back to the same receiver
         if (ch.readyState === 'open') {
           try { ch.send(ev.data); } catch {}
         }
@@ -1768,17 +1514,28 @@
       const streamedTrack = getLocalAudioTrack();
       const canTap = !!(streamedTrack && streamedTrack.readyState === 'live' && streamedTrack.enabled);
 
+      //let originLabel = 'separate mic'; //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+      //let tapUsed = false;
+      //let useSeparateMic = !DEBUG_AUDIO.FORCE_TAP; // default: prefer separate RAW mic
+      //let openedSeparate = false;
       const sendingAudio = !!(getLocalAudioTrack()?.enabled);
+      // If we're sending audio, avoid a second hardware capture.
       const preferTap = DEBUG_AUDIO.FORCE_TAP || sendingAudio;
       let originLabel = preferTap ? 'tap: streaming track' : 'separate mic';
       let tapUsed = false;
       let openedSeparate = false;
 
+      // Build muted sink
       const sink = audioCtx.createGain();
       sink.gain.value = 0;
+      //sink.connect(audioCtx.destination); //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+      // Keep the graph alive without opening the output device
       const blackhole = audioCtx.createMediaStreamDestination();
       sink.connect(blackhole);
 
+      // Try separate RAW mic first (AEC/NS/AGC OFF), unless FORCE_TAP //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+      //if (useSeparateMic) {
+      // Only open a second capture when we are NOT already sending audio
       if (!preferTap) {
         try {
           aiMicStream = await navigator.mediaDevices.getUserMedia({
@@ -1794,16 +1551,21 @@
         }
       }
 
+      // Fallback or FORCE_TAP → tap the processed streaming track
       if (!openedSeparate) {
+        //if (DEBUG_AUDIO.FORCE_TAP && !canTap) { //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
         if (preferTap && !canTap) {
           console.warn('[AUDIO][sender] FORCE_TAP requested but no live enabled streaming track to tap.');
         }
         if (canTap) {
           try {
+            //audioSource = makeSourceFromTrack(audioCtx, streamedTrack); //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+            // Clone so the AI graph lifecycle can’t affect the sender’s live track.
             aiTapTrack = streamedTrack.clone();
             aiTapTrack.enabled = true;
             audioSource = makeSourceFromTrack(audioCtx, aiTapTrack);
             tapUsed = true;
+            //originLabel = DEBUG_AUDIO.FORCE_TAP ? 'tap: streaming track (forced)' : 'tap: streaming track (fallback)'; //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
             originLabel = preferTap ? 'tap: streaming track (preferred)' : 'tap: streaming track (fallback)';
           } catch (e) {
             console.warn('[AUDIO][sender] unable to tap streamed track:', e);
@@ -1817,12 +1579,14 @@
         return;
       }
 
+      // (Optional) hint channels on the source node
       try {
         audioSource.channelCount = 2;
         audioSource.channelCountMode = 'explicit';
         audioSource.channelInterpretation = 'discrete';
       } catch {}
 
+      // Prepare resampling + ring
       const SR_DEVICE = audioCtx.sampleRate;
       const SR_TARGET = 16000;
       const WINDOW_SEC = 0.975;
@@ -1830,11 +1594,13 @@
       let ring16 = new Float32Array(0);
       let _seriesClips = 0;
 
+      // Silence watchdog
       aiSilentFrames = 0;
       streamSilentFrames = 0;
-      const SILENCE_RMS = 1e-4;
-      const SILENCE_LIMIT = 60;
+      const SILENCE_RMS = 1e-4;   // ~ -80 dBFS
+      const SILENCE_LIMIT = 60;   // ~ 0.8–1.5s depending on callback size
 
+      // Worklet modules (classifier + RMS)
       try {
         const modURL = URL.createObjectURL(new Blob([`
           class AICapture extends AudioWorkletProcessor {
@@ -1884,6 +1650,7 @@
         console.warn('[AUDIO][sender] Worklet addModule failed, will use ScriptProcessor fallback.', e);
       }
 
+      // --- Classification path
       const onChunk = async (frameFloat32) => {
         if (!audioLoopRunning || !started || !audioAiOn.checked || audioAiWhere.value !== 'sender') {
           try {
@@ -1895,6 +1662,7 @@
           return;
         }
 
+        // live RMS before resample
         lastAIRmsDev = rmsOf(frameFloat32);
         if (lastAIRmsDev < SILENCE_RMS) {
           if (++aiSilentFrames >= SILENCE_LIMIT) {
@@ -1914,7 +1682,9 @@
           }
         }
 
+        // resample -> 16k mono
         let x16 = resampleLinear(frameFloat32, SR_DEVICE, SR_TARGET);
+        // pre-gain (classifier only)
         const pregainLin = Math.pow(10, (DEBUG_AUDIO.PREGAIN_DB || 0) / 20);
         if (pregainLin !== 1) {
           for (let i = 0; i < x16.length; i++) {
@@ -1953,6 +1723,7 @@
             }
 
             const payload = JSON.stringify({ type:'audio', categories: classifications, ts: performance.now() });
+            // Remember the last payload so new data channels get an immediate score //https://chatgpt.com/c/68c1d349-17d8-832f-9534-fcb6826946a4
             lastAudioPayload = payload;
             let sent = 0;
             for (const ch of poseDCs) if (ch.readyState === 'open') { ch.send(payload); sent++; }
@@ -1970,8 +1741,10 @@
 
       audioLoopRunning = true;
       audioStarting = false;
+      //lastAIMode = tapUsed ? (DEBUG_AUDIO.FORCE_TAP ? 'tap-forced' : 'tap-fallback') : 'separate'; //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
       lastAIMode = tapUsed ? (DEBUG_AUDIO.FORCE_TAP ? 'tap-forced' : (preferTap ? 'tap-preferred' : 'tap-fallback')) : 'separate';
 
+      // Try worklet for classification
       try {
         audioProcessor = new AudioWorkletNode(audioCtx, 'ai-capture', {
           numberOfInputs: 1,
@@ -1984,6 +1757,7 @@
         audioSource.connect(audioProcessor).connect(sink);
         console.log('[AUDIO][sender] using AudioWorklet for classifier @', SR_DEVICE, 'Hz | src =', originLabel);
       } catch {
+        // Fallback to ScriptProcessor
         audioProcessor = audioCtx.createScriptProcessor(2048, 2, 1);
         audioProcessor.onaudioprocess = (e) => {
           const ib = e.inputBuffer;
@@ -2001,6 +1775,8 @@
         console.log('[AUDIO][sender] using ScriptProcessor for classifier @', SR_DEVICE, 'Hz | src =', originLabel);
       }
 
+      // --- Parallel RMS monitor for the *streaming track* (always from localStream track)
+      //if (streamedTrack) { //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
       const ENABLE_RMS_MONITOR = false; // set true when debugging
       if (streamedTrack && ENABLE_RMS_MONITOR) {
         try {
@@ -2020,6 +1796,7 @@
           };
           monSource.connect(monProcessor).connect(sink);
         } catch {
+          // scriptprocessor fallback
           const sp = audioCtx.createScriptProcessor(2048, 2, 1);
           sp.onaudioprocess = (e) => {
             const ib = e.inputBuffer;
@@ -2090,6 +1867,7 @@
           return;
         }
     
+        // Keep preview overlay tidy
         if (document.body.classList.contains('previewing') && ts !== lastClearedTs) {
           ctx.setTransform(1,0,0,1,0,0);
           ctx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
@@ -2104,16 +1882,18 @@
           const mats = result?.facialTransformationMatrixes || result?.facialTransformationMatrices || null;
     
           if (landmarks) {
+            // Optional preview drawing on the sender phone
             if (document.body.classList.contains('previewing')) {
               drawFaceOnSender([landmarks]);
             }
     
+            // Extract 4x4 pose matrix (row-major float32[16]) if provided
             let rotMat = null, yawDeg = NaN, pitchDeg = NaN, rollDeg = NaN;
             if (mats && mats.length) {
               const mat = mats[0];
               const m = (mat instanceof Float32Array || Array.isArray(mat)) ? mat : (mat?.data || []);
               if (m && m.length >= 16) {
-                rotMat = Array.from(m.slice(0,16));
+                rotMat = Array.from(m.slice(0,16)); // serialize to plain array for DC
                 const e = computeEulerXYZ(m);
                 yawDeg = e.yaw; pitchDeg = e.pitch; rollDeg = e.roll;
               }
@@ -2124,15 +1904,19 @@
             payload = {
               type: 'face',
               present: true,
-              landmarks,
-              rotMat,
+              landmarks,       // keep for optional overlay on receiver
+              rotMat,          // 4x4 (optional but great for axes/arrow)
               yawDeg, pitchDeg, rollDeg,
               centroid: cen,
               ts
             };
           }
-        } catch (e) {}
+        } catch (e) {
+          // If anything fails this frame, we still ship a "present:false" so the receiver can drive occlusion logic
+          // console.warn('[FACE][sender] detect error:', e);
+        }
     
+        // Ship to all open receivers
         const json = JSON.stringify(payload);
         lastFacePayload = json;  
         for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(json);
