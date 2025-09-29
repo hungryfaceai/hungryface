@@ -140,6 +140,13 @@
     const talkBtn = document.getElementById('talkBtn');
     const lullabyBtn = document.getElementById('lullabyBtn');
 
+    // Help autoplay on iOS/Safari: first user gesture tries to play the video
+    ['click','touchstart'].forEach(ev => {
+      window.addEventListener(ev, () => remoteVideo?.play?.().catch(()=>{}), { once: true, passive: true });
+    });
+    enableAudioBtn.addEventListener('click', () => remoteVideo?.play?.().catch(()=>{}));
+
+
     /* ---------- Status overlay ---------- */
     let hideStatusTimer = null;
     function showStatus(msg) {
@@ -197,7 +204,7 @@
     try { localStorage.setItem('naptio:lastPeerFp', PAIRED_PEER_FP); } catch {}
 
     // ⬅️ Pre-create a silent audio track so the very first O/A has an m=audio section
-    const silentTrack  = makeSilentTrack();
+    const silentTrack  = getSilentTrack();
     const silentStream = new MediaStream([silentTrack]);
     const { pc } = await connectToPeer(ss, PAIRED_PEER_FP, {
       initiator: false, //was: false https://chatgpt.com/c/68d3f9bc-d8a4-8323-b314-1f11bbcc01de
@@ -277,6 +284,11 @@
     const handleSession = async ({ sid, peerFp, role }) => {
       console.log('[RX] onSession', { sid, peerFp, role, preferred: PAIRED_PEER_FP || '(any)' });
       console.log('[RX] inbound session:', { sid, peerFp, role, preferred: PAIRED_PEER_FP || '(any)' });
+      // Already connected or connecting? Ignore further sessions.
+      if (pcRef && ['connecting','connected'].includes(pcRef.connectionState)) {
+        console.log('[RX] already have PC in', pcRef.connectionState, '— ignoring new session', sid);
+        return;
+      }
       if (role !== 'responder') return; // only inbound sessions
     
       // ⬇️ NEW: if a preferred peer is set (?peer= or localStorage), ignore others
@@ -293,7 +305,7 @@
       
       try {
         // ⬅️ Pre-create a silent audio track so the first O/A has an m=audio section
-        const silentTrack  = makeSilentTrack();
+        const silentTrack  = getSilentTrack();
         const silentStream = new MediaStream([silentTrack]);
         
         const { pc } = await connectToPeer(ss, peerFp, {
@@ -377,17 +389,12 @@
       }
     };
   
-    // Chain into your single-callback `onSession` (with logging)
-    const prev = ss.onSession;
-    ss.onSession = (evt) => {
-      try { prev && prev(evt); } catch {}
-      try {
-        console.log('[RX][SESSION] event:', JSON.stringify(evt));
-      } catch {
-        console.log('[RX][SESSION] event (non-JSON):', evt);
-      }
+    // Properly subscribe using SecureSignal's listener API
+    ss.addSessionListener((evt) => {
+      try { console.log('[RX][SESSION]', evt); } catch {}
       handleSession(evt);
-    };
+    });
+
   }
 
     /* ---------- Audio UI ---------- */
@@ -455,11 +462,18 @@
     let talkSender = null;               // RTCRtpSender
     // No transceiver pre-allocation; we create a silent m-line up front instead.
 
-    function makeSilentTrack() {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const dest = ctx.createMediaStreamDestination();
-      return dest.stream.getAudioTracks()[0];
+    let _silentCtx = null;
+    let _silentDest = null;
+    let _silentTrack = null;
+    function getSilentTrack() {
+      if (_silentTrack) return _silentTrack;
+      _silentCtx = new (window.AudioContext || window.webkitAudioContext)();
+      _silentDest = _silentCtx.createMediaStreamDestination();
+      _silentTrack = _silentDest.stream.getAudioTracks()[0];
+      try { _silentTrack.enabled = true; } catch {}
+      return _silentTrack;
     }
+
 
     // UI state
     let latched = false;                 // toggle mode ON/OFF
@@ -798,11 +812,6 @@
       }
     });
 
-    //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959
-    /*startPairedReceiver().catch((e) => {
-      console.warn(e);
-      showStatus(e?.message || 'Failed to connect');
-    });*/
     startReceiverPeerless().catch((e) => {
       console.warn(e);
       showStatus(e?.message || 'Failed to connect');
