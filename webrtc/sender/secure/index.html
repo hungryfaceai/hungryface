@@ -262,6 +262,8 @@
 
   <script type="module">
     import { RoomAuth } from '/hungryface/webrtc/shared/room-auth.js'; //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
+    import { ensureIdentity } from '/hungryface/webrtc/shared/identity.js'; //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
+    await ensureIdentity();
 
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
@@ -921,6 +923,8 @@
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
       // ➜ Let RoomAuth consume auth-hello/auth-reply/roster/peer-joined //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
+      if (msg?.type === 'auth-hello')  console.log('[AUTH][sender] got auth-hello from', msg.from);
+      if (msg?.type === 'auth-reply')  console.log('[AUTH][sender] got auth-reply from', msg.from);
       if (auth.handleRoomMessage(msg)) return;
       const t = msg?.type;
 
