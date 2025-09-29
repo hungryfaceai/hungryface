@@ -490,6 +490,10 @@
     const peers = new Map();
 	// Track fingerprints we’re actively dialing to avoid parallel dials
 	const dialing = new Set();
+	// Prevent duplicate outbound dials to the same fingerprint
+	const dialingFps = new Set();     // fprints currently being dialed (outbound)
+	const connectedFps = new Set();   // fprints that already have at least one live PC
+	  
 	
 	// Helper: deterministic peer key per fingerprint
 	const peerKeyFor = (fp) => `paired:${fp}`;
@@ -1005,21 +1009,23 @@
 	  console.log('[sender] dialing targets:', targets);
 	
 	  for (const fp of targets) {
-	    const key = peerKeyFor(fp);
-	
-	    // Skip if we already have a connection for this fingerprint
-	    if (peers.has(key)) {
-	      // console.log('[sender] skip; already connected to', key);
+	    // ----- SKIP if we already have a live or pending connection to this fingerprint -----
+	    if (dialingFps.has(fp)) {
+	      console.log('[sender] skip (already dialing):', fp);
+	      continue;
+	    }
+	    if (connectedFps.has(fp)) {
+	      console.log('[sender] skip (already connected):', fp);
+	      continue;
+	    }
+	    // Also skip if peers map already has any key for this fp
+	    const alreadyHavePc = [...peers.keys()].some(k => k.startsWith(`paired:${fp}:`));
+	    if (alreadyHavePc) {
+	      console.log('[sender] skip (pc exists for fp):', fp);
 	      continue;
 	    }
 	
-	    // Skip if a dial is already in progress for this fingerprint
-	    if (dialing.has(fp)) {
-	      // console.log('[sender] skip; dialing already in-flight for', fp);
-	      continue;
-	    }
-	
-	    dialing.add(fp);
+	    dialingFps.add(fp);
 	    try {
 	      const { pc, dc } = await connectToPeer(ss, fp, {
 	        initiator: true,
@@ -1056,7 +1062,20 @@
 	
 	      // Use deterministic key so we don’t duplicate per sweep
 	      peers.set(key, { pc, dc });
+		  connectedFps.add(fp);
 	
+		  pc.addEventListener('connectionstatechange', () => {
+		    const st = pc.connectionState;
+		    console.log('[SENDER][PC]', key, st);
+		    if (['failed','disconnected','closed'].includes(st)) {
+		      poseDCs.delete(dc);
+		      peers.delete(key);
+		      // if no other PCs remain for this fingerprint, allow redial later
+		      const stillAny = [...peers.keys()].some(k => k.startsWith(`paired:${fp}:`));
+		      if (!stillAny) connectedFps.delete(fp);
+		    }
+		  });
+
 	      if (dc) {
 	        dc.addEventListener('open', () => {
 	          poseDCs.add(dc);
@@ -1091,7 +1110,7 @@
 	    } catch (err) {
 	      console.warn('[sender] connect failed for', fp, err?.message || err);
 	    } finally {
-	      dialing.delete(fp);
+	      dialingFps.delete(fp);
 	    }
 	  }
 	
@@ -1360,6 +1379,8 @@
             try { rec.pc && rec.pc.close(); } catch {}
           }
           peers.clear();
+		  try { dialingFps.clear(); } catch {}
+		  try { connectedFps.clear(); } catch {}			
         }
       } catch {}
 
