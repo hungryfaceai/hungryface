@@ -533,7 +533,18 @@
     const auth = new RoomAuth({ ////https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
       role: 'sender',
       room: currentRoom(),
-      send: (obj) => { try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {} },
+      // WRAP: send auth payloads inside a whitelisted envelope your server forwards
+      send: (obj) => {
+        try {
+          if (ws?.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'app',       // <- an allowed type your server forwards as-is
+              to:   obj.to,      // preserve routing
+              data: obj          // put the real auth message inside
+            }));
+          }
+        } catch {}
+      },
       onAuthed: (peerId) => console.log('[AUTH][sender] OK:', peerId)
     });
 
@@ -919,9 +930,13 @@
       console.log('[SENDER] cleaned', peerId, reason);
     }
 
-
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+      // UNWRAP: if this is our app envelope, pull the inner payload out
+      if (msg?.type === 'app' && msg?.data && typeof msg.data === 'object') {
+        // preserve routing metadata
+        msg = { ...msg.data, from: msg.from, to: msg.to };
+      }
       // ➜ Let RoomAuth consume auth-hello/auth-reply/roster/peer-joined //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
       if (msg?.type === 'auth-hello')  console.log('[AUTH][sender] got auth-hello from', msg.from);
       if (msg?.type === 'auth-reply')  console.log('[AUTH][sender] got auth-reply from', msg.from);
