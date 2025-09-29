@@ -114,7 +114,8 @@
 
   <script type="module">
     import { ReceiverCore } from '/hungryface/webrtc/receiver/shared/receiver-core.js';
-    import { RoomAuth } from '/hungryface/webrtc/shared/room-auth.js';  //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
+    //import { RoomAuth } from '/hungryface/webrtc/shared/room-auth.js';  //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
+    import { authHandshakeOverRooms } from '/hungryface/webrtc/shared/room-auth.js';  //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
 
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
@@ -601,18 +602,49 @@
     // Passively listen to room messages from the core (no core changes needed)
     //auth.attachToCore(core);
     // ---- Auth-first handshake (standalone WS), then start core ----
-    let wsAuth = null;
+    //let wsAuth = null;
     
     // Use RoomAuth with a send() that targets the auth WS
-    const roomAuth = new RoomAuth({
+    /*const roomAuth = new RoomAuth({
       role: 'receiver',
       room,
       send: (obj) => { try { wsAuth?.readyState === WebSocket.OPEN && wsAuth.send(JSON.stringify(obj)); } catch {} },
       onAuthed: (peerId) => console.log('[AUTH][receiver] OK from:', peerId)
     });
+    */
+
+    // 1) Auth-first handshake
+    showStatus('Authenticating sender…');
+    let peerId, closeAuth;
+    try {
+      ({ peerId, close: closeAuth } = await authHandshakeOverRooms({
+        url: WS_ENDPOINT,
+        room,
+        role: 'receiver',
+        timeoutMs: 12000,
+        // allowFp: (fp) => fp === 'YOUR_BABYCAM_FP',
+        // onEvent: (evt) => console.log('[AUTH]', evt),
+      }));
+    } catch (e) {
+      showStatus('No trusted sender responded.\nOpen the sender in this room, or pair devices.');
+      console.warn('[AUTH] handshake failed:', e);
+      // Optionally: return;  // stop here if you want to hard-require auth before any WebRTC
+      throw e; // or stop the script entirely
+    }
+    showStatus('Authenticated sender');
+    
+    // 2) Target ONLY the trusted sender, then start WebRTC
+    core.senderId = peerId;
+    core.targetSenderId = peerId;
+    closeAuth();                 // dispose temp WS
+    core.start().catch(console.warn);
+    
+    // Cleanup
+    window.addEventListener('beforeunload', () => core.close());
+
     
     // Open a lightweight WS for auth only
-    await new Promise((resolve, reject) => {
+    /*await new Promise((resolve, reject) => {
       const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
       wsAuth = new WebSocket(url);
     
@@ -655,7 +687,7 @@
     });
 
     core.start().catch(console.warn);
-    window.addEventListener('beforeunload', () => core.close());
+    window.addEventListener('beforeunload', () => core.close());*/
   </script>
 </body>
 </html>
