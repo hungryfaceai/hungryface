@@ -1019,19 +1019,22 @@
 	      continue;
 	    }
 	    // Also skip if peers map already has any key for this fp
-	    const alreadyHavePc = [...peers.keys()].some(k => k.startsWith(`paired:${fp}:`));
+	    const alreadyHavePc = [...peers.keys()].some(k => typeof k === 'string' && k.startsWith(`paired:${fp}:`));
 	    if (alreadyHavePc) {
 	      console.log('[sender] skip (pc exists for fp):', fp);
 	      continue;
 	    }
 	
 	    dialingFps.add(fp);
-		// predeclare so catch/finally never see an undeclared identifier
-		let key = null;
-		let pc  = null;
-		let dc  = null;		  
+	
+	    // predeclare so catch/finally never see an undeclared identifier
+	    let key = null;
+	    let pc  = null;
+	    let dc  = null;
+	
 	    try {
-	      const { pc, dc } = await connectToPeer(ss, fp, {
+	      // assign into the predeclared locals (do NOT redeclare with const)
+	      ({ pc, dc } = await connectToPeer(ss, fp, {
 	        initiator: true,
 	        localStreams: [localStream],
 	        label: 'pose',
@@ -1062,45 +1065,41 @@
 	            if (msg.type === 'face')  return onFaceMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
 	          } catch {}
 	        },
-	      });
+	      }));
 	
-	      // Use deterministic key so we don’t duplicate per sweep
+	      // create a stable key ONLY AFTER pc/dc exist
+	      key = `paired:${fp}:${Math.random().toString(36).slice(2, 8)}`;
 	      peers.set(key, { pc, dc });
-		  connectedFps.add(fp);
+	      connectedFps.add(fp);
 	
-		  pc.addEventListener('connectionstatechange', () => {
-		    const st = pc.connectionState;
-		    console.log('[SENDER][PC]', key, st);
-		    if (['failed','disconnected','closed'].includes(st)) {
-		      poseDCs.delete(dc);
-		      peers.delete(key);
-		      // if no other PCs remain for this fingerprint, allow redial later
-		      const stillAny = [...peers.keys()].some(k => k.startsWith(`paired:${fp}:`));
-		      if (!stillAny) connectedFps.delete(fp);
-		    }
-		  });
-
+	      // capture stable references for listeners
+	      const myKey = key;
+	      const myDc  = dc;
+	      const myFp  = fp;
+	
 	      if (dc) {
 	        dc.addEventListener('open', () => {
-	          poseDCs.add(dc);
-	          try { dc.send(JSON.stringify({ type:'meta', room: currentRoom() })); } catch {}
+	          poseDCs.add(myDc);
+	          try { myDc.send(JSON.stringify({ type:'meta', room: currentRoom() })); } catch {}
 	          announceAIModes?.();
-	          if (lastAudioPayload) try { dc.send(lastAudioPayload); } catch {}
-	          if (lastPosePayload)  try { dc.send(lastPosePayload);  } catch {}
-	          if (lastFacePayload)  try { dc.send(lastFacePayload);  } catch {}
-	          console.log('[POSE][sender] DC open (paired many)', key);
+	          if (lastAudioPayload) try { myDc.send(lastAudioPayload); } catch {}
+	          if (lastPosePayload)  try { myDc.send(lastPosePayload);  } catch {}
+	          if (lastFacePayload)  try { myDc.send(lastFacePayload);  } catch {}
+	          console.log('[POSE][sender] DC open (paired many)', myKey);
 	        });
-	        dc.addEventListener('close',  () => { poseDCs.delete(dc); peers.delete(key); });
-	        dc.addEventListener('error',  () => { poseDCs.delete(dc); peers.delete(key); });
+	        dc.addEventListener('close',  () => { poseDCs.delete(myDc); peers.delete(myKey); });
+	        dc.addEventListener('error',  () => { poseDCs.delete(myDc); peers.delete(myKey); });
 	      }
 	
 	      pc.addEventListener('connectionstatechange', () => {
 	        const st = pc.connectionState;
-	        console.log('[SENDER][PC]', key, st);
+	        console.log('[SENDER][PC]', myKey, st);
 	        if (['failed','disconnected','closed'].includes(st)) {
-	          poseDCs.delete(dc);
-	          peers.delete(key);
-	          // (No immediate redial here — the sweep will retry later)
+	          poseDCs.delete(myDc);
+	          peers.delete(myKey);
+	          // if no other PCs remain for this fingerprint, allow redial later
+	          const stillAny = [...peers.keys()].some(k => typeof k === 'string' && k.startsWith(`paired:${myFp}:`));
+	          if (!stillAny) connectedFps.delete(myFp);
 	        }
 	      });
 	
@@ -1118,6 +1117,11 @@
 	    }
 	  }
 	
+	  // Clean up any accidental non-string/null keys (defensive sweep)
+	  for (const [k] of peers) {
+	    if (k == null || typeof k !== 'string') peers.delete(k);
+	  }
+	
 	  // Periodic sweep (once)
 	  if (!window._bmSweepTimer) {
 	    window._bmSweepTimer = setInterval(() => {
@@ -1126,7 +1130,7 @@
 	        window._bmSweepTimer = null;
 	        return;
 	      }
-	      pairedConnectAndAttachMany(localStream); // idempotent due to peers.has() + dialing guard
+	      pairedConnectAndAttachMany(localStream); // idempotent due to peers.has() + dialing/connected guards
 	    }, 8000);
 	  }
 	}
