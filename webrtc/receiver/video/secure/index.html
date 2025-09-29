@@ -114,7 +114,7 @@
 
   <script type="module">
     import { ReceiverCore } from '/hungryface/webrtc/receiver/shared/receiver-core.js';
-    import { RoomAuth } from '/hungryface/webrtc/shared/room-auth.js';
+    import { authHandshakeOverRooms } from '/hungryface/webrtc/shared/room-auth.js';
 
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
@@ -587,42 +587,28 @@
       }
     });
 
-    // ----- Auth: mirror sender's merge (wrap on send, unwrap on receive) -----
-
-    // Wrap RoomAuth messages inside our app envelope that the server forwards
-    const auth = new RoomAuth({
-      role: 'receiver',
-      room,
-      send: (obj) => {
-        try {
-          core.send?.({ type: 'app', to: obj.to, data: obj });
-        } catch {}
-      },
-      onAuthed: (peerId) => {
-        console.log('[AUTH][receiver] OK:', peerId);
-        showStatus('Authenticated sender');
-        // Target ONLY the trusted sender
-        core.senderId = peerId;
-        core.targetSenderId = peerId;
-      }
-    });
-    // Ensure correct room string
-    auth.room = room;
-
-    // Feed room messages to RoomAuth, unwrapping {type:'app', data:{...}} first
-    if (typeof core.onRoomMessage === 'function') {
-      core.onRoomMessage((raw) => {
-        let msg = raw;
-        if (msg?.type === 'app' && msg?.data && typeof msg.data === 'object') {
-          msg = { ...msg.data, from: msg.from, to: msg.to };
-        }
-        if (auth.handleRoomMessage(msg)) return;
-      });
-    } else {
-      console.warn('[Receiver] core.onRoomMessage hook not found; RoomAuth may not receive messages.');
+    // ---- Auth-first handshake (separate WS) then start WebRTC to that sender only ----
+    showStatus('Authenticating sender…');
+    let peerId, closeAuth;
+    try {
+      ({ peerId, close: closeAuth } = await authHandshakeOverRooms({
+        url: WS_ENDPOINT,
+        room,
+        role: 'receiver',
+        timeoutMs: 20000,
+        onEvent: (e) => console.log('[AUTH EVT]', e)
+      }));
+    } catch (e) {
+      showStatus('No trusted sender responded.\nOpen the sender in this room, or pair devices.');
+      console.warn('[AUTH] handshake failed:', e);
+      throw e;
     }
+    showStatus('Authenticated sender');
 
-    // Connect/start (no separate auth WS)
+    // Target ONLY the trusted sender, then start WebRTC
+    core.senderId = peerId;
+    core.targetSenderId = peerId;
+    closeAuth();
     showStatus('Connecting…');
     core.start().catch(console.warn);
 
