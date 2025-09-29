@@ -261,6 +261,8 @@
   </div>
 
   <script type="module">
+    import { RoomAuth } from '/hungryface/webrtc/shared/room-auth.js'; //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
+
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
 
@@ -525,6 +527,14 @@
     const setStatus = (t) => { statusEl.textContent = t; if (LOG.status) console.log('[STATUS]', t); };
     const currentRoom = () => (roomInput.value || 'Baby').trim();
     const isFront = () => (cameraSel.value === 'user');
+
+    const auth = new RoomAuth({  //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
+      role: 'sender',
+      room: currentRoom(),
+      send,                                    // your existing function that ws.send(JSON.stringify(obj))
+      onAuthed: (peerId) => console.log('[AUTH][sender] OK:', peerId)
+    });
+
 
     function updateMirrorClass() {
       document.body.classList.toggle('mirror', isFront());
@@ -911,6 +921,8 @@
 
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+      // ➜ Let RoomAuth consume auth-hello/auth-reply/roster/peer-joined //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
+      if (auth.handleRoomMessage(msg)) return;
       const t = msg?.type;
 
       if (t === 'peer-left' && msg.id) { cleanupPeer(msg.id, 'peer-left'); return; }
@@ -932,7 +944,12 @@
 
       if (t === 'offer' && msg.from) {
         setStatus('Got offer, creating answer…');
-
+        if (!auth.isAuthed(msg.from)) { //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
+          // Optional nudge: proactively challenge the receiver so auth completes
+          // (room-auth already challenges on peer-joined/roster, so this is just extra)
+          console.log('[AUTH][sender] ignoring offer from unauthenticated peer:', msg.from);
+          return;
+        }
         let rec = peers.get(msg.from);
         if (!rec) { getOrCreatePC(msg.from); rec = peers.get(msg.from); }
 
