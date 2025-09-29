@@ -186,3 +186,94 @@ export class RoomAuth {
     }
   }
 }
+
+// --- Convenience: one-shot auth handshake over rooms, then return the authed peerId ---
+// Opens a *temporary* WS to the same server, runs RoomAuth on it,
+// resolves with the first trusted peerId (based on your local trusted list).
+// Usage (receiver page):
+//   const { peerId, close } = await authHandshakeOverRooms({ url, room, role:'receiver' });
+//   core.senderId = peerId; core.targetSenderId = peerId; close(); core.start();
+export async function authHandshakeOverRooms({
+  url,
+  room,
+  role = 'receiver',
+  timeoutMs = 15000,
+  onEvent,                 // optional: (evt) => {} for progress logging
+  allowFp,                 // optional: (fingerprint) => true/false to restrict which trusted device qualifies
+} = {}) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`${url}?room=${encodeURIComponent(room)}`);
+    let resolved = false;
+
+    const send = (obj) => {
+      try { ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj)); } catch {}
+    };
+
+    const finish = (err, peerId) => {
+      if (resolved) return;
+      resolved = true;
+      try { ws.close(); } catch {}
+      if (err) reject(err); else resolve({ peerId, close: () => { try { ws.close(); } catch {} } });
+    };
+
+    const tm = setTimeout(() => finish(new Error('auth handshake timeout')), timeoutMs);
+
+    // Create a RoomAuth bound to this temp socket
+    const ra = new RoomAuth({
+      role,
+      room,
+      send,
+      // Note: onAuthed only passes peerId; fingerprint is available in messages below.
+      onAuthed: (peerId) => {
+        if (onEvent) try { onEvent({ type: 'authed', peerId }); } catch {}
+        // We still gate with allowFp (if provided) by watching the auth-reply message below
+        // to read msg.fromFp before resolving.
+      }
+    });
+
+    ws.onopen = () => {
+      if (onEvent) try { onEvent({ type: 'ws-open' }); } catch {}
+      send({ type: 'join', room, role });
+    };
+
+    ws.onmessage = (e) => {
+      let msg; try { msg = JSON.parse(e.data); } catch { return; }
+      // feed all room messages to RoomAuth
+      ra.handleRoomMessage(msg);
+
+      // proactively challenge senders as soon as we learn about them
+      if (msg?.type === 'roster' && Array.isArray(msg.peers)) {
+        if (onEvent) try { onEvent({ type: 'roster', peers: msg.peers }); } catch {}
+        ra.kickstart(msg.peers);
+      }
+      if (msg?.type === 'peer-joined' && msg.role) {
+        if (onEvent) try { onEvent({ type: 'peer-joined', id: msg.id, role: msg.role }); } catch {}
+        ra.kickstart([{ id: msg.id, role: msg.role }]);
+      }
+
+      // When we see a signed reply from a sender we trust, and RoomAuth marks it authed → resolve
+      if (msg?.type === 'auth-reply' && msg.from && ra.isAuthed(msg.from)) {
+        // Optional fingerprint gate
+        if (typeof allowFp === 'function') {
+          const fp = msg.fromFp;
+          if (!allowFp(fp)) return; // ignore if this authed peer isn't allowed
+        }
+        clearTimeout(tm);
+        if (onEvent) try { onEvent({ type: 'selected', peerId: msg.from, fp: msg.fromFp }); } catch {}
+        finish(null, msg.from);
+      }
+    };
+
+    ws.onerror = (err) => {
+      if (onEvent) try { onEvent({ type: 'ws-error', err }); } catch {}
+      // don't finish immediately; let timeout handle it unless the socket dies
+    };
+
+    ws.onclose = () => {
+      if (!resolved) {
+        if (onEvent) try { onEvent({ type: 'ws-closed' }); } catch {}
+        // allow timeout to fire; closing early could be just a transient
+      }
+    };
+  });
+}
