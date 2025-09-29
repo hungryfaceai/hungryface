@@ -488,6 +488,11 @@
 
     // One RTCPeerConnection per receiver
     const peers = new Map();
+	// Track fingerprints we’re actively dialing to avoid parallel dials
+	const dialing = new Set();
+	
+	// Helper: deterministic peer key per fingerprint
+	const peerKeyFor = (fp) => `paired:${fp}`;
 
     let previewTimer = null, previewTicker = null, previewEnd = 0;
 
@@ -982,122 +987,127 @@
       return { pc, dc, sid, ss };
     }
 
-    async function pairedConnectAndAttachMany(localStream) {
-      const ss = await ensureSS(); 
-      const SELF_FP = ss.self?.fingerprint || ss.self?.fp;
-      if (!SELF_FP) throw new Error('No self fingerprint');
-    
-      // Targets = all trusted except self
-      const targets = (ss.trusted || [])
-        .map(d => d.fp)
-        .filter(fp => fp && fp !== SELF_FP);
-    
-      if (!targets.length) {
-        console.log('[sender] no trusted targets to dial (others may connect later)');
-        return;
-      }
-    
-      console.log('[sender] dialing targets:', targets);
-    
-      for (const fp of targets) {
-        try {
-          const { pc, dc } = await connectToPeer(ss, fp, {
-            initiator: true,
-            localStreams: [localStream],
-            label: 'pose',
-            streamMeta: { room: currentRoom() },
-            onTrack: (ev) => {
-              try {
-                if (ev.track.kind === 'audio') {
-                  const ms = ev.streams?.[0] || new MediaStream([ev.track]);
-                  talkbackAudio.srcObject = ms;
-                  talkbackAudio.muted = false;
-                  talkbackAudio.volume = 1.0;
-                  talkbackAudio.play().catch(() => {});
-                  ev.track.addEventListener('ended', () => {
-                    if (talkbackAudio.srcObject === ms) {
-                      try { talkbackAudio.pause(); talkbackAudio.srcObject = null; } catch {}
-                    }
-                  });
-                  console.log('[SENDER] talkback attached from', fp);
-                }
-              } catch (e) { console.warn('[SENDER] ontrack error (paired many):', e); }
-            },
-            onData: (msgRaw, ch) => {
-              try {
-                const msg = (typeof msgRaw === 'string') ? JSON.parse(msgRaw) : msgRaw;
-                if (!msg || !msg.type) return;
-                if (msg.type === 'audio') return onAudioMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
-                if (msg.type === 'pose')  return onPoseMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
-                if (msg.type === 'face')  return onFaceMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
-              } catch {}
-            },
-          });
-		  try {
-		    console.log('[SENDER] connected (many)', {
-		      to: fp,
-		      pcSignaling: pc.signalingState,
-		      pcConn: pc.connectionState,
-		      senders: pc.getSenders().map(s => ({
-		        kind: s.track?.kind, id: s.track?.id, enabled: s.track?.enabled
-		      }))
-		    });
-		  } catch {}
-															  
-          pc.addEventListener('icegatheringstatechange', () => console.log('[SENDER][ICE] gathering =', pc.iceGatheringState, '→', fp));
-			
-														   
-          pc.addEventListener('signalingstatechange',   () => console.log('[SENDER][PC] signaling =', pc.signalingState, '→', fp));
-          pc.addEventListener('iceconnectionstatechange',() => console.log('[SENDER][ICE] state =', pc.iceConnectionState, '→', fp));
-          pc.addEventListener('icecandidate', (e) => { if (e.candidate) console.log('[SENDER][ICE] new candidate', e.candidate.type || e.candidate.candidate, '→', fp); });
-    
-          // 🔑 Unique key = fingerprint + random instanceId (so same-fp tabs don’t overwrite)
-          const key = `paired:${fp}:${Math.random().toString(36).slice(2, 8)}`; //https://chatgpt.com/c/68d692cc-57c8-8332-8902-e4fe3c2dca5f
-          peers.set(key, { pc, dc });
-    
-          if (dc) {
-            dc.addEventListener('open', () => {
-																									
-              poseDCs.add(dc);
-              try { dc.send(JSON.stringify({ type:'meta', room: currentRoom() })); } catch {}
-              announceAIModes?.();
-              if (lastAudioPayload) try { dc.send(lastAudioPayload); } catch {}
-              if (lastPosePayload)  try { dc.send(lastPosePayload);  } catch {}
-              if (lastFacePayload)  try { dc.send(lastFacePayload);  } catch {}
-              console.log('[POSE][sender] DC open (paired many)', key);
-            });
-            dc.addEventListener('close',  () => { poseDCs.delete(dc); peers.delete(key); });
-            dc.addEventListener('error',  () => { poseDCs.delete(dc); peers.delete(key); });
-          }
-    
-          pc.addEventListener('connectionstatechange', () => {
-            const st = pc.connectionState;
-            console.log('[SENDER][PC]', key, st);
-            if (['failed','disconnected','closed'].includes(st)) {
-              poseDCs.delete(dc);
-              peers.delete(key);
-              setTimeout(() => {
-                if (!started) return;
-                if (!peers.has(key)) {
-                  console.log('[sender] retrying dropped peer', key);
-                  pairedConnectAndAttachMany(localStream);
-                }
-              }, 2500);
-            }
-          });
-    
-        } catch (err) {
-          console.warn('[sender] connect failed for', fp, err?.message || err);
-        }
-      }
-    
-      if (!window._bmSweepTimer) {
-        window._bmSweepTimer = setInterval(() => {
-          if (!started) { clearInterval(window._bmSweepTimer); window._bmSweepTimer = null; return; }
-          pairedConnectAndAttachMany(localStream);
-        }, 8000);
-      }
-    }
+	async function pairedConnectAndAttachMany(localStream) {
+	  const ss = await ensureSS();
+	  const SELF_FP = ss.self?.fingerprint || ss.self?.fp;
+	  if (!SELF_FP) throw new Error('No self fingerprint');
+	
+	  // Targets = all trusted except self
+	  const targets = (ss.trusted || [])
+	    .map(d => d.fp)
+	    .filter(fp => fp && fp !== SELF_FP);
+	
+	  if (!targets.length) {
+	    console.log('[sender] no trusted targets to dial (others may connect later)');
+	    return;
+	  }
+	
+	  console.log('[sender] dialing targets:', targets);
+	
+	  for (const fp of targets) {
+	    const key = peerKeyFor(fp);
+	
+	    // Skip if we already have a connection for this fingerprint
+	    if (peers.has(key)) {
+	      // console.log('[sender] skip; already connected to', key);
+	      continue;
+	    }
+	
+	    // Skip if a dial is already in progress for this fingerprint
+	    if (dialing.has(fp)) {
+	      // console.log('[sender] skip; dialing already in-flight for', fp);
+	      continue;
+	    }
+	
+	    dialing.add(fp);
+	    try {
+	      const { pc, dc } = await connectToPeer(ss, fp, {
+	        initiator: true,
+	        localStreams: [localStream],
+	        label: 'pose',
+	        streamMeta: { room: currentRoom() },
+	        onTrack: (ev) => {
+	          try {
+	            if (ev.track.kind === 'audio') {
+	              const ms = ev.streams?.[0] || new MediaStream([ev.track]);
+	              talkbackAudio.srcObject = ms;
+	              talkbackAudio.muted = false;
+	              talkbackAudio.volume = 1.0;
+	              talkbackAudio.play().catch(() => {});
+	              ev.track.addEventListener('ended', () => {
+	                if (talkbackAudio.srcObject === ms) {
+	                  try { talkbackAudio.pause(); talkbackAudio.srcObject = null; } catch {}
+	                }
+	              });
+	              console.log('[SENDER] talkback attached from', fp);
+	            }
+	          } catch (e) { console.warn('[SENDER] ontrack error (paired many):', e); }
+	        },
+	        onData: (msgRaw, ch) => {
+	          try {
+	            const msg = (typeof msgRaw === 'string') ? JSON.parse(msgRaw) : msgRaw;
+	            if (!msg || !msg.type) return;
+	            if (msg.type === 'audio') return onAudioMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
+	            if (msg.type === 'pose')  return onPoseMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
+	            if (msg.type === 'face')  return onFaceMessageFromReceiver({ data: JSON.stringify(msg) }, ch);
+	          } catch {}
+	        },
+	      });
+	
+	      // Use deterministic key so we don’t duplicate per sweep
+	      peers.set(key, { pc, dc });
+	
+	      if (dc) {
+	        dc.addEventListener('open', () => {
+	          poseDCs.add(dc);
+	          try { dc.send(JSON.stringify({ type:'meta', room: currentRoom() })); } catch {}
+	          announceAIModes?.();
+	          if (lastAudioPayload) try { dc.send(lastAudioPayload); } catch {}
+	          if (lastPosePayload)  try { dc.send(lastPosePayload);  } catch {}
+	          if (lastFacePayload)  try { dc.send(lastFacePayload);  } catch {}
+	          console.log('[POSE][sender] DC open (paired many)', key);
+	        });
+	        dc.addEventListener('close',  () => { poseDCs.delete(dc); peers.delete(key); });
+	        dc.addEventListener('error',  () => { poseDCs.delete(dc); peers.delete(key); });
+	      }
+	
+	      pc.addEventListener('connectionstatechange', () => {
+	        const st = pc.connectionState;
+	        console.log('[SENDER][PC]', key, st);
+	        if (['failed','disconnected','closed'].includes(st)) {
+	          poseDCs.delete(dc);
+	          peers.delete(key);
+	          // (No immediate redial here — the sweep will retry later)
+	        }
+	      });
+	
+	      console.log('[SENDER] connected (many)', {
+	        to: fp,
+	        pcSignaling: pc.signalingState,
+	        pcConn: pc.connectionState,
+	        senders: pc.getSenders().map(s => ({ kind: s.track?.kind, id: s.track?.id, enabled: s.track?.enabled }))
+	      });
+	
+	    } catch (err) {
+	      console.warn('[sender] connect failed for', fp, err?.message || err);
+	    } finally {
+	      dialing.delete(fp);
+	    }
+	  }
+	
+	  // Periodic sweep (once)
+	  if (!window._bmSweepTimer) {
+	    window._bmSweepTimer = setInterval(() => {
+	      if (!started) {
+	        clearInterval(window._bmSweepTimer);
+	        window._bmSweepTimer = null;
+	        return;
+	      }
+	      pairedConnectAndAttachMany(localStream); // idempotent due to peers.has() + dialing guard
+	    }, 8000);
+	  }
+	}
+
 
     /* ======= accept inbound sessions from receivers (receiver-initiated) ======= */
     async function listenForReceivers(localStream) {
