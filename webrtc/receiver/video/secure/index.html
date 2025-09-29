@@ -113,19 +113,11 @@
   </div>
 
   <script type="module">
-    import { SecureSignal } from '/hungryface/webrtc/shared/secure-signal.js'; //pairing code
-    import { connectToPeer } from '/hungryface/webrtc/shared/secure-webrtc.js'; //pairing code
-    import { initTrustedSwitcher } from '/hungryface/webrtc/shared/switcher.js';
-    import { saveLastMeta } from '/hungryface/webrtc/shared/device-registry.js';
-
+    import { ReceiverCore } from '/hungryface/webrtc/receiver/shared/receiver-core.js';
 
     /* ---------- Constants ---------- */
-    // Receiver: paired-only
-    const URLQS = new URLSearchParams(location.search); //pairing code
-    const PAIRED_PEER_FP = URLQS.get('peer') || localStorage.getItem('naptio:lastPeerFp') || ''; //pairing code
-    const desiredRoom = URLQS.get('room') || 'Baby';     // stays as metadata preference (optional) //pairing code
-
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const room = new URLSearchParams(location.search).get("room") || "Baby";
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
     /* ---------- DOM ---------- */
@@ -140,12 +132,6 @@
     const talkBtn = document.getElementById('talkBtn');
     const lullabyBtn = document.getElementById('lullabyBtn');
 
-    // Help autoplay on iOS/Safari: first user gesture tries to play the video
-    ['click','touchstart'].forEach(ev => {
-      window.addEventListener(ev, () => remoteVideo?.play?.().catch(()=>{}), { once: true, passive: true });
-    });
-
-
     /* ---------- Status overlay ---------- */
     let hideStatusTimer = null;
     function showStatus(msg) {
@@ -159,242 +145,6 @@
         overlay.classList.remove('hidden');
       }
     }
-
-    initTrustedSwitcher({
-      currentPeer: PAIRED_PEER_FP,
-      desiredRoom,
-      getTrusted: async () => {
-        const ss = new SecureSignal({ url: WS_ENDPOINT });
-        await ss.init();
-        // ss.trusted is the authoritative list
-        return ss.trusted || [];
-      },
-      onPick: (fp) => {
-        try { localStorage.setItem('naptio:lastPeerFp', fp); } catch {}
-        const url = new URL(location.href);
-        url.searchParams.set('peer', fp);
-        location.href = url.toString();
-      }
-    });
-
-    //https://chatgpt.com/c/68d27f72-7b7c-832e-a8df-f0d077eed959 //pairing code
-    async function startPairedReceiver() {
-    if (!PAIRED_PEER_FP) {
-      showStatus('Missing ?peer=<fingerprint>. Pair devices and open with the peer fingerprint.');
-      return;
-    }
-  
-    showStatus('Connecting to paired device…');
-  
-    const ss = new SecureSignal({
-      url: WS_ENDPOINT,
-      onOpen: () => console.log('[SecureSignal] open (receiver)'),
-    });
-    await ss.init();
-    console.log('[SecureSignal] self:', ss.self);
-    console.log('[SecureSignal] trusted:', (ss.trusted || []).map(d => d.fp));
-
-    const peer = ss.trusted.find(d => d.fp === PAIRED_PEER_FP);
-    if (!peer) {
-      showStatus(`Peer ${PAIRED_PEER_FP} is not in Trusted devices. Pair first.`);
-      return;
-    }
-  
-    try { localStorage.setItem('naptio:lastPeerFp', PAIRED_PEER_FP); } catch {}
-
-    // ⬅️ Pre-create a silent audio track so the very first O/A has an m=audio section
-    const silentTrack  = getSilentTrack();
-    const silentStream = new MediaStream([silentTrack]);
-    const { pc } = await connectToPeer(ss, PAIRED_PEER_FP, {
-      initiator: false, //was: false https://chatgpt.com/c/68d3f9bc-d8a4-8323-b314-1f11bbcc01de
-      label: 'pose', 
-      localStreams: [silentStream], // ⬅️ keeps m-line order stable across renegotiations
-      onTrack: (ev) => {
-        const stream = ev.streams?.[0] || new MediaStream([ev.track]);
-        if (remoteVideo.srcObject !== stream) {
-          remoteVideo.srcObject = stream;
-          tryStartMuted();
-        }
-        showStatus('Connected');
-      },
-      onData: (msgRaw, dc) => {
-        // Optional: if you want to enforce room filtering here, watch for {type:'meta', room}
-        try {
-          const msg = (typeof msgRaw === 'string') ? JSON.parse(msgRaw) : msgRaw;
-          if (msg?.type === 'meta' && typeof msg.room === 'string') {
-            saveLastMeta(PAIRED_PEER_FP, { room: msg.room });
-            console.log('[Receiver] meta room:', msg.room, '| desired:', desiredRoom || '(none)');
-
-            // Example (optional): if desiredRoom mismatches, you could reduce volume, show a warning, etc.
-            // if (desiredRoom && msg.room !== desiredRoom) { *** }
-          }
-        } catch {}
-      }
-    });
-      
-    // debug hooks immediately after you have `pc`
-  pc.addEventListener('icecandidate', e => {
-    if (e.candidate) console.log('[RX][ICE] new candidate', e.candidate.type || e.candidate.candidate);
-  });
-  pc.addEventListener('iceconnectionstatechange', () => {
-    console.log('[RX][ICE] state =', pc.iceConnectionState);
-  });
-  pc.addEventListener('connectionstatechange', () => {
-    console.log('[RX][PC] state =', pc.connectionState);
-  });
-    // Grab the audio RTCRtpSender created from our silent local stream
-    try {
-      talkSender = pc.getSenders().find(s => s.track && s.track.kind === 'audio') || null;
-    } catch (e) {
-      console.warn('[Receiver] failed to get audio sender:', e);
-    }
-  
-    // If the sender created a 'pose' DC, we receive it here; we keep it open (video-only page ignores messages)
-    pc.ondatachannel = (e) => {
-      console.log('[DC][receiver] inbound datachannel (paired):', e.channel?.label);
-      if (e.channel?.label === 'pose') {
-        const ch = e.channel;
-        ch.onopen = () => console.log('[DC][receiver] pose DC open (video-only, paired)');
-        ch.onclose = () => console.log('[DC][receiver] pose DC close (video-only, paired)');
-        ch.onmessage = () => {};
-      }
-    };
-  
-    pcRef = pc; // talk/lullaby keeps working
-  }
-  
-  async function startReceiverPeerless() {
-    showStatus('Waiting for sender…');
-  
-    const ss = new SecureSignal({
-      url: WS_ENDPOINT,
-      onOpen: () => console.log('[SecureSignal] open (receiver)'),
-    });
-    await ss.init();
-    if (!ss.self?.fp) {
-      console.warn('[RX] No local identity (self.fp is undefined). Storage may be blocked or pairing not completed.');
-      showStatus('Receiver has no local identity');
-      return;
-    }
-    console.log('[RX] self =', ss.self?.fp, 'preferred =', PAIRED_PEER_FP);
-    console.log('[RX] trusted =', (ss.trusted || []).map(d => d.fp));
-  
-    // When any trusted sender opens a session to us, accept it immediately
-    const handleSession = async ({ sid, peerFp, role }) => {
-      console.log('[RX] onSession', { sid, peerFp, role, preferred: PAIRED_PEER_FP || '(any)' });
-      console.log('[RX] inbound session:', { sid, peerFp, role, preferred: PAIRED_PEER_FP || '(any)' });
-      // Already connected or connecting? Ignore further sessions.
-      if (pcRef && ['connecting','connected'].includes(pcRef.connectionState)) {
-        console.log('[RX] already have PC in', pcRef.connectionState, '— ignoring new session', sid);
-        return;
-      }
-      if (role !== 'responder') return; // only inbound sessions
-    
-      // ⬇️ NEW: if a preferred peer is set (?peer= or localStorage), ignore others
-      console.log('[RX] checking preferred filter: inbound=', peerFp, 'preferred=', PAIRED_PEER_FP);
-      if (PAIRED_PEER_FP && peerFp !== PAIRED_PEER_FP) {
-        console.warn('[RX] ignoring session from non-preferred peer', { got: peerFp, want: PAIRED_PEER_FP });
-        return;
-      }
-    
-      try {
-        // ⬇️ NEW: remember the actual peer we accepted
-        localStorage.setItem('naptio:lastPeerFp', peerFp);
-      } catch {}
-      
-      try {
-        // ⬅️ Pre-create a silent audio track so the first O/A has an m=audio section
-        const silentTrack  = getSilentTrack();
-        const silentStream = new MediaStream([silentTrack]);
-        
-        const { pc } = await connectToPeer(ss, peerFp, {
-          initiator: false,
-          sid,                                   // <-- use the actual session we just got
-          localStreams: [silentStream],          // ⬅️ keeps m-line order stable
-          onTrack: (ev) => {
-            try {
-              pc.getReceivers && console.log('[RX] receivers:',
-                pc.getReceivers().map(r => ({
-                  kind: r.track?.kind,
-                  id: r.track?.id,
-                  state: r.track?.readyState
-                }))
-              );
-            } catch {}
-            console.log('[RX] ontrack:', ev.track?.kind, {
-              streamId: ev.streams?.[0]?.id,
-              settings: ev.track?.getSettings ? ev.track.getSettings() : null
-            });
-            const stream = ev.streams?.[0] || new MediaStream([ev.track]);
-            if (remoteVideo.srcObject !== stream) {
-              console.log('[RX] attaching remote stream to <video>');
-              remoteVideo.srcObject = stream;
-              tryStartMuted()
-                .then(() => console.log('[RX] video play() resolved'))
-                .catch(e => console.warn('[RX] video play() failed:', e));
-            }
-            showStatus('Connected');
-          },
-          onData: (msgRaw, dc) => {
-            try {
-              const msg = (typeof msgRaw === 'string') ? JSON.parse(msgRaw) : msgRaw;
-              if (msg?.type === 'meta' && typeof msg.room === 'string') {
-                saveLastMeta(peerFp, { room: msg.room });
-                console.log('[Receiver] meta room:', msg.room, '| desired:', desiredRoom || '(none)');
-              }
-            } catch {}
-          }
-        });
-        console.log('[RX] connected via secure-webrtc', {
-          sid, from: peerFp,
-          pcSignaling: pc.signalingState,
-          pcConn: pc.connectionState
-        });
-        pc.addEventListener('icegatheringstatechange', () =>
-          console.log('[RX][ICE] gathering =', pc.iceGatheringState)
-        );
-        pc.addEventListener('signalingstatechange', () =>
-          console.log('[RX][PC] signaling =', pc.signalingState)
-        );
-  
-        // (optional) debug hooks
-        pc.addEventListener('icecandidate', e => {
-          if (e.candidate) console.log('[RX][ICE] new candidate', e.candidate.type || e.candidate.candidate);
-        });
-        pc.addEventListener('iceconnectionstatechange', () => {
-          console.log('[RX][ICE] state =', pc.iceConnectionState);
-        });
-        pc.addEventListener('connectionstatechange', () => {
-          console.log('[RX][PC] state =', pc.connectionState);
-        });
-  
-        // Grab the audio RTCRtpSender created from our silent local stream
-        try {
-          talkSender = pc.getSenders().find(s => s.track && s.track.kind === 'audio') || null;
-        } catch (e) {
-          console.warn('[Receiver] failed to get audio sender:', e);
-        }
-  
-        pcRef = pc;
-        setInterval(() => {
-          if (!pcRef) return;
-          console.log('[RX] pc state:', pcRef.connectionState, 'ice:', pcRef.iceConnectionState);
-          const ms = remoteVideo.srcObject;
-          const vt = ms?.getVideoTracks?.()[0];
-          if (vt) console.log('[RX] remote video track:', { id: vt.id, enabled: vt.enabled, state: vt.readyState });
-        }, 3000);
-      } catch (e) {
-        console.warn('[receiver] failed to accept session from', peerFp, e?.message || e);
-      }
-    };
-  
-    // Properly subscribe using SecureSignal's listener API
-    ss.addSessionListener((evt) => {
-      try { console.log('[RX][SESSION]', evt); } catch {}
-      handleSession(evt);
-    });
-
-  }
 
     /* ---------- Audio UI ---------- */
     function updateAudioButtons() {
@@ -459,20 +209,7 @@
     let talkStream = null;               // local mic stream
     let talkTrack = null;                // audio track from talkStream
     let talkSender = null;               // RTCRtpSender
-    // No transceiver pre-allocation; we create a silent m-line up front instead.
-
-    let _silentCtx = null;
-    let _silentDest = null;
-    let _silentTrack = null;
-    function getSilentTrack() {
-      if (_silentTrack) return _silentTrack;
-      _silentCtx = new (window.AudioContext || window.webkitAudioContext)();
-      _silentDest = _silentCtx.createMediaStreamDestination();
-      _silentTrack = _silentDest.stream.getAudioTracks()[0];
-      try { _silentTrack.enabled = true; } catch {}
-      return _silentTrack;
-    }
-
+    let talkTx = null;                   // ⬅️ preallocated sendonly transceiver
 
     // UI state
     let latched = false;                 // toggle mode ON/OFF
@@ -504,23 +241,17 @@
     }
 
     function tryAttachOnce() {
-      if (!talkTrack) return;
-      // If talkSender hasn't been captured yet, try to pull it from the PC now
-      if (!talkSender && pcRef) {
-        try {
-          talkSender = pcRef.getSenders().find(s => s.track && s.track.kind === 'audio') || null;
-        } catch {}
-      }
-      const sender = talkSender;
+      if (!talkTrack || !talkTx) return;
+      const sender = talkTx.sender || talkSender;
       if (!sender) return;
       if (sender.track === talkTrack) return;
       sender.replaceTrack(talkTrack)
         .then(() => {
-          console.log('[Receiver] talkback track bound to existing audio sender');
+          talkSender = sender;
+          console.log('[Receiver] talkback track bound to preallocated sender');
         })
         .catch(err => console.warn('[Receiver] replaceTrack failed:', err));
     }
-
 
     async function prepareIfNeeded() {
       await ensureTalkStream();
@@ -806,17 +537,12 @@
         if (pttSession || latched || talkTrack?.enabled) {
           latched = false; pttSession = false; setTalking(false);
         }
-        //if (!talkSender && talkTx?.sender) talkSender = talkTx.sender;
+        if (!talkSender && talkTx?.sender) talkSender = talkTx.sender;
         await startLullaby();
       }
     });
 
-    startReceiverPeerless().catch((e) => {
-      console.warn(e);
-      showStatus(e?.message || 'Failed to connect');
-    });
-
-    
+    // Cleanup on unload
     window.addEventListener('beforeunload', () => {
       try { setTalking(false); } catch {}
       try { talkSender && pcRef && pcRef.removeTrack(talkSender); } catch {}
@@ -824,6 +550,44 @@
       try { lullabyEl && lullabyEl.pause(); } catch {}
     });
 
+    /* ---------- Shared core ---------- */
+    const core = new ReceiverCore({
+      wsEndpoint: WS_ENDPOINT,
+      room,
+      onStatus: showStatus,
+      onStream: (stream) => {
+        if (remoteVideo.srcObject !== stream) {
+          remoteVideo.srcObject = stream;
+          tryStartMuted();
+        }
+      },
+      onCreatePC: (pc) => {
+        // Save PC for talkback and attach if mic already prepared
+        pcRef = pc;
+
+        // ⬇️ Pre-allocate a sendonly audio transceiver so talkback doesn't need renegotiation
+        try {
+          talkTx = pc.addTransceiver('audio', { direction: 'sendonly' });
+          talkSender = talkTx.sender;
+        } catch (e) {
+          console.warn('[Receiver] addTransceiver failed:', e);
+        }
+
+        tryAttachOnce();
+
+        // keep SDP shape consistent with other pages: create a 'pose' DC but ignore messages here
+        const ch = pc.createDataChannel('pose');
+        ch.onopen  = () => console.log('[DC][receiver] pose DC open (video-only)');
+        ch.onclose = () => console.log('[DC][receiver] pose DC close (video-only)');
+        ch.onmessage = () => {};
+      },
+      onDataChannel: (e) => {
+        console.log('[DC][receiver] inbound datachannel (leaving open):', e.channel?.label);
+      }
+    });
+
+    core.start().catch(console.warn);
+    window.addEventListener('beforeunload', () => core.close());
   </script>
 </body>
 </html>
