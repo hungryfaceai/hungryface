@@ -588,18 +588,71 @@
     });
 
     // Build a tiny room sender wrapper that routes via core
-    const sendRoom = (obj) => core.send?.(obj) || ws?.send?.(JSON.stringify(obj));
+    //const sendRoom = (obj) => core.send?.(obj) || ws?.send?.(JSON.stringify(obj));
     
     // Create auth helper (receiver role)
-    const auth = new RoomAuth({
+    /*const auth = new RoomAuth({
       role: 'receiver',
       room,
       send: sendRoom,
       onAuthed: (peerId) => showStatus('Authenticated sender')
-    });
+    });*/
     
     // Passively listen to room messages from the core (no core changes needed)
-    auth.attachToCore(core);
+    //auth.attachToCore(core);
+    // ---- Auth-first handshake (standalone WS), then start core ----
+    let wsAuth = null;
+    
+    // Use RoomAuth with a send() that targets the auth WS
+    const roomAuth = new RoomAuth({
+      role: 'receiver',
+      room,
+      send: (obj) => { try { wsAuth?.readyState === WebSocket.OPEN && wsAuth.send(JSON.stringify(obj)); } catch {} },
+      onAuthed: (peerId) => console.log('[AUTH][receiver] OK from:', peerId)
+    });
+    
+    // Open a lightweight WS for auth only
+    await new Promise((resolve, reject) => {
+      const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
+      wsAuth = new WebSocket(url);
+    
+      const timeout = setTimeout(() => reject(new Error('auth WS timeout')), 12000);
+    
+      wsAuth.onopen = () => {
+        // join room as receiver; server will broadcast roster/peer-joined, etc.
+        wsAuth.send(JSON.stringify({ type: 'join', room, role: 'receiver' }));
+      };
+    
+      wsAuth.onmessage = (e) => {
+        let msg; try { msg = JSON.parse(e.data); } catch { return; }
+    
+        // Feed every room message into the auth helper
+        roomAuth.handleRoomMessage(msg);
+    
+        // Optional: proactively challenge when we learn about senders
+        if (msg?.type === 'roster' && Array.isArray(msg.peers)) {
+          roomAuth.kickstart(msg.peers); // will challenge any senders listed
+        }
+        if (msg?.type === 'peer-joined' && msg.role === 'sender') {
+          roomAuth.kickstart([{ id: msg.id, role: 'sender' }]);
+        }
+    
+        // Proceed as soon as *any* trusted sender is authenticated
+        if (msg?.type === 'auth-reply' && msg.from && roomAuth.isAuthed(msg.from)) {
+          clearTimeout(timeout);
+          showStatus('Authenticated sender');
+          resolve();
+        }
+      };
+    
+      wsAuth.onerror = (err) => {
+        console.warn('[AUTH WS] error', err);
+      };
+    
+      wsAuth.onclose = () => {
+        // If it closes before we resolved, let the timeout fire/reject.
+      };
+    });
 
     core.start().catch(console.warn);
     window.addEventListener('beforeunload', () => core.close());
