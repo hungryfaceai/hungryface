@@ -114,7 +114,6 @@
 
   <script type="module">
     import { ReceiverCore } from '/hungryface/webrtc/receiver/shared/receiver-core.js';
-    import { authHandshakeOverRooms } from '/hungryface/webrtc/shared/room-auth.js';
 
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
@@ -587,32 +586,7 @@
       }
     });
 
-    // ---- Auth-first handshake (separate WS) then start WebRTC to that sender only ----
-    showStatus('Authenticating sender…');
-    let peerId, closeAuth;
-    try {
-      ({ peerId, close: closeAuth } = await authHandshakeOverRooms({
-        url: WS_ENDPOINT,
-        room,
-        role: 'receiver',
-        timeoutMs: 20000,
-        onEvent: (e) => console.log('[AUTH EVT]', e)
-      }));
-    } catch (e) {
-      showStatus('No trusted sender responded.\nOpen the sender in this room, or pair devices.');
-      console.warn('[AUTH] handshake failed:', e);
-      throw e;
-    }
-    showStatus('Authenticated sender');
-
-    // Target ONLY the trusted sender, then start WebRTC
-    core.senderId = peerId;
-    core.targetSenderId = peerId;
-    closeAuth();
-    showStatus('Connecting…');
     core.start().catch(console.warn);
-
-    // Cleanup
     window.addEventListener('beforeunload', () => core.close());
   </script>
 </body>
