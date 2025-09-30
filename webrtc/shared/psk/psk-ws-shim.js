@@ -52,7 +52,7 @@ function viewFor(obj, ctr) {
   return {
     t: obj.type || obj.op || '',
     to: obj.to || null,
-    from: obj.from || null,
+    //from: obj.from || null,
     sdp: obj.sdp || null,
     cand: obj.candidate?.candidate || null,
     mid: obj.candidate?.sdpMid ?? null,
@@ -190,7 +190,7 @@ export function installPskShim({ room }) {
     set onopen(fn)  { this._onopen = typeof fn === 'function' ? fn : null; }
     get onmessage() { return this._onmessage; }
     set onmessage(fn){ this._onmessage = typeof fn === 'function' ? fn : null; }
-    get onerror()   { return self._onerror; }
+    get onerror()   { return this._onerror; }
     set onerror(fn) { this._onerror = typeof fn === 'function' ? fn : null; }
     get onclose()   { return this._onclose; }
     set onclose(fn) { this._onclose = typeof fn === 'function' ? fn : null; }
