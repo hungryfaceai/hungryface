@@ -110,62 +110,101 @@ export function installPskShim({ room }) {
   class PskWS {
     constructor(url, protocols) {
       this._inner = new NativeWS(url, protocols);
-      this.readyState = this._inner.readyState;
-
-      const relay = (type, ev) => {
-        // Open/close/error events just forward
-        if (type !== 'message') {
-          this.readyState = this._inner.readyState;
-          this.dispatchEvent(new Event(type));
-          return;
-        }
-        // Message: verify if needed
-        const data = ev.data;
-        if (!tokenBytes) { // no token yet → just pass through
-          this.dispatchEvent(new MessageEvent('message', { data }));
-          return;
-        }
-        let obj; try { obj = JSON.parse(data); } catch {
-          this.dispatchEvent(new MessageEvent('message', { data })); return;
-        }
-        const t = obj?.type || obj?.op || '';
-        if (PASSTHRU.has(t)) {
-          this.dispatchEvent(new MessageEvent('message', { data })); return;
-        }
-        const sig = obj?.psk;
-        if (!sig || typeof sig.ctr !== 'number' || typeof sig.mac !== 'string') {
-          // Drop unverified signaling
-          return;
-        }
-        const view = viewFor(obj, sig.ctr);
-        const payload = te.encode(JSON.stringify(view));
-        hmac(tokenBytes, payload).then(expect => {
-          const got = b64uToBytes(sig.mac);
-          if (!timingSafeEq(expect, got)) return; // drop tampered
-          const key = obj.from || 'room';
-          const last = lastCtrByPeer.get(key) || 0;
-          if (sig.ctr <= last) return;           // drop replay
-          lastCtrByPeer.set(key, sig.ctr);
-          this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(obj) }));
-        });
-      };
-
-      // EventTarget-ish
+  
+      // EventTarget shim
       this._et = document.createDocumentFragment();
       this.addEventListener = this._et.addEventListener.bind(this._et);
       this.removeEventListener = this._et.removeEventListener.bind(this._et);
       this.dispatchEvent = this._et.dispatchEvent.bind(this._et);
-
-      // Wire inner -> outer
-      this._inner.addEventListener('open',  (e) => relay('open', e));
-      this._inner.addEventListener('close', (e) => relay('close', e));
-      this._inner.addEventListener('error', (e) => relay('error', e));
+  
+      // on* property handlers (to match native WebSocket usage)
+      this._onopen = null;
+      this._onmessage = null;
+      this._onerror = null;
+      this._onclose = null;
+  
+      // Relay from inner → outer
+      const relay = (type, evIn) => {
+        // Build outbound event (preserve MessageEvent data; forward original for property handler)
+        if (type === 'message') {
+          const data = evIn.data;
+          if (!tokenBytes) {
+            const evOut = new MessageEvent('message', { data });
+            this.dispatchEvent(evOut);
+            this._onmessage && this._onmessage(evOut);
+            return;
+          }
+          let obj;
+          try { obj = JSON.parse(data); } catch {
+            const evOut = new MessageEvent('message', { data });
+            this.dispatchEvent(evOut);
+            this._onmessage && this._onmessage(evOut);
+            return;
+          }
+          const t = obj?.type || obj?.op || '';
+          if (PASSTHRU.has(t)) {
+            const evOut = new MessageEvent('message', { data: JSON.stringify(obj) });
+            this.dispatchEvent(evOut);
+            this._onmessage && this._onmessage(evOut);
+            return;
+          }
+          const sig = obj?.psk;
+          if (!sig || typeof sig.ctr !== 'number' || typeof sig.mac !== 'string') return; // drop
+  
+          const view = viewFor(obj, sig.ctr);
+          const payload = te.encode(JSON.stringify(view));
+          hmac(tokenBytes, payload).then(expect => {
+            const got = b64uToBytes(sig.mac);
+            if (!timingSafeEq(expect, got)) return; // bad MAC → drop
+            const key = obj.from || 'room';
+            const last = lastCtrByPeer.get(key) || 0;
+            if (sig.ctr <= last) return;           // replay → drop
+            lastCtrByPeer.set(key, sig.ctr);
+  
+            const evOut = new MessageEvent('message', { data: JSON.stringify(obj) });
+            this.dispatchEvent(evOut);
+            this._onmessage && this._onmessage(evOut);
+          });
+          return;
+        }
+  
+        // Non-message events: forward as regular Events and also call property handler
+        const evOut =
+          type === 'close' ? new CloseEvent('close', evIn) :
+          type === 'error' ? new Event('error') :
+                             new Event('open');
+        this.dispatchEvent(evOut);
+        if (type === 'open'   && this._onopen)   this._onopen(evOut);
+        if (type === 'error'  && this._onerror)  this._onerror(evOut);
+        if (type === 'close'  && this._onclose)  this._onclose(evOut);
+      };
+  
+      this._inner.addEventListener('open',    (e) => relay('open', e));
+      this._inner.addEventListener('error',   (e) => relay('error', e));
+      this._inner.addEventListener('close',   (e) => relay('close', e));
       this._inner.addEventListener('message', (e) => relay('message', e));
     }
-
+  
+    // on* property compatibility
+    get onopen()    { return this._onopen; }
+    set onopen(fn)  { this._onopen = typeof fn === 'function' ? fn : null; }
+    get onmessage() { return this._onmessage; }
+    set onmessage(fn){ this._onmessage = typeof fn === 'function' ? fn : null; }
+    get onerror()   { return self._onerror; }
+    set onerror(fn) { this._onerror = typeof fn === 'function' ? fn : null; }
+    get onclose()   { return this._onclose; }
+    set onclose(fn) { this._onclose = typeof fn === 'function' ? fn : null; }
+  
+    // Forwarders
+    get readyState() { return this._inner.readyState; }
+    get bufferedAmount() { return this._inner.bufferedAmount; }
+    get url() { return this._inner.url; }
+    get protocol() { return this._inner.protocol; }
+  
     send(data) {
       if (!tokenBytes) { this._inner.send(data); return; }
-      let obj; try { obj = (typeof data === 'string') ? JSON.parse(data) : data; } catch { obj = null; }
+      let obj;
+      try { obj = (typeof data === 'string') ? JSON.parse(data) : data; } catch { obj = null; }
       if (!obj || typeof obj !== 'object') { this._inner.send(data); return; }
       const t = obj?.type || obj?.op || '';
       if (PASSTHRU.has(t)) { this._inner.send(JSON.stringify(obj)); return; }
@@ -178,11 +217,12 @@ export function installPskShim({ room }) {
         this._inner.send(JSON.stringify(obj));
       })();
     }
-
+  
     close(code, reason) { try { this._inner.close(code, reason); } catch {} }
-    get readyState() { return this._inner.readyState; }
-    set readyState(_) {}
   }
+  PskWS.CLOSING = NativeWS.CLOSING; PskWS.CLOSED = NativeWS.CLOSED; PskWS.CONNECTING = NativeWS.CONNECTING; PskWS.OPEN = NativeWS.OPEN;
+  
+    
   PskWS.__pskWrapped = true;
   PskWS.CLOSING = NativeWS.CLOSING; PskWS.CLOSED = NativeWS.CLOSED; PskWS.CONNECTING = NativeWS.CONNECTING; PskWS.OPEN = NativeWS.OPEN;
 
