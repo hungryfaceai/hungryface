@@ -13,7 +13,6 @@
     input, button, select, .chip { border-radius:12px; padding:12px 14px; border:1px solid #222; background:#0b0b0b; color:#fff; }
     button { font-weight:700; cursor:pointer; }
     .btn-ghost { background:transparent; border-color:#333; }
-    .grid { display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top:14px; }
     .card { border:1px solid #141414; background:#0b0b0b; border-radius:14px; padding:16px; }
     canvas { display:block; margin-top:10px; background:#fff; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -33,18 +32,19 @@
     .modal h3 { margin:0 0 10px; }
     .modal .row { margin:10px 0; }
 
-    .actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-
     .hide-on-desktop { display:none; }
     @media (pointer:coarse), (max-width: 820px) {
       .hide-on-desktop { display:inline-block; }
     }
+
+    .targets label { display:inline-flex; align-items:center; gap:6px; margin-right:10px; }
+    details summary { cursor:pointer; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>Pair devices (PSK)</h1>
-    <p class="dim">Share a one-time secret (stored on device) to secure signaling.</p>
+    <p class="dim">Scan one QR on the other device. We store the secret locally and scrub it from the URL.</p>
 
     <div class="row">
       <label class="muted">Room</label>
@@ -59,36 +59,39 @@
       <div class="token-box">
         PSK: <span id="tokenMasked" class="dim">—</span>
       </div>
-      <div class="actions">
+      <div class="row" style="margin:0">
         <button id="reveal">Reveal</button>
         <button id="copy">Copy PSK</button>
         <button id="manual" class="btn-ghost">Enter code manually</button>
       </div>
     </div>
 
-    <div class="grid">
-      <div class="card">
-        <h3>Open Sender (laptop)</h3>
-        <a id="senderLink" target="_blank" rel="noopener" class="mono"></a>
-        <canvas id="qrSender" width="256" height="256"></canvas>
-      </div>
-      <div class="card">
-        <h3>Open Receiver (iPhone)</h3>
-        <a id="receiverLink" target="_blank" rel="noopener" class="mono"></a>
-        <canvas id="qrReceiver" width="256" height="256"></canvas>
-        <div style="margin-top:10px">
-          <button id="openHere" class="hide-on-desktop">Open on this iPhone</button>
-        </div>
-      </div>
-    </div>
-
     <div class="card" style="margin-top:14px">
-      <h3>Smart install link</h3>
-      <p class="dim">If you scan on the “wrong” device, this link installs the secret, then sends you to the right page automatically.</p>
-      <a id="smartLink" class="mono"></a>
+      <h3>Scan this on your other device</h3>
+      <div class="row targets">
+        <label><input type="radio" name="target" value="auto" checked> Auto</label>
+        <label><input type="radio" name="target" value="sender"> Force Sender</label>
+        <label><input type="radio" name="target" value="receiver"> Force Receiver</label>
+      </div>
+      <canvas id="qrMain" width="256" height="256"></canvas>
+      <div class="row" style="justify-content:space-between">
+        <a id="smartLink" class="mono" style="word-break:break-all"></a>
+        <button id="shareLink">Share link</button>
+      </div>
+      <div style="margin-top:10px">
+        <button id="openHere" class="hide-on-desktop">Open on this iPhone</button>
+      </div>
+
+      <details style="margin-top:10px">
+        <summary class="muted">Advanced: role-specific links</summary>
+        <div class="mono dim" style="margin-top:6px">
+          <div>Sender: <a id="senderLink"></a></div>
+          <div>Receiver: <a id="receiverLink"></a></div>
+        </div>
+      </details>
     </div>
 
-    <p class="dim" style="margin-top:12px">Note: Token is kept in the URL <b>fragment</b> and stored locally; it isn’t sent to servers. After installing the secret, the page clears the fragment from the address bar.</p>
+    <p class="dim" style="margin-top:12px">We keep the token in the URL <b>fragment</b> just long enough to install it locally, then clear it from the address bar.</p>
   </div>
 
   <!-- Manual code modal -->
@@ -117,20 +120,22 @@
     const tokenMaskedEl = document.getElementById('tokenMasked');
     const revealBtn = document.getElementById('reveal');
     const copyBtn = document.getElementById('copy');
-    const senderA = document.getElementById('senderLink');
-    const receiverA = document.getElementById('receiverLink');
-    const qrS = document.getElementById('qrSender');
-    const qrR = document.getElementById('qrReceiver');
     const pairedChip = document.getElementById('pairedChip');
+
+    const qrMain = document.getElementById('qrMain');
     const smartA = document.getElementById('smartLink');
     const openHereBtn = document.getElementById('openHere');
+    const shareBtn = document.getElementById('shareLink');
 
-    const modalBackdrop = document.getElementById('modalBackdrop');
     const manualBtn = document.getElementById('manual');
+    const modalBackdrop = document.getElementById('modalBackdrop');
     const manualInput = document.getElementById('manualInput');
     const manualInstall = document.getElementById('manualInstall');
     const manualCancel = document.getElementById('manualCancel');
     const manualStatus = document.getElementById('manualStatus');
+
+    const senderA = document.getElementById('senderLink');
+    const receiverA = document.getElementById('receiverLink');
 
     const toastEl = document.getElementById('toast');
 
@@ -158,11 +163,17 @@
     }
 
     function normalizeToken(s) {
-      // Accept spaces/dashes; treat as base64url characters
-      return (s || '').trim().replace(/\s|-/g, '');
+      // No regex so replacement works in this editor; strip spaces and dashes.
+      s = (s || '');
+      s = s.split('-').join('');
+      s = s.split(' ').join('');
+      s = s.replace(/
+/g, '').replace(/
+/g, '').replace(/	/g, '');
+      return s;
     }
 
-    // Tiny QR (no dependency): lazy-load QRious from jsDelivr; fallback to text.
+    // Tiny QR (no dependency): lazy-load QRious; fallback to text.
     async function drawQR(canvas, text) {
       try {
         if (!window.QRious) {
@@ -180,7 +191,7 @@
       }
     }
     function wrap(ctx, text, x, y, w, lh){
-      const words = (text+"").split(/\s/); let line = '';
+      const words = String(text).split(' '); let line = '';
       for (let n=0;n<words.length;n++){
         const test = line + words[n] + ' ';
         if (ctx.measureText(test).width > w && n>0){ ctx.fillText(line, x, y); line = words[n] + ' '; y += lh; }
@@ -188,12 +199,12 @@
       } ctx.fillText(line, x, y);
     }
 
-    function makeSmartInstallUrl(room, tokenB64u) {
+    function makeSmartInstallUrl(room, tokenB64u, goto = 'auto') {
       const base = location.origin + location.pathname; // this page acts as installer
       const params = new URLSearchParams();
       params.set('room', room);
       params.set('psk', tokenB64u);
-      params.set('goto', 'auto');
+      params.set('goto', goto); // 'auto' | 'sender' | 'receiver'
       params.set('autoredirect', '1');
       return base + '#' + params.toString();
     }
@@ -207,6 +218,11 @@
       pairedChip.textContent = `Paired to: ${room} (${fp || '—'})`;
     }
 
+    function currentGoto() {
+      const checked = document.querySelector('input[name="target"]:checked');
+      return (checked && checked.value) || 'auto';
+    }
+
     async function refresh() {
       const room = (roomEl.value || 'Baby').trim();
       await ensurePskForRoom(room, 'sender'); // ensures a token exists on THIS device
@@ -215,19 +231,24 @@
       tokenMaskedEl.textContent = maskToken(tokenB64u);
       updatePairedChip(room, tokenB64u);
 
+      // Role-specific (advanced)
       const senderUrl = makeShareUrl({ baseUrl: SENDER_URL, room });
       const receiverUrl = makeShareUrl({ baseUrl: RECEIVER_URL, room });
       senderA.href = senderUrl; senderA.textContent = senderUrl;
       receiverA.href = receiverUrl; receiverA.textContent = receiverUrl;
 
-      await drawQR(qrS, senderUrl);
-      await drawQR(qrR, receiverUrl);
-
-      const smartUrl = makeSmartInstallUrl(room, tokenB64u || '');
+      // Single smart QR
+      const smartUrl = makeSmartInstallUrl(room, tokenB64u || '', currentGoto());
       smartA.href = smartUrl; smartA.textContent = smartUrl;
+      await drawQR(qrMain, smartUrl);
 
       openHereBtn.style.display = isMobile() ? 'inline-block' : 'none';
     }
+
+    // Target radio change -> redraw QR
+    document.addEventListener('change', (e) => {
+      if (e.target && e.target.name === 'target') refresh();
+    });
 
     // Reveal/Copy handlers
     let revealed = false;
@@ -276,7 +297,6 @@
       const raw = normalizeToken(manualInput.value);
       if (!raw) { manualStatus.textContent = 'Enter a code'; return; }
       try {
-        // Store in the same shape that getPsk() returns (tokenB64u at minimum)
         const key = 'psk:' + room;
         const payload = { tokenB64u: raw, installedFrom: 'manual', ts: new Date().toISOString() };
         localStorage.setItem(key, JSON.stringify(payload));
@@ -286,6 +306,22 @@
       } catch (e) {
         manualStatus.textContent = 'Failed to install: ' + (e && e.message || e);
       }
+    });
+
+    // Share smart link
+    shareBtn.addEventListener('click', async () => {
+      const room = (roomEl.value || 'Baby').trim();
+      const { tokenB64u } = getPsk(room) || {};
+      if (!tokenB64u) return;
+      const url = makeSmartInstallUrl(room, tokenB64u, currentGoto());
+      try {
+        if (navigator.share) {
+          await navigator.share({ title: 'Naptio pairing', text: `Pair to room ${room}`, url });
+        } else {
+          await navigator.clipboard.writeText(url);
+          showToast('Link copied');
+        }
+      } catch {}
     });
 
     // "Open on this iPhone" → go to Receiver with the PSK fragment
