@@ -4,6 +4,7 @@
   <meta charset="utf-8"/>
   <title>Naptio – Pair devices (PSK)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="icon" href="data:,">
   <style>
     :root { color-scheme: dark; }
     body { margin:0; background:#000; color:#fff; font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
@@ -143,7 +144,10 @@
     const RECEIVER_URL = '/hungryface/webrtc/receiver/video/secure/';
 
     // --- Helpers
-    const isMobile = () => /iPhone|Android.+Mobile|iPod|iPad/.test(navigator.userAgent);
+    const isMobile = () => {
+      const ua = navigator.userAgent || '';
+      return ua.includes('iPhone') || ua.includes('Android') && ua.includes('Mobile') || ua.includes('iPod') || ua.includes('iPad');
+    };
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
     function showToast(msg) {
@@ -163,13 +167,10 @@
     }
 
     function normalizeToken(s) {
-      // No regex so replacement works in this editor; strip spaces and dashes.
-      s = (s || '');
-      s = s.split('-').join('');
-      s = s.split(' ').join('');
-      s = s.replace(/
-/g, '').replace(/
-/g, '').replace(/	/g, '');
+      // Normalize without regex literals (avoids any parser issues on some engines)
+      s = (s || '').trim();
+      const toStrip = ['-', ' ', '\n', '\r', '\t'];
+      for (const ch of toStrip) s = s.split(ch).join('');
       return s;
     }
 
@@ -336,7 +337,7 @@
 
     // --- Smart installer path ---
     async function maybeSmartInstall() {
-      const hash = location.hash.replace(/^#/, '');
+      const hash = location.hash && location.hash.startsWith('#') ? location.hash.slice(1) : location.hash;
       if (!hash) return false;
       const qs = new URLSearchParams(hash);
       const psk = qs.get('psk');
