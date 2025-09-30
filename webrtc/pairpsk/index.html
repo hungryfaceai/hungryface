@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Naptio – Pair devices (PSK)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; background:#000; color:#fff; font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
+    .wrap { max-width:720px; margin:0 auto; padding:20px; }
+    h1 { margin:0 0 8px; }
+    .row { display:flex; gap:10px; align-items:center; margin:12px 0; flex-wrap:wrap; }
+    input, button, select { border-radius:12px; padding:12px 14px; border:1px solid #222; background:#0b0b0b; color:#fff; }
+    button { font-weight:700; cursor:pointer; }
+    .grid { display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top:14px; }
+    .card { border:1px solid #141414; background:#0b0b0b; border-radius:14px; padding:16px; }
+    canvas { display:block; margin-top:10px; background:#fff; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .dim { opacity:.8; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Pair devices (PSK)</h1>
+    <p class="dim">Share a one-time secret (stored on device) to secure signaling.</p>
+
+    <div class="row">
+      <label>Room:</label>
+      <input id="room" value="Baby" spellcheck="false" class="mono" style="min-width:140px"/>
+      <button id="regen">Generate new secret</button>
+    </div>
+
+    <div class="row mono">
+      Token: <span id="token" class="dim">—</span>
+      <button id="copy">Copy</button>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Open Sender</h3>
+        <a id="senderLink" target="_blank" rel="noopener">Open sender with token</a>
+        <canvas id="qrSender" width="256" height="256"></canvas>
+      </div>
+      <div class="card">
+        <h3>Open Receiver</h3>
+        <a id="receiverLink" target="_blank" rel="noopener">Open receiver with token</a>
+        <canvas id="qrReceiver" width="256" height="256"></canvas>
+      </div>
+    </div>
+    <p class="dim" style="margin-top:12px">Note: Token is kept in the URL <b>fragment</b> and stored locally; it isn’t sent to servers.</p>
+  </div>
+
+  <script type="module">
+    import { ensurePskForRoom, getPsk, makeShareUrl } from '/hungryface/webrtc/shared/psk-ws-shim.js';
+
+    const roomEl = document.getElementById('room');
+    const regenBtn = document.getElementById('regen');
+    const tokenEl = document.getElementById('token');
+    const copyBtn = document.getElementById('copy');
+    const senderA = document.getElementById('senderLink');
+    const receiverA = document.getElementById('receiverLink');
+    const qrS = document.getElementById('qrSender');
+    const qrR = document.getElementById('qrReceiver');
+
+    const SENDER_URL   = '/hungryface/webrtc/sender/secure/';
+    const RECEIVER_URL = '/hungryface/webrtc/receiver/video/secure/';
+
+    // Tiny QR (no dependency): dead-simple v1 QR using a CDN if available; else fallback to text.
+    async function drawQR(canvas, text) {
+      try {
+        // Lazy-load QRious (very small) from jsDelivr; ok for GH Pages
+        if (!window.QRious) {
+          await new Promise((res, rej) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js';
+            s.onload = res; s.onerror = rej; document.head.appendChild(s);
+          });
+        }
+        // eslint-disable-next-line no-undef
+        new QRious({ element: canvas, value: text, size: 256, level: 'H' });
+      } catch {
+        const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,256,256);
+        ctx.fillStyle = '#000'; ctx.font = '12px monospace'; wrap(ctx, text, 6, 16, 244, 14);
+      }
+    }
+    function wrap(ctx, text, x, y, w, lh){
+      const words = text.split(/\s/); let line = '';
+      for (let n=0;n<words.length;n++){
+        const test = line + words[n] + ' ';
+        if (ctx.measureText(test).width > w && n>0){ ctx.fillText(line, x, y); line = words[n] + ' '; y += lh; }
+        else line = test;
+      } ctx.fillText(line, x, y);
+    }
+
+    async function refresh() {
+      const room = (roomEl.value || 'Baby').trim();
+      await ensurePskForRoom(room, 'sender'); // ensures a token exists on this device
+      const { tokenB64u } = getPsk(room);
+      tokenEl.textContent = tokenB64u ? tokenB64u : '—';
+
+      const senderUrl = makeShareUrl({ baseUrl: SENDER_URL, room });
+      const receiverUrl = makeShareUrl({ baseUrl: RECEIVER_URL, room });
+      senderA.href = senderUrl; senderA.textContent = senderUrl;
+      receiverA.href = receiverUrl; receiverA.textContent = receiverUrl;
+
+      await drawQR(qrS, senderUrl);
+      await drawQR(qrR, receiverUrl);
+    }
+
+    regenBtn.addEventListener('click', async () => {
+      // Force new token by wiping current and calling ensurePskForRoom('sender')
+      const room = (roomEl.value || 'Baby').trim();
+      try { localStorage.removeItem('psk:' + room); } catch {}
+      await refresh();
+    });
+    copyBtn.addEventListener('click', async () => {
+      const t = tokenEl.textContent || '';
+      try { await navigator.clipboard.writeText(t); copyBtn.textContent = 'Copied!'; setTimeout(()=>copyBtn.textContent='Copy',1200); } catch {}
+    });
+    roomEl.addEventListener('change', refresh);
+
+    await refresh();
+  </script>
+</body>
+</html>
