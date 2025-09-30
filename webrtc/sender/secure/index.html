@@ -261,10 +261,6 @@
   </div>
 
   <script type="module">
-    import { RoomAuth } from '/hungryface/webrtc/shared/room-auth.js'; //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
-    import { ensureIdentity } from '/hungryface/webrtc/shared/identity.js'; //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
-    await ensureIdentity();
-
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
 
@@ -529,21 +525,6 @@
     const setStatus = (t) => { statusEl.textContent = t; if (LOG.status) console.log('[STATUS]', t); };
     const currentRoom = () => (roomInput.value || 'Baby').trim();
     const isFront = () => (cameraSel.value === 'user');
-    
-    const auth = new RoomAuth({
-      role: 'sender',
-      room: currentRoom(),
-      send: (obj) => {
-        try {
-          if (ws?.readyState === WebSocket.OPEN) {
-            // ✅ send raw, top-level auth messages so the receiver sees type:'auth-hello'/'auth-reply'
-            ws.send(JSON.stringify(obj));
-          }
-        } catch {}
-      },
-      onAuthed: (peerId) => console.log('[AUTH][sender] OK:', peerId)
-    });
-
 
     function updateMirrorClass() {
       document.body.classList.toggle('mirror', isFront());
@@ -927,17 +908,9 @@
       console.log('[SENDER] cleaned', peerId, reason);
     }
 
+
     async function onSignal(evt) {
       let msg; try { msg = JSON.parse(evt.data); } catch { return; }
-      // UNWRAP: if this is our app envelope, pull the inner payload out
-      if (msg?.type === 'app' && msg?.data && typeof msg.data === 'object') {
-        // preserve routing metadata
-        msg = { ...msg.data, from: msg.from, to: msg.to };
-      }
-      // ➜ Let RoomAuth consume auth-hello/auth-reply/roster/peer-joined //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
-      if (msg?.type === 'auth-hello')  console.log('[AUTH][sender] got auth-hello from', msg.from);
-      if (msg?.type === 'auth-reply')  console.log('[AUTH][sender] got auth-reply from', msg.from);
-      if (auth.handleRoomMessage(msg)) return;
       const t = msg?.type;
 
       if (t === 'peer-left' && msg.id) { cleanupPeer(msg.id, 'peer-left'); return; }
@@ -959,12 +932,7 @@
 
       if (t === 'offer' && msg.from) {
         setStatus('Got offer, creating answer…');
-        if (!auth.isAuthed(msg.from)) { //https://chatgpt.com/c/68da8bfd-c730-8330-9cab-b578127334e7
-          // Optional nudge: proactively challenge the receiver so auth completes
-          // (room-auth already challenges on peer-joined/roster, so this is just extra)
-          console.log('[AUTH][sender] ignoring offer from unauthenticated peer:', msg.from);
-          return;
-        }
+
         let rec = peers.get(msg.from);
         if (!rec) { getOrCreatePC(msg.from); rec = peers.get(msg.from); }
 
@@ -1102,8 +1070,6 @@
 
         updateMirrorClass();
         const room = currentRoom();
-        // NEW: make RoomAuth sign for the actual room we’re joining now
-        auth.room = room;
         setStatus('Starting camera…');
         localStream = await getMedia();
         localVideo.srcObject = localStream;
