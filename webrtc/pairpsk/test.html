@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Naptio – Pair devices (PSK)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; background:#000; color:#fff; font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
+    .wrap { max-width:820px; margin:0 auto; padding:20px; }
+    h1 { margin:0 0 8px; }
+    .row { display:flex; gap:10px; align-items:center; margin:12px 0; flex-wrap:wrap; }
+    input, button, select, .chip { border-radius:12px; padding:12px 14px; border:1px solid #222; background:#0b0b0b; color:#fff; }
+    button { font-weight:700; cursor:pointer; }
+    .btn-ghost { background:transparent; border-color:#333; }
+    .grid { display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top:14px; }
+    .card { border:1px solid #141414; background:#0b0b0b; border-radius:14px; padding:16px; }
+    canvas { display:block; margin-top:10px; background:#fff; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .dim { opacity:.85; }
+    .muted { opacity:.65; }
+
+    .token-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .token-box { padding:10px 12px; border-radius:10px; border:1px dashed #2a2a2a; background:#0a0a0a; }
+
+    /* Toast */
+    .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:20px; background:#111; color:#fff; border:1px solid #2a2a2a; padding:10px 14px; border-radius:12px; opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; }
+    .toast.show { opacity:1; transform:translateX(-50%) translateY(-4px); }
+
+    /* Modal */
+    .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; }
+    .modal { background:#0b0b0b; border:1px solid #1e1e1e; border-radius:16px; padding:18px; width:min(560px, 92vw); }
+    .modal h3 { margin:0 0 10px; }
+    .modal .row { margin:10px 0; }
+
+    .actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+
+    .hide-on-desktop { display:none; }
+    @media (pointer:coarse), (max-width: 820px) {
+      .hide-on-desktop { display:inline-block; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Pair devices (PSK)</h1>
+    <p class="dim">Share a one-time secret (stored on device) to secure signaling.</p>
+
+    <div class="row">
+      <label class="muted">Room</label>
+      <input id="room" value="Baby" spellcheck="false" class="mono" style="min-width:140px"/>
+      <button id="regen">Rotate secret</button>
+      <button id="forget" class="btn-ghost">Forget on this device</button>
+      <span id="pairedChip" class="chip muted mono" title="Current pairing">Paired to: Baby (—)</span>
+    </div>
+
+    <!-- Token display row: masked by default, with Reveal -->
+    <div class="token-row mono">
+      <div class="token-box">
+        PSK: <span id="tokenMasked" class="dim">—</span>
+      </div>
+      <div class="actions">
+        <button id="reveal">Reveal</button>
+        <button id="copy">Copy PSK</button>
+        <button id="manual" class="btn-ghost">Enter code manually</button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Open Sender (laptop)</h3>
+        <a id="senderLink" target="_blank" rel="noopener" class="mono"></a>
+        <canvas id="qrSender" width="256" height="256"></canvas>
+      </div>
+      <div class="card">
+        <h3>Open Receiver (iPhone)</h3>
+        <a id="receiverLink" target="_blank" rel="noopener" class="mono"></a>
+        <canvas id="qrReceiver" width="256" height="256"></canvas>
+        <div style="margin-top:10px">
+          <button id="openHere" class="hide-on-desktop">Open on this iPhone</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h3>Smart install link</h3>
+      <p class="dim">If you scan on the “wrong” device, this link installs the secret, then sends you to the right page automatically.</p>
+      <a id="smartLink" class="mono"></a>
+    </div>
+
+    <p class="dim" style="margin-top:12px">Note: Token is kept in the URL <b>fragment</b> and stored locally; it isn’t sent to servers. After installing the secret, the page clears the fragment from the address bar.</p>
+  </div>
+
+  <!-- Manual code modal -->
+  <div id="modalBackdrop" class="modal-backdrop">
+    <div class="modal">
+      <h3>Enter pairing code</h3>
+      <p class="dim">Paste the secret (PSK). Hyphens and spaces are OK. We’ll normalize it.</p>
+      <div class="row">
+        <input id="manualInput" class="mono" placeholder="Paste PSK here" style="flex:1; min-width:280px"/>
+        <button id="manualInstall">Install</button>
+        <button id="manualCancel" class="btn-ghost">Cancel</button>
+      </div>
+      <p id="manualStatus" class="mono muted"></p>
+    </div>
+  </div>
+
+  <div id="toast" class="toast mono"></div>
+
+  <script type="module">
+    import { ensurePskForRoom, getPsk, makeShareUrl } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+
+    // --- Elements
+    const roomEl = document.getElementById('room');
+    const regenBtn = document.getElementById('regen');
+    const forgetBtn = document.getElementById('forget');
+    const tokenMaskedEl = document.getElementById('tokenMasked');
+    const revealBtn = document.getElementById('reveal');
+    const copyBtn = document.getElementById('copy');
+    const senderA = document.getElementById('senderLink');
+    const receiverA = document.getElementById('receiverLink');
+    const qrS = document.getElementById('qrSender');
+    const qrR = document.getElementById('qrReceiver');
+    const pairedChip = document.getElementById('pairedChip');
+    const smartA = document.getElementById('smartLink');
+    const openHereBtn = document.getElementById('openHere');
+
+    const modalBackdrop = document.getElementById('modalBackdrop');
+    const manualBtn = document.getElementById('manual');
+    const manualInput = document.getElementById('manualInput');
+    const manualInstall = document.getElementById('manualInstall');
+    const manualCancel = document.getElementById('manualCancel');
+    const manualStatus = document.getElementById('manualStatus');
+
+    const toastEl = document.getElementById('toast');
+
+    const SENDER_URL   = '/hungryface/webrtc/sender/secure/';
+    const RECEIVER_URL = '/hungryface/webrtc/receiver/video/secure/';
+
+    // --- Helpers
+    const isMobile = () => /iPhone|Android.+Mobile|iPod|iPad/.test(navigator.userAgent);
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    function showToast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.add('show');
+      setTimeout(() => toastEl.classList.remove('show'), 1600);
+    }
+
+    function fingerprint(b64u) {
+      if (!b64u) return '—';
+      return b64u.slice(-6);
+    }
+
+    function maskToken(b64u) {
+      if (!b64u) return '—';
+      return `•••• (${fingerprint(b64u)})`;
+    }
+
+    function normalizeToken(s) {
+      // Accept spaces/dashes; treat as base64url characters
+      return (s || '').trim().replace(/\s|-/g, '');
+    }
+
+    // Tiny QR (no dependency): lazy-load QRious from jsDelivr; fallback to text.
+    async function drawQR(canvas, text) {
+      try {
+        if (!window.QRious) {
+          await new Promise((res, rej) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js';
+            s.onload = res; s.onerror = rej; document.head.appendChild(s);
+          });
+        }
+        // eslint-disable-next-line no-undef
+        new QRious({ element: canvas, value: text, size: 256, level: 'H' });
+      } catch {
+        const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,256,256);
+        ctx.fillStyle = '#000'; ctx.font = '12px monospace'; wrap(ctx, text, 6, 16, 244, 14);
+      }
+    }
+    function wrap(ctx, text, x, y, w, lh){
+      const words = (text+"").split(/\s/); let line = '';
+      for (let n=0;n<words.length;n++){
+        const test = line + words[n] + ' ';
+        if (ctx.measureText(test).width > w && n>0){ ctx.fillText(line, x, y); line = words[n] + ' '; y += lh; }
+        else line = test;
+      } ctx.fillText(line, x, y);
+    }
+
+    function makeSmartInstallUrl(room, tokenB64u) {
+      const base = location.origin + location.pathname; // this page acts as installer
+      const params = new URLSearchParams();
+      params.set('room', room);
+      params.set('psk', tokenB64u);
+      params.set('goto', 'auto');
+      params.set('autoredirect', '1');
+      return base + '#' + params.toString();
+    }
+
+    function chooseTargetUrl() {
+      return isMobile() ? RECEIVER_URL : SENDER_URL;
+    }
+
+    function updatePairedChip(room, tokenB64u) {
+      const fp = fingerprint(tokenB64u);
+      pairedChip.textContent = `Paired to: ${room} (${fp || '—'})`;
+    }
+
+    async function refresh() {
+      const room = (roomEl.value || 'Baby').trim();
+      await ensurePskForRoom(room, 'sender'); // ensures a token exists on THIS device
+      const { tokenB64u } = getPsk(room) || {};
+
+      tokenMaskedEl.textContent = maskToken(tokenB64u);
+      updatePairedChip(room, tokenB64u);
+
+      const senderUrl = makeShareUrl({ baseUrl: SENDER_URL, room });
+      const receiverUrl = makeShareUrl({ baseUrl: RECEIVER_URL, room });
+      senderA.href = senderUrl; senderA.textContent = senderUrl;
+      receiverA.href = receiverUrl; receiverA.textContent = receiverUrl;
+
+      await drawQR(qrS, senderUrl);
+      await drawQR(qrR, receiverUrl);
+
+      const smartUrl = makeSmartInstallUrl(room, tokenB64u || '');
+      smartA.href = smartUrl; smartA.textContent = smartUrl;
+
+      openHereBtn.style.display = isMobile() ? 'inline-block' : 'none';
+    }
+
+    // Reveal/Copy handlers
+    let revealed = false;
+    revealBtn.addEventListener('click', () => {
+      const room = (roomEl.value || 'Baby').trim();
+      const { tokenB64u } = getPsk(room) || {};
+      revealed = !revealed;
+      tokenMaskedEl.textContent = revealed ? (tokenB64u || '—') : maskToken(tokenB64u);
+      revealBtn.textContent = revealed ? 'Hide' : 'Reveal';
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      const room = (roomEl.value || 'Baby').trim();
+      const { tokenB64u } = getPsk(room) || {};
+      if (!tokenB64u) return;
+      try { await navigator.clipboard.writeText(tokenB64u); showToast('Copied PSK'); } catch {}
+    });
+
+    // Rotate + Forget
+    regenBtn.addEventListener('click', async () => {
+      const room = (roomEl.value || 'Baby').trim();
+      try { localStorage.removeItem('psk:' + room); } catch {}
+      await refresh();
+      showToast('Secret rotated');
+    });
+
+    forgetBtn.addEventListener('click', async () => {
+      const room = (roomEl.value || 'Baby').trim();
+      try { localStorage.removeItem('psk:' + room); } catch {}
+      await refresh();
+      showToast('Forgot on this device');
+    });
+
+    roomEl.addEventListener('change', refresh);
+
+    // Manual modal
+    function openModal() { modalBackdrop.style.display = 'flex'; manualInput.focus(); }
+    function closeModal() { modalBackdrop.style.display = 'none'; manualStatus.textContent=''; manualInput.value=''; }
+
+    manualBtn.addEventListener('click', openModal);
+    manualCancel.addEventListener('click', closeModal);
+    modalBackdrop.addEventListener('click', (e)=>{ if (e.target === modalBackdrop) closeModal(); });
+
+    manualInstall.addEventListener('click', async () => {
+      const room = (roomEl.value || 'Baby').trim();
+      const raw = normalizeToken(manualInput.value);
+      if (!raw) { manualStatus.textContent = 'Enter a code'; return; }
+      try {
+        // Store in the same shape that getPsk() returns (tokenB64u at minimum)
+        const key = 'psk:' + room;
+        const payload = { tokenB64u: raw, installedFrom: 'manual', ts: new Date().toISOString() };
+        localStorage.setItem(key, JSON.stringify(payload));
+        await refresh();
+        showToast('Secret installed');
+        closeModal();
+      } catch (e) {
+        manualStatus.textContent = 'Failed to install: ' + (e && e.message || e);
+      }
+    });
+
+    // "Open on this iPhone" → go to Receiver with the PSK fragment
+    openHereBtn.addEventListener('click', () => {
+      const room = (roomEl.value || 'Baby').trim();
+      const { tokenB64u } = getPsk(room) || {};
+      if (!tokenB64u) return;
+      const url = new URL(RECEIVER_URL, location.origin);
+      url.hash = new URLSearchParams({ room, psk: tokenB64u }).toString();
+      location.href = url.toString();
+    });
+
+    // --- Smart installer path ---
+    async function maybeSmartInstall() {
+      const hash = location.hash.replace(/^#/, '');
+      if (!hash) return false;
+      const qs = new URLSearchParams(hash);
+      const psk = qs.get('psk');
+      const room = (qs.get('room') || 'Baby').trim();
+      if (!psk) return false;
+
+      // Install locally
+      try {
+        const key = 'psk:' + room;
+        const payload = { tokenB64u: normalizeToken(psk), installedFrom: 'url', ts: new Date().toISOString() };
+        localStorage.setItem(key, JSON.stringify(payload));
+        showToast(`Secret installed • ${fingerprint(psk)}`);
+        updatePairedChip(room, psk);
+      } catch {}
+
+      // Scrub the fragment from the address bar
+      history.replaceState(null, '', location.pathname + location.search);
+
+      // Optional autoredirect
+      if (qs.get('autoredirect') === '1') {
+        const goto = qs.get('goto') || 'auto';
+        let target = chooseTargetUrl();
+        if (goto === 'sender') target = SENDER_URL;
+        if (goto === 'receiver') target = RECEIVER_URL;
+        await sleep(250);
+        const url = new URL(target, location.origin);
+        url.hash = new URLSearchParams({ room, psk }).toString();
+        location.replace(url.toString());
+      }
+      return true;
+    }
+
+    await maybeSmartInstall();
+    await refresh();
+  </script>
+</body>
+</html>
