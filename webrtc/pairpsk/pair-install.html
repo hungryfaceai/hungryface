@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Naptio – Pair devices (Install secret)</title>
+  <title>Naptio – Pair devices (install)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Install a one-time PSK to pair this device." />
   <link rel="icon" href="data:,">
@@ -53,6 +53,7 @@
       font-size: clamp(0.78rem, 2.6vw, 0.95rem);
       padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
       transition: background-color .15s ease, box-shadow .15s ease;
+      cursor: pointer; /* show hand on hover for pills/buttons */
     }
     .btn-pill:hover, .btn-pill:focus {
       background: #141414; border-color: #e6e6e6; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16);
@@ -72,6 +73,10 @@
     .label { opacity:.9; }
     .chip { border-radius:9999px; padding:8px 12px; border:1px solid #242424; background:#0a0a0a; color:#d9d9d9; font-size:.9rem; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    /* Editable PSK: chip <-> input */
+    #pskChip { outline: none; cursor: pointer; }
+    #pskChip:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 
     .success {
       background:#0f2; color:#001500; border:1px solid #1a1a1a;
@@ -126,7 +131,7 @@
     <main>
       <section class="hero">
         <div class="pair-card" aria-labelledby="pair-title">
-          <h2 id="pair-title" style="margin:0">Pair devices — install secret</h2>
+          <h2 id="pair-title" style="margin:0">Pair devices (install)</h2>
 
           <!-- Room (inherited from QR) -->
           <div class="row" style="gap:12px">
@@ -139,28 +144,19 @@
             <button id="forget" class="btn-pill" type="button" style="border-color:#444">Forget on this device</button>
           </div>
 
-          <!-- PSK chip masked initially + Enter code to edit -->
+          <!-- PSK chip masked initially; click to edit full PSK -->
           <div class="row mono" style="gap:8px;">
-            <div id="pskChip" class="chip">PSK: <span id="tokenMasked" class="mono" style="margin-left:6px; opacity:.9">—</span></div>
+            <div id="pskChip" class="chip" tabindex="0" role="button" aria-label="Show and edit secret">
+              PSK: <span id="tokenMasked" class="mono" style="margin-left:6px; opacity:.9">—</span>
+            </div>
 
             <div id="pskEdit" class="row" style="display:none; gap:8px;">
               <input id="pskInput" class="input mono" placeholder="Enter PSK" style="min-width:260px"/>
             </div>
-
-            <button id="enterCode" class="btn-pill" type="button">Enter code</button>
           </div>
 
-          <!-- Save icon + ephemeral success -->
+          <!-- Ephemeral success -->
           <div class="row" style="gap:12px;">
-            <button id="saveBtn" class="btn-pill" type="button" aria-label="Save">
-              <!-- Simple save icon (floppy) -->
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="vertical-align:-3px; margin-right:6px;">
-                <path d="M4 4h12l4 4v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" stroke="#fff" stroke-width="2" />
-                <path d="M16 4v6H8V4" stroke="#fff" stroke-width="2" />
-                <rect x="8" y="14" width="8" height="6" stroke="#fff" stroke-width="2" />
-              </svg>
-              Save
-            </button>
             <span id="pairedOk" class="success" role="status" aria-live="polite">Device paired</span>
           </div>
         </div>
@@ -182,16 +178,14 @@
 
     const pskEditWrap = document.getElementById('pskEdit');
     const pskInput = document.getElementById('pskInput');
-    const enterCodeBtn = document.getElementById('enterCode');
 
-    const saveBtn = document.getElementById('saveBtn');
     const pairedOk = document.getElementById('pairedOk');
-
     const toastEl = document.getElementById('toast');
 
-    // State (transient until saved)
-    let currentPSK = ''; // holds PSK from URL or edits; not persisted until Save
-    let hadFragment = false;
+    // State
+    let currentPSK = '';       // transient (what's shown/edited)
+    let savedPSK = '';         // last persisted for current room
+    let hadFragment = false;   // whether we came via #room&psk
 
     // Helpers
     function showToast(msg) {
@@ -217,24 +211,10 @@
     function scrubUrl() {
       history.replaceState(null, '', location.pathname + location.search);
     }
-
     function currentRoom() { return (roomEl.value || 'Baby').trim(); }
 
     function setMaskedChip(psk) {
       tokenMaskedEl.textContent = maskToken(psk);
-    }
-
-    function showEditMode(psk) {
-      pskChip.style.display = 'none';
-      pskEditWrap.style.display = 'flex';
-      pskInput.value = psk || '';
-      setTimeout(() => { try { pskInput.focus(); pskInput.select(); } catch {} }, 0);
-      enterCodeBtn.textContent = 'Cancel';
-    }
-    function hideEditMode() {
-      pskChip.style.display = '';
-      pskEditWrap.style.display = 'none';
-      enterCodeBtn.textContent = 'Enter code';
     }
 
     function showPairedFlash() {
@@ -242,60 +222,110 @@
       setTimeout(() => pairedOk.classList.remove('show'), 2000);
     }
 
-    // Events
-    enterCodeBtn.addEventListener('click', () => {
-      if (pskEditWrap.style.display === 'none' || pskEditWrap.style.display === '') {
-        showEditMode(currentPSK);
-      } else {
-        hideEditMode();
+    function showEditMode(psk) {
+      pskChip.style.display = 'none';
+      pskEditWrap.style.display = 'flex';
+      pskInput.value = psk || '';
+      // Use a microtask to ensure focus after DOM style updates
+      setTimeout(() => { try { pskInput.focus(); pskInput.select(); } catch {} }, 0);
+    }
+    function hideEditMode() {
+      pskChip.style.display = '';
+      pskEditWrap.style.display = 'none';
+    }
+
+    function persistPSK(pskValue, source = 'manual') {
+      const room = currentRoom();
+      const payload = { tokenB64u: pskValue, installedFrom: source, ts: new Date().toISOString() };
+      localStorage.setItem('psk:' + room, JSON.stringify(payload));
+      savedPSK = pskValue;
+      showPairedFlash();
+    }
+
+    // Interactions
+
+    // Click/focus the masked chip → switch to editable input with full PSK
+    pskChip.addEventListener('click', () => {
+      showEditMode(currentPSK || savedPSK);
+    });
+    pskChip.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        showEditMode(currentPSK || savedPSK);
       }
     });
 
+    // Input typing updates the transient PSK
     pskInput.addEventListener('input', () => {
       currentPSK = normalizeToken(pskInput.value);
     });
 
-    saveBtn.addEventListener('click', () => {
-      const room = currentRoom();
-      const toSave = pskEditWrap.style.display === 'flex' ? normalizeToken(pskInput.value) : currentPSK;
-      if (!toSave) { showToast('Enter a code first'); return; }
-      try {
-        const payload = { tokenB64u: toSave, installedFrom: hadFragment ? 'url' : 'manual', ts: new Date().toISOString() };
-        localStorage.setItem('psk:' + room, JSON.stringify(payload));
-        setMaskedChip(toSave);
-        hideEditMode();
-        showPairedFlash();
-      } catch {
-        showToast('Save failed');
+    // Blur the input → hide, mask, and if changed & non-empty, persist + flash
+    pskInput.addEventListener('blur', () => {
+      const newVal = normalizeToken(pskInput.value);
+      hideEditMode();
+      if (newVal && newVal !== savedPSK) {
+        persistPSK(newVal, 'manual');
+        setMaskedChip(newVal);
+      } else {
+        // No change → just re-mask using the last known saved or transient
+        setMaskedChip(savedPSK || currentPSK);
       }
     });
 
+    // Optional: Enter saves (then blurs), Escape cancels edit without saving
+    pskInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        pskInput.blur(); // triggers blur handler (save if changed)
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        // Restore previous value in UI, no save
+        pskInput.value = savedPSK || currentPSK || '';
+        hideEditMode();
+        setMaskedChip(savedPSK || currentPSK);
+      }
+    });
+
+    // Forget clears local storage and UI
     forgetBtn.addEventListener('click', () => {
       const room = currentRoom();
       try { localStorage.removeItem('psk:' + room); } catch {}
+      savedPSK = '';
+      currentPSK = '';
       setMaskedChip('');
       showToast('Forgot on this device');
     });
 
+    // Room change: load saved PSK (if any) for that room; otherwise keep transient
     roomEl.addEventListener('change', () => {
-      // On room change, if a PSK is persisted, reflect its fingerprint; else show current transient value
       const saved = getPsk(currentRoom()) || {};
-      const token = saved.tokenB64u || currentPSK || '';
-      setMaskedChip(token);
+      savedPSK = saved.tokenB64u || '';
+      currentPSK = savedPSK;
+      setMaskedChip(savedPSK || '');
     });
 
-    // Boot
+    // Boot: install PSK from QR (if present), auto-persist, flash, then scrub URL
     (function boot() {
       const intent = parseHash();
       hadFragment = intent.hadHash;
+
       roomEl.value = intent.room || 'Baby';
-      currentPSK = normalizeToken(intent.psk || '');
 
-      // Show masked chip with incoming PSK (not saved yet)
-      setMaskedChip(currentPSK);
-
-      // Scrub fragment right away
-      if (intent.hadHash) scrubUrl();
+      const incoming = normalizeToken(intent.psk || '');
+      if (incoming) {
+        persistPSK(incoming, 'url');
+        setMaskedChip(incoming);
+        currentPSK = incoming;
+        // Scrub the fragment immediately for privacy
+        if (intent.hadHash) scrubUrl();
+      } else {
+        // No incoming → reflect saved (if any) for this room
+        const saved = getPsk(currentRoom()) || {};
+        savedPSK = saved.tokenB64u || '';
+        currentPSK = savedPSK;
+        setMaskedChip(savedPSK || '');
+      }
     })();
   </script>
 </body>
