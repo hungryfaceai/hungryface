@@ -212,410 +212,397 @@
 
   <div id="toast" class="invite-toast" aria-live="polite"></div>
 
-  <script type="module">
-    import { ensurePskForRoom, getPsk, makeShareUrl } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
-    import { enablePskVerifyResponder, initiatePskVerify } from '/hungryface/webrtc/pairpsk/psk-verify.js';
-    import { ensureIdentity } from '/hungryface/webrtc/shared/identity.js';
+<script type="module">
+  import { ensurePskForRoom, getPsk, makeShareUrl } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+  import { enablePskVerifyResponder, initiatePskVerify } from '/hungryface/webrtc/shared/psk/psk-verify.js';
+  import { ensureIdentity } from '/hungryface/webrtc/shared/identity.js';
 
-    // ---- Elements
-    const roomEl = document.getElementById('room');
-    const regenBtn = document.getElementById('regen');
-    const forgetBtn = document.getElementById('forget');
-    const tokenMaskedEl = document.getElementById('tokenMasked');
-    const revealBtn = document.getElementById('reveal');
-    const copyBtn = document.getElementById('copy');
-    const pairedChip = document.getElementById('pairedChip');
+  // ---- Elements
+  const roomEl = document.getElementById('room');
+  const regenBtn = document.getElementById('regen');
+  const forgetBtn = document.getElementById('forget');
+  const tokenMaskedEl = document.getElementById('tokenMasked');
+  const revealBtn = document.getElementById('reveal');
+  const copyBtn = document.getElementById('copy');
+  const pairedChip = document.getElementById('pairedChip');
 
-    const qrMain = document.getElementById('qrMain');
-    const smartA = document.getElementById('smartLink');
-    const openHereBtn = document.getElementById('openHere');
-    const shareBtn = document.getElementById('shareLink');
+  const qrMain = document.getElementById('qrMain');
+  const smartA = document.getElementById('smartLink');
+  const openHereBtn = document.getElementById('openHere');
+  const shareBtn = document.getElementById('shareLink');
 
-    const pillSender = document.getElementById('pillSender');
-    const pillReceiver = document.getElementById('pillReceiver');
+  const pillSender = document.getElementById('pillSender');
+  const pillReceiver = document.getElementById('pillReceiver');
 
-    const senderA = document.getElementById('senderLink');
-    const receiverA = document.getElementById('receiverLink');
+  const senderA = document.getElementById('senderLink');
+  const receiverA = document.getElementById('receiverLink');
 
-    const modalBackdrop = document.getElementById('modalBackdrop');
-    const manualInput = document.getElementById('manualInput');
-    const manualInstall = document.getElementById('manualInstall');
-    const manualCancel = document.getElementById('manualCancel');
-    const modalClose = modalBackdrop?.querySelector('.invite-close');
-    const manualStatus = document.getElementById('manualStatus');
+  const modalBackdrop = document.getElementById('modalBackdrop');
+  const manualInput = document.getElementById('manualInput');
+  const manualInstall = document.getElementById('manualInstall');
+  const manualCancel = document.getElementById('manualCancel');
+  const modalClose = modalBackdrop?.querySelector('.invite-close');
+  const manualStatus = document.getElementById('manualStatus');
 
-    const toastEl = document.getElementById('toast');
+  const toastEl = document.getElementById('toast');
 
-    // ---- Constants
-    const SENDER_URL   = '/hungryface/webrtc/sender/secure/';
-    const RECEIVER_URL = '/hungryface/webrtc/receiver/video/secure/';
-    const WS_ENDPOINT  = 'wss://signaling-server-f5gu.onrender.com/ws'; // same as secure-signal.js
+  // ---- Constants
+  const SENDER_URL   = '/hungryface/webrtc/sender/secure/';
+  const RECEIVER_URL = '/hungryface/webrtc/receiver/video/secure/';
+  const WS_ENDPOINT  = 'wss://signaling-server-f5gu.onrender.com/ws';
 
-    // ---- State
-    let AUTO_CREATE = true;
-    let myFp = '';
-    let myDevice = '';
-    let instanceId = '';
-    let ws = null;
-    let bus = null;
-    let offResponder = null;
-    let pairedOK = false;
+  // ---- State
+  let AUTO_CREATE = true;
+  let myFp = '';
+  let myDevice = '';
+  let instanceId = '';
+  let ws = null;
+  let bus = null;
+  let offResponder = null;
+  let pairedOK = false;
 
-    // ---- Helpers
-    const isMobile = () => {
-      const ua = navigator.userAgent || '';
-      return ua.includes('iPhone') || (ua.includes('Android') && ua.includes('Mobile')) || ua.includes('iPod') || ua.includes('iPad');
-    };
-    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  // ---- Helpers
+  const isMobile = () => {
+    const ua = navigator.userAgent || '';
+    return ua.includes('iPhone') || (ua.includes('Android') && ua.includes('Mobile')) || ua.includes('iPod') || ua.includes('iPad');
+  };
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-    function showToast(msg) {
-      toastEl.textContent = msg;
-      toastEl.classList.add('show');
-      setTimeout(() => { toastEl.classList.remove('show'); }, 1600);
-    }
-    function fingerprint(b64u) { return b64u ? b64u.slice(-6) : '—'; }
-    function maskToken(b64u) { return b64u ? ('•••• (…' + fingerprint(b64u) + ')') : '—'; }
-    function normalizeToken(s) {
-      s = (s || '').trim();
-      const strip = ['-', ' ', '\n', '\r', '\t'];
-      for (const ch of strip) s = s.split(ch).join('');
-      return s;
-    }
-    async function drawQR(canvas, text) {
-      try {
-        if (!window.QRious) {
-          await new Promise((res, rej) => {
-            const s = document.createElement('script');
-            s.src = 'https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js';
-            s.onload = res; s.onerror = rej; document.head.appendChild(s);
-          });
-        }
-        // eslint-disable-next-line no-undef
-        new QRious({ element: canvas, value: text, size: 220, level: 'H' });
-      } catch {
-        const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,220,220);
-        ctx.fillStyle = '#000'; ctx.font = '12px monospace'; wrap(ctx, text, 6, 16, 208, 14);
-      }
-    }
-    function wrap(ctx, text, x, y, w, lh){
-      const words = String(text).split(' '); let line = '';
-      for (let n=0;n<words.length;n++){
-        const test = line + words[n] + ' ';
-        if (ctx.measureText(test).width > w && n>0){ ctx.fillText(line, x, y); line = words[n] + ' '; y += lh; }
-        else line = test;
-      } ctx.fillText(line, x, y);
-    }
-
-    function setChip(text) { pairedChip.textContent = text; }
-    function setPillsEnabled(on) {
-      [pillSender, pillReceiver].forEach(a => a && a.classList[on ? 'remove' : 'add']('disabled'));
-    }
-    function updatePairedChip(room, tokenB64u) {
-      pairedChip.textContent = 'Paired to: ' + room + ' (' + fingerprint(tokenB64u) + ')';
-    }
-    function currentRoom() { return (roomEl.value || 'Baby').trim(); }
-
-    // ---- Smart link builder (includes host fp + pair=1)
-    function makeSmartInstallUrl(room, tokenB64u) {
-      const base = location.origin + location.pathname; // same page acts as installer
-      const qs = new URLSearchParams();
-      qs.set('room', room);
-      qs.set('psk', tokenB64u);
-      if (myFp) qs.set('host', myFp); // who to ping
-      qs.set('pair', '1');            // ask guest to run verifier
-      qs.set('autoredirect', '0');    // stay on pairing page
-      return base + '#' + qs.toString();
-    }
-
-    // ---- Minimal WS bus for PSK verify (no changes to secure-signal.js needed)
-    function whenOpen(socket) {
-      if (socket && socket.readyState === WebSocket.OPEN) return Promise.resolve();
-      return new Promise(res => socket.addEventListener('open', res, { once: true }));
-    }
-    class PskBus {
-      constructor(socket, selfFp, instId) {
-        this.ws = socket;
-        this.fp = selfFp;
-        this.inst = instId;
-        this.handlers = new Set();
-        socket.addEventListener('message', (e) => {
-          let m; try { m = JSON.parse(e.data); } catch { return; }
-          // Route only our PSK verify relays for us
-          if (!m || m.op !== 'relay' || m.to !== this.fp || m.kind !== 'psk-verify') return;
-          // Forward a simplified shape to listeners
-          const msg = { ...m, type: m.type, from: m.from, room: m.room };
-          for (const fn of this.handlers) { try { fn(msg); } catch {} }
+  function showToast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    setTimeout(() => { toastEl.classList.remove('show'); }, 1600);
+  }
+  function fingerprint(b64u) { return b64u ? b64u.slice(-6) : '—'; }
+  function maskToken(b64u) { return b64u ? ('•••• (…' + fingerprint(b64u) + ')') : '—'; }
+  function normalizeToken(s) {
+    s = (s || '').trim();
+    const strip = ['-', ' ', '\n', '\r', '\t'];
+    for (const ch of strip) s = s.split(ch).join('');
+    return s;
+  }
+  async function drawQR(canvas, text) {
+    try {
+      if (!window.QRious) {
+        await new Promise((res, rej) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js';
+          s.onload = res; s.onerror = rej; document.head.appendChild(s);
         });
       }
-      on(event, cb) {
-        if (event !== 'message') return () => {};
-        this.handlers.add(cb);
-        return () => this.handlers.delete(cb);
-      }
-      async relay(toFp, payload, { room } = {}) {
-        const out = {
-          op: 'relay',
-          to: toFp,
-          from: this.fp,
-          fromInstance: this.inst,
-          kind: 'psk-verify',
-          ...payload,
-          room: room || payload.room
-        };
-        await whenOpen(this.ws);
-        this.ws.send(JSON.stringify(out));
-      }
+      // eslint-disable-next-line no-undef
+      new QRious({ element: canvas, value: text, size: 220, level: 'H' });
+    } catch {
+      const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,220,220);
+      ctx.fillStyle = '#000'; ctx.font = '12px monospace'; wrap(ctx, text, 6, 16, 208, 14);
     }
+  }
+  function wrap(ctx, text, x, y, w, lh){
+    const words = String(text).split(' '); let line = '';
+    for (let n=0;n<words.length;n++){
+      const test = line + words[n] + ' ';
+      if (ctx.measureText(test).width > w && n>0){ ctx.fillText(line, x, y); line = words[n] + ' '; y += lh; }
+      else line = test;
+    } ctx.fillText(line, x, y);
+  }
 
-    async function initIdentityAndWS() {
-      // Identity (same source as secure-signal.js uses)
-      const me = await ensureIdentity({});
-      myFp = me.fingerprint;
-      myDevice = me.deviceName || 'Device';
+  function setChip(text) { pairedChip.textContent = text; }
+  function setPillsEnabled(on) {
+    [pillSender, pillReceiver].forEach(a => a && a.classList[on ? 'remove' : 'add']('disabled'));
+  }
+  function updatePairedChip(room, tokenB64u) {
+    pairedChip.textContent = 'Paired to: ' + room + ' (' + fingerprint(tokenB64u) + ')';
+  }
+  function currentRoom() { return (roomEl.value || 'Baby').trim(); }
 
-      // Instance id (copy of secure-signal.js logic)
-      try {
-        instanceId = sessionStorage.getItem('naptio:instanceId') || (() => {
-          const b = crypto.getRandomValues(new Uint8Array(8));
-          const id = Array.from(b).map(x => x.toString(16).padStart(2,'0')).join('');
-          sessionStorage.setItem('naptio:instanceId', id);
-          return id;
-        })();
-      } catch {
-        const b = new Uint8Array(8);
-        crypto.getRandomValues(b);
-        instanceId = Array.from(b).map(x => x.toString(16).padStart(2,'0')).join('');
-      }
+  // ---- Smart link builder (includes host fp + pair=1)
+  function makeSmartInstallUrl(room, tokenB64u) {
+    const base = location.origin + location.pathname; // same page acts as installer
+    const qs = new URLSearchParams();
+    qs.set('room', room);
+    qs.set('psk', tokenB64u);
+    if (myFp) qs.set('host', myFp);
+    qs.set('pair', '1');            // ask guest to run verifier
+    qs.set('autoredirect', '0');    // stay on pairing page
+    return base + '#' + qs.toString();
+  }
 
-      // Open a slim WS just for PSK verify
-      ws = new WebSocket(WS_ENDPOINT);
-      ws.addEventListener('open', () => {
-        ws.send(JSON.stringify({ op: 'register', fp: myFp, instance: instanceId, device: myDevice }));
-      });
-      ws.addEventListener('close', () => {
-        setChip('Reconnecting…');
-        setTimeout(initIdentityAndWS, 1200); // simple reconnect
-      });
-
-      // Build the PSK bus and arm responder for current room
-      bus = new PskBus(ws, myFp, instanceId);
-      armResponder();
-    }
-
-    function armResponder() {
-      if (!bus) return;
-      if (offResponder) { try { offResponder(); } catch {} offResponder = null; }
-      offResponder = enablePskVerifyResponder(bus, {
-        room: currentRoom(),
-        onStatus: verifyStatusHandler
+  // ---- Minimal WS bus for PSK verify
+  function whenOpen(socket) {
+    if (socket && socket.readyState === WebSocket.OPEN) return Promise.resolve();
+    return new Promise(res => socket.addEventListener('open', res, { once: true }));
+  }
+  class PskBus {
+    constructor(socket, selfFp, instId) {
+      this.ws = socket;
+      this.fp = selfFp;
+      this.inst = instId;
+      this.handlers = new Set();
+      socket.addEventListener('message', (e) => {
+        let m; try { m = JSON.parse(e.data); } catch { return; }
+        if (!m || m.op !== 'relay' || m.to !== this.fp || m.kind !== 'psk-verify') return;
+        // Forward only the essentials expected by the verifier
+        const msg = { type: m.type, from: m.from, room: m.room, nonceA: m.nonceA, mac: m.mac, nonceB: m.nonceB, macA: m.macA, macB: m.macB };
+        for (const fn of this.handlers) { try { fn(msg); } catch {} }
       });
     }
-
-    function verifyStatusHandler(state) {
-      if (state === 'verifying') {
-        setChip('Verifying secret…');
-      } else if (state === 'paired') {
-        pairedOK = true;
-        const room = currentRoom();
-        const { tokenB64u } = getPsk(room) || {};
-        setChip('Paired ✓ ' + room + ' (…' + fingerprint(tokenB64u) + ')');
-        setPillsEnabled(true);
-      } else if (state === 'failed') {
-        setChip('Secret mismatch / timeout — Re-scan or Rotate');
-        setPillsEnabled(false);
-      }
+    on(event, cb) {
+      if (event !== 'message') return () => {};
+      this.handlers.add(cb);
+      return () => this.handlers.delete(cb);
     }
-
-    async function refresh() {
-      const room = currentRoom();
-
-      if (AUTO_CREATE) {
-        await ensurePskForRoom(room, 'sender');
-      }
-
-      const existing = getPsk(room) || {};
-      const tokenB64u = existing.tokenB64u || '';
-
-      tokenMaskedEl.textContent = maskToken(tokenB64u);
-      // “Paired to” chip shows local install fingerprint (neutral until verified)
-      const fpText = tokenB64u ? fingerprint(tokenB64u) : '—';
-      pairedChip.textContent = 'Paired to: ' + room + ' (' + fpText + ')';
-
-      // Advanced role-specific links (don’t include PSK; rely on localstorage)
-      const senderUrl = makeShareUrl({ baseUrl: SENDER_URL, room });
-      const receiverUrl = makeShareUrl({ baseUrl: RECEIVER_URL, room });
-      senderA.href = senderUrl; senderA.textContent = senderUrl;
-      receiverA.href = receiverUrl; receiverA.textContent = receiverUrl;
-
-      // Inline pills (room hint only)
-      pillSender.href = SENDER_URL + '#room=' + encodeURIComponent(room);
-      pillReceiver.href = RECEIVER_URL + '#room=' + encodeURIComponent(room);
-
-      // Smart link + QR
-      if (tokenB64u) {
-        const smartUrl = makeSmartInstallUrl(room, tokenB64u);
-        smartA.href = smartUrl; smartA.textContent = smartUrl;
-        await drawQR(qrMain, smartUrl);
-        shareBtn.disabled = false;
-      } else {
-        smartA.removeAttribute('href');
-        smartA.textContent = '(no secret on this device)';
-        const ctx = qrMain.getContext('2d');
-        ctx.clearRect(0,0,qrMain.width,qrMain.height);
-        ctx.fillStyle = '#222'; ctx.fillRect(0,0,qrMain.width,qrMain.height);
-        ctx.fillStyle = '#aaa'; ctx.font = '14px monospace'; ctx.fillText('No PSK', 8, 24);
-        shareBtn.disabled = true;
-      }
-
-      openHereBtn.style.display = (isMobile() && tokenB64u) ? '' : 'none';
-    }
-
-    // ---- UI handlers
-    let revealed = false;
-    revealBtn.addEventListener('click', () => {
-      const room = currentRoom();
-      const v = getPsk(room) || {};
-      const tokenB64u = v.tokenB64u || '';
-      revealed = !revealed;
-      tokenMaskedEl.textContent = revealed ? (tokenB64u || '—') : maskToken(tokenB64u);
-      revealBtn.textContent = revealed ? 'Hide' : 'Reveal';
-    });
-
-    copyBtn.addEventListener('click', async () => {
-      const { tokenB64u } = getPsk(currentRoom()) || {};
-      if (!tokenB64u) return;
-      try { await navigator.clipboard.writeText(tokenB64u); showToast('Copied'); } catch {}
-    });
-
-    regenBtn.addEventListener('click', async () => {
-      AUTO_CREATE = true;
-      const room = currentRoom();
-      try { localStorage.removeItem('psk:' + room); } catch {}
-      await ensurePskForRoom(room, 'sender');
-      pairedOK = false; setPillsEnabled(false);
-      await refresh();
-      setChip('Secret rotated — re-scan to pair');
-      showToast('Secret rotated');
-    });
-
-    forgetBtn.addEventListener('click', async () => {
-      AUTO_CREATE = false;
-      const room = currentRoom();
-      try { localStorage.removeItem('psk:' + room); } catch {}
-      pairedOK = false; setPillsEnabled(false);
-      await refresh();
-      setChip('Forgot on this device');
-      showToast('Forgot');
-    });
-
-    roomEl.addEventListener('change', async () => {
-      AUTO_CREATE = true; pairedOK = false; setPillsEnabled(false);
-      await refresh();
-      armResponder(); // re-arm responder for new room
-    });
-
-    // Manual modal
-    function openModal() { modalBackdrop.classList.add('visible'); modalBackdrop.setAttribute('aria-hidden','false'); setTimeout(()=>manualInput?.focus?.(),0); }
-    function closeModal() { modalBackdrop.classList.remove('visible'); modalBackdrop.setAttribute('aria-hidden','true'); manualStatus.textContent=''; manualInput.value=''; }
-    document.getElementById('manual')?.addEventListener('click', openModal);
-    manualCancel?.addEventListener('click', closeModal);
-    modalClose?.addEventListener('click', closeModal);
-    modalBackdrop?.addEventListener('click', (e)=>{ if (e.target === modalBackdrop) closeModal(); });
-
-    manualInstall.addEventListener('click', async () => {
-      const room = currentRoom();
-      const raw = normalizeToken(manualInput.value);
-      if (!raw) { manualStatus.textContent = 'Enter a code'; return; }
-      try {
-        const key = 'psk:' + room;
-        const payload = { tokenB64u: raw, installedFrom: 'manual', ts: new Date().toISOString() };
-        localStorage.setItem(key, JSON.stringify(payload));
-        AUTO_CREATE = false; pairedOK = false; setPillsEnabled(false);
-        await refresh();
-        setChip('Secret installed — verify by scanning');
-        showToast('Secret installed');
-        closeModal();
-      } catch (e) {
-        manualStatus.textContent = 'Failed: ' + (e && e.message || e);
-      }
-    });
-
-    shareBtn.addEventListener('click', async () => {
-      const room = currentRoom();
-      const { tokenB64u } = getPsk(room) || {};
-      if (!tokenB64u) return;
-      const url = makeSmartInstallUrl(room, tokenB64u);
-      try {
-        if (navigator.share && (!navigator.canShare || navigator.canShare({ url }))) {
-          await navigator.share({ title: 'Naptio pairing', text: 'Pair to room ' + room, url });
-        } else {
-          await navigator.clipboard.writeText(url);
-          showToast('Link copied');
-        }
-      } catch {}
-    });
-
-    openHereBtn.addEventListener('click', () => {
-      const room = currentRoom();
-      const { tokenB64u } = getPsk(room) || {};
-      if (!tokenB64u) return;
-      const url = new URL(RECEIVER_URL, location.origin);
-      url.hash = new URLSearchParams({ room, psk: tokenB64u }).toString();
-      location.href = url.toString();
-    });
-
-    // ---- Pairing intent from fragment (install + optional verify) ----
-    function parseIntentFromHash() {
-      const hash = (location.hash && location.hash.startsWith('#')) ? location.hash.slice(1) : '';
-      const qs = new URLSearchParams(hash);
-      return {
-        hadHash: !!hash,
-        room: (qs.get('room') || 'Baby').trim(),
-        psk: qs.get('psk') || '',
-        host: qs.get('host') || '',
-        pair: qs.get('pair') === '1'
+    async relay(toFp, payload, { room } = {}) {
+      const out = {
+        op: 'relay',
+        to: toFp,
+        from: this.fp,
+        fromInstance: this.inst,
+        kind: 'psk-verify',
+        room: room || payload.room || '',
+        ...payload
       };
+      await whenOpen(this.ws);
+      this.ws.send(JSON.stringify(out));
     }
-    async function maybeInstallFromHash(intent) {
-      if (!intent || !intent.psk) return false;
-      try {
-        const key = 'psk:' + intent.room;
-        const payload = { tokenB64u: normalizeToken(intent.psk), installedFrom: 'url', ts: new Date().toISOString() };
-        localStorage.setItem(key, JSON.stringify(payload));
-        showToast('Secret installed • ' + fingerprint(payload.tokenB64u));
-        updatePairedChip(intent.room, payload.tokenB64u);
-      } catch {}
-      history.replaceState(null, '', location.pathname + location.search);
-      return true;
+  }
+
+  async function initIdentityAndWS() {
+    const me = await ensureIdentity({});
+    myFp = me.fingerprint;
+    myDevice = me.deviceName || 'Device';
+
+    try {
+      instanceId = sessionStorage.getItem('naptio:instanceId') || (() => {
+        const b = crypto.getRandomValues(new Uint8Array(8));
+        const id = Array.from(b).map(x => x.toString(16).padStart(2,'0')).join('');
+        sessionStorage.setItem('naptio:instanceId', id);
+        return id;
+      })();
+    } catch {
+      const b = new Uint8Array(8);
+      crypto.getRandomValues(b);
+      instanceId = Array.from(b).map(x => x.toString(16).padStart(2,'0')).join('');
     }
 
-    // ---- Boot sequence ----
-    (async function boot() {
-      // 1) Parse scan intent (if guest just scanned)
-      const intent = parseIntentFromHash();
-      if (intent.psk) {
-        roomEl.value = intent.room; // adopt room from link
-        await maybeInstallFromHash(intent);
-      }
+    ws = new WebSocket(WS_ENDPOINT);
+    ws.addEventListener('open', () => {
+      ws.send(JSON.stringify({ op: 'register', fp: myFp, instance: instanceId, device: myDevice }));
+    });
+    ws.addEventListener('close', () => {
+      setChip('Reconnecting…');
+      setTimeout(initIdentityAndWS, 1200);
+    });
 
-      // 2) Ensure PSK exists (if allowed), then init identity+WS (gives us myFp), then render (QR needs host)
+    bus = new PskBus(ws, myFp, instanceId);
+    armResponder();
+  }
+
+  function armResponder() {
+    if (!bus) return;
+    if (offResponder) { try { offResponder(); } catch {} offResponder = null; }
+    offResponder = enablePskVerifyResponder(bus, {
+      room: currentRoom(),
+      onStatus: verifyStatusHandler
+    });
+  }
+
+  function verifyStatusHandler(state) {
+    if (state === 'verifying') {
+      setChip('Verifying secret…');
+    } else if (state === 'paired') {
+      pairedOK = true;
+      const room = currentRoom();
+      const { tokenB64u } = getPsk(room) || {};
+      setChip('Paired ✓ ' + room + ' (…' + fingerprint(tokenB64u) + ')');
+      setPillsEnabled(true);
+    } else if (state === 'failed') {
+      setChip('Secret mismatch / timeout — Re-scan or Rotate');
+      setPillsEnabled(false);
+    }
+  }
+
+  async function refresh() {
+    const room = currentRoom();
+
+    if (AUTO_CREATE) {
+      await ensurePskForRoom(room, 'sender');
+    }
+
+    const existing = getPsk(room) || {};
+    const tokenB64u = existing.tokenB64u || '';
+
+    tokenMaskedEl.textContent = maskToken(tokenB64u);
+    pairedChip.textContent = 'Paired to: ' + room + ' (' + (tokenB64u ? fingerprint(tokenB64u) : '—') + ')';
+
+    const senderUrl = makeShareUrl({ baseUrl: SENDER_URL, room });
+    const receiverUrl = makeShareUrl({ baseUrl: RECEIVER_URL, room });
+    senderA.href = senderUrl; senderA.textContent = senderUrl;
+    receiverA.href = receiverUrl; receiverA.textContent = receiverUrl;
+
+    pillSender.href = SENDER_URL + '#room=' + encodeURIComponent(room);
+    pillReceiver.href = RECEIVER_URL + '#room=' + encodeURIComponent(room);
+
+    if (tokenB64u) {
+      const smartUrl = makeSmartInstallUrl(room, tokenB64u);
+      smartA.href = smartUrl; smartA.textContent = smartUrl;
+      await drawQR(qrMain, smartUrl);
+      shareBtn.disabled = false;
+    } else {
+      smartA.removeAttribute('href');
+      smartA.textContent = '(no secret on this device)';
+      const ctx = qrMain.getContext('2d');
+      ctx.clearRect(0,0,qrMain.width,qrMain.height);
+      ctx.fillStyle = '#222'; ctx.fillRect(0,0,qrMain.width,qrMain.height);
+      ctx.fillStyle = '#aaa'; ctx.font = '14px monospace'; ctx.fillText('No PSK', 8, 24);
+      shareBtn.disabled = true;
+    }
+
+    openHereBtn.style.display = (isMobile() && tokenB64u) ? '' : 'none';
+  }
+
+  // ---- UI handlers
+  let revealed = false;
+  revealBtn.addEventListener('click', () => {
+    const room = currentRoom();
+    const v = getPsk(room) || {};
+    const tokenB64u = v.tokenB64u || '';
+    revealed = !revealed;
+    tokenMaskedEl.textContent = revealed ? (tokenB64u || '—') : maskToken(tokenB64u);
+    revealBtn.textContent = revealed ? 'Hide' : 'Reveal';
+  });
+
+  copyBtn.addEventListener('click', async () => {
+    const { tokenB64u } = getPsk(currentRoom()) || {};
+    if (!tokenB64u) return;
+    try { await navigator.clipboard.writeText(tokenB64u); showToast('Copied'); } catch {}
+  });
+
+  regenBtn.addEventListener('click', async () => {
+    AUTO_CREATE = true;
+    const room = currentRoom();
+    try { localStorage.removeItem('psk:' + room); } catch {}
+    await ensurePskForRoom(room, 'sender');
+    pairedOK = false; setPillsEnabled(false);
+    await refresh();
+    setChip('Secret rotated — re-scan to pair');
+    showToast('Secret rotated');
+  });
+
+  forgetBtn.addEventListener('click', async () => {
+    AUTO_CREATE = false;
+    const room = currentRoom();
+    try { localStorage.removeItem('psk:' + room); } catch {}
+    pairedOK = false; setPillsEnabled(false);
+    await refresh();
+    setChip('Forgot on this device');
+    showToast('Forgot');
+  });
+
+  roomEl.addEventListener('change', async () => {
+    AUTO_CREATE = true; pairedOK = false; setPillsEnabled(false);
+    await refresh();
+    armResponder(); // re-arm responder for new room
+  });
+
+  // Manual modal
+  function openModal() { modalBackdrop.classList.add('visible'); modalBackdrop.setAttribute('aria-hidden','false'); setTimeout(()=>manualInput?.focus?.(),0); }
+  function closeModal() { modalBackdrop.classList.remove('visible'); modalBackdrop.setAttribute('aria-hidden','true'); manualStatus.textContent=''; manualInput.value=''; }
+  document.getElementById('manual')?.addEventListener('click', openModal);
+  manualCancel?.addEventListener('click', closeModal);
+  modalClose?.addEventListener('click', closeModal);
+  modalBackdrop?.addEventListener('click', (e)=>{ if (e.target === modalBackdrop) closeModal(); });
+
+  manualInstall.addEventListener('click', async () => {
+    const room = currentRoom();
+    const raw = normalizeToken(manualInput.value);
+    if (!raw) { manualStatus.textContent = 'Enter a code'; return; }
+    try {
+      const key = 'psk:' + room;
+      const payload = { tokenB64u: raw, installedFrom: 'manual', ts: new Date().toISOString() };
+      localStorage.setItem(key, JSON.stringify(payload));
+      AUTO_CREATE = false; pairedOK = false; setPillsEnabled(false);
       await refresh();
-      await initIdentityAndWS();
-      await refresh(); // render QR again so host=myFp is included
+      setChip('Secret installed — verify by scanning');
+      showToast('Secret installed');
+      closeModal();
+    } catch (e) {
+      manualStatus.textContent = 'Failed: ' + (e && e.message || e);
+    }
+  });
 
-      // 3) If guest arrived via scan, initiate the tiny PSK verify to the host
-      if (intent.pair && intent.host && bus) {
-        try {
-          setChip('Verifying secret…');
-          await initiatePskVerify(bus, { room: intent.room, peerFp: intent.host, onStatus: verifyStatusHandler });
-        } catch (e) {
-          verifyStatusHandler('failed', { reason: e && e.message || String(e) });
-        }
+  shareBtn.addEventListener('click', async () => {
+    const room = currentRoom();
+    const { tokenB64u } = getPsk(room) || {};
+    if (!tokenB64u) return;
+    const url = makeSmartInstallUrl(room, tokenB64u);
+    try {
+      if (navigator.share && (!navigator.canShare || navigator.canShare({ url }))) {
+        await navigator.share({ title: 'Naptio pairing', text: 'Pair to room ' + room, url });
       } else {
-        // Host idle — wait for inbound req; keep pills disabled until paired
-        setPillsEnabled(false);
+        await navigator.clipboard.writeText(url);
+        showToast('Link copied');
       }
-    })();
-  </script>
+    } catch {}
+  });
+
+  openHereBtn.addEventListener('click', () => {
+    const room = currentRoom();
+    const { tokenB64u } = getPsk(room) || {};
+    if (!tokenB64u) return;
+    const url = new URL(RECEIVER_URL, location.origin);
+    url.hash = new URLSearchParams({ room, psk: tokenB64u }).toString();
+    location.href = url.toString();
+  });
+
+  // ---- Pairing intent from fragment (install + optional verify) ----
+  function parseIntentFromHash() {
+    const hash = (location.hash && location.hash.startsWith('#')) ? location.hash.slice(1) : '';
+    const qs = new URLSearchParams(hash);
+    return {
+      hadHash: !!hash,
+      room: (qs.get('room') || 'Baby').trim(),
+      psk: qs.get('psk') || '',
+      host: qs.get('host') || '',
+      pair: qs.get('pair') === '1'
+    };
+  }
+  async function maybeInstallFromHash(intent) {
+    if (!intent || !intent.psk) return false;
+    try {
+      const key = 'psk:' + intent.room;
+      const payload = { tokenB64u: normalizeToken(intent.psk), installedFrom: 'url', ts: new Date().toISOString() };
+      localStorage.setItem(key, JSON.stringify(payload));
+      showToast('Secret installed • ' + fingerprint(payload.tokenB64u));
+      updatePairedChip(intent.room, payload.tokenB64u);
+    } catch {}
+    history.replaceState(null, '', location.pathname + location.search);
+    return true;
+  }
+
+  // ---- Boot sequence ----
+  (async function boot() {
+    const intent = parseIntentFromHash();
+    if (intent.psk) {
+      roomEl.value = intent.room; // adopt room from link
+      await maybeInstallFromHash(intent);
+    }
+
+    await refresh();           // ensure PSK visible / QR provisional
+    await initIdentityAndWS(); // myFp + bus ready
+    await refresh();           // rebuild QR including host=myFp
+
+    if (intent.pair && intent.host && bus) {
+      try {
+        setChip('Verifying secret…');
+        await initiatePskVerify(bus, { room: intent.room, peerFp: intent.host, onStatus: verifyStatusHandler });
+      } catch (e) {
+        verifyStatusHandler('failed', { reason: e && e.message || String(e) });
+      }
+    } else {
+      setPillsEnabled(false);
+    }
+  })();
+</script>
+
 </body>
 </html>
