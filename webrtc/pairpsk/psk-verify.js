@@ -1,18 +1,14 @@
 // /webrtc/shared/psk/psk-verify.js
-// Minimal 1-RTT PSK verification using a generic signal bus:
-//   - signal.relay(toFp, payload, { room })
+// Minimal 1-RTT PSK verification over a simple relay bus.
+// Bus API expected:
 //   - off = signal.on('message', cb)  // cb(msg) where msg.type is 'psk-verify-*'
-//
-// Messages (JSON):
-//   psk-verify-req  { type, room, nonceA, mac }
-//   psk-verify-resp { type, nonceB, macA }
-//   psk-verify-ack  { type, macB }
+//   - await signal.relay(toFp, payload, { room })
 
 import { getPsk } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
 
 const te = new TextEncoder();
 
-// ---- helpers (no regex pitfalls) ----
+// ---------- helpers ----------
 function b64uToBytes(b64u) {
   if (!b64u) return new Uint8Array(0);
   let b64 = b64u.split('-').join('+').split('_').join('/');
@@ -40,13 +36,23 @@ function ctEq(a, b) {
   let v = 0; for (let i = 0; i < a.length; i++) v |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return v === 0;
 }
+
+// Canonical/stable stringify (keys sorted) to avoid platform key-order quirks
+function stableStringify(v) {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+  const keys = Object.keys(v).sort();
+  return '{' + keys.map(k => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
+}
+
 async function hmacB64u(pskB64u, obj) {
   const key = await crypto.subtle.importKey('raw', b64uToBytes(pskB64u), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const data = te.encode(typeof obj === 'string' ? obj : JSON.stringify(obj));
+  const data = te.encode(stableStringify(obj));
   const sig = await crypto.subtle.sign('HMAC', key, data);
   return bytesToB64u(new Uint8Array(sig));
 }
-function waitFor(signal, { type, from }, timeoutMs = 4000) {
+
+function waitFor(signal, { type, from }, timeoutMs = 7000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { off(); reject(new Error('TIMEOUT_' + type)); }, timeoutMs);
     const off = signal.on('message', (m) => {
@@ -57,26 +63,33 @@ function waitFor(signal, { type, from }, timeoutMs = 4000) {
   });
 }
 
-// ---- API: enable responder (host side) ----
+// ---------- responder (host side) ----------
 export function enablePskVerifyResponder(signal, { room, onStatus }) {
   const off = signal.on('message', async (msg) => {
     try {
-      if (!msg || msg.type !== 'psk-verify-req' || (room && msg.room && msg.room !== room)) return;
-      const psk = getPsk(room)?.tokenB64u;
-      if (!psk) return;
+      if (!msg || msg.type !== 'psk-verify-req') return;
+
+      // Be room-tolerant: prefer the room in the message; else fall back
+      const wantRoom = (msg.room || room || '').trim();
+      let psk = getPsk(wantRoom)?.tokenB64u;
+      if (!psk && room && wantRoom !== room) {
+        // Fallback to the responder's current room if caller passed one
+        psk = getPsk(room)?.tokenB64u;
+      }
+      if (!psk) return; // can't proceed
+
       onStatus && onStatus('verifying', { dir: 'inbound', from: msg.from });
 
-      // Validate request MAC (early drop for wrong PSK)
-      const expectReq = await hmacB64u(psk, { kind: 'req', room, nonceA: msg.nonceA });
+      // Validate request MAC quickly (drops wrong-PSK or wrong-room)
+      const expectReq = await hmacB64u(psk, { kind: 'req', room: wantRoom, nonceA: msg.nonceA });
       if (!ctEq(expectReq, msg.mac)) throw new Error('BAD_REQ_MAC');
 
       const nonceB = randomB64u(16);
-      const macA = await hmacB64u(psk, { kind: 'resp', room, nonceA: msg.nonceA, nonceB });
-      await signal.relay(msg.from, { type: 'psk-verify-resp', nonceB, macA, room }, { room });
+      const macA = await hmacB64u(psk, { kind: 'resp', room: wantRoom, nonceA: msg.nonceA, nonceB });
+      await signal.relay(msg.from, { type: 'psk-verify-resp', nonceB, macA, room: wantRoom }, { room: wantRoom });
 
-      // Wait for ack
-      const ack = await waitFor(signal, { type: 'psk-verify-ack', from: msg.from }, 4000);
-      const expectAck = await hmacB64u(psk, { kind: 'ack', room, nonceB });
+      const ack = await waitFor(signal, { type: 'psk-verify-ack', from: msg.from }, 7000);
+      const expectAck = await hmacB64u(psk, { kind: 'ack', room: wantRoom, nonceB });
       if (!ctEq(expectAck, ack.macB)) throw new Error('BAD_ACK_MAC');
 
       onStatus && onStatus('paired', { peerFp: msg.from });
@@ -84,11 +97,11 @@ export function enablePskVerifyResponder(signal, { room, onStatus }) {
       onStatus && onStatus('failed', { reason: e && e.message || String(e) });
     }
   });
-  return off; // allow caller to disable responder if needed
+  return off;
 }
 
-// ---- API: initiate verification (guest side) ----
-export async function initiatePskVerify(signal, { room, peerFp, onStatus }, timeoutMs = 4000) {
+// ---------- initiator (guest side) ----------
+async function _runOnce(signal, { room, peerFp, onStatus }, timeoutMs) {
   const psk = getPsk(room)?.tokenB64u;
   if (!psk) throw new Error('NO_PSK');
 
@@ -112,4 +125,17 @@ export async function initiatePskVerify(signal, { room, peerFp, onStatus }, time
 
   onStatus && onStatus('paired', { peerFp });
   return { ok: true };
+}
+
+export async function initiatePskVerify(signal, opts, timeoutMs = 7000) {
+  try {
+    return await _runOnce(signal, opts, timeoutMs);
+  } catch (e) {
+    // Single retry on timeout (host might still be arming responder)
+    if (String(e && e.message || '').startsWith('TIMEOUT_')) {
+      await new Promise(r => setTimeout(r, 600));
+      return await _runOnce(signal, opts, timeoutMs);
+    }
+    throw e;
+  }
 }
