@@ -143,10 +143,13 @@
     const SENDER_URL   = '/hungryface/webrtc/sender/secure/';
     const RECEIVER_URL = '/hungryface/webrtc/receiver/video/secure/';
 
+    // Control whether refresh() auto-creates a PSK if missing
+    let AUTO_CREATE = true;
+
     // --- Helpers
     const isMobile = () => {
       const ua = navigator.userAgent || '';
-      return ua.includes('iPhone') || ua.includes('Android') && ua.includes('Mobile') || ua.includes('iPod') || ua.includes('iPad');
+      return ua.includes('iPhone') || (ua.includes('Android') && ua.includes('Mobile')) || ua.includes('iPod') || ua.includes('iPad');
     };
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -163,11 +166,11 @@
 
     function maskToken(b64u) {
       if (!b64u) return '—';
-      return `•••• (${fingerprint(b64u)})`;
+      return '•••• (' + fingerprint(b64u) + ')';
     }
 
     function normalizeToken(s) {
-      // Normalize without regex literals (avoids any parser issues on some engines)
+      // Normalize without regex literals
       s = (s || '').trim();
       const toStrip = ['-', ' ', '\n', '\r', '\t'];
       for (const ch of toStrip) s = s.split(ch).join('');
@@ -216,7 +219,7 @@
 
     function updatePairedChip(room, tokenB64u) {
       const fp = fingerprint(tokenB64u);
-      pairedChip.textContent = `Paired to: ${room} (${fp || '—'})`;
+      pairedChip.textContent = 'Paired to: ' + room + ' (' + (fp || '—') + ')';
     }
 
     function currentGoto() {
@@ -226,8 +229,14 @@
 
     async function refresh() {
       const room = (roomEl.value || 'Baby').trim();
-      await ensurePskForRoom(room, 'sender'); // ensures a token exists on THIS device
-      const { tokenB64u } = getPsk(room) || {};
+
+      if (AUTO_CREATE) {
+        // Only create/ensure when allowed (prevents auto-regeneration after "Forget")
+        await ensurePskForRoom(room, 'sender');
+      }
+
+      const existing = getPsk(room) || {};
+      const tokenB64u = existing.tokenB64u || '';
 
       tokenMaskedEl.textContent = maskToken(tokenB64u);
       updatePairedChip(room, tokenB64u);
@@ -239,11 +248,22 @@
       receiverA.href = receiverUrl; receiverA.textContent = receiverUrl;
 
       // Single smart QR
-      const smartUrl = makeSmartInstallUrl(room, tokenB64u || '', currentGoto());
-      smartA.href = smartUrl; smartA.textContent = smartUrl;
-      await drawQR(qrMain, smartUrl);
+      if (tokenB64u) {
+        const smartUrl = makeSmartInstallUrl(room, tokenB64u, currentGoto());
+        smartA.href = smartUrl; smartA.textContent = smartUrl;
+        await drawQR(qrMain, smartUrl);
+        shareBtn.disabled = false;
+      } else {
+        smartA.removeAttribute('href');
+        smartA.textContent = '(no secret on this device)';
+        const ctx = qrMain.getContext('2d');
+        ctx.clearRect(0,0,qrMain.width,qrMain.height);
+        ctx.fillStyle = '#222'; ctx.fillRect(0,0,qrMain.width,qrMain.height);
+        ctx.fillStyle = '#aaa'; ctx.font = '14px monospace'; ctx.fillText('No PSK', 8, 24);
+        shareBtn.disabled = true;
+      }
 
-      openHereBtn.style.display = isMobile() ? 'inline-block' : 'none';
+      openHereBtn.style.display = (isMobile() && tokenB64u) ? 'inline-block' : 'none';
     }
 
     // Target radio change -> redraw QR
@@ -255,7 +275,8 @@
     let revealed = false;
     revealBtn.addEventListener('click', () => {
       const room = (roomEl.value || 'Baby').trim();
-      const { tokenB64u } = getPsk(room) || {};
+      const v = getPsk(room) || {};
+      const tokenB64u = v.tokenB64u || '';
       revealed = !revealed;
       tokenMaskedEl.textContent = revealed ? (tokenB64u || '—') : maskToken(tokenB64u);
       revealBtn.textContent = revealed ? 'Hide' : 'Reveal';
@@ -263,27 +284,37 @@
 
     copyBtn.addEventListener('click', async () => {
       const room = (roomEl.value || 'Baby').trim();
-      const { tokenB64u } = getPsk(room) || {};
+      const v = getPsk(room) || {};
+      const tokenB64u = v.tokenB64u || '';
       if (!tokenB64u) return;
       try { await navigator.clipboard.writeText(tokenB64u); showToast('Copied PSK'); } catch {}
     });
 
     // Rotate + Forget
     regenBtn.addEventListener('click', async () => {
+      // Explicitly rotate: delete then immediately re-create
+      AUTO_CREATE = true;
       const room = (roomEl.value || 'Baby').trim();
       try { localStorage.removeItem('psk:' + room); } catch {}
+      await ensurePskForRoom(room, 'sender');
       await refresh();
       showToast('Secret rotated');
     });
 
     forgetBtn.addEventListener('click', async () => {
+      // Do not auto-create after forgetting
+      AUTO_CREATE = false;
       const room = (roomEl.value || 'Baby').trim();
       try { localStorage.removeItem('psk:' + room); } catch {}
       await refresh();
       showToast('Forgot on this device');
     });
 
-    roomEl.addEventListener('change', refresh);
+    roomEl.addEventListener('change', () => {
+      // When user changes room, allow auto-create again (fresh pairing)
+      AUTO_CREATE = true;
+      refresh();
+    });
 
     // Manual modal
     function openModal() { modalBackdrop.style.display = 'flex'; manualInput.focus(); }
@@ -301,6 +332,7 @@
         const key = 'psk:' + room;
         const payload = { tokenB64u: raw, installedFrom: 'manual', ts: new Date().toISOString() };
         localStorage.setItem(key, JSON.stringify(payload));
+        AUTO_CREATE = false; // user provided a specific PSK; don't auto-generate
         await refresh();
         showToast('Secret installed');
         closeModal();
@@ -312,12 +344,13 @@
     // Share smart link
     shareBtn.addEventListener('click', async () => {
       const room = (roomEl.value || 'Baby').trim();
-      const { tokenB64u } = getPsk(room) || {};
+      const v = getPsk(room) || {};
+      const tokenB64u = v.tokenB64u || '';
       if (!tokenB64u) return;
       const url = makeSmartInstallUrl(room, tokenB64u, currentGoto());
       try {
         if (navigator.share) {
-          await navigator.share({ title: 'Naptio pairing', text: `Pair to room ${room}`, url });
+          await navigator.share({ title: 'Naptio pairing', text: 'Pair to room ' + room, url });
         } else {
           await navigator.clipboard.writeText(url);
           showToast('Link copied');
@@ -328,7 +361,8 @@
     // "Open on this iPhone" → go to Receiver with the PSK fragment
     openHereBtn.addEventListener('click', () => {
       const room = (roomEl.value || 'Baby').trim();
-      const { tokenB64u } = getPsk(room) || {};
+      const v = getPsk(room) || {};
+      const tokenB64u = v.tokenB64u || '';
       if (!tokenB64u) return;
       const url = new URL(RECEIVER_URL, location.origin);
       url.hash = new URLSearchParams({ room, psk: tokenB64u }).toString();
@@ -337,9 +371,9 @@
 
     // --- Smart installer path ---
     async function maybeSmartInstall() {
-      const hash = location.hash && location.hash.startsWith('#') ? location.hash.slice(1) : location.hash;
+      const hash = (location.hash && location.hash.startsWith('#')) ? location.hash.slice(1) : location.hash;
       if (!hash) return false;
-      const qs = new URLSearchParams(hash);
+      const qs = new URLSearchParams(hash || '');
       const psk = qs.get('psk');
       const room = (qs.get('room') || 'Baby').trim();
       if (!psk) return false;
@@ -349,7 +383,7 @@
         const key = 'psk:' + room;
         const payload = { tokenB64u: normalizeToken(psk), installedFrom: 'url', ts: new Date().toISOString() };
         localStorage.setItem(key, JSON.stringify(payload));
-        showToast(`Secret installed • ${fingerprint(psk)}`);
+        showToast('Secret installed • ' + fingerprint(psk));
         updatePairedChip(room, psk);
       } catch {}
 
