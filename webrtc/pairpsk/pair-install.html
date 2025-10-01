@@ -47,6 +47,16 @@
     .nav-center a:hover { background: #eaeaea; }
     .nav-center a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 
+    /* Disabled state for Camera/Viewer when no valid PSK is stored */
+    .nav-center a.is-disabled {
+      background: #1a1a1a !important;
+      border-color: #2a2a2a !important;
+      color: #8a8a8a !important;
+      opacity: 0.6 !important;
+      cursor: not-allowed !important;
+      pointer-events: none; /* make truly non-clickable */
+    }
+
     .btn-pill {
       color: #fff; background: #000; border: 1px solid #fff; border-radius: 9999px;
       font-weight: 600; line-height: 1; opacity: 1; white-space: nowrap;
@@ -121,8 +131,8 @@
       </nav>
 
       <nav class="nav-center" aria-label="Modes">
-        <a href="https://hungryfaceai.github.io/hungryface/webrtc/sender/" role="button">Camera (Baby)</a>
-        <a href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/main" role="button">Viewer (Parent)</a>
+        <a id="linkSender" href="https://hungryfaceai.github.io/hungryface/webrtc/sender/secure/" role="button">Camera (Baby)</a>
+        <a id="linkViewer" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/main" role="button">Viewer (Parent)</a>
       </nav>
 
       <nav class="nav-right" aria-label="Quick actions"></nav>
@@ -147,7 +157,7 @@
           <!-- PSK chip masked initially; click to edit full PSK -->
           <div class="row mono" style="gap:8px;">
             <div id="pskChip" class="chip" tabindex="0" role="button" aria-label="Show and edit secret">
-              PSK: <span id="tokenMasked" class="mono" style="margin-left:6px; opacity:.9">—</span>
+              Key: <span id="tokenMasked" class="mono" style="margin-left:6px; opacity:.9">—</span>
             </div>
 
             <div id="pskEdit" class="row" style="display:none; gap:8px;">
@@ -179,6 +189,9 @@
     const pskEditWrap = document.getElementById('pskEdit');
     const pskInput = document.getElementById('pskInput');
 
+    const linkSender = document.getElementById('linkSender');
+    const linkViewer = document.getElementById('linkViewer');
+
     const pairedOk = document.getElementById('pairedOk');
     const toastEl = document.getElementById('toast');
 
@@ -201,6 +214,43 @@
       for (const ch of strip) s = s.split(ch).join('');
       return s;
     }
+    function b64uToBytes(b64u) {
+      if (!b64u) return new Uint8Array(0);
+      let b64 = b64u.replace(/-/g, '+').replace(/_/g, '/');
+      const pad = (4 - (b64.length % 4)) % 4;
+      if (pad) b64 += '===='.slice(0, pad);
+      const bin = atob(b64);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+    function hasValidStoredPsk(room) {
+      try {
+        const raw = localStorage.getItem('psk:' + room);
+        if (!raw) return false;
+        const obj = JSON.parse(raw);
+        const token = obj && obj.tokenB64u;
+        if (!token) return false;
+        // Consider "valid" if it's at least 16 bytes (128 bits)
+        return b64uToBytes(token).length >= 16;
+      } catch { return false; }
+    }
+    function setModeLinksEnabled(enabled) {
+      const links = [linkSender, linkViewer];
+      links.forEach(a => {
+        if (!a) return;
+        if (enabled) {
+          a.classList.remove('is-disabled');
+          a.removeAttribute('aria-disabled');
+          a.tabIndex = 0;
+        } else {
+          a.classList.add('is-disabled');
+          a.setAttribute('aria-disabled', 'true');
+          a.tabIndex = -1; // remove from tab order
+        }
+      });
+    }
+
     function parseHash() {
       const hash = (location.hash && location.hash.startsWith('#')) ? location.hash.slice(1) : '';
       const qs = new URLSearchParams(hash);
@@ -226,7 +276,6 @@
       pskChip.style.display = 'none';
       pskEditWrap.style.display = 'flex';
       pskInput.value = psk || '';
-      // Use a microtask to ensure focus after DOM style updates
       setTimeout(() => { try { pskInput.focus(); pskInput.select(); } catch {} }, 0);
     }
     function hideEditMode() {
@@ -240,6 +289,7 @@
       localStorage.setItem('psk:' + room, JSON.stringify(payload));
       savedPSK = pskValue;
       showPairedFlash();
+      setModeLinksEnabled(hasValidStoredPsk(room));
     }
 
     // Interactions
@@ -268,7 +318,6 @@
         persistPSK(newVal, 'manual');
         setMaskedChip(newVal);
       } else {
-        // No change → just re-mask using the last known saved or transient
         setMaskedChip(savedPSK || currentPSK);
       }
     });
@@ -280,32 +329,34 @@
         pskInput.blur(); // triggers blur handler (save if changed)
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        // Restore previous value in UI, no save
         pskInput.value = savedPSK || currentPSK || '';
         hideEditMode();
         setMaskedChip(savedPSK || currentPSK);
       }
     });
 
-    // Forget clears local storage and UI
+    // Forget clears local storage and UI, and disables mode links
     forgetBtn.addEventListener('click', () => {
       const room = currentRoom();
       try { localStorage.removeItem('psk:' + room); } catch {}
       savedPSK = '';
       currentPSK = '';
       setMaskedChip('');
+      setModeLinksEnabled(false);
       showToast('Forgot on this device');
     });
 
-    // Room change: load saved PSK (if any) for that room; otherwise keep transient
+    // Room change: load saved PSK (if any) for that room; update mode link enabled state
     roomEl.addEventListener('change', () => {
-      const saved = getPsk(currentRoom()) || {};
+      const room = currentRoom();
+      const saved = getPsk(room) || {};
       savedPSK = saved.tokenB64u || '';
       currentPSK = savedPSK;
       setMaskedChip(savedPSK || '');
+      setModeLinksEnabled(hasValidStoredPsk(room));
     });
 
-    // Boot: install PSK from QR (if present), auto-persist, flash, then scrub URL
+    // Boot: install PSK from QR (if present) → auto-persist → enable links; else reflect saved state
     (function boot() {
       const intent = parseHash();
       hadFragment = intent.hadHash;
@@ -314,17 +365,17 @@
 
       const incoming = normalizeToken(intent.psk || '');
       if (incoming) {
-        persistPSK(incoming, 'url');
+        persistPSK(incoming, 'url');      // will also enable links if valid
         setMaskedChip(incoming);
         currentPSK = incoming;
-        // Scrub the fragment immediately for privacy
-        if (intent.hadHash) scrubUrl();
+        if (intent.hadHash) scrubUrl();   // scrub fragment for privacy
       } else {
-        // No incoming → reflect saved (if any) for this room
-        const saved = getPsk(currentRoom()) || {};
+        const room = currentRoom();
+        const saved = getPsk(room) || {};
         savedPSK = saved.tokenB64u || '';
         currentPSK = savedPSK;
         setMaskedChip(savedPSK || '');
+        setModeLinksEnabled(hasValidStoredPsk(room));
       }
     })();
   </script>
