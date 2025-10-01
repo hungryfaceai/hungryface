@@ -224,9 +224,17 @@
       for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
       return out;
     }
+
     function isValidPsk(token) {
-      try { return b64uToBytes(token).length >= 16; } catch { return false; } // ≥128-bit
+      if (!token || typeof token !== 'string') return false;
+      try {
+        // Convert base64url → bytes and accept ≥ 12 bytes (≥ 96-bit) as "valid" for UI enablement
+        return b64uToBytes(token).length >= 12;
+      } catch {
+        return false;
+      }
     }
+
     function hasValidStoredPsk(room) {
       try {
         const raw = localStorage.getItem('psk:' + room);
