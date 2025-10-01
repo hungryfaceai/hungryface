@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Naptio – Pair devices (Install secret)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Install a one-time PSK to pair this device." />
+  <link rel="icon" href="data:,">
+  <style>
+    :root { color-scheme: dark; }
+    html, body { height: 100%; margin: 0; background: #000; color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+    a { color: #fff; text-decoration: none; opacity: 0.9; }
+    a:hover, a:focus { opacity: 1; }
+
+    /* Prevent underline on Camera / Viewer pills */
+    .nav-center a,
+    .nav-center a:hover,
+    .nav-center a:focus { text-decoration: none; }
+
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    .page { min-height: 100%; display: flex; flex-direction: column; }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center; padding: 14px 20px; gap: 12px;
+    }
+    .nav-left, .nav-center, .nav-right {
+      display: flex; gap: 18px; align-items: center; white-space: nowrap; font-size: 0.95rem;
+    }
+    .nav-left  { justify-self: start; }
+    .nav-center{ justify-self: center; gap: 12px; min-width: 0; }
+    .nav-right { justify-self: end; gap: 12px; }
+
+    .home-link { display: inline-flex; align-items: center; line-height: 1; }
+    .icon { width: var(--icon-size, 24px); height: var(--icon-size, 24px); display: block; }
+    .icon-home { --icon-size: 26px; }
+
+    .nav-center a {
+      color: #000; background: #fff; border-radius: 9999px; border: 1px solid #fff;
+      opacity: 1; font-weight: 600; line-height: 1; white-space: nowrap;
+      font-size: clamp(0.78rem, 2.6vw, 0.95rem);
+      padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
+    }
+    .nav-center a:hover { background: #eaeaea; }
+    .nav-center a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+    .btn-pill {
+      color: #fff; background: #000; border: 1px solid #fff; border-radius: 9999px;
+      font-weight: 600; line-height: 1; opacity: 1; white-space: nowrap;
+      font-size: clamp(0.78rem, 2.6vw, 0.95rem);
+      padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
+      transition: background-color .15s ease, box-shadow .15s ease;
+    }
+    .btn-pill:hover, .btn-pill:focus {
+      background: #141414; border-color: #e6e6e6; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16);
+    }
+    .btn-pill:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+    main { flex: 1; display: grid; place-items: center; padding: 24px; text-align: center; }
+    .hero { width: min(920px, 96vw); }
+
+    .pair-card {
+      background: #0b0b0b; border: 1px solid #141414; border-radius: 16px;
+      padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      display: grid; gap: 14px; justify-items: center;
+    }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:center; }
+    .input { border-radius:12px; padding:12px 14px; border:1px solid #222; background:#0b0b0b; color:#fff; }
+    .label { opacity:.9; }
+    .chip { border-radius:9999px; padding:8px 12px; border:1px solid #242424; background:#0a0a0a; color:#d9d9d9; font-size:.9rem; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    .success {
+      background:#0f2; color:#001500; border:1px solid #1a1a1a;
+      padding:8px 12px; border-radius:9999px; font-weight:700;
+      opacity:0; transform: translateY(6px); transition: opacity .2s, transform .2s;
+    }
+    .success.show { opacity:1; transform: translateY(0); }
+
+    .invite-toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(12px);
+      background: #111; border: 1px solid #222; color: #fff; padding: 10px 14px;
+      border-radius: 9999px; opacity: 0; transition: opacity .2s ease, transform .2s ease;
+      z-index: 1100; font-size: 0.9rem;
+    }
+    .invite-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    @media (max-width: 560px) {
+      header { grid-template-columns: 1fr 1fr; grid-auto-rows: minmax(0, auto); row-gap:10px; }
+      .nav-left{ grid-column:1; grid-row:1; justify-self:start; }
+      .nav-right{ grid-column:2; grid-row:1; justify-self:end; gap:10px; }
+      .nav-center{ grid-column:1/-1; grid-row:2; justify-content:center; gap:12px; width:100%; }
+      .nav-center a { font-size: clamp(0.92rem, 3.8vw, 1.12rem); padding: clamp(8px, 2.2vw, 12px) clamp(14px, 4.5vw, 18px); }
+      .btn-pill { font-size: clamp(0.78rem, 3.0vw, 0.92rem); padding: clamp(6px, 1.8vw, 8px) clamp(10px, 3.0vw, 14px); }
+    }
+    @media (max-width: 380px) {
+      .nav-left a, .nav-right a { font-size: 0.82rem; }
+      .nav-left, .nav-right { gap: 10px; } .nav-center { gap: 10px; }
+      header { padding: 12px 14px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <nav class="nav-left" aria-label="Primary">
+        <a href="https://hungryfaceai.github.io/hungryface/home" class="home-link" aria-label="Home" title="Home">
+          <svg class="icon icon-home" aria-hidden="true" focusable="false">
+            <use href="/hungryface/assets/icons.svg#icon-cradle-ai" xlink:href="/hungryface/assets/icons.svg#icon-cradle-ai"></use>
+          </svg>
+          <span class="sr-only">Home</span>
+        </a>
+      </nav>
+
+      <nav class="nav-center" aria-label="Modes">
+        <a href="https://hungryfaceai.github.io/hungryface/webrtc/sender/" role="button">Camera (Baby)</a>
+        <a href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/main" role="button">Viewer (Parent)</a>
+      </nav>
+
+      <nav class="nav-right" aria-label="Quick actions"></nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="pair-card" aria-labelledby="pair-title">
+          <h2 id="pair-title" style="margin:0">Pair devices — install secret</h2>
+
+          <!-- Room (inherited from QR) -->
+          <div class="row" style="gap:12px">
+            <label for="room" class="label">Room</label>
+            <input id="room" class="input mono" value="Baby" spellcheck="false" style="min-width:160px"/>
+          </div>
+
+          <!-- Only Forget pill here -->
+          <div class="row">
+            <button id="forget" class="btn-pill" type="button" style="border-color:#444">Forget on this device</button>
+          </div>
+
+          <!-- PSK chip masked initially + Enter code to edit -->
+          <div class="row mono" style="gap:8px;">
+            <div id="pskChip" class="chip">PSK: <span id="tokenMasked" class="mono" style="margin-left:6px; opacity:.9">—</span></div>
+
+            <div id="pskEdit" class="row" style="display:none; gap:8px;">
+              <input id="pskInput" class="input mono" placeholder="Enter PSK" style="min-width:260px"/>
+            </div>
+
+            <button id="enterCode" class="btn-pill" type="button">Enter code</button>
+          </div>
+
+          <!-- Save icon + ephemeral success -->
+          <div class="row" style="gap:12px;">
+            <button id="saveBtn" class="btn-pill" type="button" aria-label="Save">
+              <!-- Simple save icon (floppy) -->
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="vertical-align:-3px; margin-right:6px;">
+                <path d="M4 4h12l4 4v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" stroke="#fff" stroke-width="2" />
+                <path d="M16 4v6H8V4" stroke="#fff" stroke-width="2" />
+                <rect x="8" y="14" width="8" height="6" stroke="#fff" stroke-width="2" />
+              </svg>
+              Save
+            </button>
+            <span id="pairedOk" class="success" role="status" aria-live="polite">Device paired</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="invite-toast" aria-live="polite"></div>
+
+  <script type="module">
+    import { getPsk } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+
+    // Elements
+    const roomEl = document.getElementById('room');
+    const forgetBtn = document.getElementById('forget');
+
+    const pskChip = document.getElementById('pskChip');
+    const tokenMaskedEl = document.getElementById('tokenMasked');
+
+    const pskEditWrap = document.getElementById('pskEdit');
+    const pskInput = document.getElementById('pskInput');
+    const enterCodeBtn = document.getElementById('enterCode');
+
+    const saveBtn = document.getElementById('saveBtn');
+    const pairedOk = document.getElementById('pairedOk');
+
+    const toastEl = document.getElementById('toast');
+
+    // State (transient until saved)
+    let currentPSK = ''; // holds PSK from URL or edits; not persisted until Save
+    let hadFragment = false;
+
+    // Helpers
+    function showToast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.add('show');
+      setTimeout(() => { toastEl.classList.remove('show'); }, 1600);
+    }
+    function fingerprint(b64u) { return b64u ? b64u.slice(-6) : '—'; }
+    function maskToken(b64u) { return b64u ? ('•••• (…' + fingerprint(b64u) + ')') : '—'; }
+    function normalizeToken(s) {
+      s = (s || '').trim();
+      const strip = ['-', ' ', '\n', '\r', '\t'];
+      for (const ch of strip) s = s.split(ch).join('');
+      return s;
+    }
+    function parseHash() {
+      const hash = (location.hash && location.hash.startsWith('#')) ? location.hash.slice(1) : '';
+      const qs = new URLSearchParams(hash);
+      const room = (qs.get('room') || 'Baby').trim();
+      const psk = (qs.get('psk') || '').trim();
+      return { hadHash: !!hash, room, psk };
+    }
+    function scrubUrl() {
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+
+    function currentRoom() { return (roomEl.value || 'Baby').trim(); }
+
+    function setMaskedChip(psk) {
+      tokenMaskedEl.textContent = maskToken(psk);
+    }
+
+    function showEditMode(psk) {
+      pskChip.style.display = 'none';
+      pskEditWrap.style.display = 'flex';
+      pskInput.value = psk || '';
+      setTimeout(() => { try { pskInput.focus(); pskInput.select(); } catch {} }, 0);
+      enterCodeBtn.textContent = 'Cancel';
+    }
+    function hideEditMode() {
+      pskChip.style.display = '';
+      pskEditWrap.style.display = 'none';
+      enterCodeBtn.textContent = 'Enter code';
+    }
+
+    function showPairedFlash() {
+      pairedOk.classList.add('show');
+      setTimeout(() => pairedOk.classList.remove('show'), 2000);
+    }
+
+    // Events
+    enterCodeBtn.addEventListener('click', () => {
+      if (pskEditWrap.style.display === 'none' || pskEditWrap.style.display === '') {
+        showEditMode(currentPSK);
+      } else {
+        hideEditMode();
+      }
+    });
+
+    pskInput.addEventListener('input', () => {
+      currentPSK = normalizeToken(pskInput.value);
+    });
+
+    saveBtn.addEventListener('click', () => {
+      const room = currentRoom();
+      const toSave = pskEditWrap.style.display === 'flex' ? normalizeToken(pskInput.value) : currentPSK;
+      if (!toSave) { showToast('Enter a code first'); return; }
+      try {
+        const payload = { tokenB64u: toSave, installedFrom: hadFragment ? 'url' : 'manual', ts: new Date().toISOString() };
+        localStorage.setItem('psk:' + room, JSON.stringify(payload));
+        setMaskedChip(toSave);
+        hideEditMode();
+        showPairedFlash();
+      } catch {
+        showToast('Save failed');
+      }
+    });
+
+    forgetBtn.addEventListener('click', () => {
+      const room = currentRoom();
+      try { localStorage.removeItem('psk:' + room); } catch {}
+      setMaskedChip('');
+      showToast('Forgot on this device');
+    });
+
+    roomEl.addEventListener('change', () => {
+      // On room change, if a PSK is persisted, reflect its fingerprint; else show current transient value
+      const saved = getPsk(currentRoom()) || {};
+      const token = saved.tokenB64u || currentPSK || '';
+      setMaskedChip(token);
+    });
+
+    // Boot
+    (function boot() {
+      const intent = parseHash();
+      hadFragment = intent.hadHash;
+      roomEl.value = intent.room || 'Baby';
+      currentPSK = normalizeToken(intent.psk || '');
+
+      // Show masked chip with incoming PSK (not saved yet)
+      setMaskedChip(currentPSK);
+
+      // Scrub fragment right away
+      if (intent.hadHash) scrubUrl();
+    })();
+  </script>
+</body>
+</html>
