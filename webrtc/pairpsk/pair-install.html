@@ -54,7 +54,7 @@
       color: #8a8a8a !important;
       opacity: 0.6 !important;
       cursor: not-allowed !important;
-      pointer-events: none; /* make truly non-clickable */
+      pointer-events: none; /* truly non-clickable */
     }
 
     .btn-pill {
@@ -224,15 +224,15 @@
       for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
       return out;
     }
+    function isValidPsk(token) {
+      try { return b64uToBytes(token).length >= 16; } catch { return false; } // ≥128-bit
+    }
     function hasValidStoredPsk(room) {
       try {
         const raw = localStorage.getItem('psk:' + room);
         if (!raw) return false;
         const obj = JSON.parse(raw);
-        const token = obj && obj.tokenB64u;
-        if (!token) return false;
-        // Consider "valid" if it's at least 16 bytes (128 bits)
-        return b64uToBytes(token).length >= 16;
+        return isValidPsk(obj && obj.tokenB64u);
       } catch { return false; }
     }
     function setModeLinksEnabled(enabled) {
@@ -275,21 +275,30 @@
     function showEditMode(psk) {
       pskChip.style.display = 'none';
       pskEditWrap.style.display = 'flex';
-      pskInput.value = psk || '';
+      pskInput.value = psKOrEmpty(psk);
       setTimeout(() => { try { pskInput.focus(); pskInput.select(); } catch {} }, 0);
     }
     function hideEditMode() {
       pskChip.style.display = '';
       pskEditWrap.style.display = 'none';
     }
+    function psKOrEmpty(x){ return x || ''; }
 
+    // Persist; only show green pill if PSK is valid; always (re)grey/enable top pills accordingly
     function persistPSK(pskValue, source = 'manual') {
       const room = currentRoom();
       const payload = { tokenB64u: pskValue, installedFrom: source, ts: new Date().toISOString() };
       localStorage.setItem('psk:' + room, JSON.stringify(payload));
       savedPSK = pskValue;
-      showPairedFlash();
-      setModeLinksEnabled(hasValidStoredPsk(room));
+
+      const valid = isValidPsk(pskValue);
+      setModeLinksEnabled(valid);
+      if (valid) {
+        showPairedFlash();
+      } else {
+        // ensure the pill is not visible if we previously showed it
+        pairedOk.classList.remove('show');
+      }
     }
 
     // Interactions
@@ -310,7 +319,7 @@
       currentPSK = normalizeToken(pskInput.value);
     });
 
-    // Blur the input → hide, mask, and if changed & non-empty, persist + flash
+    // Blur the input → hide, mask, and if changed & non-empty, persist (green pill only for valid)
     pskInput.addEventListener('blur', () => {
       const newVal = normalizeToken(pskInput.value);
       hideEditMode();
@@ -319,6 +328,8 @@
         setMaskedChip(newVal);
       } else {
         setMaskedChip(savedPSK || currentPSK);
+        // If unchanged but invalid, make sure links reflect validity
+        setModeLinksEnabled(isValidPsk(savedPSK || ''));
       }
     });
 
@@ -329,9 +340,10 @@
         pskInput.blur(); // triggers blur handler (save if changed)
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        pskInput.value = savedPSK || currentPSK || '';
+        pskInput.value = psKOrEmpty(savedPSK || currentPSK);
         hideEditMode();
         setMaskedChip(savedPSK || currentPSK);
+        setModeLinksEnabled(isValidPsk(savedPSK || ''));
       }
     });
 
@@ -343,6 +355,7 @@
       currentPSK = '';
       setMaskedChip('');
       setModeLinksEnabled(false);
+      pairedOk.classList.remove('show'); // no green pill on forget
       showToast('Forgot on this device');
     });
 
@@ -353,10 +366,12 @@
       savedPSK = saved.tokenB64u || '';
       currentPSK = savedPSK;
       setMaskedChip(savedPSK || '');
-      setModeLinksEnabled(hasValidStoredPsk(room));
+      setModeLinksEnabled(isValidPsk(savedPSK || ''));
+      // do not flash here; only flash on successful save or QR install with valid key
+      pairedOk.classList.remove('show');
     });
 
-    // Boot: install PSK from QR (if present) → auto-persist → enable links; else reflect saved state
+    // Boot: install PSK from QR (if present) → auto-persist; only flash if valid; else grey pills
     (function boot() {
       const intent = parseHash();
       hadFragment = intent.hadHash;
@@ -365,7 +380,7 @@
 
       const incoming = normalizeToken(intent.psk || '');
       if (incoming) {
-        persistPSK(incoming, 'url');      // will also enable links if valid
+        persistPSK(incoming, 'url');      // handles validity + greying + conditional flash
         setMaskedChip(incoming);
         currentPSK = incoming;
         if (intent.hadHash) scrubUrl();   // scrub fragment for privacy
@@ -375,7 +390,7 @@
         savedPSK = saved.tokenB64u || '';
         currentPSK = savedPSK;
         setMaskedChip(savedPSK || '');
-        setModeLinksEnabled(hasValidStoredPsk(room));
+        setModeLinksEnabled(isValidPsk(savedPSK || ''));
       }
     })();
   </script>
