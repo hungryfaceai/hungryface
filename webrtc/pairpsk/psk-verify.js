@@ -1,8 +1,7 @@
 // /webrtc/shared/psk/psk-verify.js
-// Minimal 1-RTT PSK verification using your SecureSignal transport.
-// Expected SecureSignal API:
+// Minimal 1-RTT PSK verification using a generic signal bus:
 //   - signal.relay(toFp, payload, { room })
-//   - const off = signal.on('message', (msg) => { ... })   // returns an unsubscribe function
+//   - off = signal.on('message', cb)  // cb(msg) where msg.type is 'psk-verify-*'
 //
 // Messages (JSON):
 //   psk-verify-req  { type, room, nonceA, mac }
@@ -13,12 +12,12 @@ import { getPsk } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
 
 const te = new TextEncoder();
 
-// ---- helpers (avoid regex where possible) ----
+// ---- helpers (no regex pitfalls) ----
 function b64uToBytes(b64u) {
   if (!b64u) return new Uint8Array(0);
   let b64 = b64u.split('-').join('+').split('_').join('/');
-  const padLen = (4 - (b64.length % 4)) % 4;
-  if (padLen) b64 += '===='.slice(0, padLen);
+  const pad = (4 - (b64.length % 4)) % 4;
+  if (pad) b64 += '===='.slice(0, pad);
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
@@ -67,15 +66,15 @@ export function enablePskVerifyResponder(signal, { room, onStatus }) {
       if (!psk) return;
       onStatus && onStatus('verifying', { dir: 'inbound', from: msg.from });
 
-      // Validate request MAC (optional but recommended)
+      // Validate request MAC (early drop for wrong PSK)
       const expectReq = await hmacB64u(psk, { kind: 'req', room, nonceA: msg.nonceA });
       if (!ctEq(expectReq, msg.mac)) throw new Error('BAD_REQ_MAC');
 
       const nonceB = randomB64u(16);
       const macA = await hmacB64u(psk, { kind: 'resp', room, nonceA: msg.nonceA, nonceB });
-      await signal.relay(msg.from, { type: 'psk-verify-resp', nonceB, macA }, { room });
+      await signal.relay(msg.from, { type: 'psk-verify-resp', nonceB, macA, room }, { room });
 
-      // Wait for ack (short timeout)
+      // Wait for ack
       const ack = await waitFor(signal, { type: 'psk-verify-ack', from: msg.from }, 4000);
       const expectAck = await hmacB64u(psk, { kind: 'ack', room, nonceB });
       if (!ctEq(expectAck, ack.macB)) throw new Error('BAD_ACK_MAC');
@@ -108,7 +107,7 @@ export async function initiatePskVerify(signal, { room, peerFp, onStatus }, time
   const expectMacA = await hmacB64u(psk, { kind: 'resp', room, nonceA, nonceB: resp.nonceB });
   if (!ctEq(expectMacA, resp.macA)) throw new Error('BAD_MAC_A');
 
-  const ack = { type: 'psk-verify-ack', macB: await hmacB64u(psk, { kind: 'ack', room, nonceB: resp.nonceB }) };
+  const ack = { type: 'psk-verify-ack', macB: await hmacB64u(psk, { kind: 'ack', room, nonceB: resp.nonceB }), room };
   await signal.relay(peerFp, ack, { room });
 
   onStatus && onStatus('paired', { peerFp });
