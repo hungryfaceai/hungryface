@@ -208,6 +208,20 @@
     }
     function fingerprint(b64u) { return b64u ? b64u.slice(-6) : '—'; }
     function maskToken(b64u) { return b64u ? ('•••• (…' + fingerprint(b64u) + ')') : '—'; }
+
+    // Keep base64url characters from URL (only trim whitespace)
+    function normalizeUrlToken(s) {
+      return (s || '').trim(); // PRESERVE '-' and '_'
+    }
+    
+    // For manual edits: allow users to paste with spaces/dashes; strip those
+    function normalizeManualToken(s) {
+      s = (s || '').trim();
+      const strip = [' ', '\n', '\r', '\t', '-'];
+      for (const ch of strip) s = s.split(ch).join('');
+      return s;
+    }
+
     function normalizeToken(s) {
       s = (s || '').trim();
       const strip = ['-', ' ', '\n', '\r', '\t'];
@@ -228,8 +242,7 @@
     function isValidPsk(token) {
       if (!token || typeof token !== 'string') return false;
       try {
-        // Convert base64url → bytes and accept ≥ 8 bytes (≥ 64-bit) as "valid" for UI enablement
-        return b64uToBytes(token).length >= 8;
+        return b64uToBytes(token).length >= 16;
       } catch {
         return false;
       }
@@ -324,12 +337,12 @@
 
     // Input typing updates the transient PSK
     pskInput.addEventListener('input', () => {
-      currentPSK = normalizeToken(pskInput.value);
+      currentPSK = pskInput.value.trim(); // keep '-' and '_'
     });
 
     // Blur the input → hide, mask, and if changed & non-empty, persist (green pill only for valid)
     pskInput.addEventListener('blur', () => {
-      const newVal = normalizeToken(pskInput.value);
+      const newVal = normalizeManualToken(pskInput.value);
       hideEditMode();
       if (newVal && newVal !== savedPSK) {
         persistPSK(newVal, 'manual');
@@ -386,7 +399,7 @@
 
       roomEl.value = intent.room || 'Baby';
 
-      const incoming = normalizeToken(intent.psk || '');
+      const incoming = normalizeUrlToken(intent.psk || ''); //const incoming = normalizeToken(intent.psk || '');
       if (incoming) {
         persistPSK(incoming, 'url');      // handles validity + greying + conditional flash
         setMaskedChip(incoming);
