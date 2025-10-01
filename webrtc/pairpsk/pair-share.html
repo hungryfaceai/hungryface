@@ -53,6 +53,7 @@
       font-size: clamp(0.78rem, 2.6vw, 0.95rem);
       padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
       transition: background-color .15s ease, box-shadow .15s ease;
+      cursor: pointer; /* show hand on hover for pills/buttons */
     }
     .btn-pill:hover, .btn-pill:focus {
       background: #141414; border-color: #e6e6e6; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16);
@@ -72,6 +73,10 @@
     .label { opacity:.9; }
     .chip { border-radius:9999px; padding:8px 12px; border:1px solid #242424; background:#0a0a0a; color:#d9d9d9; font-size:.9rem; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    /* Make PSK chip focusable for show/hide on focus/blur */
+    #pskChip { outline: none; }
+    #pskChip:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 
     .pair-qr {
       width: 240px; height: 240px; background: #111; border: 1px solid #222; border-radius: 12px;
@@ -140,10 +145,11 @@
             <button id="forget" class="btn-pill" type="button" style="border-color:#444">Forget on this device</button>
           </div>
 
-          <!-- PSK chip (masked) + Reveal only -->
+          <!-- PSK chip (masked). Click/focus to reveal, blur to hide -->
           <div class="row mono" style="gap:8px;">
-            <div class="chip">PSK: <span id="tokenMasked" class="mono" style="margin-left:6px; opacity:.9">—</span></div>
-            <button id="reveal" class="btn-pill" type="button">Reveal</button>
+            <div id="pskChip" class="chip" tabindex="0" role="button" aria-label="Temporarily show secret">
+              PSK: <span id="tokenMasked" class="mono" style="margin-left:6px; opacity:.9">—</span>
+            </div>
           </div>
 
           <!-- QR only (no URL text) -->
@@ -171,8 +177,10 @@
     const roomEl = document.getElementById('room');
     const regenBtn = document.getElementById('regen');
     const forgetBtn = document.getElementById('forget');
+
+    const pskChip = document.getElementById('pskChip');
     const tokenMaskedEl = document.getElementById('tokenMasked');
-    const revealBtn = document.getElementById('reveal');
+
     const shareBtn = document.getElementById('shareLink');
     const copyBtn = document.getElementById('copyLink');
     const qrMain = document.getElementById('qrMain');
@@ -180,7 +188,6 @@
 
     const INSTALLER_URL = './pair-install.html'; // target page on the other device
 
-    let revealed = false;
     let AUTO_CREATE = true;
 
     // Helpers
@@ -191,6 +198,12 @@
     }
     function fingerprint(b64u) { return b64u ? b64u.slice(-6) : '—'; }
     function maskToken(b64u) { return b64u ? ('•••• (…' + fingerprint(b64u) + ')') : '—'; }
+
+    function currentRoom() { return (roomEl.value || 'Baby').trim(); }
+    function getCurrentToken() {
+      const { tokenB64u = '' } = getPsk(currentRoom()) || {};
+      return tokenB64u;
+    }
 
     // QR
     async function drawQR(canvas, text) {
@@ -218,8 +231,6 @@
       } ctx.fillText(line, x, y);
     }
 
-    function currentRoom() { return (roomEl.value || 'Baby').trim(); }
-
     function makeInstallUrl(room, tokenB64u) {
       const url = new URL(INSTALLER_URL, location.href);
       url.hash = new URLSearchParams({ room, psk: tokenB64u }).toString();
@@ -233,12 +244,12 @@
         await ensurePskForRoom(room, 'sender');
       }
 
-      const { tokenB64u = '' } = getPsk(room) || {};
-      tokenMaskedEl.textContent = maskToken(tokenB64u);
+      const token = getCurrentToken();
+      tokenMaskedEl.textContent = maskToken(token);
 
       // Build QR to installer, but DO NOT display raw URL
-      if (tokenB64u) {
-        const smartUrl = makeInstallUrl(room, tokenB64u);
+      if (token) {
+        const smartUrl = makeInstallUrl(room, token);
         await drawQR(qrMain, smartUrl);
         shareBtn.disabled = false;
         copyBtn.disabled = false;
@@ -252,12 +263,27 @@
       }
     }
 
-    // Reveal toggle
-    revealBtn.addEventListener('click', () => {
-      const { tokenB64u = '' } = getPsk(currentRoom()) || {};
-      revealed = !revealed;
-      tokenMaskedEl.textContent = revealed ? (tokenB64u || '—') : maskToken(tokenB64u);
-      revealBtn.textContent = revealed ? 'Hide' : 'Reveal';
+    // --- PSK chip interactions: reveal on click/focus, hide on blur
+    function revealPSK() {
+      const token = getCurrentToken();
+      tokenMaskedEl.textContent = token || '—';
+    }
+    function hidePSK() {
+      const token = getCurrentToken();
+      tokenMaskedEl.textContent = maskToken(token);
+    }
+
+    pskChip.addEventListener('click', () => {
+      pskChip.focus(); // ensure we get blur later
+      revealPSK();
+    });
+    pskChip.addEventListener('focus', revealPSK);
+    pskChip.addEventListener('blur', hidePSK);
+    pskChip.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        revealPSK();
+      }
     });
 
     // Rotate / Forget
@@ -279,17 +305,15 @@
 
     roomEl.addEventListener('change', async () => {
       AUTO_CREATE = true;
-      revealed = false;
-      revealBtn.textContent = 'Reveal';
       await refresh();
     });
 
     // Share & Copy (URL only)
     shareBtn.addEventListener('click', async () => {
       const room = currentRoom();
-      const { tokenB64u = '' } = getPsk(room) || {};
-      if (!tokenB64u) return;
-      const url = makeInstallUrl(room, tokenB64u);
+      const token = getCurrentToken();
+      if (!token) return;
+      const url = makeInstallUrl(room, token);
       try {
         if (navigator.share && (!navigator.canShare || navigator.canShare({ url }))) {
           await navigator.share({ title: 'Naptio pairing', text: 'Install secret for room ' + room, url });
@@ -302,9 +326,9 @@
 
     copyBtn.addEventListener('click', async () => {
       const room = currentRoom();
-      const { tokenB64u = '' } = getPsk(room) || {};
-      if (!tokenB64u) return;
-      const url = makeInstallUrl(room, tokenB64u);
+      const token = getCurrentToken();
+      if (!token) return;
+      const url = makeInstallUrl(room, token);
       try { await navigator.clipboard.writeText(url); showToast('Link copied'); } catch {}
     });
 
