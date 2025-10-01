@@ -47,6 +47,16 @@
     .nav-center a:hover { background: #eaeaea; }
     .nav-center a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 
+    /* Disabled state for Camera/Viewer when PSK is missing */
+    .nav-center a.is-disabled {
+      background: #1a1a1a !important;
+      border-color: #2a2a2a !important;
+      color: #8a8a8a !important;
+      opacity: 0.6 !important;
+      cursor: not-allowed !important;
+      pointer-events: none; /* make non-clickable */
+    }
+
     .btn-pill {
       color: #fff; background: #000; border: 1px solid #fff; border-radius: 9999px;
       font-weight: 600; line-height: 1; opacity: 1; white-space: nowrap;
@@ -120,8 +130,8 @@
       </nav>
 
       <nav class="nav-center" aria-label="Modes">
-        <a href="https://hungryfaceai.github.io/hungryface/webrtc/sender/secure/" role="button">Camera (Baby)</a>
-        <a href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/main" role="button">Viewer (Parent)</a>
+        <a id="linkSender" href="https://hungryfaceai.github.io/hungryface/webrtc/sender/secure/" role="button">Camera (Baby)</a>
+        <a id="linkViewer" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/main" role="button">Viewer (Parent)</a>
       </nav>
 
       <nav class="nav-right" aria-label="Quick actions">
@@ -178,6 +188,9 @@
     const regenBtn = document.getElementById('regen');
     const forgetBtn = document.getElementById('forget');
 
+    const linkSender = document.getElementById('linkSender');
+    const linkViewer = document.getElementById('linkViewer');
+
     const pskChip = document.getElementById('pskChip');
     const tokenMaskedEl = document.getElementById('tokenMasked');
 
@@ -203,6 +216,21 @@
     function getCurrentToken() {
       const { tokenB64u = '' } = getPsk(currentRoom()) || {};
       return tokenB64u;
+    }
+
+    function setModeLinksEnabled(enabled) {
+      [linkSender, linkViewer].forEach(a => {
+        if (!a) return;
+        if (enabled) {
+          a.classList.remove('is-disabled');
+          a.removeAttribute('aria-disabled');
+          a.tabIndex = 0;
+        } else {
+          a.classList.add('is-disabled');
+          a.setAttribute('aria-disabled', 'true');
+          a.tabIndex = -1; // remove from tab order
+        }
+      });
     }
 
     // QR
@@ -246,6 +274,9 @@
 
       const token = getCurrentToken();
       tokenMaskedEl.textContent = maskToken(token);
+
+      // Enable/disable top mode pills if PSK is present
+      setModeLinksEnabled(!!token);
 
       // Build QR to installer, but DO NOT display raw URL
       if (token) {
