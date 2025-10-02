@@ -337,7 +337,11 @@
     const talkbackAudio = document.getElementById('talkbackAudio'); //https://chatgpt.com/c/68cbdcf2-d4f8-8330-97d8-a97eb665eb33
 
     // --- PSK Room dropdown population & default selection ---
-    (async function initRoomDropdown() {
+    function hasOption(sel, val) {
+      return !!Array.from(sel?.options || []).find(o => o.value === val);
+    }
+
+    (function initRoomDropdown() {
       const rooms = listValidPskRooms();              // all rooms with a valid PSK
       const qsRoom = new URLSearchParams(location.search).get('room') || '';
       const lastRoom = (localStorage.getItem('naptio:lastRoom') || '').trim();
@@ -372,7 +376,9 @@
         envRoom ||
         Array.from(uniq)[0];
     
-      roomSel.value = pick;
+      roomSel.value = hasOption(roomSel, pick) ? pick : roomSel.options[0].value;
+      try { localStorage.setItem('bm_sender_room', roomSel.value); } catch {}
+      try { localStorage.setItem('naptio:lastRoom', roomSel.value); } catch {}
     
       // Persist on change (keeps your existing behavior)
       roomSel.addEventListener('change', () => {
@@ -495,6 +501,7 @@
         const v = localStorage.getItem(PREFIX + key);
         if (v == null) return;
         if (type === 'checkbox') el.checked = (v === '1' || v === 'true');
+        else if (type === 'select') { if (hasOption(el, v)) el.value = v; }
         else el.value = v;
       }
       function saveOne(key, type, el) {
@@ -598,7 +605,7 @@
     }
 
     const setStatus = (t) => { statusEl.textContent = t; if (LOG.status) console.log('[STATUS]', t); };
-    const currentRoom = () => (roomSel.value || 'Baby').trim();
+    const currentRoom = () => ((roomSel?.value || roomSel?.options?.[0]?.value || 'Baby') + '').trim();
     const isFront = () => (cameraSel.value === 'user');
 
     function updateMirrorClass() {
@@ -1140,7 +1147,7 @@
     async function startOrStop() {
       try {
         if (started) { await stopStreaming(); return; }
-
+        roomSel.disabled = true;  
         startBtn.disabled = true;
 
         updateMirrorClass();
@@ -1174,6 +1181,7 @@
         if (DEBUG_UI) elDbgPanel.style.display = 'block';
 
       } catch (err) {
+        roomSel.disabled = false;
         console.error(err);
         alert(err.message || err);
         setStatus('Idle');
@@ -1184,6 +1192,7 @@
     async function stopStreaming() {
       try { send({ type: 'bye' }); } catch {}
       started = false;                        // so scheduleWSReconnect() bails out
+      roomSel.disabled = false;
       stopWSHeartbeat();
       if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
 
