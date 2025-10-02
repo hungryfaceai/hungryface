@@ -40,6 +40,22 @@
     /* Optional small status text under the card title */
     #status { margin-top: 6px; font-size: 13px; color: #9aa; }
   </style>
+
+  <!-- --- Sidebar overlap fix CSS --- -->
+  <style>
+    :root { --sidebar-visible: 0px; }
+    #ui {
+      transform: translateX(var(--sidebar-visible));
+      transition: transform .18s ease;
+      will-change: transform;
+    }
+    .card {
+      max-width: min(520px, calc(100vw - var(--sidebar-visible) - 32px));
+    }
+    @media (max-width: 420px) {
+      body.drawer-open-detected #ui { padding-right: 8px; }
+    }
+  </style>
 </head>
 <body>
   <!-- Shared sidebar injection (same as receiver pages) -->
@@ -61,6 +77,83 @@
         });
       } catch (err) {
         console.error('[Sidebar] failed to load shared assets:', err);
+      }
+    })();
+  </script>
+
+  <!-- --- Sidebar overlap fix JS --- -->
+  <script type="module">
+    (function () {
+      const root = document.documentElement;
+      let sidebar = null;
+      let ro = null, mo = null;
+      let rafId = 0;
+
+      function px(n) { return Math.max(0, Math.round(n)) + 'px'; }
+
+      function pickSidebarCandidate() {
+        const preferred = document.querySelector(
+          '[data-hf-sidebar], [data-sidebar], .hf-sidebar, #hfSidebar, #sidebar, .sidebar, aside[role="complementary"], nav[aria-label="Sidebar"]'
+        );
+        if (preferred) return preferred;
+
+        const nodes = Array.from(document.body.querySelectorAll('body > *'));
+        return nodes.find(el => {
+          const cs = getComputedStyle(el);
+          if (cs.position !== 'fixed') return false;
+          if (!(/^0(px)?$/).test(cs.left)) return false;
+          const r = el.getBoundingClientRect();
+          const w = r.width;
+          return w >= 160 && w <= window.innerWidth * 0.9;
+        }) || null;
+      }
+
+      function visibleLeftWidth(el) {
+        const r = el.getBoundingClientRect();
+        const visible = Math.max(0, Math.min(window.innerWidth, r.right) - Math.max(0, r.left));
+        const cs = getComputedStyle(el);
+        const displayOK = cs.display !== 'none' && cs.visibility !== 'hidden' && r.height > 0;
+        return displayOK && r.left < (window.innerWidth / 2) ? visible : 0;
+      }
+
+      function updateShift() {
+        rafId && cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(() => {
+          const w = sidebar ? visibleLeftWidth(sidebar) : 0;
+          root.style.setProperty('--sidebar-visible', px(w));
+          document.body.classList.toggle('drawer-open-detected', w > 8);
+        });
+      }
+
+      function attachObservers() {
+        if (!sidebar) return;
+        try { ro?.disconnect(); mo?.disconnect(); } catch {}
+        ro = new ResizeObserver(updateShift);
+        ro.observe(sidebar);
+        mo = new MutationObserver(updateShift);
+        mo.observe(sidebar, { attributes: true, attributeFilter: ['style', 'class', 'hidden', 'inert'], subtree: false });
+      }
+
+      function boot() {
+        sidebar = pickSidebarCandidate();
+        if (!sidebar) {
+          setTimeout(boot, 120);
+          return;
+        }
+        attachObservers();
+        updateShift();
+      }
+
+      ['resize','orientationchange'].forEach(ev => window.addEventListener(ev, updateShift, { passive: true }));
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', updateShift, { passive: true });
+        window.visualViewport.addEventListener('scroll',  updateShift, { passive: true });
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot, { once: true });
+      } else {
+        boot();
       }
     })();
   </script>
