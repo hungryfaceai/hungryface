@@ -88,8 +88,12 @@ export function installLandingPairGate(userOptions = {}) {
   }
 
   // ---------- Wiring ----------
-  dom.scrim.addEventListener('click', () => closeSheet('scrim'));
-  dom.btnClose.addEventListener('click', () => closeSheet('close'));
+  //dom.scrim.addEventListener('click', () => closeSheet('scrim'));
+  //dom.btnClose.addEventListener('click', () => closeSheet('close'));
+  // Close when clicking outside the sheet (anywhere on the overlay that isn’t the sheet)
+  dom.root.addEventListener('click', (e) => {
+    if (!dom.sheet.contains(e.target)) closeSheet('outside');
+  });
   dom.btnPrimary.addEventListener('click', () => {
     onEvent('pair_cta', { intent: currentIntent });
     // Route to Pair Devices
@@ -237,7 +241,7 @@ export function installLandingPairGate(userOptions = {}) {
       }
 
       .lpg-row { display: grid; gap: 10px; }
-      .lpg-hdr { display: grid; grid-template-columns: 1fr auto; align-items: start; }
+      .lpg-hdr { display: flex; align-items: center; justify-content: center; }
       .lpg-title { margin: 0; font-weight: 800; font-size: 1.05rem; }
       .lpg-close {
         appearance: none; background: #0d0d0d; color: #fff;
@@ -284,8 +288,8 @@ export function installLandingPairGate(userOptions = {}) {
 
     const hdr   = el('div', 'lpg-hdr');
     const title = el('h2', 'lpg-title', { id: 'lpg-title' }, copy.title);
-    const btnClose = el('button', 'lpg-close', { type: 'button', 'aria-label': copy.closeAria }, '×');
-    hdr.append(title, btnClose);
+    // No close button
+    hdr.append(title);
 
     const subline = el('div', 'lpg-subline');
 
@@ -308,7 +312,7 @@ export function installLandingPairGate(userOptions = {}) {
     root.append(sheet);
     document.body.append(scrim, root);
 
-    return { scrim, root, sheet, btnClose, btnPrimary, howLink, howBody, subline };
+    return { scrim, root, sheet, btnPrimary, howLink, howBody, subline };
   }
 
   function el(tag, className, attrs = {}, text = null) {
