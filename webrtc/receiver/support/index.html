@@ -18,17 +18,16 @@
     textarea { min-height:140px; resize:vertical; }
     .drop { border:1.5px dashed #2d2d2d; background:#121212; border-radius:12px; padding:14px; text-align:center; transition:background .15s, border-color .15s; }
     .drop.over { background:#151515; border-color:#444; }
-    .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
-    .btn { appearance:none; border:1px solid #2a2a2a; background:#1a1a1a; color:#eee; padding:12px 16px; border-radius:999px; font-weight:600; cursor:pointer; }
-    .btn.primary { background:#2b7cff; border-color:transparent; color:#fff; box-shadow:0 6px 16px rgba(0,0,0,.25); }
-    .btn:disabled { opacity:.6; cursor:not-allowed; }
-    .spacer { flex:1 1 auto; }
-    .small { font-size:13px; color:#bbb; margin-top:10px; }
-    .error { color:#ff8a80; font-size:13px; display:none; margin-top:8px; }
-    .error.show { display:block; }
     .chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
     .chip { display:inline-flex; align-items:center; gap:8px; background:#1a1a1a; border:1px solid #2a2a2a; border-radius:999px; padding:6px 10px; font-size:13px; }
     .chip button { border:none; background:none; color:#bbb; font-size:16px; cursor:pointer; }
+    .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; align-items:center; }
+    .btn { appearance:none; border:1px solid #2a2a2a; background:#2b7cff; color:#fff; padding:12px 16px; border-radius:999px; font-weight:600; cursor:pointer; box-shadow:0 6px 16px rgba(0,0,0,.25); }
+    .btn:disabled { opacity:.6; cursor:not-allowed; }
+    .link { appearance:none; border:1px solid #2a2a2a; background:#1a1a1a; color:#eee; padding:10px 14px; border-radius:999px; font-weight:600; cursor:pointer; }
+    .hint { font-size:13px; color:#bbb; margin-top:8px; }
+    .error { color:#ff8a80; font-size:13px; display:none; margin-top:8px; }
+    .error.show { display:block; }
   </style>
 </head>
 <body>
@@ -49,8 +48,8 @@
 
       <div class="row" id="attachRow">
         <label for="files">Attachments (optional)</label>
-        <div id="drop" class="drop" tabindex="0">
-          <p>Drag & drop files here, or <button type="button" class="btn">browse</button></p>
+        <div id="drop" class="drop" tabindex="0" aria-label="Add files by dropping or choosing">
+          <p><button type="button" class="link" id="browseBtn">Choose files</button> or drag & drop here</p>
           <input id="files" type="file" multiple hidden />
           <div class="chips" id="chips"></div>
         </div>
@@ -59,98 +58,92 @@
       <p class="error" id="err"></p>
 
       <div class="actions">
-        <button class="btn primary" id="sendShare">Send via Mail app</button>
-        <button class="btn" id="sendMailto">Open email composer</button>
-        <span class="spacer"></span>
-        <button class="btn" id="copyAddr" title="Copy address">support@naptio.com</button>
+        <button class="btn" id="emailBtn">Email support</button>
+        <button class="link" id="copyBtn" title="Copy address">support@naptio.com</button>
       </div>
-      <p class="small">If your email app opens, review the draft and press Send.</p>
+      <p class="hint" id="modeHint"></p>
     </section>
   </main>
 
   <script>
   (function(){
     const TO = 'support@naptio.com';
+
+    // Elements
     const subjectEl = document.getElementById('subject');
     const messageEl = document.getElementById('message');
     const errEl     = document.getElementById('err');
+    const emailBtn  = document.getElementById('emailBtn');
+    const copyBtn   = document.getElementById('copyBtn');
+    const hintEl    = document.getElementById('modeHint');
 
-    // Attachments (only used when the platform supports share-with-files)
+    // Attachment UI
+    const attachRow = document.getElementById('attachRow');
     const drop = document.getElementById('drop');
     const filesInput = document.getElementById('files');
     const chips = document.getElementById('chips');
-    const browseBtn = drop.querySelector('button');
+    const browseBtn = document.getElementById('browseBtn');
 
+    // Platform helpers
+    const ua = navigator.userAgent || '';
+    const isIOS = /iP(hone|od|ad)/.test(ua) || (/Mac/.test(navigator.platform) && 'ontouchend' in document);
+    const isAndroid = /Android/i.test(ua);
+
+    // Check Web Share with files capability
     let canShareFiles = false;
     try {
       const test = new File([new Blob(['x'], {type:'text/plain'})], 'x.txt', {type:'text/plain'});
       canShareFiles = !!(navigator.canShare && navigator.canShare({ files: [test] }));
     } catch { canShareFiles = false; }
 
-    if (!canShareFiles) {
-      // hide the whole attachments row if we can't hand off files
-      document.getElementById('attachRow').style.display = 'none';
-    }
+    // If we can't share files at all, hide attachments UI
+    if (!canShareFiles) attachRow.style.display = 'none';
 
+    // Events
+    messageEl.addEventListener('input', validate);
     browseBtn.addEventListener('click', () => filesInput.click());
-    filesInput.addEventListener('change', () => { renderChips(); });
+    filesInput.addEventListener('change', () => { renderChips(); updateModeLabel(); });
+
     ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, (e)=>{ e.preventDefault(); drop.classList.add('over'); }));
     ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, (e)=>{ e.preventDefault(); drop.classList.remove('over'); }));
     drop.addEventListener('drop', (e) => {
       const files = [...(e.dataTransfer?.files || [])];
       if (!files.length) return;
-      const current = [...filesInput.files];
+      const cur = [...filesInput.files];
       const dt = new DataTransfer();
-      [...current, ...files].slice(0, 5).forEach(f => dt.items.add(f)); // simple cap of 5 files
+      [...cur, ...files].slice(0, 5).forEach(f => dt.items.add(f)); // cap 5 files
       filesInput.files = dt.files;
-      renderChips();
+      renderChips(); updateModeLabel();
     });
 
-    function renderChips(){
-      chips.innerHTML = '';
-      [...filesInput.files].forEach((f, i) => {
-        const chip = document.createElement('span'); chip.className='chip';
-        chip.innerHTML = `<span>${f.name} • ${fmtBytes(f.size)}</span>`;
-        const x = document.createElement('button'); x.type='button'; x.setAttribute('aria-label','Remove'); x.textContent='×';
-        x.onclick = () => {
-          const arr = [...filesInput.files]; arr.splice(i,1);
-          const dt = new DataTransfer(); arr.forEach(ff => dt.items.add(ff));
-          filesInput.files = dt.files; renderChips();
-        };
-        chip.appendChild(x);
-        chips.appendChild(chip);
-      });
-    }
-
-    const sendShareBtn  = document.getElementById('sendShare');
-    const sendMailtoBtn = document.getElementById('sendMailto');
-    const copyAddrBtn   = document.getElementById('copyAddr');
-
-    messageEl.addEventListener('input', validate);
-    validate();
-
-    sendShareBtn.addEventListener('click', async () => {
+    emailBtn.addEventListener('click', async () => {
       if (!validate()) return;
-      // Prefer native share flow (attachments only when supported)
-      try {
-        const data = { title: composeSubject(), text: composeBody() };
-        if (canShareFiles && filesInput.files.length) data.files = [...filesInput.files];
-        if (navigator.share) await navigator.share(data);
-        else openMailto(); // fallback if share API missing
-      } catch {
-        // user canceled or share failed; fallback to mailto
+
+      const hasFiles = filesInput.files && filesInput.files.length > 0;
+
+      // Mode pick:
+      // - If user attached files and we can share files -> use share sheet (attachments included, To not prefilled)
+      // - Else -> mailto with To/Subject/Body prefilled (no attachments)
+      if (hasFiles && canShareFiles && navigator.share) {
+        try {
+          // Helpful UX on mobile: copy address so user can paste into To quickly
+          try { await navigator.clipboard.writeText(TO); } catch {}
+          const data = { title: composeSubject(), text: composeBody(), files: [...filesInput.files] };
+          await navigator.share(data);
+        } catch {
+          // user canceled or share failed -> fallback to mailto
+          openMailto();
+        }
+      } else {
         openMailto();
       }
     });
 
-    sendMailtoBtn.addEventListener('click', () => { if (validate()) openMailto(); });
-
-    copyAddrBtn.addEventListener('click', async () => {
-      try { await navigator.clipboard.writeText(TO); copyAddrBtn.textContent = 'Copied!'; setTimeout(()=>copyAddrBtn.textContent = TO, 1200); } catch {}
+    copyBtn.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(TO); copyBtn.textContent = 'Copied!'; setTimeout(()=>copyBtn.textContent = TO, 1200); } catch {}
     });
 
     function openMailto(){
-      // Note: mailto: doesn’t support attaching files
       const url = `mailto:${encodeURIComponent(TO)}?subject=${encodeURIComponent(composeSubject())}&body=${encodeURIComponent(composeBody())}`;
       window.location.href = url;
     }
@@ -161,12 +154,44 @@
     function validate(){
       errEl.classList.remove('show'); errEl.textContent = '';
       const ok = messageEl.value.trim().length > 0;
-      sendShareBtn.disabled = !ok;
-      sendMailtoBtn.disabled = !ok;
+      emailBtn.disabled = !ok;
       return ok;
     }
 
+    function renderChips(){
+      chips.innerHTML = '';
+      [...filesInput.files].forEach((f, i) => {
+        const chip = document.createElement('span'); chip.className='chip';
+        chip.innerHTML = `<span>${f.name} • ${fmtBytes(f.size)}</span>`;
+        const x = document.createElement('button'); x.type='button'; x.setAttribute('aria-label','Remove'); x.textContent='×';
+        x.onclick = () => {
+          const arr = [...filesInput.files]; arr.splice(i,1);
+          const dt = new DataTransfer(); arr.forEach(ff => dt.items.add(ff));
+          filesInput.files = dt.files; renderChips(); updateModeLabel();
+        };
+        chip.appendChild(x);
+        chips.appendChild(chip);
+      });
+    }
+
+    function updateModeLabel(){
+      const hasFiles = filesInput.files && filesInput.files.length > 0;
+      if (hasFiles && canShareFiles) {
+        emailBtn.textContent = 'Share email with attachments';
+        hintEl.textContent = (isIOS || isAndroid)
+          ? 'Your email app will open with files attached. You may need to enter the address.'
+          : 'Your mail client will open with files attached. You may need to enter the address.';
+      } else {
+        emailBtn.textContent = 'Open email (To filled in)';
+        hintEl.textContent = 'Opens your email app with To/Subject/Message prefilled. Attachments aren’t included.';
+      }
+    }
+
     function fmtBytes(n){ if (n<1024) return n+' B'; const u=['KB','MB','GB']; let i=-1; do{ n/=1024; i++; } while(n>=1024&&i<u.length-1); return n.toFixed(1)+' '+u[i]; }
+
+    // initial state
+    validate();
+    updateModeLabel();
   })();
   </script>
 </body>
