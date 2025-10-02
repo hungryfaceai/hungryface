@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>Email us</title>
+  <title>Email Naptio Support</title>
   <style>
     :root { color-scheme: dark; }
     html, body { margin:0; height:100%; background:#000; color:#eee; font-family:-apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
@@ -26,8 +26,11 @@
     .btn:disabled { opacity:.6; cursor:not-allowed; }
     .link { appearance:none; border:1px solid #2a2a2a; background:#1a1a1a; color:#eee; padding:10px 14px; border-radius:999px; font-weight:600; cursor:pointer; }
     .hint { font-size:13px; color:#bbb; margin-top:8px; }
+    .small { font-size:12px; color:#9a9a9a; }
     .error { color:#ff8a80; font-size:13px; display:none; margin-top:8px; }
     .error.show { display:block; }
+    .checkbox { display:flex; align-items:flex-start; gap:10px; font-size:14px; color:#ccc; }
+    .checkbox input { margin-top:2px; }
   </style>
 </head>
 <body>
@@ -55,6 +58,14 @@
         </div>
       </div>
 
+      <div class="row">
+        <label class="checkbox">
+          <input id="includeDiag" type="checkbox" />
+          <span>Include diagnostic info at the end (OS, device, browser, screen, etc.)</span>
+        </label>
+        <p class="small">Helpful for reproducing issues. You can leave this unchecked.</p>
+      </div>
+
       <p class="error" id="err"></p>
 
       <div class="actions">
@@ -67,110 +78,109 @@
 
   <script>
   (function(){
-    const TO = 'naptioai@gmail.com';
-  
+    const TO = 'support@naptio.com';
+
     // Elements
-    const subjectEl = document.getElementById('subject');
-    const messageEl = document.getElementById('message');
-    const errEl     = document.getElementById('err');
-    const emailBtn  = document.getElementById('emailBtn');
-    const copyBtn   = document.getElementById('copyBtn');
-    const hintEl    = document.getElementById('modeHint');
-  
-    const attachRow = document.getElementById('attachRow');
-    const drop      = document.getElementById('drop');
-    const filesInput= document.getElementById('files');
-    const chips     = document.getElementById('chips');
-    const browseBtn = document.getElementById('browseBtn');
-  
+    const subjectEl   = document.getElementById('subject');
+    const messageEl   = document.getElementById('message');
+    const errEl       = document.getElementById('err');
+    const emailBtn    = document.getElementById('emailBtn');
+    const copyBtn     = document.getElementById('copyBtn');
+    const hintEl      = document.getElementById('modeHint');
+    const includeDiag = document.getElementById('includeDiag');
+
+    // Attachment UI
+    const attachRow  = document.getElementById('attachRow');
+    const drop       = document.getElementById('drop');
+    const filesInput = document.getElementById('files');
+    const chips      = document.getElementById('chips');
+    const browseBtn  = document.getElementById('browseBtn');
+
     // Platform helpers
     const ua = navigator.userAgent || '';
     const isIOS = /iP(hone|od|ad)/.test(ua) || (/Mac/.test(navigator.platform) && 'ontouchend' in document);
     const isAndroid = /Android/i.test(ua);
-  
+
     // Capability: Web Share w/ files
     let canShareFiles = false;
     try {
       const test = new File([new Blob(['x'], {type:'text/plain'})], 'x.txt', {type:'text/plain'});
       canShareFiles = !!(navigator.canShare && navigator.canShare({ files: [test] }));
     } catch { canShareFiles = false; }
-  
-    // Store selected attachments independently of the <input>
+
+    // Persistent list of selected attachments
     let selectedFiles = []; // Array<File>
     const MAX_FILES = 5;
-  
+
     if (!canShareFiles) attachRow.style.display = 'none';
-  
+
     // Events
     messageEl.addEventListener('input', validate);
     browseBtn.addEventListener('click', () => filesInput.click());
-  
-    // IMPORTANT: merge new picks with existing files
+
     filesInput.addEventListener('change', (e) => {
       addFiles([...(e.target.files || [])]);
-      // Clear input so picking the same file again retriggers 'change'
-      e.target.value = '';
+      e.target.value = ''; // allow re-select same file
     });
-  
-    ;['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, (e)=>{ e.preventDefault(); drop.classList.add('over'); }));
-    ;['dragleave','drop'].forEach(ev => drop.addEventListener(ev, (e)=>{ e.preventDefault(); drop.classList.remove('over'); }));
+
+    ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, (e)=>{ e.preventDefault(); drop.classList.add('over'); }));
+    ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, (e)=>{ e.preventDefault(); drop.classList.remove('over'); }));
     drop.addEventListener('drop', (e) => {
       addFiles([...(e.dataTransfer?.files || [])]);
     });
-  
+
     emailBtn.addEventListener('click', async () => {
       if (!validate()) return;
-  
+
       const hasFiles = selectedFiles.length > 0;
-  
-      // If user attached files and sharing supports files -> share (attachments included)
+      const subject = composeSubject();
+      const body    = await composeBodyWithDiagnostics();
+
+      // With files + share support => share (attachments included, To likely not prefilled)
       if (hasFiles && canShareFiles && navigator.share) {
         try {
-          // Helpful: copy address for quick paste into the To: field (iOS/Android)
+          // Copy address for quick paste (mobile convenience)
           try { await navigator.clipboard.writeText(TO); } catch {}
-          await navigator.share({ title: composeSubject(), text: composeBody(), files: selectedFiles });
+          await navigator.share({ title: subject, text: body, files: selectedFiles });
         } catch {
-          openMailto();
+          openMailto(subject, body);
         }
       } else {
-        // Otherwise, use mailto with prefilled To/Subject/Body (no attachments)
-        openMailto();
+        // mailto pre-fills To/Subject/Body (no attachments)
+        openMailto(subject, body);
       }
     });
-  
+
     copyBtn.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(TO); copyBtn.textContent = 'Copied!'; setTimeout(()=>copyBtn.textContent = TO, 1200); } catch {}
     });
-  
+
     // ---- File helpers ----
     function addFiles(files){
       for (const f of files) {
         if (selectedFiles.length >= MAX_FILES) break;
-        // de-dupe by name + size + lastModified
         const exists = selectedFiles.some(g => g.name === f.name && g.size === f.size && g.lastModified === f.lastModified);
         if (!exists) selectedFiles.push(f);
       }
       renderChips();
       updateModeLabel();
-      // Try to reflect into the <input> (best-effort; some browsers don't support programmatic sets)
       try {
         const dt = new DataTransfer();
         selectedFiles.forEach(f => dt.items.add(f));
         filesInput.files = dt.files;
       } catch {}
     }
-  
+
     function removeAt(i){
       selectedFiles.splice(i,1);
-      renderChips();
-      updateModeLabel();
+      renderChips(); updateModeLabel();
       try {
         const dt = new DataTransfer();
         selectedFiles.forEach(f => dt.items.add(f));
         filesInput.files = dt.files;
       } catch {}
     }
-  
+
     function renderChips(){
       chips.innerHTML = '';
       selectedFiles.forEach((f, i) => {
@@ -182,15 +192,72 @@
         chips.appendChild(chip);
       });
     }
-  
+
     // ---- Email helpers ----
-    function openMailto(){
-      const url = `mailto:${encodeURIComponent(TO)}?subject=${encodeURIComponent(composeSubject())}&body=${encodeURIComponent(composeBody())}`;
+    function openMailto(subject, body){
+      const url = `mailto:${encodeURIComponent(TO)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
       window.location.href = url;
     }
     function composeSubject(){ return subjectEl.value.trim() || 'Support request'; }
-    function composeBody(){ return messageEl.value.trim(); }
-  
+
+    async function composeBodyWithDiagnostics(){
+      const userText = messageEl.value.trim();
+      if (!includeDiag.checked) return userText;
+
+      const diag = await collectDiagnostics();
+      const block = [
+        '',
+        '— — — — —',
+        'Diagnostics',
+        `Time: ${diag.time.local} (${diag.time.tz}, UTC${(diag.time.offsetMin>=0?'+':'')}${(diag.time.offsetMin/60).toFixed(0)})`,
+        `URL: ${location.href}`,
+        `UA: ${diag.env.ua}`,
+        diag.env.hints ? `UA-CH: ${JSON.stringify(diag.env.hints)}` : null,
+        `Platform: ${diag.env.platform || 'n/a'} (${diag.env.vendor || 'vendor n/a'})`,
+        `Language: ${diag.env.lang}`,
+        `Device: memory=${diag.env.memory ?? 'n/a'}GB cores=${diag.env.cores ?? 'n/a'}`,
+        `Screen: ${diag.env.screen.w}x${diag.env.screen.h} @${diag.env.screen.dpr} ${diag.env.screen.orient || ''}`.trim(),
+        `Viewport: ${diag.env.viewport.w}x${diag.env.viewport.h}`,
+        diag.env.conn ? `Network: downlink=${diag.env.conn.downlink}Mbps rtt=${diag.env.conn.rtt}ms saveData=${diag.env.conn.saveData} type=${diag.env.conn.type}` : null,
+        diag.env.battery ? `Battery: ${Math.round(diag.env.battery.level*100)}% ${diag.env.battery.charging?'(charging)':''}` : null,
+        `Permissions: camera=${diag.env.camPerm || 'n/a'} mic=${diag.env.micPerm || 'n/a'}`,
+      ].filter(Boolean).join('\n');
+
+      // Trim to ~2.5KB to avoid overly long bodies
+      const MAX = 2500;
+      const out = userText + '\n\n' + block;
+      return out.length > MAX ? out.slice(0, MAX) + '\n…(truncated)' : out;
+    }
+
+    // ---- Diagnostics collection ----
+    async function collectDiagnostics(){
+      const nav = navigator;
+      const ua = nav.userAgent || '';
+      const hints = nav.userAgentData ? { brands: nav.userAgentData.brands, mobile: nav.userAgentData.mobile, platform: nav.userAgentData.platform } : null;
+
+      const memory = 'deviceMemory' in nav ? nav.deviceMemory : undefined;
+      const cores = 'hardwareConcurrency' in nav ? nav.hardwareConcurrency : undefined;
+      const lang = nav.language;
+      const vendor = nav.vendor;
+      const platform = nav.platform;
+
+      const screenInfo = { w: screen.width, h: screen.height, dpr: devicePixelRatio, orient: (screen.orientation && screen.orientation.type) || undefined };
+      const viewport = { w: window.innerWidth, h: window.innerHeight };
+
+      const conn = nav.connection ? { downlink: nav.connection.downlink, rtt: nav.connection.rtt, saveData: nav.connection.saveData, type: nav.connection.type } : null;
+
+      let battery = null;
+      try { if (nav.getBattery) { const b = await nav.getBattery(); battery = { charging: b.charging, level: b.level }; } } catch {}
+
+      let camPerm, micPerm;
+      try { if (navigator.permissions) camPerm = (await navigator.permissions.query({ name: 'camera' })).state; } catch {}
+      try { if (navigator.permissions) micPerm = (await navigator.permissions.query({ name: 'microphone' })).state; } catch {}
+
+      const time = { local: new Date().toISOString(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, offsetMin: -new Date().getTimezoneOffset() };
+
+      return { env: { ua, hints, platform, vendor, lang, memory, cores, screen: screenInfo, viewport, conn, battery, camPerm, micPerm }, time };
+    }
+
     // ---- UI state ----
     function validate(){
       errEl.classList.remove('show'); errEl.textContent = '';
@@ -198,27 +265,26 @@
       emailBtn.disabled = !ok;
       return ok;
     }
-  
+
     function updateModeLabel(){
       const hasFiles = selectedFiles.length > 0;
       if (hasFiles && canShareFiles) {
-        emailBtn.textContent = 'Share email';
+        emailBtn.textContent = 'Share email with attachments';
         hintEl.textContent = (isIOS || isAndroid)
-          ? 'Your email app will open with files attached.'
-          : 'Your mail client will open with files attached.';
+          ? 'Your email app will open with files attached. You may need to enter the address.'
+          : 'Your mail client will open with files attached. You may need to enter the address.';
       } else {
-        emailBtn.textContent = 'Open email';
+        emailBtn.textContent = 'Open email (To filled in)';
         hintEl.textContent = 'Opens your email app with To/Subject/Message prefilled. Attachments aren’t included.';
       }
     }
-  
+
     function fmtBytes(n){ if (n<1024) return n+' B'; const u=['KB','MB','GB']; let i=-1; do{ n/=1024; i++; } while(n>=1024&&i<u.length-1); return n.toFixed(1)+' '+u[i]; }
-  
+
     // init
     validate();
     updateModeLabel();
   })();
   </script>
-
 </body>
 </html>
