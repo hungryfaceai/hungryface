@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>Email Naptio Support</title>
+  <title>Email us</title>
   <style>
     :root { color-scheme: dark; }
     html, body { margin:0; height:100%; background:#000; color:#eee; font-family:-apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
@@ -67,8 +67,8 @@
 
   <script>
   (function(){
-    const TO = 'support@naptio.com';
-
+    const TO = 'naptioai@gmail.com';
+  
     // Elements
     const subjectEl = document.getElementById('subject');
     const messageEl = document.getElementById('message');
@@ -76,123 +76,149 @@
     const emailBtn  = document.getElementById('emailBtn');
     const copyBtn   = document.getElementById('copyBtn');
     const hintEl    = document.getElementById('modeHint');
-
-    // Attachment UI
+  
     const attachRow = document.getElementById('attachRow');
-    const drop = document.getElementById('drop');
-    const filesInput = document.getElementById('files');
-    const chips = document.getElementById('chips');
+    const drop      = document.getElementById('drop');
+    const filesInput= document.getElementById('files');
+    const chips     = document.getElementById('chips');
     const browseBtn = document.getElementById('browseBtn');
-
+  
     // Platform helpers
     const ua = navigator.userAgent || '';
     const isIOS = /iP(hone|od|ad)/.test(ua) || (/Mac/.test(navigator.platform) && 'ontouchend' in document);
     const isAndroid = /Android/i.test(ua);
-
-    // Check Web Share with files capability
+  
+    // Capability: Web Share w/ files
     let canShareFiles = false;
     try {
       const test = new File([new Blob(['x'], {type:'text/plain'})], 'x.txt', {type:'text/plain'});
       canShareFiles = !!(navigator.canShare && navigator.canShare({ files: [test] }));
     } catch { canShareFiles = false; }
-
-    // If we can't share files at all, hide attachments UI
+  
+    // Store selected attachments independently of the <input>
+    let selectedFiles = []; // Array<File>
+    const MAX_FILES = 5;
+  
     if (!canShareFiles) attachRow.style.display = 'none';
-
+  
     // Events
     messageEl.addEventListener('input', validate);
     browseBtn.addEventListener('click', () => filesInput.click());
-    filesInput.addEventListener('change', () => { renderChips(); updateModeLabel(); });
-
-    ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, (e)=>{ e.preventDefault(); drop.classList.add('over'); }));
-    ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, (e)=>{ e.preventDefault(); drop.classList.remove('over'); }));
-    drop.addEventListener('drop', (e) => {
-      const files = [...(e.dataTransfer?.files || [])];
-      if (!files.length) return;
-      const cur = [...filesInput.files];
-      const dt = new DataTransfer();
-      [...cur, ...files].slice(0, 5).forEach(f => dt.items.add(f)); // cap 5 files
-      filesInput.files = dt.files;
-      renderChips(); updateModeLabel();
+  
+    // IMPORTANT: merge new picks with existing files
+    filesInput.addEventListener('change', (e) => {
+      addFiles([...(e.target.files || [])]);
+      // Clear input so picking the same file again retriggers 'change'
+      e.target.value = '';
     });
-
+  
+    ;['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, (e)=>{ e.preventDefault(); drop.classList.add('over'); }));
+    ;['dragleave','drop'].forEach(ev => drop.addEventListener(ev, (e)=>{ e.preventDefault(); drop.classList.remove('over'); }));
+    drop.addEventListener('drop', (e) => {
+      addFiles([...(e.dataTransfer?.files || [])]);
+    });
+  
     emailBtn.addEventListener('click', async () => {
       if (!validate()) return;
-
-      const hasFiles = filesInput.files && filesInput.files.length > 0;
-
-      // Mode pick:
-      // - If user attached files and we can share files -> use share sheet (attachments included, To not prefilled)
-      // - Else -> mailto with To/Subject/Body prefilled (no attachments)
+  
+      const hasFiles = selectedFiles.length > 0;
+  
+      // If user attached files and sharing supports files -> share (attachments included)
       if (hasFiles && canShareFiles && navigator.share) {
         try {
-          // Helpful UX on mobile: copy address so user can paste into To quickly
+          // Helpful: copy address for quick paste into the To: field (iOS/Android)
           try { await navigator.clipboard.writeText(TO); } catch {}
-          const data = { title: composeSubject(), text: composeBody(), files: [...filesInput.files] };
-          await navigator.share(data);
+          await navigator.share({ title: composeSubject(), text: composeBody(), files: selectedFiles });
         } catch {
-          // user canceled or share failed -> fallback to mailto
           openMailto();
         }
       } else {
+        // Otherwise, use mailto with prefilled To/Subject/Body (no attachments)
         openMailto();
       }
     });
-
+  
     copyBtn.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(TO); copyBtn.textContent = 'Copied!'; setTimeout(()=>copyBtn.textContent = TO, 1200); } catch {}
     });
-
+  
+    // ---- File helpers ----
+    function addFiles(files){
+      for (const f of files) {
+        if (selectedFiles.length >= MAX_FILES) break;
+        // de-dupe by name + size + lastModified
+        const exists = selectedFiles.some(g => g.name === f.name && g.size === f.size && g.lastModified === f.lastModified);
+        if (!exists) selectedFiles.push(f);
+      }
+      renderChips();
+      updateModeLabel();
+      // Try to reflect into the <input> (best-effort; some browsers don't support programmatic sets)
+      try {
+        const dt = new DataTransfer();
+        selectedFiles.forEach(f => dt.items.add(f));
+        filesInput.files = dt.files;
+      } catch {}
+    }
+  
+    function removeAt(i){
+      selectedFiles.splice(i,1);
+      renderChips();
+      updateModeLabel();
+      try {
+        const dt = new DataTransfer();
+        selectedFiles.forEach(f => dt.items.add(f));
+        filesInput.files = dt.files;
+      } catch {}
+    }
+  
+    function renderChips(){
+      chips.innerHTML = '';
+      selectedFiles.forEach((f, i) => {
+        const chip = document.createElement('span'); chip.className='chip';
+        chip.innerHTML = `<span>${f.name} • ${fmtBytes(f.size)}</span>`;
+        const x = document.createElement('button'); x.type='button'; x.setAttribute('aria-label','Remove'); x.textContent='×';
+        x.onclick = () => removeAt(i);
+        chip.appendChild(x);
+        chips.appendChild(chip);
+      });
+    }
+  
+    // ---- Email helpers ----
     function openMailto(){
       const url = `mailto:${encodeURIComponent(TO)}?subject=${encodeURIComponent(composeSubject())}&body=${encodeURIComponent(composeBody())}`;
       window.location.href = url;
     }
-
     function composeSubject(){ return subjectEl.value.trim() || 'Support request'; }
     function composeBody(){ return messageEl.value.trim(); }
-
+  
+    // ---- UI state ----
     function validate(){
       errEl.classList.remove('show'); errEl.textContent = '';
       const ok = messageEl.value.trim().length > 0;
       emailBtn.disabled = !ok;
       return ok;
     }
-
-    function renderChips(){
-      chips.innerHTML = '';
-      [...filesInput.files].forEach((f, i) => {
-        const chip = document.createElement('span'); chip.className='chip';
-        chip.innerHTML = `<span>${f.name} • ${fmtBytes(f.size)}</span>`;
-        const x = document.createElement('button'); x.type='button'; x.setAttribute('aria-label','Remove'); x.textContent='×';
-        x.onclick = () => {
-          const arr = [...filesInput.files]; arr.splice(i,1);
-          const dt = new DataTransfer(); arr.forEach(ff => dt.items.add(ff));
-          filesInput.files = dt.files; renderChips(); updateModeLabel();
-        };
-        chip.appendChild(x);
-        chips.appendChild(chip);
-      });
-    }
-
+  
     function updateModeLabel(){
-      const hasFiles = filesInput.files && filesInput.files.length > 0;
+      const hasFiles = selectedFiles.length > 0;
       if (hasFiles && canShareFiles) {
-        emailBtn.textContent = 'Share email with attachments';
+        emailBtn.textContent = 'Share email';
         hintEl.textContent = (isIOS || isAndroid)
-          ? 'Your email app will open with files attached. You may need to enter the address.'
-          : 'Your mail client will open with files attached. You may need to enter the address.';
+          ? 'Your email app will open with files attached.'
+          : 'Your mail client will open with files attached.';
       } else {
-        emailBtn.textContent = 'Open email (To filled in)';
+        emailBtn.textContent = 'Open email';
         hintEl.textContent = 'Opens your email app with To/Subject/Message prefilled. Attachments aren’t included.';
       }
     }
-
+  
     function fmtBytes(n){ if (n<1024) return n+' B'; const u=['KB','MB','GB']; let i=-1; do{ n/=1024; i++; } while(n>=1024&&i<u.length-1); return n.toFixed(1)+' '+u[i]; }
-
-    // initial state
+  
+    // init
     validate();
     updateModeLabel();
   })();
   </script>
+
 </body>
 </html>
