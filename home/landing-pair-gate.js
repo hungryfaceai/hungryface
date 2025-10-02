@@ -294,7 +294,7 @@ export function installLandingPairGate(userOptions = {}) {
     const subline = el('div', 'lpg-subline');
 
     const bullets = el('ul', 'lpg-bullets');
-    bullets.append(el('li', null, {}, copy.bullet1), el('li', null, {}, copy.bullet2));
+    bullets.append(el('li', null, {}, copy.bullet1), el('li', null, {}, copy.bullet2), el('li', null, {}, copy.bullet3));
 
     const actions = el('div', 'lpg-actions');
     const btnPrimary = el('button', 'lpg-cta', { type: 'button' }, copy.primaryCta);
