@@ -113,15 +113,29 @@
   </div>
 
   <script type="module">
-    import { ensurePskForRoom, installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
-    const qs = new URLSearchParams(location.search);
-    const room = qs.get('room') || 'Baby';
+    import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+    import { requirePskOrRedirect } from '/hungryface/webrtc/shared/psk/require-psk.js';
   
-    // Receiver imports token from #fragment (or uses persisted). Does NOT auto-generate.
-    //await ensurePskForRoom(room, 'receiver');
-    const undo = installPskShim({ room });
-    console.log('[PSK] shim installed for room', room);
+    const qs = new URLSearchParams(location.search);
+    const preferRoom = (qs.get('room') || '').trim();
+  
+    const env = await requirePskOrRedirect({
+      intent: 'viewer',
+      pairRoute: '/hungryface/webrtc/pairpsk/',
+      preferRoom,
+      fallbackRoom: 'Baby',
+    });
+  
+    if (env.redirected) {
+      console.log('[PSK][viewer] no PSK found → redirecting to Pair Devices…');
+    } else {
+      const { room } = env;
+      const undo = installPskShim({ room });
+      console.log('[PSK][viewer] using existing PSK for room:', room);
+      // continue with your existing receiver setup…
+    }
   </script>
+
 
   <script type="module">
     import { ReceiverCore } from '/hungryface/webrtc/receiver/shared/receiver-core.js';
