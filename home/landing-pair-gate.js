@@ -334,9 +334,9 @@ export function installLandingPairGate(userOptions = {}) {
         `You share that secret to the other ${nouns.singular} (QR code or share link).`,
         `The other ${nouns.singular} installs the secret locally too.`,
         `From then on, only ${nouns.plural} that hold the same secret can connect.`,
-        `You can rotate or forget the secret anytime. The secret never leaves your ${nouns.plural} except when you share it.`,
+        `You can rotate or forget the secret anytime. The secret never leaves your ${nouns.plural}.`,
       ],
-      privacyTip: 'The share link keeps the secret in the URL fragment (#…), which isn’t sent to servers.',
+      //privacyTip: 'The share link keeps the secret in the URL fragment (#…), which isn’t sent to servers.',
     };
     if (!override) return base;
 
