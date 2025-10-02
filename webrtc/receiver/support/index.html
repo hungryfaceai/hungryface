@@ -41,6 +41,16 @@
 
     .checkbox { display:flex; align-items:flex-start; gap:10px; font-size:14px; color:#ccc; }
     .checkbox input { margin-top:2px; }
+
+    /* ▼▼ Added: dynamic offset for fixed top drawer/sidebar */
+    :root { --nav-offset: 56px; } /* fallback */
+    main.wrap {
+      padding-top: calc(var(--nav-offset) + env(safe-area-inset-top));
+    }
+    @supports (height: 100dvh) {
+      main.wrap { min-height: calc(100dvh - var(--nav-offset) - env(safe-area-inset-bottom)); }
+    }
+    /* ▲▲ Added */
   </style>
 </head>
 <body>
@@ -66,6 +76,44 @@
       }
     })();
   </script>
+
+  <!-- ▼▼ Added: auto-measure topbar height and set --nav-offset -->
+  <script>
+  (function(){
+    const CANDIDATES = [
+      '.sidebar-top', '.topbar', '#topbar',
+      'header[role="banner"]', 'nav[role="navigation"]'
+    ];
+    function findTopbar(){
+      for (const sel of CANDIDATES) {
+        const el = document.querySelector(sel);
+        if (el) return el;
+      }
+      const fixed = [...document.querySelectorAll('body *')].filter(n=>{
+        const s = getComputedStyle(n);
+        return s.position === 'fixed' && parseInt(s.top||'0',10) === 0 && n.offsetHeight > 30;
+      });
+      return fixed.sort((a,b)=>b.offsetHeight - a.offsetHeight)[0] || null;
+    }
+    function applyOffset(topEl){
+      const h = Math.ceil(topEl?.getBoundingClientRect().height || 0);
+      document.documentElement.style.setProperty('--nav-offset', h + 'px');
+    }
+    function init(){
+      const topEl = findTopbar();
+      applyOffset(topEl);
+      if (topEl && 'ResizeObserver' in window) {
+        const ro = new ResizeObserver(()=>applyOffset(topEl));
+        ro.observe(topEl);
+      }
+      window.addEventListener('orientationchange', ()=>applyOffset(topEl), { passive:true });
+      window.addEventListener('resize', ()=>applyOffset(topEl), { passive:true });
+    }
+    if (document.readyState === 'complete') init();
+    else window.addEventListener('load', init);
+  })();
+  </script>
+  <!-- ▲▲ Added -->
 
   <main class="wrap">
     <section class="card" role="form" aria-labelledby="title">
