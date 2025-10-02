@@ -41,16 +41,23 @@
     #status { margin-top: 6px; font-size: 13px; color: #9aa; }
   </style>
 
-  <!-- --- Sidebar overlap fix CSS --- -->
+  <!-- --- Sidebar overlap fix CSS (revised: use padding-left instead of transform) --- -->
   <style>
-    :root { --sidebar-visible: 0px; }
-    #ui {
-      transform: translateX(var(--sidebar-visible));
-      transition: transform .18s ease;
-      will-change: transform;
+    :root {
+      --sidebar-visible: 0px;
+      --sidebar-gutter: 12px;                     /* extra spacing so shadows/borders don't touch card */
+      --safe-left: env(safe-area-inset-left, 0px);/* iPhone notch/gesture area */
+      --sidebar-offset: calc(var(--sidebar-visible) + var(--safe-left) + var(--sidebar-gutter));
     }
+    /* Shift layout using padding so content is not under the drawer/scrim */
+    #ui {
+      padding-left: var(--sidebar-offset);
+      transition: padding-left .18s ease;
+      will-change: padding-left;
+    }
+    /* Keep the card fully visible within remaining width */
     .card {
-      max-width: min(520px, calc(100vw - var(--sidebar-visible) - 32px));
+      max-width: min(520px, calc(100vw - var(--sidebar-offset) - 32px));
     }
     @media (max-width: 420px) {
       body.drawer-open-detected #ui { padding-right: 8px; }
@@ -81,7 +88,7 @@
     })();
   </script>
 
-  <!-- --- Sidebar overlap fix JS --- -->
+  <!-- --- Sidebar overlap fix JS (measures visible drawer width) --- -->
   <script type="module">
     (function () {
       const root = document.documentElement;
