@@ -4,9 +4,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Email Naptio Support</title>
+
+  <!-- Shared sidebar stylesheet -->
+  <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
+
   <style>
     :root { color-scheme: dark; }
     html, body { margin:0; height:100%; background:#000; color:#eee; font-family:-apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+    /* Let content scroll under a fixed/overlay sidebar */
+    body { overflow-x: hidden; }
     .wrap { min-height:100dvh; display:grid; place-items:center; padding:24px; }
     .card { width:min(720px, 92vw); background:#111; border:1px solid #222; border-radius:16px; padding:18px; box-shadow:0 10px 30px rgba(0,0,0,.35); }
     h1 { font-size:clamp(18px,3vw,22px); margin:4px 0 12px; }
@@ -16,24 +22,51 @@
     input[type="text"], textarea { width:100%; box-sizing:border-box; background:#161616; color:#eee; border:1px solid #2a2a2a; border-radius:12px; padding:11px 12px; font-size:15px; outline:none; }
     input[type="text"]:focus, textarea:focus { border-color:#3a3a3a; box-shadow:0 0 0 2px rgba(255,255,255,.05) inset; }
     textarea { min-height:140px; resize:vertical; }
+
     .drop { border:1.5px dashed #2d2d2d; background:#121212; border-radius:12px; padding:14px; text-align:center; transition:background .15s, border-color .15s; }
     .drop.over { background:#151515; border-color:#444; }
     .chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
     .chip { display:inline-flex; align-items:center; gap:8px; background:#1a1a1a; border:1px solid #2a2a2a; border-radius:999px; padding:6px 10px; font-size:13px; }
     .chip button { border:none; background:none; color:#bbb; font-size:16px; cursor:pointer; }
+
     .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; align-items:center; }
     .btn { appearance:none; border:1px solid #2a2a2a; background:#2b7cff; color:#fff; padding:12px 16px; border-radius:999px; font-weight:600; cursor:pointer; box-shadow:0 6px 16px rgba(0,0,0,.25); }
     .btn:disabled { opacity:.6; cursor:not-allowed; }
     .link { appearance:none; border:1px solid #2a2a2a; background:#1a1a1a; color:#eee; padding:10px 14px; border-radius:999px; font-weight:600; cursor:pointer; }
+
     .hint { font-size:13px; color:#bbb; margin-top:8px; }
     .small { font-size:12px; color:#9a9a9a; }
     .error { color:#ff8a80; font-size:13px; display:none; margin-top:8px; }
     .error.show { display:block; }
+
     .checkbox { display:flex; align-items:flex-start; gap:10px; font-size:14px; color:#ccc; }
     .checkbox input { margin-top:2px; }
   </style>
 </head>
 <body>
+  <!-- ⬇️ Inject shared sidebar markup and behavior (same pattern as your receiver page) -->
+  <script type="module">
+    (async () => {
+      try {
+        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
+        const html = await res.text();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html.trim();
+        document.body.prepend(...wrap.childNodes);
+
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      } catch (err) {
+        console.error('[Sidebar] failed to load shared assets:', err);
+      }
+    })();
+  </script>
+
   <main class="wrap">
     <section class="card" role="form" aria-labelledby="title">
       <h1 id="title">Email Naptio Support</h1>
@@ -89,7 +122,7 @@
     const hintEl      = document.getElementById('modeHint');
     const includeDiag = document.getElementById('includeDiag');
 
-    // Attachment UI
+    // Attachments UI
     const attachRow  = document.getElementById('attachRow');
     const drop       = document.getElementById('drop');
     const filesInput = document.getElementById('files');
@@ -101,7 +134,7 @@
     const isIOS = /iP(hone|od|ad)/.test(ua) || (/Mac/.test(navigator.platform) && 'ontouchend' in document);
     const isAndroid = /Android/i.test(ua);
 
-    // Capability: Web Share w/ files
+    // Web Share with files availability
     let canShareFiles = false;
     try {
       const test = new File([new Blob(['x'], {type:'text/plain'})], 'x.txt', {type:'text/plain'});
@@ -136,17 +169,15 @@
       const subject = composeSubject();
       const body    = await composeBodyWithDiagnostics();
 
-      // With files + share support => share (attachments included, To likely not prefilled)
       if (hasFiles && canShareFiles && navigator.share) {
         try {
-          // Copy address for quick paste (mobile convenience)
+          // Mobile convenience: copy address for quick paste into To:
           try { await navigator.clipboard.writeText(TO); } catch {}
           await navigator.share({ title: subject, text: body, files: selectedFiles });
         } catch {
           openMailto(subject, body);
         }
       } else {
-        // mailto pre-fills To/Subject/Body (no attachments)
         openMailto(subject, body);
       }
     });
@@ -223,7 +254,7 @@
         `Permissions: camera=${diag.env.camPerm || 'n/a'} mic=${diag.env.micPerm || 'n/a'}`,
       ].filter(Boolean).join('\n');
 
-      // Trim to ~2.5KB to avoid overly long bodies
+      // Trim to ~2.5KB to keep mailto bodies sane
       const MAX = 2500;
       const out = userText + '\n\n' + block;
       return out.length > MAX ? out.slice(0, MAX) + '\n…(truncated)' : out;
