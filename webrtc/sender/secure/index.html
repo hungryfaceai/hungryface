@@ -65,8 +65,6 @@
       padding-bottom: 4px;
     }
 
-    #ui { min-height: 100svh; }
-
     @media (max-height: 740px) {
       #ui { padding-top: 0; }
       .page-header { padding: 2px 10px; }
@@ -196,8 +194,8 @@
       </div>
 
       <div class="row">
-        <input id="room" type="text" placeholder="Room (e.g., Baby)" value="Baby" autocomplete="off">
-        <span style="opacity:.7;font-size:13px;">Room name</span>
+        <select id="roomSel"></select>
+        <label for="roomSel" style="opacity:.7;font-size:13px;cursor:pointer;">Room</label>
       </div>
 
       <div class="row">
@@ -274,17 +272,24 @@
       fallbackRoom: 'Baby',
     });
   
+    // NEW: expose env + a safe re-install hook
+    window.__pskEnv = env;
+    window.__installPskForRoom = (room) => {
+      try { window.__pskUndo?.(); } catch {}
+      window.__pskUndo = installPskShim({ room });
+      console.log('[PSK][sender] shim installed for room:', room);
+    };
+  
     if (env.redirected) {
       console.log('[PSK][sender] no PSK found → redirecting to Pair Devices…');
     } else {
-      const { room } = env;
-      const undo = installPskShim({ room });
-      console.log('[PSK][sender] using existing PSK for room:', room);
-      // continue with your existing sender setup…
+      // Install for the env room by default; UI can switch before start.
+      window.__installPskForRoom(env.room);
     }
   </script>
 
   <script type="module">
+    import { listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
 
@@ -315,7 +320,7 @@
       PREGAIN_DB: 0       // pre-gain for classifier path only (keeps WebRTC stream untouched)
     };
 
-    const roomInput = document.getElementById('room');
+    const roomSel   = document.getElementById('roomSel');
     const videoOn   = document.getElementById('videoOn');
     const audioOn   = document.getElementById('audioOn');
     const cameraSel = document.getElementById('cameraSel');
@@ -329,6 +334,58 @@
     const stage     = document.getElementById('stage');
     const talkbackAudio = document.getElementById('talkbackAudio'); //https://chatgpt.com/c/68cbdcf2-d4f8-8330-97d8-a97eb665eb33
 
+    // --- PSK Room dropdown population & default selection ---
+    function hasOption(sel, val) {
+      return !!Array.from(sel?.options || []).find(o => o.value === val);
+    }
+
+    (function initRoomDropdown() {
+      const rooms = listValidPskRooms();              // all rooms with a valid PSK
+      const qsRoom = new URLSearchParams(location.search).get('room') || '';
+      const lastRoom = (localStorage.getItem('naptio:lastRoom') || '').trim();
+      const persisted = (localStorage.getItem('bm_sender_room') || '').trim(); // your existing persistence key
+      const envRoom = (window.__pskEnv?.room || '').trim();
+    
+      // Build options (ensure uniqueness)
+      const uniq = new Set(rooms);
+      // Optionally include envRoom if not present
+      if (envRoom) uniq.add(envRoom);
+    
+      // If nothing, show a disabled placeholder (shouldn’t happen due to redirect)
+      roomSel.innerHTML = '';
+      if (uniq.size === 0) {
+        roomSel.innerHTML = `<option value="" disabled selected>No PSK rooms</option>`;
+        roomSel.disabled = true;
+        startBtn.disabled = true;
+        startBtn.title = 'No PSK rooms found. Pair devices first.';
+        return;
+      }
+    
+      // Create options
+      for (const r of Array.from(uniq).sort()) {
+        const opt = document.createElement('option');
+        opt.value = opt.textContent = r;
+        roomSel.appendChild(opt);
+      }
+    
+      // Choose default: ?room → lastRoom → persisted → envRoom → first
+      const pick =
+        (qsRoom && uniq.has(qsRoom) && qsRoom) ||
+        (lastRoom && uniq.has(lastRoom) && lastRoom) ||
+        (persisted && uniq.has(persisted) && persisted) ||
+        envRoom ||
+        Array.from(uniq)[0];
+    
+      roomSel.value = hasOption(roomSel, pick) ? pick : roomSel.options[0].value;
+      try { localStorage.setItem('bm_sender_room', roomSel.value); } catch {}
+      try { localStorage.setItem('naptio:lastRoom', roomSel.value); } catch {}
+    
+      // Persist on change (keeps your existing behavior)
+      roomSel.addEventListener('change', () => {
+        try { localStorage.setItem('bm_sender_room', roomSel.value); } catch {}
+        try { localStorage.setItem('naptio:lastRoom', roomSel.value); } catch {}
+      });
+    })();
 
     // Debug elements
     const elDbgPanel = document.getElementById('debugPanel');
@@ -429,7 +486,7 @@
         ['videoOn',    'checkbox', document.getElementById('videoOn')],
         ['audioOn',    'checkbox', document.getElementById('audioOn')],
         ['cameraSel',  'select',   document.getElementById('cameraSel')],
-        ['room',       'text',     document.getElementById('room')],
+        ['room',       'select',   document.getElementById('roomSel')],
         ['previewMins','number',   document.getElementById('previewMins')],
         ['poseOn',     'checkbox', document.getElementById('poseOn')],
         ['poseWhere',  'select',   poseWhere],
@@ -444,6 +501,7 @@
         const v = localStorage.getItem(PREFIX + key);
         if (v == null) return;
         if (type === 'checkbox') el.checked = (v === '1' || v === 'true');
+        else if (type === 'select') { if (hasOption(el, v)) el.value = v; }
         else el.value = v;
       }
       function saveOne(key, type, el) {
@@ -547,7 +605,7 @@
     }
 
     const setStatus = (t) => { statusEl.textContent = t; if (LOG.status) console.log('[STATUS]', t); };
-    const currentRoom = () => (roomInput.value || 'Baby').trim();
+    const currentRoom = () => ((roomSel?.value || roomSel?.options?.[0]?.value || 'Baby') + '').trim();
     const isFront = () => (cameraSel.value === 'user');
 
     function updateMirrorClass() {
@@ -1089,7 +1147,7 @@
     async function startOrStop() {
       try {
         if (started) { await stopStreaming(); return; }
-
+        roomSel.disabled = true;  
         startBtn.disabled = true;
 
         updateMirrorClass();
@@ -1101,7 +1159,10 @@
         beginViewportSettle();
 
         beginPreviewWindow(Number(previewMinsInput.value) || 1);
-
+        // Make sure the PSK shim is installed for the selected room before signaling
+        if (typeof window.__installPskForRoom === 'function') {
+          window.__installPskForRoom(room);
+        }
         await connectWS(room);
         started = true;
         startBtn.textContent = 'Stop streaming';
@@ -1120,6 +1181,7 @@
         if (DEBUG_UI) elDbgPanel.style.display = 'block';
 
       } catch (err) {
+        roomSel.disabled = false;
         console.error(err);
         alert(err.message || err);
         setStatus('Idle');
@@ -1130,6 +1192,7 @@
     async function stopStreaming() {
       try { send({ type: 'bye' }); } catch {}
       started = false;                        // so scheduleWSReconnect() bails out
+      roomSel.disabled = false;
       stopWSHeartbeat();
       if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
 
@@ -1971,8 +2034,7 @@
     }
 
     announceAIModes(); // harmless early initialization
-    const qsRoom = new URLSearchParams(location.search).get('room');
-    if (qsRoom) roomInput.value = qsRoom;
+
   </script>
 </body>
 </html>
