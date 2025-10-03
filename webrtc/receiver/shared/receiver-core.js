@@ -172,7 +172,7 @@ export class ReceiverCore {
       } else if (s === 'closed') {
         this.#status('ICE: closed');
       } else {
-        this.#status('ICEX: ' + s);
+        //this.#status('ICE: ' + s);
       }
     };
   }
