@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Baby Monitor – Receiver</title>
+  <link rel="icon" href="data:,">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+
+  <!-- ⬇️ Add shared sidebar stylesheet -->
+  <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
+
+  <style>
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; height: 100%;
+      background: #000; color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+      overflow: hidden;
+    }
+    /* Fullscreen wrapper so video+canvas scale together */
+    #stage {
+      position: fixed; inset: 0;
+      width: 100vw; height: 100vh;   /* fallback */
+      width: 100dvw; height: 100dvh; /* dynamic viewport */
+      width: 100svw; height: 100svh; /* small viewport (iOS URL bar safe) */
+      z-index: 1; background: #000;
+    }
+    #stage > video {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: contain; background: #000;
+      z-index: 0;
+      pointer-events: none;
+    }
+    #stage > canvas {
+      position: absolute;
+      z-index: 2; background: transparent; display: none;
+      pointer-events: auto;
+      touch-action: none;
+    }
+    /* Translucent red veil shown when any landmark is outside zone */
+    #zoneAlert {
+      position: absolute; inset: 0;
+      background: rgba(255, 0, 0, 0.18);
+      z-index: 3;
+      pointer-events: none;
+      display: none;
+    }
+
+    .btn {
+      padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
+      background: transparent; color: #fff; font-size: 16px; font-weight: 600;
+      cursor: pointer; box-shadow: none;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+    .btn:active { transform: scale(0.99); }
+
+    #controls {
+      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 12px; z-index: 6;
+      flex-wrap: wrap;
+    }
+    #enableAudioBtn, #disableAudioBtn { display: none; }
+
+    .overlay {
+      position: fixed; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      pointer-events: none; z-index: 5;
+    }
+    .status {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
+      text-align: center; white-space: pre-line; max-width: 90vw;
+    }
+    .overlay.hidden { display: none; }
+
+    /* ==== Virtual Fence banner ==== */
+    .fence-banner {
+      position: absolute;
+      top: 12px; left: 50%; transform: translateX(-50%);
+      background: #b91c1c;  /* red-700 */
+      color: #fff;
+      padding: 10px 14px; border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.25);
+      box-shadow: 0 10px 20px rgba(0,0,0,.35);
+      z-index: 10000;
+      font-size: 14px; text-align: center;
+      max-width: min(92vw, 720px);
+    }
+    .fence-banner.hidden { display: none; }
+    .fence-banner__actions { margin-top: 6px; display: inline-flex; gap: 8px; align-items: center; }
+    .fence-link {
+      background: none; border: 0; color: #fff; padding: 0;
+      font: inherit; cursor: pointer; text-decoration: underline;
+    }
+    .fence-link:active { transform: scale(0.98); }
+  </style>
+</head>
+<body>
+  <!-- ⬇️ Inject shared sidebar markup and behavior (kept separate from your code) -->
+  <script type="module">
+    (async () => {
+      try {
+        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
+        const html = await res.text();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html.trim();
+        document.body.prepend(...wrap.childNodes);
+
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      } catch (err) {
+        console.error('[Sidebar] failed to load shared assets:', err);
+      }
+    })();
+  </script>
+
+  <div id="controls">
+    <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
+    <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
+    <button id="fsBtn" class="btn" type="button">Fullscreen</button>
+    <!-- 👇 Zone controls -->
+    <button id="drawZoneBtn" class="btn" type="button">Draw zone</button>
+    <button id="clearZoneBtn" class="btn" type="button">Clear</button>
+  </div>
+
+  <div id="stage">
+    <video id="remote" autoplay playsinline></video>
+    <div id="zoneAlert"></div>
+    <canvas id="poseCanvas"></canvas>
+    <!-- ==== Virtual Fence banner ==== -->
+    <div id="fenceBanner" class="fence-banner hidden" role="alert" aria-live="assertive">
+      <div class="fence-banner__text">
+        Virtual Fence alert — Movement outside “Area” detected at
+        <span id="fenceBannerTime">--:--</span>.
+      </div>
+      <div class="fence-banner__actions">
+        <button id="fenceDismissBtn" class="fence-link" type="button">Dismiss</button>
+      </div>
+    </div>    
+  </div>
+
+  <div id="overlay" class="overlay">
+    <div id="status" class="status">Idle</div>
+  </div>
+
+  <script type="module">
+    import { DrawingUtils, PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+    import { ReceiverCore } from '/hungryface/webrtc/receiver/shared/receiver-core.js';
+
+    /* ---------- Constants ---------- */
+    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const room = new URLSearchParams(location.search).get("room") || "Baby";
+
+    const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+    const WASM_DIR = TASKS_URL + "/wasm";
+    const POSE_MODEL_URL =
+      "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+
+    const HAVE_CURRENT_DATA = 2;
+
+    /* ----- Virtual Fence banner config ----- */
+    const DISMISS_SUPPRESS_MS = 10 * 60 * 1000; // 10 minutes
+
+    /* ---------- DOM ---------- */
+    const stage = document.getElementById('stage');
+    const remoteVideo = document.getElementById('remote');
+    const poseCanvas = document.getElementById('poseCanvas');
+    const poseCtx = poseCanvas.getContext('2d', { alpha: true });
+    const zoneAlert = document.getElementById('zoneAlert');
+
+    const fsBtn = document.getElementById('fsBtn');
+    const enableAudioBtn = document.getElementById('enableAudioBtn');
+    const disableAudioBtn = document.getElementById('disableAudioBtn');
+    const drawZoneBtn = document.getElementById('drawZoneBtn');
+    const clearZoneBtn = document.getElementById('clearZoneBtn');
+    const overlay = document.getElementById('overlay');
+    const statusEl = document.getElementById('status');
+
+    /* ----- Virtual Fence banner DOM ----- */
+    const fenceBanner     = document.getElementById('fenceBanner');
+    const fenceBannerTime = document.getElementById('fenceBannerTime');
+    const fenceDismissBtn = document.getElementById('fenceDismissBtn');
+
+    /* ---------- State ---------- */
+    let hideStatusTimer = null;
+    let poseDC = null;
+    let poseEnabled = false;
+    let poseWhere = 'sender'; // 'sender' | 'receiver'
+    let poseTask = null;
+    let poseLoopRunning = false;
+
+    // ---------- Polygon / Zone state ----------
+    let polygonPoints = [];
+    let polygonClosed = true;
+    let drawingMode = false;
+    let polygonInitialized = false;
+    let activePointerId = null;
+    let isDragging = false;
+    let draggingPointIndex = -1;
+    let hoveredPointIndex = -1;
+    let lastTapTime = 0;
+    let lastTapPos = null;
+    const HANDLE_RADIUS_CSS = 10;
+
+    /* ----- Virtual Fence banner state ----- */
+    let suppressUntilMs = 0;
+    let keepReminding   = true;
+    let lastOutside     = false;
+    let lastBreachAtMs  = 0;
+
+    function fmtTime(ms) {
+      return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    function showFenceBanner(whenMs) {
+      if (!keepReminding && Date.now() < suppressUntilMs) return;
+      fenceBannerTime.textContent = fmtTime(whenMs);
+      fenceBanner.classList.remove('hidden');
+    }
+    function hideFenceBanner() {
+      fenceBanner.classList.add('hidden');
+    }
+    function updateFenceBanner(isOutside) {
+      if (isOutside && !lastOutside) lastBreachAtMs = Date.now();
+      if (isOutside) {
+        if (Date.now() >= suppressUntilMs) showFenceBanner(lastBreachAtMs || Date.now());
+        else hideFenceBanner();
+      } else {
+        hideFenceBanner();
+      }
+      lastOutside = isOutside;
+    }
+    fenceDismissBtn?.addEventListener('click', () => {
+      keepReminding   = false;
+      suppressUntilMs = Date.now() + DISMISS_SUPPRESS_MS;
+      hideFenceBanner();
+    });
+
+    /* ---------- Status overlay ---------- */
+    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
+    function showStatus(msg) {
+      statusEl.textContent = msg;
+      overlay.classList.remove('hidden');
+      if (msg === 'Connected') {
+        if (hideStatusTimer) clearTimeout(hideStatusTimer);
+        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
+      } else {
+        if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
+        overlay.classList.remove('hidden');
+      }
+    }
+
+    /* ---------- Audio UI ---------- */
+    function updateAudioButtons() {
+      if (remoteVideo.muted) {
+        enableAudioBtn.style.display = 'block';
+        disableAudioBtn.style.display = 'none';
+      } else {
+        enableAudioBtn.style.display = 'none';
+        disableAudioBtn.style.display = 'block';
+      }
+    }
+    enableAudioBtn.style.display = 'block';
+    async function tryStartMuted() {
+      try { remoteVideo.muted = true; remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
+      updateAudioButtons();
+    }
+    enableAudioBtn.addEventListener('click', async (e) => {
+      e?.preventDefault?.();
+      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
+      updateAudioButtons();
+    });
+    disableAudioBtn.addEventListener('click', (e) => {
+      e?.preventDefault?.();
+      remoteVideo.muted = true;
+      updateAudioButtons();
+    });
+
+    /* ---------- Fullscreen ---------- */
+    fsBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        if (!document.fullscreenElement) {
+          await (stage.requestFullscreen?.call(stage) || document.documentElement.requestFullscreen());
+          fsBtn.textContent = 'Exit fullscreen';
+        } else {
+          await document.exitFullscreen();
+          fsBtn.textContent = 'Fullscreen';
+        }
+      } catch {}
+      beginViewportSettle();
+    });
+    document.addEventListener('fullscreenchange', () => {
+      fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+      beginViewportSetle();
+    });
+
+    remoteVideo.addEventListener('loadedmetadata', () => {
+      console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
+      beginViewportSettle();
+    });
+    remoteVideo.addEventListener('playing', () => {
+      updateAudioButtons();
+      beginViewportSettle();
+    });
+    remoteVideo.addEventListener('resize', beginViewportSettle);
+
+    /* ---------- Canvas alignment ---------- */
+    function containRect(containerW, containerH, contentW, contentH) {
+      const scale = Math.min(containerW / (contentW||1), containerH / (contentH||1));
+      const w = Math.round(contentW * scale);
+      const h = Math.round(contentH * scale);
+      const x = Math.floor((containerW - w) / 2);
+      const y = Math.floor((containerH - h) / 2);
+      return { left:x, top:y, width:w, height:h };
+    }
+    function alignCanvasToVideo() {
+      const stageBox = stage.getBoundingClientRect();
+      const videoBox = remoteVideo.getBoundingClientRect();
+      const containerW = Math.round(videoBox.width);
+      const containerH = Math.round(videoBox.height);
+      const vidW = remoteVideo.videoWidth || 1;
+      const vidH = remoteVideo.videoHeight || 1;
+
+      const fit = containRect(containerW, containerH, vidW, vidH);
+      const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
+      const topCSS = Math.round((videoBox.top - stageBox.top) + fit.top);
+
+      poseCanvas.style.left = leftCSS + 'px';
+      poseCanvas.style.top = topCSS + 'px';
+      poseCanvas.style.width = fit.width + 'px';
+      poseCanvas.style.height = fit.height + 'px';
+
+      const dpr = window.devicePixelRatio || 1;
+      const needW = Math.max(1, Math.round(fit.width * dpr));
+      const needH = Math.max(1, Math.round(fit.height * dpr));
+
+      if (poseCanvas.width !== needW || poseCanvas.height !== needH) {
+        const prevW = poseCanvas.width || needW;
+        const prevH = poseCanvas.height || needH;
+        poseCanvas.width = needW;
+        poseCanvas.height = needH;
+
+        if (!polygonInitialized) {
+          setDefaultPolygon();
+          polygonInitialized = true;
+        } else {
+          const sx = needW / Math.max(1, prevW);
+          const sy = needH / Math.max(1, prevH);
+          for (const p of polygonPoints) { p.x *= sx; p.y *= sy; }
+        }
+        renderPolygonOnly();
+      }
+
+      poseCtx.setTransform(1,0,0,1,0,0);
+    }
+    let settleRAF = 0, settleUntil = 0;
+    function beginViewportSettle(durationMs = 1200) {
+      settleUntil = performance.now() + durationMs;
+      if (settleRAF) return;
+      const tick = () => {
+        alignCanvasToVideo();
+        if (performance.now() < settleUntil) {
+          settleRAF = requestAnimationFrame(tick);
+        } else {
+          cancelAnimationFrame(settleRAF); settleRAF = 0;
+          alignCanvasToVideo();
+        }
+      };
+      tick();
+    }
+    const vpAlign = () => beginViewportSettle();
+    ['resize','orientationchange','scroll'].forEach(ev =>
+      window.addEventListener(ev, vpAlign, { passive: true })
+    );
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', vpAlign, { passive: true });
+      window.visualViewport.addEventListener('scroll',  vpAlign, { passive: true });
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) beginViewportSettle();
+    });
+
+    /* ---------- Overlay helpers ---------- */
+    function setOverlayVisible(v) {
+      const want = v || drawingMode || (polygonClosed && polygonPoints.length >= 3);
+      poseCanvas.style.display = want ? 'block' : 'none';
+      if (want) beginViewportSettle();
+      else poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+    }
+    function clearOverlayDrawing() {
+      try {
+        poseCtx.setTransform(1,0,0,1,0,0);
+        poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+        zoneAlert.style.display = 'none';
+        hideFenceBanner();
+      } catch {}
+    }
+
+    /* ---------- Polygon helpers ---------- */
+    function setDefaultPolygon() {
+      polygonPoints = [
+        { x: 0, y: 0 },
+        { x: poseCanvas.width, y: 0 },
+        { x: poseCanvas.width, y: poseCanvas.height },
+        { x: 0, y: poseCanvas.height }
+      ];
+      polygonClosed = true;
+      drawingMode = false;
+      setOverlayVisible(true);
+    }
+    function getCanvasCoordsFromClientXY(clientX, clientY) {
+      const rect = poseCanvas.getBoundingClientRect();
+      const xVis = clientX - rect.left;
+      const yVis = clientY - rect.top;
+      const sx = poseCanvas.width / Math.max(1, rect.width);
+      const sy = poseCanvas.height / Math.max(1, rect.height);
+      return { x: xVis * sx, y: yVis * sy };
+    }
+    function getHitRadiusCanvasPx() {
+      const rect = poseCanvas.getBoundingClientRect();
+      const sx = poseCanvas.width / Math.max(1, rect.width);
+      const dpr = window.devicePixelRatio || 1;
+      return HANDLE_RADIUS_CSS * Math.max(1, sx / dpr) * dpr;
+    }
+    function findHandleIndexAt(pos) {
+      const r2 = getHitRadiusCanvasPx() ** 2;
+      let best = -1, bestDist = Infinity;
+      for (let i = 0; i < polygonPoints.length; i++) {
+        const dx = polygonPoints[i].x - pos.x;
+        const dy = polygonPoints[i].y - pos.y;
+        const d2 = dx*dx + dy*dy;
+        if (d2 <= r2 && d2 < bestDist) { best = i; bestDist = d2; }
+      }
+      return best;
+    }
+    function clampToCanvas(pt) {
+      return {
+        x: Math.max(0, Math.min(poseCanvas.width, pt.x)),
+        y: Math.max(0, Math.min(poseCanvas.height, pt.y))
+      };
+    }
+    function drawPolygonOverlay(ctx) {
+      if (!polygonPoints.length) return;
+      ctx.save();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#00BCD4";
+      ctx.fillStyle = "rgba(0, 188, 212, 0.10)";
+      ctx.beginPath();
+      ctx.moveTo(polygonPoints[0].x, polygonPoints[0].y);
+      for (let i = 1; i < polygonPoints.length; i++) ctx.lineTo(polygonPoints[i].x, polygonPoints[i].y);
+      if (polygonClosed) ctx.closePath();
+      ctx.stroke();
+      if (polygonClosed) ctx.fill();
+      for (let i = 0; i < polygonPoints.length; i++) {
+        const p = polygonPoints[i];
+        ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = "#00BCD4"; ctx.fill();
+      }
+      const idx = isDragging ? draggingPointIndex : hoveredPointIndex;
+      if (idx >= 0) {
+        const p = polygonPoints[idx];
+        ctx.beginPath(); ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+        ctx.strokeStyle = "#FF9800"; ctx.lineWidth = 2; ctx.stroke();
+      }
+      ctx.restore();
+    }
+    function renderPolygonOnly() {
+      poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+      drawPolygonOverlay(poseCtx);
+    }
+    function pointInPolygon(pt, poly) {
+      let inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const xi = poly[i].x, yi = poly[i].y;
+        const xj = poly[j].x, yj = poly[j].y;
+        const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+          (pt.x < ((xj - xi) * (pt.y - yi)) / ((yj - yi) || 1e-9) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+    function anyLandmarkOutside(landmarks) {
+      if (!polygonClosed || polygonPoints.length < 3) return false;
+      const w = poseCanvas.width, h = poseCanvas.height;
+      for (const lm of landmarks) {
+        for (const p of lm) {
+          const x = p.x * w;
+          const y = p.y * h;
+          if (!pointInPolygon({ x, y }, polygonPoints)) return true;
+        }
+      }
+      return false;
+    }
+
+    /* ---------- MediaPipe on RECEIVER ---------- */
+    async function ensurePoseTask() {
+      if (poseTask) return poseTask;
+      const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
+      poseTask = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: POSE_MODEL_URL, delegate: "GPU" },
+        runningMode: "VIDEO",
+        numPoses: 1
+      });
+      return poseTask;
+    }
+    function videoHasFrame(v) {
+      return v && v.readyState >= HAVE_CURRENT_DATA && v.videoWidth > 0 && v.videoHeight > 0;
+    }
+    function waitForVideoFrame(video) {
+      if (videoHasFrame(video)) return Promise.resolve();
+      return new Promise((resolve) => {
+        const check = () => { if (videoHasFrame(video)) { cleanup(); resolve(); } };
+        const cleanup = () => {
+          video.removeEventListener('loadedmetadata', check);
+          video.removeEventListener('playing', check);
+          video.removeEventListener('resize', check);
+        };
+        video.addEventListener('loadedmetadata', check);
+        video.addEventListener('playing', check);
+        video.addEventListener('resize', check);
+      });
+    }
+    function drawPoseLandmarks(landmarks) {
+      if (!poseCanvas.width || !poseCanvas.height) return;
+      poseCtx.save();
+      poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+
+      const utils = new DrawingUtils(poseCtx);
+      for (const lm of landmarks || []) {
+        utils.drawLandmarks(lm, {
+          radius: (data) => DrawingUtils.lerp((data.from && data.from.z) ?? 0, -0.15, 0.1, 5, 1)
+        });
+        utils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS);
+      }
+      drawPolygonOverlay(poseCtx);
+      poseCtx.restore();
+
+      const out = (landmarks && landmarks.length) ? anyLandmarkOutside(landmarks) : false;
+      zoneAlert.style.display = out ? 'block' : 'none';
+      updateFenceBanner(!!out);
+    }
+    async function startReceiverPoseLoop() {
+      if (poseLoopRunning) return;
+      await ensurePoseTask();
+      await waitForVideoFrame(remoteVideo);
+
+      poseLoopRunning = true;
+      const useRVFC = 'requestVideoFrameCallback' in remoteVideo;
+
+      const onFrame = () => {
+        if (!poseLoopRunning || !poseEnabled || poseWhere !== 'receiver') return;
+
+        if (!videoHasFrame(remoteVideo)) {
+          poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+          zoneAlert.style.display = 'none';
+          hideFenceBanner();
+          scheduleNext();
+          return;
+        }
+
+        try {
+          const ts = performance.now();
+          const result = poseTask.detectForVideo(remoteVideo, ts);
+          if (result?.landmarks?.length) {
+            drawPoseLandmarks(result.landmarks);
+          } else {
+            poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+            drawPolygonOverlay(poseCtx);
+            zoneAlert.style.display = 'none';
+            updateFenceBanner(false);
+          }
+        } catch {
+        } finally {
+          scheduleNext();
+        }
+      };
+      const scheduleNext = () => {
+        if (useRVFC) remoteVideo.requestVideoFrameCallback(onFrame);
+        else requestAnimationFrame(onFrame);
+      };
+      scheduleNext();
+    }
+    function stopReceiverPoseLoop() {
+      poseLoopRunning = false;
+      poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
+      zoneAlert.style.display = 'none';
+      hideFenceBanner();
+    }
+    function applyPoseMode() {
+      setOverlayVisible(poseEnabled);
+      if (!poseEnabled) { stopReceiverPoseLoop(); return; }
+      if (poseWhere === 'receiver') startReceiverPoseLoop();
+      else stopReceiverPoseLoop();
+    }
+
+    /* ---------- Shared WebRTC core ---------- */
+    const core = new ReceiverCore({
+      wsEndpoint: WS_ENDPOINT,
+      room,
+      onStatus: showStatus,
+      onStream: (stream) => {
+        if (remoteVideo.srcObject !== stream) {
+          remoteVideo.srcObject = stream;
+          tryStartMuted();
+          attachStreamEndHandlers(stream);
+        }
+      },
+      onIceState: (state) => {
+        if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+          clearOverlayDrawing();
+        }
+      },
+      onBye: () => {
+        clearOverlayDrawing();
+      },
+      onCreatePC: (pc) => {
+        // Receiver-initiated 'pose' data channel
+        const ch = pc.createDataChannel('pose');
+        ch.onopen  = () => console.log('[DC][receiver] pose DC open');
+        ch.onclose = () => console.log('[DC][receiver] pose DC close');
+        ch.onerror = (e) => console.warn('[DC][receiver] pose DC error', e);
+        ch.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'pose-mode') {
+              poseEnabled = !!msg.enabled;
+              poseWhere   = msg.where || 'sender';
+              applyPoseMode();
+            } else if (msg.type === 'pose') {
+              if (poseEnabled && poseWhere === 'sender') drawPoseLandmarks(msg.landmarks);
+            }
+          } catch {}
+        };
+        poseDC = ch;
+      },
+      onDataChannel: (e) => {
+        console.log('[DC][receiver] inbound datachannel (leaving open):', e.channel?.label);
+      }
+    });
+
+    core.start().catch(console.warn);
+    window.addEventListener('beforeunload', () => core.close());
+
+    // tiny typo guard used in logs
+    function beginViewportSetle(){ beginViewportSettle(); }
+
+    /* ---------- NEW: clear overlay on video element stop-like states ---------- */
+    ['pause','ended','emptied','stalled','suspend','waiting'].forEach((ev) => {
+      remoteVideo.addEventListener(ev, clearOverlayDrawing, { passive: true });
+    });
+
+    /* ---------- Track/stream end handlers ---------- */
+    function attachStreamEndHandlers(stream) {
+      if (!stream) return;
+      stream.getVideoTracks().forEach((t) => {
+        t.addEventListener('ended',  clearOverlayDrawing);
+        t.addEventListener('mute',   clearOverlayDrawing);
+      });
+      stream.addEventListener('removetrack', (e) => {
+        if (e.track?.kind === 'video') clearOverlayDrawing();
+      });
+    }
+
+    /* ---------- Polygon interactions ---------- */
+    function resetInteractionState() {
+      try {
+        if (activePointerId != null) {
+          poseCanvas.releasePointerCapture?.(activePointerId);
+        }
+      } catch {}
+      activePointerId = null;
+      isDragging = false;
+      draggingPointIndex = -1;
+      hoveredPointIndex = -1;
+      lastTapPos = null;
+      lastTapTime = 0;
+    }
+    function onPointerDown(e) {
+      e.preventDefault();
+      const pos = getCanvasCoordsFromClientXY(e.clientX, e.clientY);
+      activePointerId = e.pointerId;
+      poseCanvas.setPointerCapture?.(e.pointerId);
+
+      if (drawingMode) {
+        const now = Date.now();
+        if (lastTapPos && (now - lastTapTime) < 350) {
+          const dx = pos.x - lastTapPos.x;
+          const dy = pos.y - lastTapPos.y;
+          if (dx*dx + dy*dy < (getHitRadiusCanvasPx() ** 2)) {
+            if (polygonPoints.length >= 3) {
+              polygonClosed = true;
+              drawingMode = false;
+              drawZoneBtn.textContent = 'Draw zone';
+              renderPolygonOnly();
+              return;
+            }
+          }
+        }
+        polygonPoints.push(clampToCanvas(pos));
+        lastTapTime = now;
+        lastTapPos = pos;
+        renderPolygonOnly();
+      } else {
+        const idx = findHandleIndexAt(pos);
+        if (idx !== -1) { isDragging = true; draggingPointIndex = idx; }
+      }
+    }
+    function onPointerMove(e) {
+      if (activePointerId !== e.pointerId) return;
+      const pos = getCanvasCoordsFromClientXY(e.clientX, e.clientY);
+
+      if (isDragging && draggingPointIndex !== -1) {
+        e.preventDefault();
+        polygonPoints[draggingPointIndex] = clampToCanvas(pos);
+        renderPolygonOnly();
+      } else if (!drawingMode) {
+        hoveredPointIndex = findHandleIndexAt(pos);
+        renderPolygonOnly();
+      }
+    }
+    function onPointerUpOrCancel(e) {
+      if (activePointerId !== e.pointerId) return;
+      isDragging = false; draggingPointIndex = -1;
+      activePointerId = null;
+      poseCanvas.releasePointerCapture?.(e.pointerId);
+    }
+
+    poseCanvas.addEventListener("pointerdown", onPointerDown, { passive: false });
+    poseCanvas.addEventListener("pointermove", onPointerMove, { passive: false });
+    poseCanvas.addEventListener("pointerup", onPointerUpOrCancel, { passive: false });
+    poseCanvas.addEventListener("pointercancel", onPointerUpOrCancel, { passive: false });
+    poseCanvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+    // Buttons
+    drawZoneBtn.addEventListener('click', () => {
+      if (!drawingMode) {
+        resetInteractionState();
+        polygonPoints = [];
+        polygonClosed = false;
+        drawingMode = true;
+        hoveredPointIndex = -1; draggingPointIndex = -1; isDragging = false;
+        zoneAlert.style.display = 'none';
+        hideFenceBanner();
+        drawZoneBtn.textContent = 'Finish drawing';
+        setOverlayVisible(true);
+        renderPolygonOnly();
+      } else {
+        drawingMode = false;
+        if (polygonPoints.length >= 3) polygonClosed = true;
+        drawZoneBtn.textContent = 'Draw zone';
+        renderPolygonOnly();
+      }
+    });
+    clearZoneBtn.addEventListener('click', () => {
+      resetInteractionState();
+      setDefaultPolygon();
+      zoneAlert.style.display = 'none';
+      hideFenceBanner();
+      drawZoneBtn.textContent = 'Draw zone';
+      renderPolygonOnly();
+    });
+
+    // Make sure canvas is visible for interactions from the start
+    setDefaultPolygon();
+    setOverlayVisible(true);
+  </script>
+</body>
+</html>
