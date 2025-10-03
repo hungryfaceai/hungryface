@@ -286,7 +286,7 @@ export class ReceiverCore {
         this.remoteDescriptionSet = true;
         this.lastAnswerSdp = msg.sdp;
         this.#stopOfferResendLoop();
-        this.#status('Got answer, applied.');
+        //this.#status('Got answer, applied.');
       
         for (const c of this.candidateQueue) {
           try { await this.pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
