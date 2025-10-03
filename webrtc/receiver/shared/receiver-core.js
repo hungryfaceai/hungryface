@@ -185,7 +185,7 @@ export class ReceiverCore {
     await this.pc.setLocalDescription(offer);
     await this.#sendCurrentOffer();
     this.#startOfferResendLoop();
-    this.#status('Offer sent, waiting for answer…');
+    //this.#status('Offer sent, waiting for answer…');
   }
 
   async #sendCurrentOffer() {
