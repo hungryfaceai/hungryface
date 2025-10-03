@@ -121,6 +121,44 @@
     })();
   </script>
 
+  <!-- ⬇️ PSK bootstrap (viewer); resolves room from query/Settings and installs shim -->
+  <script type="module">
+    import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+    import { requirePskOrRedirect } from '/hungryface/webrtc/shared/psk/require-psk.js';
+
+    const qs = new URLSearchParams(location.search);
+    const qsRoom   = (qs.get('room') || '').trim();
+    const stored   = (localStorage.getItem('bm_receiver_room') || '').trim();
+    const lastRoom = (localStorage.getItem('naptio:lastRoom') || '').trim();
+
+    const preferRoom = qsRoom || stored || lastRoom || '';
+
+    const env = await requirePskOrRedirect({
+      intent: 'viewer',
+      pairRoute: '/hungryface/webrtc/pairpsk/',
+      preferRoom,
+      fallbackRoom: 'Baby',
+    });
+
+    // Expose env + safe re-install hook (same API shape as sender)
+    window.__pskEnv = env;
+    window.__installPskForRoom = (room) => {
+      try { window.__pskUndo?.(); } catch {}
+      window.__pskUndo = installPskShim({ room });
+      console.log('[PSK][receiver-fence] shim installed for room:', room);
+      try {
+        localStorage.setItem('bm_receiver_room', room);
+        localStorage.setItem('naptio:lastRoom', room);
+      } catch {}
+    };
+
+    if (!env.redirected) {
+      const resolvedRoom = qsRoom || stored || lastRoom || env.room || 'Baby';
+      window.__installPskForRoom(resolvedRoom);
+      window.__pskRoom = resolvedRoom;
+    }
+  </script>
+  
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
     <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
@@ -156,7 +194,7 @@
 
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
-    const room = new URLSearchParams(location.search).get("room") || "Baby";
+    const room = window.__pskRoom || "Baby";
 
     const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     const WASM_DIR = TASKS_URL + "/wasm";
