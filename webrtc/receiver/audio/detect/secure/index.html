@@ -305,6 +305,44 @@
     </div>
   </div>
 
+  <!-- ⬇️ PSK bootstrap (viewer); resolves room from query/Settings and installs shim -->
+  <script type="module">
+    import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+    import { requirePskOrRedirect } from '/hungryface/webrtc/shared/psk/require-psk.js';
+
+    const qs = new URLSearchParams(location.search);
+    const qsRoom   = (qs.get('room') || '').trim();
+    const stored   = (localStorage.getItem('bm_receiver_room') || '').trim();
+    const lastRoom = (localStorage.getItem('naptio:lastRoom') || '').trim();
+
+    const preferRoom = qsRoom || stored || lastRoom || '';
+
+    const env = await requirePskOrRedirect({
+      intent: 'viewer',
+      pairRoute: '/hungryface/webrtc/pairpsk/',
+      preferRoom,
+      fallbackRoom: 'Baby',
+    });
+
+    // Expose env + safe re-install hook (same API shape as sender)
+    window.__pskEnv = env;
+    window.__installPskForRoom = (room) => {
+      try { window.__pskUndo?.(); } catch {}
+      window.__pskUndo = installPskShim({ room });
+      console.log('[PSK][receiver-fence] shim installed for room:', room);
+      try {
+        localStorage.setItem('bm_receiver_room', room);
+        localStorage.setItem('naptio:lastRoom', room);
+      } catch {}
+    };
+
+    if (!env.redirected) {
+      const resolvedRoom = qsRoom || stored || lastRoom || env.room || 'Baby';
+      window.__installPskForRoom(resolvedRoom);
+      window.__pskRoom = resolvedRoom;
+    }
+  </script>
+  
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <!-- External Help HTML (unchanged) -->
   <script type="module" src="./help-sheet.js"></script>
@@ -317,7 +355,7 @@
     /* ========= WebRTC (ReceiverCore) ========= */
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
-    const room = new URLSearchParams(location.search).get("room") || "Baby";
+    const room = window.__pskRoom || "Baby";
 
     const wrtc = { core:null, dc:null, stream:null, ctx:null, src:null, sink:null, node:null,
                    audioEnabled:true, where:'sender', connected:false };
