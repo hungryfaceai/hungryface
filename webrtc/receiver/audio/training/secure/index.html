@@ -699,16 +699,27 @@
     function PENALTY_KEY(){ return `cryPenalty_${getModelName()}`; }
 
     function loadModel() {
+      const name = getModelName();
       const raw = localStorage.getItem(MODEL_KEY());
-      if (raw) { try { return JSON.parse(raw); } catch {} }
+      const STARTER = {"Crying, sobbing":0.493,"Baby cry, infant cry":0.421,"Whimper":0.086};
+      if (raw) {
+        try {
+          const m = JSON.parse(raw);
+          if (name === 'default' && (!m.weights || !Object.keys(m.weights).length)) {
+            m.weights = STARTER; // seed starter if default was saved empty
+          }
+          return m;
+        } catch {}
+      }
+      // no saved record → bootstrap
       return {
         version: 1,
-        name: getModelName(),
+        name,
         halfLifeSec: Number(els.HALF_LIFE_S.value),
         K: Number(els.TOP_K.value),
         kPrior: Number(els.K_PRIOR.value),
         classes: {},
-        weights: { "Crying, sobbing": 0.493, "Baby cry, infant cry": 0.421, "Whimper": 0.086 },
+        weights: (name === 'default') ? STARTER : {},
         updatedAt: Date.now()
       };
     }
