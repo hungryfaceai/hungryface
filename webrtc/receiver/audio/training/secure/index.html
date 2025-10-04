@@ -20,6 +20,12 @@
     .btn[disabled] { opacity:.6; cursor:default; }
     .small { padding:8px 10px; font-size:13px; border-radius:10px; }
 
+    /* 🔴 Active state frame */
+    .btn.live {
+      border-color: #ff5252;
+      box-shadow: 0 0 0 2px rgba(255,82,82,0.2), 0 0 12px rgba(255,82,82,0.35);
+    }
+
     /* Pair layout */
     .btn-pair { display:flex; gap:10px; min-width:240px; }
     .btn-pair .btn { flex:1 1 0; min-width:120px; }
@@ -196,8 +202,8 @@
           </div>
 
           <div class="btn-pair" style="margin-left:auto;">
-            <button id="btnTrainStart" class="btn">Start</button>
-            <button id="btnTrainStop" class="btn">Stop</button>
+            <!-- Single toggle button -->
+            <button id="btnTrain" class="btn" aria-pressed="false">Start</button>
           </div>
         </div>
         <span id="trainInfo" class="muted"></span>
@@ -226,8 +232,8 @@
         <div class="subgroup">
           <strong>Calibrate thresholds</strong>
           <div class="btn-pair">
-            <button id="btnCal" class="btn">Start</button>
-            <button id="btnCalStop" class="btn">Stop</button>
+            <!-- Single toggle button -->
+            <button id="btnCal" class="btn" aria-pressed="false">Start</button>
           </div>
         </div>
 
@@ -264,8 +270,8 @@
         <div class="subgroup">
           <strong>Detection</strong>
           <div class="btn-pair">
-            <button id="btnStartDetect" class="btn">Start</button>
-            <button id="btnStop" class="btn">Stop</button>
+            <!-- Single toggle button -->
+            <button id="btnDetect" class="btn" aria-pressed="false">Start</button>
           </div>
           <span class="muted">Uses the active model & thresholds and the selected source (Mic or Sender).</span>
         </div>
@@ -536,14 +542,14 @@
       'status','statePill','rmsFill','SR_TARGET','FRAME_LEN_S','HOP_S',
       'CLASS_EMA_TAU_S','FUSED_EMA_TAU_S','ALERT_HOLD_MS',
       'CAL_SEC_SETTINGS','ALERT_OFF_DELTA','TOP_K','K_PRIOR','HALF_LIFE_S','MAX_RESULTS',
-      'btnStartDetect','btnStop','btnCal','btnCalStop','CAL_DUR_SLIDER','CAL_DUR_LABEL',
+      'btnDetect','btnCal','CAL_DUR_SLIDER','CAL_DUR_LABEL',
       'fileInp','folderInp','btnChooseFolder','btnChooseFile',
       'btnRecompute','btnClear','btnExport',
       'trainAudio','chart','bars','barsDynW','barsSavedW',
       'IGNORE_CLASSES','PENALTY_MAP','btnResetDefaults',
       'THR_OFF_SLIDER','THR_OFF_LABEL','THR_ON_SLIDER','THR_ON_LABEL',
       'MODEL_SELECT','CHART_WINDOW_S','cardLiveBars',
-      'TRAIN_SRC','btnTrainStart','btnTrainStop','trainInfo'
+      'TRAIN_SRC','btnTrain','trainInfo'
     ].map(x => [x, document.getElementById(x)])) )();
 
     // Persist/consult who is doing inference when using Sender (WebRTC). //https://chatgpt.com/c/68c0b810-7a90-8325-abde-e96235904c27
@@ -876,6 +882,22 @@
       chartCap: 0
     };
 
+    /* ====== Toggle button helpers ====== */
+    function setLiveBtn(btn, on){
+      if (!btn) return;
+      btn.classList.toggle('live', !!on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.textContent = on ? 'Stop' : 'Start';
+    }
+    function updateToggleButtonsUI(){
+      const trainingOn = (state.mode === 'train' || state.mode === 'train_file' || state.mode === 'train_folder');
+      const detectOn = (state.mode === 'detect');
+      const calOn = !!state.calActive;
+      setLiveBtn(els.btnTrain, trainingOn);
+      setLiveBtn(els.btnDetect, detectOn);
+      setLiveBtn(els.btnCal, calOn);
+    }
+
     /* ====== Time-windowed chart helpers ====== */
     function hhmmss(tMs){
       const d = new Date(tMs);
@@ -1175,6 +1197,7 @@
       state.calVals = [];
       setStatus(`Quiet calibration for ${durSec}s… Please keep things quiet.`);
       enableThrSliders(false);
+      updateToggleButtonsUI();
 
       await startInputForMode('detect'); // Mic or Sender
       setStatus(`Quiet calibration for ${durSec}s… Please keep things quiet.`);
@@ -1184,8 +1207,9 @@
       const updateBtn = () => {
         if (!state.calActive) return;
         const left = Math.max(0, durSec - Math.floor((performance.now() - startedAt)/1000));
-        els.btnCal.textContent = `Calibration… (${left}s)`;
-        els.btnCal.disabled = true;
+        // Keep button label as "Stop" per single-toggle UX
+        // els.btnCal.textContent = `Stop (${left}s)`; // (optional if you want a countdown)
+								   
       };
       updateBtn();
       state.calCountdownId = setInterval(updateBtn, 250);
@@ -1194,7 +1218,7 @@
         const vals = state.calVals.slice();
         state.calActive = false;
         clearInterval(state.calCountdownId); state.calCountdownId = null;
-        els.btnCal.disabled = false; els.btnCal.textContent = 'Start';
+        // Keep button enabled for single-toggle UX
         state.calTimerId = null;
 
         if (!vals.length) {
@@ -1207,6 +1231,7 @@
           await stopAll();
           setPill('idle', false);
           log('warn', 'Calibration captured 0 frames; using defaults.');
+          updateToggleButtonsUI();
           return;
         }
 
@@ -1225,6 +1250,7 @@
         await stopAll();
         setPill('idle', false);
         setStatus('Calibration done. Adjust thresholds if needed, then start detection.');
+        updateToggleButtonsUI();
       }, durSec * 1000);
     }
     function stopCalibrationEarly(){
@@ -1232,10 +1258,11 @@
       state.calActive = false;
       if (state.calTimerId) { clearTimeout(state.calTimerId); state.calTimerId = null; }
       if (state.calCountdownId) { clearInterval(state.calCountdownId); state.calCountdownId = null; }
-      els.btnCal.disabled = false; els.btnCal.textContent = 'Start';
+																	
       enableThrSliders(true);
       setPill('idle', false);
       stopAll();
+      updateToggleButtonsUI();
     }
 
     /* ========= Classify loop & modes ========= */
@@ -1330,6 +1357,7 @@
       log('ok', `Mic started in ${mode.toUpperCase()} mode.`);
       if (mode === 'train') setStatus('Training started (mic).');
       else if (mode === 'detect' && !state.calActive) setStatus('Detection started (mic).');
+      updateToggleButtonsUI();
     }
 
     async function stopMicOnly(){
@@ -1350,6 +1378,7 @@
       setPill('idle', false); setRMS(0);
       clearTopBars(); setupChart();
       if (wasRunning) log('warn','Stopped audio graph.');
+      updateToggleButtonsUI();
     }
 
     /* ========= Training on FILE/FOLDER ========= */
@@ -1411,6 +1440,7 @@
       setPill('training', true);
       setStatus(`Training started (file): ${file.name}`);
       log('ok', `Training started on file: ${file.name}`, `<span class="chip">${(file.size/1024/1024).toFixed(2)} MB</span>`);
+      updateToggleButtonsUI();
 
       els.trainAudio.onended = async () => {
         await stopFilePlayback();
@@ -1418,6 +1448,7 @@
         setPill('idle', false);
         state.mode='idle';
         clearTopBars();
+        updateToggleButtonsUI();
       };
 
       try { await els.trainAudio.play(); } catch {}
@@ -1435,6 +1466,7 @@
     
       if (wasTraining) state.mode = 'idle';
       if (!silent && wasTraining) setStatus('Training stopped.');
+      updateToggleButtonsUI();
     }
 
     /* ========= Folder training ========= */
@@ -1474,6 +1506,7 @@
       setPill('training', true);
       setStatus(`Training started (folder): ${folderFiles.length} file(s).`);
       log('ok', `Folder training queued: ${folderFiles.length} file(s) from “${describeCommonRoot(folderFiles)}”.`);
+      updateToggleButtonsUI();
       await trainNextFileInFolder();
     }
 
@@ -1510,6 +1543,7 @@
         log('warn','Stopped folder training.');
         setStatus('Training stopped.');
       }
+      updateToggleButtonsUI();
     }
 
     /* ========= Params & UI wiring ========= */
@@ -1522,16 +1556,30 @@
       };
     }
 
-    // Detect / Calibrate
-    els.btnStartDetect.onclick = () => startDetectBasedOnSource();
-    els.btnStop.onclick = async () => {
-      await stopFolderTraining(true); // silent stop if folder training was active
-      //await stopFilePlayback();
-      await stopAll();
-      setStatus('Detection stopped.');
+    // Detect / Calibrate — single toggle buttons
+																  
+    els.btnDetect.onclick = async () => {
+      if (state.mode === 'detect') {
+        await stopFolderTraining(true);
+        await stopFilePlayback();
+        await stopAll();
+        setStatus('Detection stopped.');
+      } else {
+        await stopFolderTraining(true);
+        await stopFilePlayback();
+        await startInputForMode('detect');
+        setPill('idle', false);
+      }
+      updateToggleButtonsUI();
     };
-    els.btnCal.onclick = () => quietCalibrate();
-    els.btnCalStop.onclick = () => stopCalibrationEarly();
+												
+														  
+
+    els.btnCal.onclick = () => {
+      if (state.calActive) stopCalibrationEarly();
+      else quietCalibrate();
+      updateToggleButtonsUI();
+    };
 
     // Training source UI
     function updateTrainingSourceUI(){
@@ -1549,8 +1597,8 @@
         els.trainInfo.textContent = count ? `${count} audio file(s) selected from “${describeCommonRoot(folderFiles)}”.` : 'Choose a folder with audio files.';
       }
       if (v === 'sender') {
-        //els.trainInfo.textContent = `Sender mode. Room “${room}”. Waiting for stream or scores…`;
-        // Read current “where” (sender|receiver); default to sender
+																										 
+																		
         const where = (localStorage.getItem('cryInferWhere') || 'sender') === 'receiver'
           ? 'receiver (from streamed audio)'
           : 'sender (scores via data channel)';
@@ -1579,9 +1627,22 @@
       log('info', els.trainInfo.textContent);
     };
 
-    // Training Start/Stop (based on source)
-    els.btnTrainStart.onclick = async () => {
+    // Training single toggle
+    els.btnTrain.onclick = async () => {
       const src = els.TRAIN_SRC.value;
+      const trainingActive = (state.mode === 'train' || state.mode === 'train_file' || state.mode === 'train_folder');
+
+      if (trainingActive) {
+        if (src === 'mic') await stopAll();
+        else if (src === 'file') await stopFilePlayback();
+        else if (src === 'folder') await stopFolderTraining();
+        else if (src === 'sender') { await stopAll(); }
+        setStatus('Training stopped');
+        updateToggleButtonsUI();
+        return;
+      }
+
+      // Start training
       if (src === 'mic') {
         await startMic('train');
       } else if (src === 'file') {
@@ -1596,19 +1657,19 @@
         state.mode = 'train';
         setPill('training', true);
         setStatus('Training started (sender).');
-        // If sender selected "receiver" path, we classify the remote audio here:
+																				 
         if (wrtc.where === 'receiver' && wrtc.stream) {
           await startRemoteAudioTap('train');
         }
       }
-    };
-    els.btnTrainStop.onclick = async () => {
-      const src = els.TRAIN_SRC.value;
-      if (src === 'mic') await stopAll();
-      else if (src === 'file') await stopFilePlayback();
-      else if (src === 'folder') await stopFolderTraining();
-      else if (src === 'sender') { await stopAll(); }
-      setStatus('Training stopped');
+      updateToggleButtonsUI();
+											
+									  
+										 
+														
+															
+													 
+									
     };
 
     // Recompute / Clear / Export
@@ -1875,6 +1936,7 @@
       setupChart();
       if (mode === 'train') setStatus('Training started (sender audio → local inference).');
       if (mode === 'detect' && !state.calActive) setStatus('Detection started (sender audio → local inference).');
+      updateToggleButtonsUI();
     }
 
     async function stopRemoteAudioTap(){
@@ -1896,6 +1958,7 @@
         state.mode = mode;
         if (mode === 'detect' && !state.calActive) setStatus('Detection started (sender).');
         if (mode === 'train') setStatus('Training started (sender).');
+        updateToggleButtonsUI();
         return;
       }
       // file/folder not applicable here
@@ -1907,6 +1970,7 @@
       await stopFilePlayback();
       await startInputForMode('detect');
       setPill('idle', false);
+      updateToggleButtonsUI();
     }
 
     /* ========= Boot ========= */
@@ -1934,6 +1998,7 @@
 
       hideLiveBars();
       setStatus('Ready. Train (mic/file/folder/sender) → Recompute Weights → Quiet Calibrate → Start detection.');
+      updateToggleButtonsUI();
     })();
   </script>
 </body>
