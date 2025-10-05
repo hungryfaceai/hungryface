@@ -815,41 +815,90 @@
     }
 
     /* ========= Threshold slider helpers ========= */
+    /* ========= Threshold inputs (numbers) ========= */
+    // Keep this for programmatic updates (boot/model switch). Do NOT call it during typing.
     function setThrUI() {
       els.THR_OFF_SLIDER.value = String(state.thrOff.toFixed(2));
       els.THR_ON_SLIDER.value  = String(state.thrOn.toFixed(2));
-      els.THR_OFF_LABEL.textContent = state.thrOff.toFixed(2);
-      els.THR_ON_LABEL.textContent  = state.thrOn.toFixed(2);
     }
-    function persistThresholds(extra={}) {
+    
+    // Persist calibration to localStorage
+    function persistThresholds(extra = {}) {
       const prev = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null') || {};
       const payload = { ...prev, version: 1, thr_on: state.thrOn, thr_off: state.thrOff, at: new Date().toISOString(), ...extra };
       localStorage.setItem(CALIB_KEY(), JSON.stringify(payload));
       log('ok','Saved thresholds.', `<div class="log-code">${JSON.stringify(payload, null, 2)}</div>`);
     }
-
-    function updateChartThresholdLines(){ //https://chatgpt.com/c/68c1a641-4560-8322-a46e-2c0160afdb2b
+    
+    // Update the dashed threshold lines on the chart
+    function updateChartThresholdLines(){
       if (!state.chart) return;
       const n = state.chart.data.labels?.length || state.chartCap || computeChartCap();
       state.chart.data.datasets[2].data = new Array(n).fill(state.thrOn);  // thr ON
       state.chart.data.datasets[3].data = new Array(n).fill(state.thrOff); // thr OFF
       state.chart.update();
     }
+    
+    /* Allow free typing:
+       - On 'input': only update state if the value parses; never write back (no rounding).
+       - Enforce thrOn >= thrOff in state; if we change the *other* threshold, reflect it in its field (safe; not focused).
+       - On 'change'/'blur': clamp [0,1], round to 2dp, write back, persist. */
+    
     els.THR_OFF_SLIDER.addEventListener('input', () => {
-      state.thrOff = clamp01(parseFloat(els.THR_OFF_SLIDER.value) || 0);
-      if (state.thrOn < state.thrOff) state.thrOn = state.thrOff;
-      setThrUI();
-      updateChartThresholdLines(); //https://chatgpt.com/c/68c1a641-4560-8322-a46e-2c0160afdb2b
+      const v = parseFloat(els.THR_OFF_SLIDER.value);
+      if (!Number.isFinite(v)) return;                    // let the user keep typing
+      state.thrOff = clamp01(v);
+      if (state.thrOn < state.thrOff) {
+        state.thrOn = state.thrOff;
+        // Update the other field (not the one being typed in)
+        if (document.activeElement !== els.THR_ON_SLIDER) {
+          els.THR_ON_SLIDER.value = state.thrOn.toFixed(2);
+        }
+      }
+      updateChartThresholdLines();
     });
+    
     els.THR_ON_SLIDER.addEventListener('input', () => {
-      state.thrOn = clamp01(parseFloat(els.THR_ON_SLIDER.value) || 0);
-      if (state.thrOn < state.thrOff) state.thrOff = state.thrOn;
-      setThrUI();
-      updateChartThresholdLines(); //https://chatgpt.com/c/68c1a641-4560-8322-a46e-2c0160afdb2b
+      const v = parseFloat(els.THR_ON_SLIDER.value);
+      if (!Number.isFinite(v)) return;
+      state.thrOn = clamp01(v);
+      if (state.thrOn < state.thrOff) {
+        state.thrOff = state.thrOn;
+        if (document.activeElement !== els.THR_OFF_SLIDER) {
+          els.THR_OFF_SLIDER.value = state.thrOff.toFixed(2);
+        }
+      }
+      updateChartThresholdLines();
     });
+    
     ['change','blur'].forEach(evt => {
-      els.THR_OFF_SLIDER.addEventListener(evt, () => { persistThresholds(); });
-      els.THR_ON_SLIDER.addEventListener(evt,  () => { persistThresholds(); });
+      els.THR_OFF_SLIDER.addEventListener(evt, () => {
+        let v = parseFloat(els.THR_OFF_SLIDER.value);
+        if (!Number.isFinite(v)) v = state.thrOff;
+        v = clamp01(v);
+        state.thrOff = v;
+        if (state.thrOn < v) {
+          state.thrOn = v;
+          els.THR_ON_SLIDER.value = v.toFixed(2);
+        }
+        els.THR_OFF_SLIDER.value = v.toFixed(2);
+        updateChartThresholdLines();
+        persistThresholds();
+      });
+    
+      els.THR_ON_SLIDER.addEventListener(evt, () => {
+        let v = parseFloat(els.THR_ON_SLIDER.value);
+        if (!Number.isFinite(v)) v = state.thrOn;
+        v = clamp01(v);
+        state.thrOn = v;
+        if (v < state.thrOff) {
+          state.thrOff = v;
+          els.THR_OFF_SLIDER.value = v.toFixed(2);
+        }
+        els.THR_ON_SLIDER.value = v.toFixed(2);
+        updateChartThresholdLines();
+        persistThresholds();
+      });
     });
 
     /* ========= Common categories handler ========= */
