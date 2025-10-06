@@ -62,7 +62,7 @@ export function setupAlertBanner() {
     .alert-banner input.banner-input[type="number"] {
       width: 64px; padding: 4px 6px; border-radius: 8px;
       border: 1px solid #222;
-      background: #0b0b0b;  /* solid dark, matches audio page */
+      background: #7f1d1d;  /* #0b0b0b solid dark, matches audio page */
       color: #fff;
       font: inherit; -moz-appearance: textfield;
     }
