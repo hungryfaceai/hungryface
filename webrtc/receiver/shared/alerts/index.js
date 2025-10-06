@@ -1,7 +1,7 @@
 // webrtc/receiver/shared/alerts/index.js
 // Public surface for shared Alerts UI + store + banner
 
-import { setupAlertBanner, showAlertBanner as _showAlertBanner, hideAlertBanner } from './banner.js';
+import { setupAlertBanner, showAlertBanner as _showAlertBanner, hideAlertBanner, setAlertBannerText } from './banner.js';
 import { setupAlertsDrawer, refreshAlertsBadge } from './drawer.js';
 import { getAllAlerts, addAlert, updateAlert, clearAllAlerts, AlertTypes } from './store.js';
 import { mountAlertsPill } from './pill.js';
@@ -60,8 +60,8 @@ export async function finishAlert(id, { avgScore = 0, message = '' } = {}) {
 
 /** Red banner (styled like audio page) */
 export function showAlertBanner(whenMs = Date.now()) {
-  _showAlertBanner(whenMs);
+  _showAlertBanner(whenMs, text);
 }
 
 // re-exports for convenience / compatibility
-export { refreshAlertsBadge, getAllAlerts, clearAllAlerts, AlertTypes, hideAlertBanner };
+export { refreshAlertsBadge, getAllAlerts, clearAllAlerts, AlertTypes, hideAlertBanner, setAlertBannerText };
