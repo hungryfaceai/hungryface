@@ -21,6 +21,11 @@
     .btn:active { transform:scale(.98); }
     .btn[disabled] { opacity:.6; cursor:default; }
     .small { padding:8px 10px; font-size:13px; border-radius:10px; }
+    /* live state for toggle button */
+    .btn.live {
+      border-color: #ff5252;
+      box-shadow: 0 0 0 2px rgba(255,82,82,0.2), 0 0 12px rgba(255,82,82,0.35);
+    }
 
     .status-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
     .meter { height:10px; border-radius:8px; background:#0a0a0a; border:1px solid #222; overflow:hidden; }
@@ -36,7 +41,6 @@
     input[type="number"], input[type="text"] { padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; }
     select { padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; }
     .slider-wrap { display:flex; align-items:center; gap:10px; }
-    input[type="range"] { width:220px; }
 
     .chart-wrap { position: relative; }
     .chart-wrap > canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; display: block; background:#0a0a0a; border-radius:10px; }
@@ -57,7 +61,6 @@
     @media (max-width:560px){
       .subgroup { flex-direction:column; align-items:stretch; }
       .subgroup strong { min-width:unset; }
-      input[type="range"] { width:100%; }
       select, input[type="number"], input[type="text"] { width:100%; box-sizing:border-box; }
     }
 
@@ -172,8 +175,7 @@
         <div class="subgroup">
           <strong>Detection</strong>
           <div class="row" style="gap:10px;">
-            <button id="btnStartDetect" class="btn">Start</button>
-            <button id="btnStop" class="btn">Stop</button>
+            <button id="btnDetect" class="btn" aria-pressed="false">Start</button>
           </div>
           <span class="muted"></span>
         </div>
@@ -186,13 +188,11 @@
           <strong>Hysteresis</strong>
           <div class="slider-wrap">
             <span class="muted" style="min-width:28px;">OFF</span>
-            <input id="THR_OFF_SLIDER" type="range" min="0" max="1" step="0.01" />
-            <span id="THR_OFF_LABEL">0.25</span>
+            <input id="THR_OFF_SLIDER" type="number" min="0" max="1" step="0.01" value="0.25" style="width:84px;" inputmode="decimal" />
           </div>
           <div class="slider-wrap">
             <span class="muted" style="min-width:28px;">ON</span>
-            <input id="THR_ON_SLIDER" type="range" min="0" max="1" step="0.01" />
-            <span id="THR_ON_LABEL">0.35</span>
+            <input id="THR_ON_SLIDER" type="number" min="0" max="1" step="0.01" value="0.35" style="width:84px;" inputmode="decimal" />
           </div>
           <span class="muted"></span>
         </div>
@@ -251,7 +251,7 @@
       <div class="card">
         <div class="row" style="justify-content:space-between; width:100%;">
           <h2 style="margin:0;">Logs</h2>
-          <button id="btnToggleLogs" class="btn">Display logs</button>
+        <button id="btnToggleLogs" class="btn">Display logs</button>
         </div>
         <div id="logsContainer" class="log-panel" style="display:none">
           <div class="log-toolbar">
@@ -439,8 +439,8 @@
     const els = (id => Object.fromEntries([
       'status','statePill','rmsFill','SR_TARGET','FRAME_LEN_S','HOP_S',
       'CLASS_EMA_TAU_S','FUSED_EMA_TAU_S','ALERT_HOLD_MS','ALERT_OFF_DELTA','MAX_RESULTS',
-      'btnStartDetect','btnStop','chart','bars','barsSavedW','PENALTY_MAP',
-      'THR_OFF_SLIDER','THR_OFF_LABEL','THR_ON_SLIDER','THR_ON_LABEL',
+      'btnDetect','chart','bars','barsSavedW','PENALTY_MAP',
+      'THR_OFF_SLIDER','THR_ON_SLIDER',
       'MODEL_SELECT','CHART_WINDOW_S','TRAIN_SRC','trainInfo',
       'btnToggleLiveBars','btnToggleSavedW','liveBarsWrap','savedWWrap'
     ].map(x => [x, document.getElementById(x)])) )();
@@ -743,7 +743,7 @@
           options: {
             indexAxis:'y', responsive:true, maintainAspectRatio:false, animation:false,
             plugins:{ legend:{display:false}, pctLabel:{enabled: true, font:'11px system-ui', color:'#bbb'} },
-            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}, ticks:{ font:{ size:11 } } }, y:{ ticks:{ autoSkip:false, font:{ size:11 } } } }
+            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}, ticks:{ font:{ size:11 } } } , y:{ ticks:{ autoSkip:false, font:{ size:11 } } } }
           }
         });
       }
@@ -813,41 +813,90 @@
     }
 
     /* ========= Threshold slider helpers ========= */
+    /* ========= Threshold inputs (numbers) ========= */
+    // Keep this for programmatic updates (boot/model switch). Do NOT call it during typing.
     function setThrUI() {
       els.THR_OFF_SLIDER.value = String(state.thrOff.toFixed(2));
       els.THR_ON_SLIDER.value  = String(state.thrOn.toFixed(2));
-      els.THR_OFF_LABEL.textContent = state.thrOff.toFixed(2);
-      els.THR_ON_LABEL.textContent  = state.thrOn.toFixed(2);
     }
-    function persistThresholds(extra={}) {
+    
+    // Persist calibration to localStorage
+    function persistThresholds(extra = {}) {
       const prev = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null') || {};
       const payload = { ...prev, version: 1, thr_on: state.thrOn, thr_off: state.thrOff, at: new Date().toISOString(), ...extra };
       localStorage.setItem(CALIB_KEY(), JSON.stringify(payload));
       log('ok','Saved thresholds.', `<div class="log-code">${JSON.stringify(payload, null, 2)}</div>`);
     }
-
-    function updateChartThresholdLines(){ //https://chatgpt.com/c/68c1a641-4560-8322-a46e-2c0160afdb2b
+    
+    // Update the dashed threshold lines on the chart
+    function updateChartThresholdLines(){
       if (!state.chart) return;
       const n = state.chart.data.labels?.length || state.chartCap || computeChartCap();
       state.chart.data.datasets[2].data = new Array(n).fill(state.thrOn);  // thr ON
       state.chart.data.datasets[3].data = new Array(n).fill(state.thrOff); // thr OFF
       state.chart.update();
     }
+    
+    /* Allow free typing:
+       - On 'input': only update state if the value parses; never write back (no rounding).
+       - Enforce thrOn >= thrOff in state; if we change the *other* threshold, reflect it in its field (safe; not focused).
+       - On 'change'/'blur': clamp [0,1], round to 2dp, write back, persist. */
+    
     els.THR_OFF_SLIDER.addEventListener('input', () => {
-      state.thrOff = clamp01(parseFloat(els.THR_OFF_SLIDER.value) || 0);
-      if (state.thrOn < state.thrOff) state.thrOn = state.thrOff;
-      setThrUI();
-      updateChartThresholdLines(); //https://chatgpt.com/c/68c1a641-4560-8322-a46e-2c0160afdb2b
+      const v = parseFloat(els.THR_OFF_SLIDER.value);
+      if (!Number.isFinite(v)) return;                    // let the user keep typing
+      state.thrOff = clamp01(v);
+      if (state.thrOn < state.thrOff) {
+        state.thrOn = state.thrOff;
+        // Update the other field (not the one being typed in)
+        if (document.activeElement !== els.THR_ON_SLIDER) {
+          els.THR_ON_SLIDER.value = state.thrOn.toFixed(2);
+        }
+      }
+      updateChartThresholdLines();
     });
+    
     els.THR_ON_SLIDER.addEventListener('input', () => {
-      state.thrOn = clamp01(parseFloat(els.THR_ON_SLIDER.value) || 0);
-      if (state.thrOn < state.thrOff) state.thrOff = state.thrOn;
-      setThrUI();
-      updateChartThresholdLines(); //https://chatgpt.com/c/68c1a641-4560-8322-a46e-2c0160afdb2b
+      const v = parseFloat(els.THR_ON_SLIDER.value);
+      if (!Number.isFinite(v)) return;
+      state.thrOn = clamp01(v);
+      if (state.thrOn < state.thrOff) {
+        state.thrOff = state.thrOn;
+        if (document.activeElement !== els.THR_OFF_SLIDER) {
+          els.THR_OFF_SLIDER.value = state.thrOff.toFixed(2);
+        }
+      }
+      updateChartThresholdLines();
     });
+    
     ['change','blur'].forEach(evt => {
-      els.THR_OFF_SLIDER.addEventListener(evt, () => { persistThresholds(); });
-      els.THR_ON_SLIDER.addEventListener(evt,  () => { persistThresholds(); });
+      els.THR_OFF_SLIDER.addEventListener(evt, () => {
+        let v = parseFloat(els.THR_OFF_SLIDER.value);
+        if (!Number.isFinite(v)) v = state.thrOff;
+        v = clamp01(v);
+        state.thrOff = v;
+        if (state.thrOn < v) {
+          state.thrOn = v;
+          els.THR_ON_SLIDER.value = v.toFixed(2);
+        }
+        els.THR_OFF_SLIDER.value = v.toFixed(2);
+        updateChartThresholdLines();
+        persistThresholds();
+      });
+    
+      els.THR_ON_SLIDER.addEventListener(evt, () => {
+        let v = parseFloat(els.THR_ON_SLIDER.value);
+        if (!Number.isFinite(v)) v = state.thrOn;
+        v = clamp01(v);
+        state.thrOn = v;
+        if (v < state.thrOff) {
+          state.thrOff = v;
+          els.THR_OFF_SLIDER.value = v.toFixed(2);
+        }
+        els.THR_ON_SLIDER.value = v.toFixed(2);
+        updateChartThresholdLines();
+        persistThresholds();
+      });
     });
 
     /* ========= Common categories handler ========= */
@@ -867,9 +916,9 @@
       const weights = model.weights || {"Baby cry, infant cry":1};
       const { raw, sm } = fusedScoreFromCategories(cats, weights, HOP_S);
 
-      const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+      /*const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
       if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; }
-      else { state.thrOn = 0.35; state.thrOff = Math.max(0, state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1)); }
+      else { state.thrOn = 0.35; state.thrOff = Math.max(0, state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1)); }*/
 
       pushChart(Date.now(), raw, sm);
 
@@ -1042,6 +1091,7 @@
       state.asmLastLogTs = 0; state.scoreLastLogTs = 0;
       setRMS(0); clearTopBars(); setupChart();
       if (wasRunning) log('warn','Stopped audio graph.');
+      updateDetectButtonUI();
     }
 
     /* ========= WebRTC integration ========= */
@@ -1052,7 +1102,7 @@
       if (state.mode !== 'detect') {
         log('info', '[RUN] First score arrived; starting detection (sender).');
         try { startDetectBasedOnSource(); } catch {}
-        if (els.btnStartDetect) els.btnStartDetect.disabled = true; // keep Start greyed out while running
+        updateDetectButtonUI();
         return;
       }
     
@@ -1109,15 +1159,6 @@
             }
     
           } else if (msg.type === 'audio') {
-            /*setInferWhere('sender');
-            if (els.TRAIN_SRC.value === 'sender' && state.mode === 'detect') {
-              setStatus('Connected to sender');
-              const categories = (msg.categories || []).map(c => ({
-                categoryName: (c.displayName || c.categoryName || '').trim(),
-                score: c.score || 0
-              }));
-              onCategories(categories);
-              }*/
               // Force sender mode on first score and make sure detection is actually running.
               setInferWhere('sender');
               wrtc.where = 'sender'; 
@@ -1220,15 +1261,22 @@
       }
     }
 
-    /* ========= UI wiring ========= */
-    els.btnStartDetect.onclick = async () => {
-      els.btnStartDetect.disabled = true;
-      await startDetectBasedOnSource();
-    };
-    els.btnStop.onclick = async () => {
-      await stopAll();
-      setStatus('Detection stopped.');
-      els.btnStartDetect.disabled = false; // re-enable Start after stop
+    /* ========= Detect toggle button ========= */
+    function updateDetectButtonUI(){
+      const active = (state.mode === 'detect');
+      els.btnDetect.textContent = active ? 'Stop' : 'Start';
+      els.btnDetect.classList.toggle('live', active);
+      els.btnDetect.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+    els.btnDetect.onclick = async () => {
+      const active = (state.mode === 'detect');
+      if (!active) {
+        await startDetectBasedOnSource();
+      } else {
+        await stopAll();
+        setStatus('Detection stopped.');
+      }
+      updateDetectButtonUI();
     };
 
     // Live bars / Saved weights toggles
@@ -1305,7 +1353,7 @@
       const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
       if (calib) {
         state.thrOn=calib.thr_on; state.thrOff=calib.thr_off;
-        log('ok',`Loaded thresholds for “${getModelName()}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`);
+        log('ok',`Loaded thresholds for “${getModelName()}”.`, `<div class="log-code">${JSON.stringify(calib, null, 2)}</div>`);
       } else {
         const offDelta = Number(els.ALERT_OFF_DELTA.value) || 0.10;
         state.thrOn = 0.35; state.thrOff = Math.max(0, state.thrOn - offDelta);
@@ -1325,8 +1373,7 @@
 
       setStatus('Ready. Detection will auto-start…');
       // === AUTO-START DETECTION ===
-      els.btnStartDetect.disabled = true; // greyed out while running
-      startDetectBasedOnSource();
+      startDetectBasedOnSource().then(updateDetectButtonUI).catch(()=>{});
     })();
   </script>
 </body>
