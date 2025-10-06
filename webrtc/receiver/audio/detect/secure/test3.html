@@ -349,8 +349,17 @@
 
   <script type="module">
     /* ========= Imports for banner + drawer ========= */
-    import { setupAudioBanner, showAudioBanner, hideAudioBanner, saveAlertRecord } from './alert-banner.js';
-    import { setupAlertsDrawer, refreshAlertsBadge } from './alerts-drawer.js';
+    //import { setupAlertBanner, showAudioBanner, hideAlertBanner, saveAlertRecord } from './alert-banner.js'; //https://chatgpt.com/c/68e3987c-33dc-832e-9a7d-01180a2f901d
+    //import { setupAlertsDrawer, refreshAlertsBadge } from './alerts-drawer.js';
+    /* ========= Shared alerts (same as motion page) ========= */
+    import {
+      setupAlertBanner,
+      showAlertBanner,
+      hideAlertBanner,
+      setupAlertsDrawer,
+      refreshAlertsBadge,
+      saveAlertRecord
+    } from '/hungryface/webrtc/receiver/shared/alerts/index.js';
 
     /* ========= WebRTC (ReceiverCore) ========= */
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
@@ -938,7 +947,7 @@
         state.alertStartMs = Date.now();
         state.alertSum = 0;
         state.alertCount = 0;
-        showAudioBanner(state.alertStartMs);
+        showAlertBanner(state.alertStartMs);
         log('ok','ALERT ON (cry detected).');
       }
       // Accumulate while ON
@@ -951,14 +960,18 @@
         const startAt = state.alertStartMs || Date.now();
         const endAt   = Date.now();
         const avg     = state.alertCount > 0 ? (state.alertSum / state.alertCount) : sm;
-        hideAudioBanner();
+        hideAlertBanner();
         const record = {
           type: 'audio detection',
           startAt: new Date(startAt).toISOString(),
           endAt:   new Date(endAt).toISOString(),
           avgScore: Number(avg.toFixed(4))
         };
-        saveAlertRecord(record);
+        // Save alert + refresh the badge like motion page
+        try {
+          const p = saveAlertRecord(record);
+          Promise.resolve(p).then(() => refreshAlertsBadge()).catch(()=>{});
+        } catch {}
         log('warn','ALERT OFF.', `<div class="log-code">${JSON.stringify(record, null, 2)}</div>`);
         state.alertStartMs = 0;
         state.alertSum = 0;
@@ -1075,7 +1088,8 @@
           avgScore: Number(avg.toFixed(4))
         };
         try { await saveAlertRecord(record); } catch {}
-        hideAudioBanner();
+        try { refreshAlertsBadge(); } catch {}
+        hideAlertBanner();
         log('warn', 'ALERT OFF (stop).', `<div class="log-code">${JSON.stringify(record, null, 2)}</div>`);
         state.alertOn = false;
         state.alertStartMs = 0;
@@ -1340,7 +1354,7 @@
     /* ========= Boot ========= */
     (function boot(){
       // Inject external UI & styles
-      setupAudioBanner();
+      setupAlertBanner();
       setupAlertsDrawer();
 
       const active = localStorage.getItem('cryActiveModelName') || 'default';
