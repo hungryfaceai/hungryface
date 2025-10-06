@@ -7,6 +7,7 @@ const LS_KEY_SNOOZE_MIN  = 'naptio-alerts-snooze-mins';
 
 let bannerEl = null;
 let timeEl = null;
+let labelEl = null;
 let dismissBtn = null;
 let minsInput = null;
 
@@ -58,10 +59,11 @@ export function setupAlertBanner() {
     }
     .banner-link:active { transform: scale(0.98); }
     .banner-inline { display: inline-flex; gap: 6px; align-items: center; }
-    .banner-input {
+    .alert-banner input.banner-input[type="number"] {
       width: 64px; padding: 4px 6px; border-radius: 8px;
-      border: 1px solid rgba(255,255,255,0.35);
-      background: rgba(0,0,0,0.1); color: #fff;
+      border: 1px solid #222;
+      background: #0b0b0b;  /* solid dark, matches audio page */
+      color: #fff;
       font: inherit; -moz-appearance: textfield;
     }
     .banner-input::-webkit-outer-spin-button,
@@ -74,7 +76,8 @@ export function setupAlertBanner() {
   wrap.innerHTML = `
     <div id="alertBanner" class="alert-banner hidden" role="alert" aria-live="assertive">
       <div class="alert-banner__text">
-        Alert — Motion detected at <span id="alertBannerTime">--:--</span>.
+        Alert — <span id="alertBannerLabel">Cue detected</span>
+        at <span id="alertBannerTime">--:--</span>.
       </div>
       <div class="alert-banner__actions">
         <label class="banner-inline" for="alertsDismissMins">
@@ -91,6 +94,7 @@ export function setupAlertBanner() {
 
   bannerEl = node;
   timeEl = node.querySelector('#alertBannerTime');
+  labelEl = node.querySelector('#alertBannerLabel');
   dismissBtn = node.querySelector('#alertDismissBtn');
   minsInput = node.querySelector('#alertsDismissMins');
 
@@ -109,11 +113,16 @@ export function setupAlertBanner() {
   });
 }
 
-export function showAlertBanner(whenMs = Date.now()) {
+export function showAlertBanner(whenMs = Date.now(), text) {
   if (!bannerEl) setupAlertBanner();
   if (Date.now() < suppressUntil) return; // snoozed
   if (timeEl) timeEl.textContent = fmtHM(whenMs);
+  if (text && labelEl) labelEl.textContent = text;
   bannerEl?.classList.remove('hidden');
+}
+export function setAlertBannerText(t) {
+  if (!bannerEl) setupAlertBanner();
+  if (labelEl) labelEl.textContent = String(t || '');
 }
 
 export function hideAlertBanner() {
