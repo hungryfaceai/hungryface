@@ -76,7 +76,7 @@ export function setupAlertBanner() {
   wrap.innerHTML = `
     <div id="alertBanner" class="alert-banner hidden" role="alert" aria-live="assertive">
       <div class="alert-banner__text">
-        Alert — <span id="alertBannerLabel">Cue detected</span>
+        Alert — <span id="alertBannerLabel">Motion detected</span>
         at <span id="alertBannerTime">--:--</span>.
       </div>
       <div class="alert-banner__actions">
