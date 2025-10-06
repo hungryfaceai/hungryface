@@ -59,9 +59,9 @@ export async function finishAlert(id, { avgScore = 0, message = '' } = {}) {
 }
 
 /** Red banner (styled like audio page) */
-export function showAlertBanner(whenMs = Date.now()) {
+export function showAlertBanner(whenMs = Date.now(), text) {
   _showAlertBanner(whenMs, text);
 }
 
 // re-exports for convenience / compatibility
-export { refreshAlertsBadge, getAllAlerts, clearAllAlerts, AlertTypes, hideAlertBanner, setAlertBannerText };
+export { refreshAlertsBadge, getAllAlerts, clearAllAlerts, AlertTypes, hideAlertBanner, setAlertBannerText, };
