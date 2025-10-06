@@ -951,7 +951,7 @@
       if (!on && state.alertOn) {
         const avg = _audioCount > 0 ? (_audioSum / _audioCount) : sm;
         const id = _audioAlertId; _audioAlertId = null;
-        runAsync(finishAlert(id, {
+        if (id != null) runAsync(finishAlert(id, {
           avgScore: Number(avg.toFixed(4)),
           message: 'Crying ended'
         }));
@@ -1015,10 +1015,19 @@
       await ctx.resume();
       log('info', `Mic AudioContext sampleRate=${ctx.sampleRate} Hz`);
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false },
-        video: false
-      });
+      //const stream = await navigator.mediaDevices.getUserMedia({
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false },
+          video: false
+        });
+      } catch (e) {
+        log('err', 'Mic permission/device error: ' + (e?.message || e));
+        setStatus('Microphone unavailable.');
+        await stopMicOnly();
+        return;
+      }
       const src = ctx.createMediaStreamSource(stream);
       const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
       state.srcNode = src; state.sinkNode = sink;
@@ -1063,8 +1072,8 @@
       // finalize open alert if any
       if (state.alertOn && _audioAlertId != null) {
         const avg = _audioCount > 0 ? (_audioSum / _audioCount) : 0;
-        const id = _audioAlertId; _audioAlertId = null;
-        runAsync(finishAlert(id, {
+        coull;
+        if (id != null) runAsync(finishAlert(id, {
           avgScore: Number(avg.toFixed(4)),
           message: 'Detection stopped'
         }));
@@ -1158,7 +1167,6 @@
             
               kickDetectIfIdle(); // <- ensures state.mode === 'detect' (and tap running if needed)
             
-              setStatus('Connected to sender');
               const categories = (msg.categories || []).map(c => ({
                 categoryName: (c.displayName || c.categoryName || '').trim(),
                 score: c.score || 0
@@ -1324,7 +1332,7 @@
       const m = loadModel();
       if (savedWUserVisible) setWeightsChart(m.weights || {});
       const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
-      if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; setThrUI(); log('ok', `Loaded thresholds for “${v}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`); }
+      if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; setThrUI(); updateChartThresholdLines(); log('ok', `Loaded thresholds for “${v}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`); }
       const pen = localStorage.getItem(PENALTY_KEY()); if (pen) els.PENALTY_MAP.value = pen;
       setStatus(`Active model set to “${v}”.`);
     });
@@ -1350,7 +1358,7 @@
         state.thrOn = 0.35; state.thrOff = Math.max(0, state.thrOn - offDelta);
       }
       setThrUI();
-
+      updateChartThresholdLines();
       const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
 
       // Hidden by default
