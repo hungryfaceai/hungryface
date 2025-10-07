@@ -74,27 +74,6 @@
       text-align: center; white-space: pre-line; max-width: 90vw;
     }
     .overlay.hidden { display: none; }
-
-    /* ==== Virtual Fence banner ==== */
-    .fence-banner {
-      position: absolute;
-      top: 12px; left: 50%; transform: translateX(-50%);
-      background: #b91c1c;  /* red-700 */
-      color: #fff;
-      padding: 10px 14px; border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.25);
-      box-shadow: 0 10px 20px rgba(0,0,0,.35);
-      z-index: 10000;
-      font-size: 14px; text-align: center;
-      max-width: min(92vw, 720px);
-    }
-    .fence-banner.hidden { display: none; }
-    .fence-banner__actions { margin-top: 6px; display: inline-flex; gap: 8px; align-items: center; }
-    .fence-link {
-      background: none; border: 0; color: #fff; padding: 0;
-      font: inherit; cursor: pointer; text-decoration: underline;
-    }
-    .fence-link:active { transform: scale(0.98); }
   </style>
 </head>
 <body>
@@ -172,16 +151,6 @@
     <video id="remote" autoplay playsinline></video>
     <div id="zoneAlert"></div>
     <canvas id="poseCanvas"></canvas>
-    <!-- ==== Virtual Fence banner ==== -->
-    <div id="fenceBanner" class="fence-banner hidden" role="alert" aria-live="assertive">
-      <div class="fence-banner__text">
-        Virtual Fence alert — Movement outside “Area” detected at
-        <span id="fenceBannerTime">--:--</span>.
-      </div>
-      <div class="fence-banner__actions">
-        <button id="fenceDismissBtn" class="fence-link" type="button">Dismiss</button>
-      </div>
-    </div>    
   </div>
 
   <div id="overlay" class="overlay">
@@ -203,9 +172,6 @@
 
     const HAVE_CURRENT_DATA = 2;
 
-    /* ----- Virtual Fence banner config ----- */
-    const DISMISS_SUPPRESS_MS = 10 * 60 * 1000; // 10 minutes
-
     /* ---------- DOM ---------- */
     const stage = document.getElementById('stage');
     const remoteVideo = document.getElementById('remote');
@@ -220,11 +186,6 @@
     const clearZoneBtn = document.getElementById('clearZoneBtn');
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
-
-    /* ----- Virtual Fence banner DOM ----- */
-    const fenceBanner     = document.getElementById('fenceBanner');
-    const fenceBannerTime = document.getElementById('fenceBannerTime');
-    const fenceDismissBtn = document.getElementById('fenceDismissBtn');
 
     /* ---------- State ---------- */
     let hideStatusTimer = null;
@@ -246,39 +207,6 @@
     let lastTapTime = 0;
     let lastTapPos = null;
     const HANDLE_RADIUS_CSS = 10;
-
-    /* ----- Virtual Fence banner state ----- */
-    let suppressUntilMs = 0;
-    let keepReminding   = true;
-    let lastOutside     = false;
-    let lastBreachAtMs  = 0;
-
-    function fmtTime(ms) {
-      return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-    function showFenceBanner(whenMs) {
-      if (!keepReminding && Date.now() < suppressUntilMs) return;
-      fenceBannerTime.textContent = fmtTime(whenMs);
-      fenceBanner.classList.remove('hidden');
-    }
-    function hideFenceBanner() {
-      fenceBanner.classList.add('hidden');
-    }
-    function updateFenceBanner(isOutside) {
-      if (isOutside && !lastOutside) lastBreachAtMs = Date.now();
-      if (isOutside) {
-        if (Date.now() >= suppressUntilMs) showFenceBanner(lastBreachAtMs || Date.now());
-        else hideFenceBanner();
-      } else {
-        hideFenceBanner();
-      }
-      lastOutside = isOutside;
-    }
-    fenceDismissBtn?.addEventListener('click', () => {
-      keepReminding   = false;
-      suppressUntilMs = Date.now() + DISMISS_SUPPRESS_MS;
-      hideFenceBanner();
-    });
 
     /* ---------- Status overlay ---------- */
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
@@ -437,7 +365,6 @@
         poseCtx.setTransform(1,0,0,1,0,0);
         poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
         zoneAlert.style.display = 'none';
-        hideFenceBanner();
       } catch {}
     }
 
@@ -582,7 +509,6 @@
 
       const out = (landmarks && landmarks.length) ? anyLandmarkOutside(landmarks) : false;
       zoneAlert.style.display = out ? 'block' : 'none';
-      updateFenceBanner(!!out);
     }
     async function startReceiverPoseLoop() {
       if (poseLoopRunning) return;
@@ -598,7 +524,6 @@
         if (!videoHasFrame(remoteVideo)) {
           poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
           zoneAlert.style.display = 'none';
-          hideFenceBanner();
           scheduleNext();
           return;
         }
@@ -612,7 +537,6 @@
             poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
             drawPolygonOverlay(poseCtx);
             zoneAlert.style.display = 'none';
-            updateFenceBanner(false);
           }
         } catch {
         } finally {
@@ -629,7 +553,6 @@
       poseLoopRunning = false;
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
       zoneAlert.style.display = 'none';
-      hideFenceBanner();
     }
     function applyPoseMode() {
       setOverlayVisible(poseEnabled);
@@ -785,7 +708,6 @@
         drawingMode = true;
         hoveredPointIndex = -1; draggingPointIndex = -1; isDragging = false;
         zoneAlert.style.display = 'none';
-        hideFenceBanner();
         drawZoneBtn.textContent = 'Finish drawing';
         setOverlayVisible(true);
         renderPolygonOnly();
@@ -800,7 +722,6 @@
       resetInteractionState();
       setDefaultPolygon();
       zoneAlert.style.display = 'none';
-      hideFenceBanner();
       drawZoneBtn.textContent = 'Draw zone';
       renderPolygonOnly();
     });
