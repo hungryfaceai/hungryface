@@ -259,5 +259,198 @@
       });
     })();
   </script>
+
+  <!-- ——— Naptio: Factory Reset (this device) ——— -->
+  <section id="factoryResetSection" style="margin-top:24px">
+    <div style="
+      background:#0b0b0b;border:1px solid #141414;border-radius:14px;padding:16px;max-width:900px;margin:0 auto;">
+      <h2 style="margin:0 0 8px 0;font-size:18px;line-height:1.3;">Factory reset (this device)</h2>
+      <p style="margin:0 0 12px 0;opacity:.85">
+        Delete all Naptio data stored on <strong>this browser</strong>. This won’t affect other devices.
+      </p>
+      <button id="btnFactoryReset" style="
+        appearance:none;border:1px solid #3b0a0a;background:#1a0000;color:#ffb3b3;
+        padding:10px 14px;border-radius:999px;font-weight:600;cursor:pointer;">
+        Erase all local data
+      </button>
+    </div>
+  </section>
+  
+  <!-- Lightweight modal (no dependencies) -->
+  <div id="factoryResetModal" hidden
+       style="position:fixed;inset:0;display:grid;place-items:center;z-index:9999;">
+    <div class="backdrop" style="position:absolute;inset:0;background:#0008;"></div>
+    <div role="dialog" aria-modal="true" aria-labelledby="factoryResetTitle"
+         style="position:relative;width:min(90vw,560px);background:#0b0b0b;border:1px solid #222;border-radius:16px;padding:18px;box-shadow:0 10px 30px #0009;">
+      <h3 id="factoryResetTitle" style="margin:0 0 8px 0;font-size:18px;">
+        Factory reset Naptio on this device?
+      </h3>
+      <div style="opacity:.9;font-size:14px;line-height:1.5;margin-bottom:10px">
+        This will permanently delete your device-specific data for Naptio in this browser, including:
+        <ul style="margin:8px 0 0 18px;padding:0">
+          <li>Preferences, calibration and alert history</li>
+          <li>Pairing keys / room tokens (PSKs) and saved settings</li>
+          <li>Offline caches and background service workers</li>
+          <li>All local databases (IndexedDB), localStorage and sessionStorage</li>
+        </ul>
+        <div style="margin-top:10px;color:#ffb3b3">
+          This action <strong>cannot be undone</strong>. It does not delete anything on other devices.
+        </div>
+      </div>
+  
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button id="factoryResetCancel" style="
+          appearance:none;border:1px solid #333;background:#101010;color:#ddd;
+          padding:8px 12px;border-radius:10px;cursor:pointer;">Cancel</button>
+        <button id="factoryResetConfirm" style="
+          appearance:none;border:1px solid #3b0a0a;background:#1a0000;color:#ffb3b3;
+          padding:8px 12px;border-radius:10px;font-weight:700;cursor:pointer;">Erase & Reset</button>
+      </div>
+  
+      <div id="factoryResetStatus" role="status" aria-live="polite"
+           style="margin-top:10px;font-size:13px;opacity:.9"></div>
+  
+      <div id="factoryResetReloadRow" hidden style="display:flex;justify-content:flex-end;margin-top:10px">
+        <button id="factoryResetReload" style="
+          appearance:none;border:1px solid #2a3b0a;background:#0c1a00;color:#caff9e;
+          padding:8px 12px;border-radius:10px;cursor:pointer;">Reload now</button>
+      </div>
+    </div>
+  </div>
+  
+  <script type="module">
+    // ——— Factory reset routine (no external deps) ———
+    async function factoryResetNaptio({ includeSessionStorage = true, knownDbNames = [] } = {}) {
+      const results = { indexedDB: [], localStorage: null, sessionStorage: null, caches: [], serviceWorkers: [] };
+  
+      // 1) Enumerate IndexedDB DBs (best effort)
+      const dbNames = new Set();
+      try {
+        if (indexedDB && typeof indexedDB.databases === 'function') {
+          const dbs = await indexedDB.databases();
+          for (const db of dbs) if (db?.name) dbNames.add(db.name);
+        }
+      } catch (e) {
+        // ignore; we'll just use knownDbNames
+      }
+      for (const n of knownDbNames) if (n) dbNames.add(n);
+  
+      // 2) Delete each IndexedDB DB
+      async function deleteDb(name) {
+        return new Promise((resolve) => {
+          const req = indexedDB.deleteDatabase(name);
+          req.onsuccess = () => resolve({ name, status: 'deleted' });
+          req.onerror = () => resolve({ name, status: 'error', error: String(req.error) });
+          req.onblocked = () => resolve({ name, status: 'blocked' });
+        });
+      }
+      for (const name of dbNames) results.indexedDB.push(await deleteDb(name));
+  
+      // 3) Clear storage
+      try { localStorage.clear(); results.localStorage = 'cleared'; }
+      catch (e) { results.localStorage = 'error: ' + e; }
+  
+      if (includeSessionStorage) {
+        try { sessionStorage.clear(); results.sessionStorage = 'cleared'; }
+        catch (e) { results.sessionStorage = 'error: ' + e; }
+      }
+  
+      // 4) Clear Cache Storage
+      if ('caches' in window) {
+        try {
+          const keys = await caches.keys();
+          for (const key of keys) {
+            const ok = await caches.delete(key);
+            results.caches.push({ key, deleted: ok });
+          }
+        } catch (e) {
+          results.caches.push({ error: String(e) });
+        }
+      }
+  
+      // 5) Unregister Service Workers
+      if ('serviceWorker' in navigator) {
+        try {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const reg of regs) {
+            const ok = await reg.unregister();
+            results.serviceWorkers.push({ scope: reg.scope, unregistered: ok });
+          }
+        } catch (e) {
+          results.serviceWorkers.push({ error: String(e) });
+        }
+      }
+  
+      return results;
+    }
+  
+    // ——— Minimal modal wiring ———
+    const $ = (s) => document.querySelector(s);
+    const modal = $('#factoryResetModal');
+    const btnOpen = $('#btnFactoryReset');
+    const btnCancel = $('#factoryResetCancel');
+    const btnConfirm = $('#factoryResetConfirm');
+    const statusEl = $('#factoryResetStatus');
+    const reloadRow = $('#factoryResetReloadRow');
+    const btnReload = $('#factoryResetReload');
+  
+    function openModal() {
+      modal.hidden = false;
+      document.body.style.overflow = 'hidden';
+      statusEl.textContent = '';
+      reloadRow.hidden = true;
+      btnConfirm.disabled = false;
+      btnCancel.disabled = false;
+    }
+    function closeModal() {
+      modal.hidden = true;
+      document.body.style.overflow = '';
+    }
+  
+    btnOpen?.addEventListener('click', openModal);
+    btnCancel?.addEventListener('click', closeModal);
+    modal?.addEventListener('click', (e) => {
+      if (e.target === modal || e.target.classList.contains('backdrop')) closeModal();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (!modal.hidden && e.key === 'Escape') closeModal();
+    });
+  
+    btnConfirm?.addEventListener('click', async () => {
+      btnConfirm.disabled = true;
+      btnCancel.disabled = true;
+      statusEl.textContent = 'Deleting local data…';
+  
+      try {
+        const summary = await factoryResetNaptio({
+          includeSessionStorage: true,
+          // Fallback DB names (adjust if your app uses different ones)
+          knownDbNames: ['naptio-audio', 'naptio-video', 'naptio-settings', 'naptio']
+        });
+  
+        const blocked = summary.indexedDB.some(x => x.status === 'blocked');
+        const errored = summary.indexedDB.some(x => x.status === 'error');
+  
+        if (!blocked && !errored) {
+          statusEl.textContent = 'Reset complete — reloading…';
+          setTimeout(() => location.reload(), 450);
+        } else if (blocked) {
+          statusEl.textContent = 'Almost done — another Naptio tab is still open. Close other Naptio tabs and reload to finish.';
+          reloadRow.hidden = false;
+        } else {
+          statusEl.textContent = 'Couldn’t finish the reset. Close other Naptio tabs and try again.';
+          reloadRow.hidden = false;
+        }
+      } catch (e) {
+        statusEl.textContent = 'Unexpected error. Close other tabs and try again.';
+        reloadRow.hidden = false;
+        console.error('[FactoryReset] error', e);
+      }
+    });
+  
+    btnReload?.addEventListener('click', () => location.reload());
+  </script>
+  <!-- ——— End: Naptio Factory Reset ——— -->
+
 </body>
 </html>
