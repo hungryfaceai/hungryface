@@ -58,8 +58,8 @@ export function setupAlertsDrawer({ openBtnEl, badgeEl, hostId='alertsModalHost'
         <div class="modal-head">
           <strong>Alerts history</strong>
           <div class="modal-actions">
-            <button id="btnAlertsExportJSON" class="btn" type="button">Export JSON</button>
-            <button id="btnAlertsExportCSV"  class="btn" type="button">Export CSV</button>
+            <!-- <button id="btnAlertsExportJSON" class="btn" type="button">Export JSON</button> -->
+            <!-- <button id="btnAlertsExportCSV"  class="btn" type="button">Export CSV</button> -->
             <button id="btnAlertsClear"      class="btn" type="button">Clear all</button>
             <button id="btnAlertsClose"      class="close" type="button" title="Close" aria-label="Close">×</button>
           </div>
@@ -100,8 +100,8 @@ export function setupAlertsDrawer({ openBtnEl, badgeEl, hostId='alertsModalHost'
     badge: badgeEl || document.getElementById('alertsBadge'),
     btnClose: $('btnAlertsClose'),
     btnClear: $('btnAlertsClear'),
-    btnJSON: $('btnAlertsExportJSON'),
-    btnCSV: $('btnAlertsExportCSV'),
+    // btnJSON: $('btnAlertsExportJSON'),   // ← hidden (commented out)
+    // btnCSV: $('btnAlertsExportCSV'),     // ← hidden (commented out)
     search: $('alertsSearch'),
     chk: {
       Audio: $('chkAudio'), Prone: $('chkProne'),
@@ -141,8 +141,8 @@ export function setupAlertsDrawer({ openBtnEl, badgeEl, hostId='alertsModalHost'
 
   // Toolbar actions
   els.btnClear?.addEventListener('click', async () => { await clearAllAlerts(); await renderTable(); await refreshAlertsBadge(); });
-  els.btnJSON?.addEventListener('click', async () => downloadBlob(makeName('json'), 'application/json', await dumpJSON()));
-  els.btnCSV?.addEventListener('click', async () => downloadBlob(makeName('csv'),  'text/csv',           await dumpCSV()));
+  // els.btnJSON?.addEventListener('click', async () => downloadBlob(makeName('json'), 'application/json', await dumpJSON())); // ← hidden
+  // els.btnCSV?.addEventListener('click', async () => downloadBlob(makeName('csv'),  'text/csv',           await dumpCSV()));  // ← hidden
 
   // Keep badge (and table if open) in sync
   document.addEventListener('alerts:changed', async () => {
