@@ -51,12 +51,6 @@
 
     /* Alerts badge (iOS-style) */
     #btnOpenAlerts { position:relative; }
-    #alertsBadge {
-      display:inline-flex; align-items:center; justify-content:center;
-      min-width:18px; height:18px; padding:0 5px; border-radius:999px;
-      background:#ef4444; color:#fff; font-size:12px; line-height:1; font-weight:800;
-      margin-left:8px;
-    }
 
     @media (max-width:560px){
       .subgroup { flex-direction:column; align-items:stretch; }
@@ -129,8 +123,6 @@
       <header class="topbar">
         <div class="row">
           <h1>Audio – Live Detection</h1>
-          <!-- LEFT: Alerts with badge -->
-          <button id="btnOpenAlerts" class="btn">Alerts <span id="alertsBadge">0</span></button>
         </div>
         <!-- RIGHT: Help above Settings -->
         <div class="row">
@@ -269,7 +261,7 @@
   </div>
 
   <!-- Hosts for injected UI -->
-  <div id="audioBannerHost"></div>
+  <div id="alertBannerHost"></div>
   <div id="alertsModalHost"></div>
 
   <!-- Hidden host for remote audio track -->
@@ -348,9 +340,9 @@
   <script type="module" src="./help-sheet.js"></script>
 
   <script type="module">
-    /* ========= Imports for banner + drawer ========= */
-    import { setupAudioBanner, showAudioBanner, hideAudioBanner, saveAlertRecord } from './alert-banner.js';
-    import { setupAlertsDrawer, refreshAlertsBadge } from './alerts-drawer.js';
+    /* ========= Shared alerts (same as motion page) ========= */
+    import {initAlertsUI, beginAlert, finishAlert, AlertTypes, showAlertBanner} from "/hungryface/webrtc/receiver/shared/alerts/index.js";
+
 
     /* ========= WebRTC (ReceiverCore) ========= */
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
@@ -638,7 +630,7 @@
       perClassEma: new Map(), fusedEma: 0,
       alertOn: false, alertUntil: 0,
       // alert episode accumulation
-      alertStartMs: 0, alertSum: 0, alertCount: 0,
+      alertStartMs: 0,
       chart: null, barChart: null, barSavedW: null,
       labels: [], fusedRaw: [], fusedSm: [],
       thrOn: 0.35, thrOff: 0.25,
@@ -649,6 +641,10 @@
     // Live chart vis toggles
     let liveBarsUserVisible = false;
     let savedWUserVisible   = false;
+    // ===== Alerts episode state (Audio) =====
+    let _audioAlertId = null;
+    let _audioSum = 0, _audioCount = 0;
+    const runAsync = (p) => Promise.resolve(p).catch(()=>{});
 
     // Charts
     function hhmmss(tMs){
@@ -934,35 +930,35 @@
       const on = applyHysteresis(sm, performance.now());
 
       // OFF -> ON
-      if (on && !state.alertOn) {
-        state.alertStartMs = Date.now();
-        state.alertSum = 0;
-        state.alertCount = 0;
-        showAudioBanner(state.alertStartMs);
-        log('ok','ALERT ON (cry detected).');
-      }
+     if (on && !state.alertOn) {
+       state.alertStartMs = Date.now();
+       _audioSum = 0; _audioCount = 0;
+       runAsync((async () => {
+         _audioAlertId = await beginAlert({
+           type: (AlertTypes?.Audio ?? 'audio'),
+           message: 'Crying detected'
+         });
+         showAlertBanner(state.alertStartMs, 'Crying detected');
+       })());
+       log('ok','ALERT ON (cry detected).');
+     }
       // Accumulate while ON
       if (on) {
-        state.alertSum += sm;
-        state.alertCount++;
+        _audioSum += sm;
+        _audioCount++;
       }
       // ON -> OFF
       if (!on && state.alertOn) {
-        const startAt = state.alertStartMs || Date.now();
-        const endAt   = Date.now();
-        const avg     = state.alertCount > 0 ? (state.alertSum / state.alertCount) : sm;
-        hideAudioBanner();
-        const record = {
-          type: 'audio detection',
-          startAt: new Date(startAt).toISOString(),
-          endAt:   new Date(endAt).toISOString(),
-          avgScore: Number(avg.toFixed(4))
-        };
-        saveAlertRecord(record);
-        log('warn','ALERT OFF.', `<div class="log-code">${JSON.stringify(record, null, 2)}</div>`);
+        const avg = _audioCount > 0 ? (_audioSum / _audioCount) : sm;
+        const id = _audioAlertId; _audioAlertId = null;
+        if (id != null) runAsync(finishAlert(id, {
+          avgScore: Number(avg.toFixed(4)),
+          message: 'Crying ended'
+        }));
+        log('warn','ALERT OFF.');
         state.alertStartMs = 0;
-        state.alertSum = 0;
-        state.alertCount = 0;
+        _audioSum = 0;
+        _audioCount = 0;
       }
       state.alertOn = on;
     }
@@ -1019,10 +1015,19 @@
       await ctx.resume();
       log('info', `Mic AudioContext sampleRate=${ctx.sampleRate} Hz`);
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false },
-        video: false
-      });
+      //const stream = await navigator.mediaDevices.getUserMedia({
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false },
+          video: false
+        });
+      } catch (e) {
+        log('err', 'Mic permission/device error: ' + (e?.message || e));
+        setStatus('Microphone unavailable.');
+        await stopMicOnly();
+        return;
+      }
       const src = ctx.createMediaStreamSource(stream);
       const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
       state.srcNode = src; state.sinkNode = sink;
@@ -1065,22 +1070,19 @@
 
     async function stopAll(){
       // finalize open alert if any
-      if (state.alertOn && state.alertStartMs) {
-        const endAt = Date.now();
-        const avg   = state.alertCount > 0 ? (state.alertSum / state.alertCount) : 0;
-        const record = {
-          type: 'audio detection',
-          startAt: new Date(state.alertStartMs).toISOString(),
-          endAt:   new Date(endAt).toISOString(),
-          avgScore: Number(avg.toFixed(4))
-        };
-        try { await saveAlertRecord(record); } catch {}
-        hideAudioBanner();
-        log('warn', 'ALERT OFF (stop).', `<div class="log-code">${JSON.stringify(record, null, 2)}</div>`);
+      if (state.alertOn && _audioAlertId != null) {
+        const avg = _audioCount > 0 ? (_audioSum / _audioCount) : 0;
+        //coull;
+        const id = _audioAlertId; _audioAlertId = null;
+        if (id != null) runAsync(finishAlert(id, {
+          avgScore: Number(avg.toFixed(4)),
+          message: 'Detection stopped'
+        }));
+        log('warn', 'ALERT OFF (stop).');
         state.alertOn = false;
         state.alertStartMs = 0;
-        state.alertSum = 0;
-        state.alertCount = 0;
+        _audioSum = 0;
+        _audioCount = 0;
       }
 
       const wasRunning = state.running || state.mode!=='idle';
@@ -1166,7 +1168,6 @@
             
               kickDetectIfIdle(); // <- ensures state.mode === 'detect' (and tap running if needed)
             
-              setStatus('Connected to sender');
               const categories = (msg.categories || []).map(c => ({
                 categoryName: (c.displayName || c.categoryName || '').trim(),
                 score: c.score || 0
@@ -1332,16 +1333,15 @@
       const m = loadModel();
       if (savedWUserVisible) setWeightsChart(m.weights || {});
       const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
-      if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; setThrUI(); log('ok', `Loaded thresholds for “${v}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`); }
+      if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; setThrUI(); updateChartThresholdLines(); log('ok', `Loaded thresholds for “${v}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`); }
       const pen = localStorage.getItem(PENALTY_KEY()); if (pen) els.PENALTY_MAP.value = pen;
       setStatus(`Active model set to “${v}”.`);
     });
 
     /* ========= Boot ========= */
     (function boot(){
-      // Inject external UI & styles
-      setupAudioBanner();
-      setupAlertsDrawer();
+      // Inject shared Alerts UI (adds drawer into #alertsModalHost)
+      initAlertsUI({ drawerHostId: 'alertsModalHost' });
 
       const active = localStorage.getItem('cryActiveModelName') || 'default';
       refreshModelSelect(active);
@@ -1359,7 +1359,7 @@
         state.thrOn = 0.35; state.thrOff = Math.max(0, state.thrOn - offDelta);
       }
       setThrUI();
-
+      updateChartThresholdLines();
       const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
 
       // Hidden by default
@@ -1367,9 +1367,6 @@
       els.savedWWrap.style.display = 'none';
 
       updateSourceUI();
-
-      // Badge
-      refreshAlertsBadge();
 
       setStatus('Ready. Detection will auto-start…');
       // === AUTO-START DETECTION ===
