@@ -74,27 +74,6 @@
       text-align: center; white-space: pre-line; max-width: 90vw;
     }
     .overlay.hidden { display: none; }
-
-    /* ==== Virtual Fence banner ==== */
-    .fence-banner {
-      position: absolute;
-      top: 12px; left: 50%; transform: translateX(-50%);
-      background: #b91c1c;  /* red-700 */
-      color: #fff;
-      padding: 10px 14px; border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.25);
-      box-shadow: 0 10px 20px rgba(0,0,0,.35);
-      z-index: 10000;
-      font-size: 14px; text-align: center;
-      max-width: min(92vw, 720px);
-    }
-    .fence-banner.hidden { display: none; }
-    .fence-banner__actions { margin-top: 6px; display: inline-flex; gap: 8px; align-items: center; }
-    .fence-link {
-      background: none; border: 0; color: #fff; padding: 0;
-      font: inherit; cursor: pointer; text-decoration: underline;
-    }
-    .fence-link:active { transform: scale(0.98); }
   </style>
 </head>
 <body>
@@ -172,17 +151,11 @@
     <video id="remote" autoplay playsinline></video>
     <div id="zoneAlert"></div>
     <canvas id="poseCanvas"></canvas>
-    <!-- ==== Virtual Fence banner ==== -->
-    <div id="fenceBanner" class="fence-banner hidden" role="alert" aria-live="assertive">
-      <div class="fence-banner__text">
-        Virtual Fence alert — Movement outside “Area” detected at
-        <span id="fenceBannerTime">--:--</span>.
-      </div>
-      <div class="fence-banner__actions">
-        <button id="fenceDismissBtn" class="fence-link" type="button">Dismiss</button>
-      </div>
-    </div>    
   </div>
+
+  <!-- Hosts for shared Alerts UI (banner + drawer) -->
+  <div id="alertBannerHost"></div>
+  <div id="alertsModalHost"></div>
 
   <div id="overlay" class="overlay">
     <div id="status" class="status">Idle</div>
@@ -191,6 +164,7 @@
   <script type="module">
     import { DrawingUtils, PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     import { ReceiverCore } from '/hungryface/webrtc/receiver/shared/receiver-core.js';
+    import { initAlertsUI, beginAlert, finishAlert, AlertTypes, showAlertBanner } from "/hungryface/webrtc/receiver/shared/alerts/index.js";
 
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
@@ -202,9 +176,6 @@
       "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
 
     const HAVE_CURRENT_DATA = 2;
-
-    /* ----- Virtual Fence banner config ----- */
-    const DISMISS_SUPPRESS_MS = 10 * 60 * 1000; // 10 minutes
 
     /* ---------- DOM ---------- */
     const stage = document.getElementById('stage');
@@ -220,11 +191,6 @@
     const clearZoneBtn = document.getElementById('clearZoneBtn');
     const overlay = document.getElementById('overlay');
     const statusEl = document.getElementById('status');
-
-    /* ----- Virtual Fence banner DOM ----- */
-    const fenceBanner     = document.getElementById('fenceBanner');
-    const fenceBannerTime = document.getElementById('fenceBannerTime');
-    const fenceDismissBtn = document.getElementById('fenceDismissBtn');
 
     /* ---------- State ---------- */
     let hideStatusTimer = null;
@@ -247,38 +213,14 @@
     let lastTapPos = null;
     const HANDLE_RADIUS_CSS = 10;
 
-    /* ----- Virtual Fence banner state ----- */
-    let suppressUntilMs = 0;
-    let keepReminding   = true;
-    let lastOutside     = false;
-    let lastBreachAtMs  = 0;
+    // ---------- Shared Alerts (episode state) ----------
+    const runAsync = (p) => Promise.resolve(p).catch(()=>{});
+    let fenceAlertOn = false;
+    let fenceAlertId = null;
+    let fenceStartMs = 0;
+    let fenceFrames = 0;
 
-    function fmtTime(ms) {
-      return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-    function showFenceBanner(whenMs) {
-      if (!keepReminding && Date.now() < suppressUntilMs) return;
-      fenceBannerTime.textContent = fmtTime(whenMs);
-      fenceBanner.classList.remove('hidden');
-    }
-    function hideFenceBanner() {
-      fenceBanner.classList.add('hidden');
-    }
-    function updateFenceBanner(isOutside) {
-      if (isOutside && !lastOutside) lastBreachAtMs = Date.now();
-      if (isOutside) {
-        if (Date.now() >= suppressUntilMs) showFenceBanner(lastBreachAtMs || Date.now());
-        else hideFenceBanner();
-      } else {
-        hideFenceBanner();
-      }
-      lastOutside = isOutside;
-    }
-    fenceDismissBtn?.addEventListener('click', () => {
-      keepReminding   = false;
-      suppressUntilMs = Date.now() + DISMISS_SUPPRESS_MS;
-      hideFenceBanner();
-    });
+    function beginViewportSetle(){ beginViewportSettle(); } // tiny typo guard used in logs
 
     /* ---------- Status overlay ---------- */
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
@@ -437,7 +379,8 @@
         poseCtx.setTransform(1,0,0,1,0,0);
         poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
         zoneAlert.style.display = 'none';
-        hideFenceBanner();
+        // Ensure any open fence alert is finalized when video/overlay clears
+        finalizeOpenFenceAlert('Video unavailable');
       } catch {}
     }
 
@@ -537,6 +480,47 @@
       return false;
     }
 
+    /* ---------- Shared Alerts helpers ---------- */
+    function finalizeOpenFenceAlert(message = 'Ended') {
+      if (!fenceAlertOn || fenceAlertId == null) {
+        fenceAlertOn = false; fenceAlertId = null; fenceStartMs = 0; fenceFrames = 0;
+        return;
+      }
+      const id = fenceAlertId;
+      fenceAlertId = null;
+      fenceAlertOn = false;
+      const frames = fenceFrames; fenceFrames = 0;
+      runAsync(finishAlert(id, {
+        message,
+        frames
+      }));
+      fenceStartMs = 0;
+    }
+
+    function updateFenceAlert(isOutside) {
+      // ON transition
+      if (isOutside && !fenceAlertOn) {
+        fenceAlertOn = true;
+        fenceStartMs = Date.now();
+        fenceFrames = 0;
+        runAsync((async () => {
+          fenceAlertId = await beginAlert({
+            type: (AlertTypes?.Fence ?? AlertTypes?.Motion ?? 'fence'),
+            message: 'Movement outside virtual fence'
+          });
+          showAlertBanner(fenceStartMs, 'Movement outside virtual fence');
+        })());
+      }
+      // accumulate while ON
+      if (isOutside && fenceAlertOn) {
+        fenceFrames++;
+      }
+      // OFF transition
+      if (!isOutside && fenceAlertOn) {
+        finalizeOpenFenceAlert('Returned to safe zone');
+      }
+    }
+
     /* ---------- MediaPipe on RECEIVER ---------- */
     async function ensurePoseTask() {
       if (poseTask) return poseTask;
@@ -582,7 +566,7 @@
 
       const out = (landmarks && landmarks.length) ? anyLandmarkOutside(landmarks) : false;
       zoneAlert.style.display = out ? 'block' : 'none';
-      updateFenceBanner(!!out);
+      updateFenceAlert(!!out);
     }
     async function startReceiverPoseLoop() {
       if (poseLoopRunning) return;
@@ -598,7 +582,7 @@
         if (!videoHasFrame(remoteVideo)) {
           poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
           zoneAlert.style.display = 'none';
-          hideFenceBanner();
+          updateFenceAlert(false);
           scheduleNext();
           return;
         }
@@ -612,7 +596,7 @@
             poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
             drawPolygonOverlay(poseCtx);
             zoneAlert.style.display = 'none';
-            updateFenceBanner(false);
+            updateFenceAlert(false);
           }
         } catch {
         } finally {
@@ -629,7 +613,7 @@
       poseLoopRunning = false;
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
       zoneAlert.style.display = 'none';
-      hideFenceBanner();
+      updateFenceAlert(false);
     }
     function applyPoseMode() {
       setOverlayVisible(poseEnabled);
@@ -661,8 +645,8 @@
       onCreatePC: (pc) => {
         // Receiver-initiated 'pose' data channel
         const ch = pc.createDataChannel('pose');
-        ch.onopen  = () => console.log('[DC][receiver] pose DC open');
-        ch.onclose = () => console.log('[DC][receiver] pose DC close');
+        ch.onopen  = () => console.log('[DC][receiver] pose DC open]');
+        ch.onclose = () => console.log('[DC][receiver] pose DC close]');
         ch.onerror = (e) => console.warn('[DC][receiver] pose DC error', e);
         ch.onmessage = (ev) => {
           try {
@@ -684,10 +668,10 @@
     });
 
     core.start().catch(console.warn);
-    window.addEventListener('beforeunload', () => core.close());
-
-    // tiny typo guard used in logs
-    function beginViewportSetle(){ beginViewportSettle(); }
+    window.addEventListener('beforeunload', () => {
+      finalizeOpenFenceAlert('Page closing');
+      core.close();
+    });
 
     /* ---------- NEW: clear overlay on video element stop-like states ---------- */
     ['pause','ended','emptied','stalled','suspend','waiting'].forEach((ev) => {
@@ -785,10 +769,11 @@
         drawingMode = true;
         hoveredPointIndex = -1; draggingPointIndex = -1; isDragging = false;
         zoneAlert.style.display = 'none';
-        hideFenceBanner();
         drawZoneBtn.textContent = 'Finish drawing';
         setOverlayVisible(true);
         renderPolygonOnly();
+        // stop any ongoing alert while the zone is being redrawn
+        updateFenceAlert(false);
       } else {
         drawingMode = false;
         if (polygonPoints.length >= 3) polygonClosed = true;
@@ -800,14 +785,17 @@
       resetInteractionState();
       setDefaultPolygon();
       zoneAlert.style.display = 'none';
-      hideFenceBanner();
       drawZoneBtn.textContent = 'Draw zone';
       renderPolygonOnly();
+      updateFenceAlert(false);
     });
 
     // Make sure canvas is visible for interactions from the start
     setDefaultPolygon();
     setOverlayVisible(true);
+
+    // Inject shared Alerts UI (drawer & banner like audio/prone)
+    initAlertsUI({ drawerHostId: 'alertsModalHost' });
   </script>
 </body>
 </html>
