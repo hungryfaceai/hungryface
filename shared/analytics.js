@@ -52,6 +52,7 @@ export function installAnalytics(opts = {}) {
   let activeMs = 0;
   let hbTimer = null;
   let leaderTimer = null;
+  let featureName = feature;
   const leaderKey = 'naptio:analytics:leader';
   const me = randId();
   const LEADER_TTL = Math.max(8000, intervalMs * 1.5); // stale window
@@ -90,7 +91,7 @@ export function installAnalytics(opts = {}) {
     const body = {
       ts: Date.now(),
       app,
-      feature,
+      feature: featureName,
       page: location.pathname,
       installId,
       sessionId,
@@ -156,7 +157,7 @@ export function installAnalytics(opts = {}) {
       activeMs = 0;
       if (amLeader()) post({}); // record session boundary
     },
-    setFeature(f) { if (f) feature = String(f); }, // optional at runtime
+    setFeature(f) { if (f) featureName = String(f); }, // optional at runtime
     uninstall() { stop(); }
   };
 
