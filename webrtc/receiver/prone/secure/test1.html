@@ -413,6 +413,10 @@
     <div id="status" class="status">Idle</div>
   </div>
 
+  <!-- Hosts for shared Alerts UI (banner + history drawer) -->
+  <div id="alertBannerHost"></div>
+  <div id="alertsModalHost"></div>
+
   <!-- ⬇️ PSK bootstrap (viewer); resolves room from query/Settings and installs shim -->
   <script type="module">
     import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
@@ -454,6 +458,8 @@
   <script type="module">
     import { DrawingUtils, FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
+    /* === Shared Alerts (banner + drawer + persistence) === */
+    import { initAlertsUI, beginAlert, finishAlert, AlertTypes, showAlertBanner } from "/hungryface/webrtc/receiver/shared/alerts/index.js";
 
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
@@ -522,7 +528,7 @@
       emaTau: 2.0,
 
       // Pose mapping + hysteresis
-      thetaOn: 55,            // deg below supine considered "prone-ish"
+      thetaOn: 55,
       poseThrOn: 0.70,
       poseThrOff: 0.40,
       poseDwellOn: 12,
@@ -544,6 +550,9 @@
     };
     let S = loadSettings();
     let pitchSupine = loadSupine();
+
+    /* === Alerts UI init (injects banner + drawer & pill) === */
+    initAlertsUI({ drawerHostId: 'alertsModalHost' });
 
     /* ---------- UI wire-up (settings) ---------- */
     const $ = (id) => document.getElementById(id);
@@ -1056,6 +1065,10 @@
     let occEma = 0;
     let occAlert = false, occAboveT = 0, occBelowT = 0;
 
+    // === Alerts episode state (Prone) ===
+    let _proneAlertId = null;
+    let _proneSum = 0, _proneCount = 0, _proneStartMs = 0;
+
     function emaUpdate(prev, x, tau, dt){
       if (!Number.isFinite(x)) return prev;
       const a = 1 - Math.exp(-dt / Math.max(0.001, tau));
@@ -1238,13 +1251,43 @@
         const newAlert = poseAlert || occAlert;
         if (newAlert !== alert) {
           alert = newAlert;
+
           if (alert) {
             const cause = (poseAlert && !occAlert) ? 'Pose' : (!poseAlert && occAlert) ? 'Occlusion' : 'Pose + Occlusion';
+            // Banner text aligned with audio page style
+            const bannerMsg =
+              (poseAlert && !occAlert) ? 'Prone sleeping detected' :
+              (!poseAlert && occAlert) ? 'Occlusion detected' :
+              'Prone sleeping detected (with occlusion)';
+
+            _proneStartMs = Date.now();
+            _proneSum = 0; _proneCount = 0;
+
+            // Persist start + show banner (fire-and-forget)
+            beginAlert({ type: (AlertTypes?.Prone ?? 'Prone'), message: bannerMsg })
+              .then(id => { _proneAlertId = id; })
+              .catch(()=>{});
+            try { showAlertBanner(_proneStartMs, bannerMsg); } catch {}
+
             showStatus(`PRONE suspected • ${cause}`);
           } else {
             showStatus('Recovered from prone');
+
+            // Finish episode and persist average fused risk
+            const avg = _proneCount > 0 ? (_proneSum / _proneCount) : (riskEma || 0);
+            const id = _proneAlertId; _proneAlertId = null;
+            if (id != null) {
+              finishAlert(id, {
+                avgScore: Number((avg || 0).toFixed(4)),
+                message: 'Recovered from prone'
+              }).catch(()=>{});
+            }
+            _proneStartMs = 0; _proneSum = 0; _proneCount = 0;
           }
         }
+
+        // Accumulate fused risk while ON for episode averaging
+        if (alert) { _proneSum += (riskEma || 0); _proneCount++; }
     
         // Fused risk bar (instant occlusion vs normalized pose)
         const pPoseInst = clamp(rPoseInst / POSE_RANGE, 0, 1); // 0..1
