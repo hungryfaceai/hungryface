@@ -19,7 +19,7 @@ const state = {
   sortKey: 'startAt',
   sortDir: 'desc',
   // time window (rolling by default)
-  windowHours: 12,
+  windowHours: 2,
   windowStartMs: null,
   windowEndMs: null,
   rolling: true, // <- window tracks "now" unless user brushes
@@ -308,15 +308,16 @@ async function fetchIfChanged() {
 
 // ------- Time window helpers -------
 function setRollingWindow(hours) {
-  state.windowHours = Math.max(1, Number(hours) || 12);
+  state.windowHours = Math.max(0.25, Number(hours) || 2); // allow 15m; default 2h
   const now = Date.now();
   state.windowEndMs = now;
-  state.windowStartMs = now - state.windowHours * 3600 * 1000;
+  state.windowStartMs = now - state.windowHours * 3600_000;
   state.rolling = true;
-  startRolling(); 
+  startRolling();
   startPaintTick();
   syncWinBtnActive();
 }
+
 
 function setExplicitWindow(startMs, endMs) {
   state.windowStartMs = Math.min(startMs, endMs);
@@ -830,7 +831,7 @@ els.chips.forEach(ch => ch.addEventListener('click', () => {
   renderAll();
 }));
 els.winBtns.forEach(b => b.addEventListener('click', () => {
-  const h = Math.max(1, parseInt(b.dataset.win, 10) || 12);
+  const h = Math.max(0.25, parseFloat(b.dataset.win) || 2);
   setRollingWindow(h);
   syncWinBtnActive();
   renderAll();
