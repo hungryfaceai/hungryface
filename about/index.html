@@ -8,9 +8,20 @@
   <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
   <style>
     :root { color-scheme: dark; }
-    html, body { margin:0; background:#000; color:#fff; font-family:-apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans SC", sans-serif; }
+    html, body {
+      margin:0; background:#000; color:#fff;
+      font-family:-apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial,
+        "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew",
+        "Noto Sans SC", "Noto Sans KR", "Noto Sans Devanagari", sans-serif;
+    }
     /* Allow scroll under fixed sidebar */
     body { overflow-x:hidden; }
+
+    /* Visually hidden for screen readers */
+    .sr-only {
+      position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+      overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+    }
 
     /* Layout wrapper */
     .wrap { min-height:100dvh; display:grid; place-items:start center; padding:16px; }
@@ -26,6 +37,15 @@
       box-shadow: 0 0 0 1px #0b0b0b inset;
     }
 
+    /* Top bar: logo left, language on the right */
+    .topbar {
+      display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px;
+    }
+    .logo-link { display:inline-flex; align-items:center; gap:10px; text-decoration:none; color:#fff; opacity:.95; }
+    .logo-link:hover { opacity:1; }
+    .logo-svg { width:28px; height:28px; display:block; }
+    .brand { font-weight:600; letter-spacing:.2px; font-size:14px; color:#eee; opacity:.9; }
+
     h1 { margin:.25rem 0 .5rem; font-size:22px; line-height:1.25; }
     h2 { margin:1.25rem 0 .5rem; font-size:18px; line-height:1.3; }
     p  { margin:.5rem 0; color:#ddd; }
@@ -35,8 +55,7 @@
     .muted { color:#aaa; }
     .fineprint { font-size:.92rem; color:#ccc; }
 
-    /* Header row with language selector */
-    .row { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    /* Language selector */
     .lang {
       display:flex; align-items:center; gap:8px;
       background:#0d0d0d; border:1px solid #1a1a1a; border-radius:999px;
@@ -69,14 +88,25 @@
     @media (max-width:520px){
       .wrap { padding:12px; }
       .panel { padding:14px; }
+      .brand { display:none; } /* keep the header compact on very small screens */
     }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="panel">
-      <div class="row">
-        <h1 id="t-title" class="soft">About Naptio</h1>
+      <div class="topbar">
+        <!-- Logo (inline SVG) → landing page -->
+        <a class="logo-link" href="https://hungryfaceai.github.io/hungryface/home/" aria-label="Go to Naptio home">
+          <svg class="logo-svg" viewBox="0 0 32 32" role="img" aria-hidden="true">
+            <rect x="1.5" y="1.5" width="29" height="29" rx="7" ry="7" fill="#101010" stroke="#2a2a2a"/>
+            <!-- Simple N mark -->
+            <path d="M10 23V9h3l9 11V9h2v14h-3L12 12v11h-2z" fill="#ffffff"/>
+          </svg>
+          <span class="brand">Naptio</span>
+        </a>
+
+        <!-- Language selector -->
         <div class="lang" role="group" aria-label="Language selector">
           <span class="flag" id="flag">🇬🇧</span>
           <label for="lang" id="t-language-label" class="sr-only">Language</label>
@@ -89,9 +119,13 @@
             <option value="uk">🇺🇦 Українська</option>
             <option value="he">🇮🇱 עברית</option>
             <option value="zh">🇨🇳 中文</option>
+            <option value="ko">🇰🇷 한국어</option>
+            <option value="hi">🇮🇳 हिन्दी</option>
           </select>
         </div>
       </div>
+
+      <h1 id="t-title" class="soft">About Naptio</h1>
 
       <p id="t-intro-1"></p>
       <p id="t-intro-2"></p>
@@ -189,7 +223,7 @@
           "Gratuit"
         ],
         safetyTitle: "Avertissement important de sécurité",
-        safetyBody: "Naptio n’est pas un dispositif médical et ne diagnostique, ne traite ni ne prévient aucune maladie. C’est un assistant, pas un substitut à la surveillance parentale ni aux conseils de professionnels. Suivez toujours les recommandations de sommeil sécurisé. En cas d’inquiétude pour votre enfant, demandez immédiatement une aide médicale (par ex. appelez le 999/112).",
+        safetyBody: "Naptio n’est pas un dispositif médical et ne diagnostique, ne traite ni ne préviennent aucune maladie. C’est un assistant, pas un substitut à la surveillance parentale ni aux conseils de professionnels. Suivez toujours les recommandations de sommeil sécurisé. En cas d’inquiétude pour votre enfant, demandez immédiatement une aide médicale (par ex. appelez le 999/112).",
         teamTitle: "L’équipe Naptio",
         teamBody: "Nous sommes une petite équipe, proche du terrain, qui aime créer des outils utiles où la confidentialité passe en premier. Avant Naptio, nous avons passé des années à concevoir des modèles très fiables dans un secteur très exigeant — un travail qui nous a appris à privilégier la précision, la sécurité et la performance. Nous mettons aujourd’hui ce même soin au service de quelque chose de plus proche de nous : aider les familles à dormir un peu plus sereinement. Et nous nous engageons à garder Naptio accessible à tous, gratuitement."
       },
@@ -317,6 +351,56 @@
         safetyBody: "Naptio 不是医疗器械，不能用于诊断、治疗或预防任何疾病或状况。它只是辅助工具，不能替代家长看护或专业建议。请始终遵循安全睡眠指南。如对孩子的健康有担忧，请立即寻求医疗帮助（例如拨打 112/999）。",
         teamTitle: "Naptio 团队",
         teamBody: "我们是一个小而专注的团队，热爱打造实用、隐私优先的工具。在做 Naptio 之前，我们多年在一个极其严苛的行业里构建高可靠性的模型——这让我们格外注重准确性、安全性和性能。现在，我们把同样的用心投入到更贴近家庭的事情上：让家长们更安心地休息。我们也承诺，让 Naptio 永远对所有人免费开放。"
+      },
+      ko: {
+        name: "한국어", flag: "🇰🇷", dir: "ltr",
+        title: "Naptio 소개",
+        intro1: "Naptio는 브라우저에서 바로 실행되는 개인용(온디바이스) 아기 모니터입니다. 예비 휴대폰을 아기 방에 카메라로 두고, 다른 휴대폰이나 노트북에서 확인하세요—계정, 구독, 광고가 없습니다.",
+        intro2: "",
+        howTitle: "작동 방식",
+        howBody: "Naptio는 내 기기들끼리 안전하게 연결하고, 기기에서 직접 동작하는 가벼운 AI로 울음, 큰 움직임, 수면 자세 신호 같은 중요한 순간을 알아차리도록 도와줍니다. 모든 처리가 로컬에서 이루어져 클라우드 업로드나 앱 설치가 필요 없습니다.",
+        privacyTitle: "프라이버시 중심 설계",
+        privacyList: [
+          "영상과 소리는 사용자 기기에만 머뭅니다. 아기 영상은 저희가 보거나 저장하지 않습니다.",
+          "기본적으로 안전합니다. 기기 간 연결은 종단 간 암호화됩니다.",
+          "사용자 주도. 원하는 알림을 고르고, 기기 페어링/해제 및 초기화를 언제든 할 수 있습니다."
+        ],
+        whyTitle: "부모가 좋아하는 이유",
+        whyList: [
+          "이미 갖고 있는 휴대폰과 노트북으로 바로 사용",
+          "간단한 페어링으로 빠른 시작",
+          "복잡한 설정 없이 유용한 AI 알림",
+          "무료"
+        ],
+        safetyTitle: "중요 안전 안내",
+        safetyBody: "Naptio는 의료기기가 아니며 어떠한 질환을 진단·치료·예방하지 않습니다. 부모의 감독이나 전문가의 조언을 대신할 수 없습니다. 항상 안전한 수면 지침을 따르세요. 아이가 걱정될 때는 즉시 의료 도움을 받으세요(예: 112/999).",
+        teamTitle: "Naptio 팀",
+        teamBody: "우리는 작은 실무형 팀으로, 유용하고 프라이버시를 최우선으로 하는 도구를 만듭니다. Naptio 이전에는 매우 까다로운 업계에서 고신뢰 모델을 수년간 개발하며 정확성·보안·성능에 집착하는 법을 배웠습니다. 이제 그 정성을 가정에 더 가까운 일에 쏟아, 가족들이 좀 더 편히 쉴 수 있도록 돕고 있습니다. 그리고 Naptio를 모두가 무료로 사용할 수 있게 유지하겠습니다."
+      },
+      hi: {
+        name: "हिन्दी", flag: "🇮🇳", dir: "ltr",
+        title: "Naptio के बारे में",
+        intro1: "Naptio एक निजी, ऑन-डिवाइस बेबी मॉनिटर है जो सीधे आपके ब्राउज़र में चलता है। नर्सरी में एक अतिरिक्त फ़ोन को कैमरे की तरह रखें और किसी भी दूसरे फ़ोन या लैपटॉप से देखिए—न अकाउंट, न सब्सक्रिप्शन, न विज्ञापन।",
+        intro2: "",
+        howTitle: "यह कैसे काम करता है",
+        howBody: "Naptio आपके अपने डिवाइसों को सुरक्षित रूप से जोड़ता है और डिवाइस पर ही चलने वाले हल्के AI से उन पलों पर ध्यान दिलाता है जो मायने रखते हैं—जैसे रोना, ज़्यादा हरकत, या सोने की स्थिति के संकेत। सब कुछ लोकल पर होता है, इसलिए कुछ भी क्लाउड पर अपलोड नहीं होता और कोई ऐप इंस्टॉल नहीं करनी पड़ती।",
+        privacyTitle: "गोपनीयता पहले",
+        privacyList: [
+          "आपका वीडियो और ऑडियो आपके पास ही रहता है। हम आपके बच्चे की फुटेज न देखते हैं, न स्टोर करते हैं।",
+          "डिफ़ॉल्ट रूप से सुरक्षित। आपके डिवाइसों के बीच कनेक्शन एंड-टू-एंड एन्क्रिप्टेड होते हैं।",
+          "नियंत्रण आपके हाथ में। कौन-कौन से अलर्ट चाहिए चुनें, डिवाइस पेयर/अनपेयर करें, और कभी भी रीसेट करें।"
+        ],
+        whyTitle: "माता-पिता इसे क्यों पसंद करते हैं",
+        whyList: [
+          "आपके पास मौजूद फ़ोन और लैपटॉप के साथ काम करता है",
+          "सरल पेयरिंग के साथ तेज़ सेट-अप",
+          "जटिल सेटिंग्स के बिना उपयोगी AI संकेत",
+          "मुफ़्त"
+        ],
+        safetyTitle: "महत्वपूर्ण सुरक्षा नोट",
+        safetyBody: "Naptio कोई मेडिकल डिवाइस नहीं है और किसी भी स्थिति का निदान, उपचार या रोकथाम नहीं करता। यह एक सहायक उपकरण है—माता-पिता की निगरानी या विशेषज्ञ सलाह का विकल्प नहीं। हमेशा सुरक्षित-नींद दिशानिर्देशों का पालन करें। यदि आपको अपने बच्चे को लेकर चिंता हो, तो तुरंत चिकित्सा सहायता लें (जैसे 112/999 पर कॉल करें)।",
+        teamTitle: "Naptio टीम",
+        teamBody: "हम एक छोटा, व्यावहारिक टीम हैं जो उपयोगी, गोपनीयता-प्रथम टूल बनाना पसंद करती है। Naptio से पहले हमने एक बेहद माँग-भरे क्षेत्र में वर्षों तक उच्च-विश्वसनीयता मॉडल तैयार किए—जिसने हमें शुद्धता, सुरक्षा और प्रदर्शन पर ध्यान देना सिखाया। अब वही समर्पण हम घर के और करीब की चीज़ में लगा रहे हैं: परिवारों को थोड़ा और सुकून देना। और हम वादा करते हैं कि Naptio सभी के लिए मुफ़्त रहेगा।"
       }
     };
 
@@ -331,23 +415,23 @@
       document.body.classList.toggle("rtl", (lang.dir || "ltr") === "rtl");
 
       // Headings & text
-      $("t-title").textContent       = lang.title;
-      $("t-how-title").textContent   = lang.howTitle;
+      $("t-title").textContent         = lang.title;
+      $("t-how-title").textContent     = lang.howTitle;
       $("t-privacy-title").textContent = lang.privacyTitle;
-      $("t-why-title").textContent   = lang.whyTitle;
-      $("t-safety-title").textContent= lang.safetyTitle;
-      $("t-team-title").textContent  = lang.teamTitle;
+      $("t-why-title").textContent     = lang.whyTitle;
+      $("t-safety-title").textContent  = lang.safetyTitle;
+      $("t-team-title").textContent    = lang.teamTitle;
 
-      $("t-intro-1").textContent     = lang.intro1;
-      $("t-intro-2").textContent     = lang.intro2 || "";
+      $("t-intro-1").textContent       = lang.intro1;
+      $("t-intro-2").textContent       = lang.intro2 || "";
 
-      $("t-how-body").textContent    = lang.howBody;
-      $("t-safety-body").textContent = lang.safetyBody;
-      $("t-team-body").textContent   = lang.teamBody;
+      $("t-how-body").textContent      = lang.howBody;
+      $("t-safety-body").textContent   = lang.safetyBody;
+      $("t-team-body").textContent     = lang.teamBody;
 
       // Lists
-      $("t-privacy-list").innerHTML  = lang.privacyList.map(li => `<li>${li}</li>`).join("");
-      $("t-why-list").innerHTML      = lang.whyList.map(li => `<li>${li}</li>`).join("");
+      $("t-privacy-list").innerHTML    = lang.privacyList.map(li => `<li>${li}</li>`).join("");
+      $("t-why-list").innerHTML        = lang.whyList.map(li => `<li>${li}</li>`).join("");
 
       // UI bits
       $("flag").textContent = lang.flag;
@@ -371,7 +455,9 @@
         "ru":"ru", "ru-ru":"ru",
         "uk":"uk", "uk-ua":"uk",
         "he":"he", "iw":"he",
-        "zh":"zh", "zh-cn":"zh", "zh-sg":"zh"
+        "zh":"zh", "zh-cn":"zh", "zh-sg":"zh",
+        "ko":"ko", "ko-kr":"ko",
+        "hi":"hi", "hi-in":"hi"
       };
       return map[nav] || "en";
     }
