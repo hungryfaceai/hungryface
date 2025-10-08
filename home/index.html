@@ -2,292 +2,477 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Naptio — About</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <!-- Shared sidebar stylesheet to retain site look & feel -->
-  <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
+  <title>Naptio – Landing</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Naptio is a privacy-first baby monitor. Two phones, local connection, on-device AI for cry and motion alerts—no cloud video, no extra hardware." />
   <style>
     :root { color-scheme: dark; }
+
     html, body {
-      margin:0; background:#000; color:#fff;
-      font-family:-apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial,
-        "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew",
-        "Noto Sans SC", "Noto Sans KR", "Noto Sans JP", "Noto Sans Devanagari", sans-serif;
+      height: 100%;
+      margin: 0; background: #000; color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
     }
-    /* Allow scroll under fixed sidebar */
-    body { overflow-x:hidden; }
 
-    /* Visually hidden for screen readers */
+    a { color: #fff; text-decoration: none; opacity: 0.9; }
+    a:hover, a:focus { text-decoration: underline; opacity: 1; }
+
+    /* Don't underline specific links on hover/focus */
+    .no-underline,
+    .no-underline:hover,
+    .no-underline:focus,
+    .btn-pill,
+    .btn-pill:hover,
+    .btn-pill:focus { text-decoration: none; }
+
+    /* Visually hidden but accessible text */
     .sr-only {
-      position:absolute; width:1px; height:1px; padding:0; margin:-1px;
-      overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
     }
 
-    /* Layout wrapper */
-    .wrap { min-height:100dvh; display:grid; place-items:start center; padding:16px; }
+    /* Utility: hide but keep in DOM for later */
+    .is-hidden { display: none !important; }
 
-    /* Card panel style (matches other pages) */
-    .panel {
-      width:min(100%, 1000px);
-      background:#0b0b0b;
-      border:1px solid #141414;
-      border-radius:14px;
-      padding:16px;
-      margin:16px auto 24px;
-      box-shadow: 0 0 0 1px #0b0b0b inset;
+    .page { min-height: 100%; display: flex; flex-direction: column; }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr; /* left | center | right (wide screens) */
+      align-items: center;
+      padding: 14px 20px;
+      gap: 12px;
     }
 
-    /* Top bar: logo left, language on the right */
-    .topbar {
-      display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px;
+    .nav-left, .nav-center, .nav-right {
+      display: flex; gap: 18px; align-items: center;
+      font-size: 0.95rem; white-space: nowrap;
     }
-    .logo-link { display:inline-flex; align-items:center; gap:10px; text-decoration:none; color:#fff; opacity:.95; }
-    .logo-link:hover { opacity:1; }
-    /* Use an <img> so it matches your landing page logo asset; falls back to text if missing */
-    .logo-img { width:28px; height:28px; display:block; border-radius:6px; }
-    .brand { font-weight:600; letter-spacing:.2px; font-size:14px; color:#eee; opacity:.9; }
+    .nav-left  { justify-self: start; }
+    .nav-center{ justify-self: center; gap: 12px; flex-wrap: nowrap; min-width: 0; }
+    .nav-right { justify-self: end; display:flex; gap:12px; flex-wrap: nowrap; }
 
-    h1 { margin:.25rem 0 .5rem; font-size:22px; line-height:1.25; }
-    h2 { margin:1.25rem 0 .5rem; font-size:18px; line-height:1.3; }
-    p  { margin:.5rem 0; color:#ddd; }
-    ul { margin:.5rem 0 .75rem 1.1rem; padding:0; }
-    li { margin:.3rem 0; color:#ddd; }
+    /* Home icon link (uses shared sprite) */
+    .home-link { display: inline-flex; align-items: center; line-height: 1; }
+    .home-link:hover, .home-link:focus { text-decoration: none; }
 
-    .muted { color:#aaa; }
-    .fineprint { font-size:.92rem; color:#ccc; }
+    /* Reusable icon sizing */
+    .icon { width: var(--icon-size, 24px); height: var(--icon-size, 24px); display: block; }
+    .icon-home { --icon-size: 26px; } /* Bigger Home icon */
 
-    /* Language selector */
-    .lang {
-      display:flex; align-items:center; gap:8px;
-      background:#0d0d0d; border:1px solid #1a1a1a; border-radius:999px;
-      padding:6px 10px;
+    /* Center buttons (modes) */
+    .nav-center a {
+      color: #000; background: #fff; border-radius: 9999px; border: 1px solid #fff;
+      opacity: 1; font-weight: 600; line-height: 1; display: inline-block; white-space: nowrap;
+      font-size: clamp(0.78rem, 2.6vw, 0.95rem);
+      padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
     }
-    .lang label { font-size:.9rem; color:#aaa; }
-    .lang select {
-      appearance:none; -webkit-appearance:none; -moz-appearance:none;
-      background:transparent; color:#fff; border:none; outline:none;
-      padding:4px 18px 4px 6px; cursor:pointer; font-size:.95rem;
+    .nav-center a:hover { background: #eaeaea; }
+
+    /* Prevent underline on Camera / Viewer buttons */
+    .nav-center a:hover,
+    .nav-center a:focus { text-decoration: none; }
+    .nav-center a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+    /* Right-side pill buttons (pair/share) */
+    .btn-pill {
+      color: #fff; background: #000; border: 1px solid #fff; border-radius: 9999px;
+      font-weight: 600; line-height: 1; display: inline-block; opacity: 1; white-space: nowrap;
+      font-size: clamp(0.78rem, 2.6vw, 0.95rem);
+      padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
+      transition: background-color .15s ease, box-shadow .15s ease; /* ← add this */
     }
-    .lang select:focus { outline:2px solid #2a2a2a; border-radius:8px; }
 
-    /* RTL support */
-    .rtl .panel { direction:rtl; }
-    .rtl ul { margin:.5rem 1.1rem .75rem 0; }
+    /* Subtle hover/focus cue for Pair / Share pills */
+    .btn-pill:hover,
+    .btn-pill:focus {
+      background: #141414;                 /* deeper change than #0d0d0d */
+      border-color: #e6e6e6;               /* slight border lift for contrast */
+      box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16); /* faint inner ring */
+    }
 
-    /* Subtle separator */
-    .hr { height:1px; background:#141414; margin:12px 0; border-radius:1px; }
+    .btn-pill:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 
-    /* Links (if any) */
-    a { color:#9ad; text-decoration:none; }
-    a:hover, a:focus { text-decoration:underline; }
+    main { flex: 1; display: grid; place-items: center; padding: 24px; text-align: center; }
+    .hero { max-width: 900px; }
+    .brand {
+      font-size: clamp(2.5rem, 6vw, 5rem);
+      line-height: 1.05; letter-spacing: 0.02em; margin: 0 0 12px;
+    }
+    .tagline { font-size: clamp(1.05rem, 2.5vw, 1.5rem); margin: 0 0 12px; opacity: 0.95; }
 
-    /* Make headings slightly softer */
-    .soft { color:#eee; }
+    /* ---- Free badge under tagline ---- */
+    .badge-free {
+      display: inline-flex; align-items: center; gap: 8px;
+      margin-top: 8px; padding: 6px 10px;
+      border-radius: 9999px; border: 1px solid #242424;
+      background: #0a0a0a; color: #d9d9d9;
+      font-size: 0.85rem; opacity: 0.95;
+    }
+    .badge-free .dot {
+      width: 6px; height: 6px; border-radius: 50%; background: #5cf078;
+    }
+    @media (max-width:560px){ .badge-free{ font-size:.9rem; } }
 
-    /* Responsive tweaks */
-    @media (max-width:520px){
-      .wrap { padding:12px; }
-      .panel { padding:14px; }
-      .brand { display:none; } /* keep the header compact on very small screens */
+    .subcopy { font-size: clamp(0.98rem, 2vw, 1.15rem); margin: 0 auto; opacity: 0.9; }
+
+    /* Safety note (smaller, centered) */
+    .safety-note { font-size: 0.8rem; opacity: 0.8; margin-top: 24px; text-align: center; }
+
+    /* Footer */
+    footer {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 16px 20px; font-size: 0.9rem; opacity: 0.85;
+    }
+    .footer-note {
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      font-size: 0.75rem; color: #fff; opacity: 0.85; text-decoration: none;
+    }
+    .footer-note:hover, .footer-note:focus { text-decoration: none; opacity: 0.85; }
+
+    /* ---------------- Small screens: force modes BELOW pair/share + make modes bigger ---------------- */
+    @media (max-width: 560px) {
+      header {
+        grid-template-columns: 1fr 1fr;
+        grid-auto-rows: minmax(0, auto);
+        row-gap: 10px;
+      }
+      .nav-left  { grid-column: 1; grid-row: 1; justify-self: start; }
+      .nav-right { grid-column: 2; grid-row: 1; justify-self: end; gap: 10px; }
+      .nav-center{
+        grid-column: 1 / -1; /* span both columns */
+        grid-row: 2;         /* second row */
+        justify-content: center;
+        gap: 12px;
+        width: 100%;
+      }
+      /* Make center (mode) buttons larger than right-side pills on small screens */
+      .nav-center a {
+        font-size: clamp(0.92rem, 3.8vw, 1.12rem);
+        padding: clamp(8px, 2.2vw, 12px) clamp(14px, 4.5vw, 18px);
+      }
+      /* Keep right-side pills compact so they don't collide */
+      .btn-pill {
+        font-size: clamp(0.78rem, 3.0vw, 0.92rem);
+        padding: clamp(6px, 1.8vw, 8px) clamp(10px, 3.0vw, 14px);
+      }
+    }
+
+    /* iPhone 12 mini (~360px): spacing tweaks */
+    @media (max-width: 380px) {
+      .nav-left a, .nav-right a { font-size: 0.82rem; }
+      .nav-left, .nav-right { gap: 10px; }
+      .nav-center { gap: 10px; }
+      header { padding: 12px 14px; }
+    }
+
+    /* ============ Invite modal (with × close icon) ============ */
+    .invite-modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+      display: none; align-items: center; justify-content: center;
+      z-index: 1000;
+    }
+    .invite-modal.visible { display: flex; }
+    .invite-card {
+      position: relative;
+      width: min(92vw, 480px);
+      background: #0b0b0b; border: 1px solid #141414; border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+      padding: 18px 18px 20px;
+    }
+    .invite-header {
+      display: flex; align-items: center; justify-content: center; margin-bottom: 8px;
+    }
+    .invite-title { font-size: 1rem; font-weight: 700; margin: 0; }
+    .invite-close {
+      position: absolute; top: 10px; right: 10px;
+      width: 36px; height: 36px; border-radius: 9999px;
+      display: grid; place-items: center;
+      background: #0d0d0d; border: 1px solid #2a2a2a; color: #fff;
+      font-size: 22px; line-height: 1; cursor: pointer;
+    }
+    .invite-close:hover { background: #111; }
+    .invite-close:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+    .invite-body { display: grid; gap: 12px; justify-items: center; }
+    .invite-qr {
+      width: 220px; height: 220px; background: #111; border: 1px solid #222; border-radius: 12px;
+      display: grid; place-items: center; overflow: hidden;
+    }
+    .invite-url {
+      width: 100%; background: #090909; border: 1px solid #1a1a1a; color: #fff;
+      border-radius: 10px; padding: 10px 12px; box-sizing: border-box; font-size: 0.9rem;
+    }
+    .invite-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+    .invite-actions .btn-pill { border-color: #444; }
+
+    /* Toast */
+    .invite-toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(12px);
+      background: #111; border: 1px solid #222; color: #fff; padding: 10px 14px;
+      border-radius: 9999px; opacity: 0; transition: opacity .2s ease, transform .2s ease;
+      z-index: 1100; font-size: 0.9rem;
+    }
+    .invite-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* Force two-row header in iPhone landscape (and other narrow landscapes) */
+    @media (max-width: 900px) and (orientation: landscape) {
+      header {
+        grid-template-columns: 1fr 1fr;
+        grid-auto-rows: minmax(0, auto);
+        row-gap: 10px;
+      }
+      .nav-left  { grid-column: 1; grid-row: 1; justify-self: start; }
+      .nav-right { grid-column: 2; grid-row: 1; justify-self: end; gap: 10px; }
+
+      /* Modes go on their own row, full width, centered */
+      .nav-center{
+        grid-column: 1 / -1;
+        grid-row: 2;
+        justify-content: center;
+        gap: 12px;
+        width: 100%;
+      }
+
+      /* Make mode buttons a bit bigger than Pair/Share */
+      .nav-center a {
+        font-size: clamp(0.92rem, 2.2vw, 1.12rem);
+        padding: clamp(8px, 1.8vw, 12px) clamp(14px, 3.2vw, 18px);
+      }
+
+      /* Keep right-side pills compact so they never collide */
+      .btn-pill {
+        font-size: clamp(0.78rem, 1.8vw, 0.92rem);
+        padding: clamp(6px, 1.2vw, 8px) clamp(10px, 2.2vw, 14px);
+      }
     }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="panel">
-      <div class="topbar">
-        <!-- Logo → landing page. Uses the same asset path as home; shows text if it fails. -->
-        <a class="logo-link" href="https://hungryfaceai.github.io/hungryface/home/" aria-label="Go to Naptio home">
-          <img class="logo-img" src="/hungryface/home/logo.svg" alt="Naptio logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';" />
-          <span class="brand" style="display:none;">Naptio</span>
+  <div class="page">
+    <header>
+      <nav class="nav-left" aria-label="Primary">
+        <a href="https://hungryfaceai.github.io/hungryface/home" class="home-link" aria-label="Home" title="Home">
+          <svg class="icon icon-home" aria-hidden="true" focusable="false">
+            <use href="/hungryface/assets/icons.svg#icon-cradle-ai" xlink:href="/hungryface/assets/icons.svg#icon-cradle-ai"></use>
+          </svg>
+          <span class="sr-only">Home</span>
+        </a>
+        <a class="no-underline" href="https://hungryfaceai.github.io/hungryface/about">About</a>
+      </nav>
+
+      <nav class="nav-center" aria-label="Modes">
+        <a href="https://hungryfaceai.github.io/hungryface/webrtc/sender/secure/" aria-label="Camera (Baby) — sender" role="button">
+          Camera (Baby)
+        </a>
+        <a href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/main/" aria-label="Viewer (Parent) — receiver" role="button">
+          Viewer (Parent)
+        </a>
+      </nav>
+
+      <nav class="nav-right" aria-label="Quick actions">
+        <a class="is-hidden" href="https://hungryfaceai.github.io/hungryface/login">Log in</a>
+        <a class="is-hidden" href="https://hungryfaceai.github.io/hungryface/signup">Sign up</a>
+
+        <a class="btn-pill" href="https://hungryfaceai.github.io/hungryface/webrtc/pairpsk/" aria-label="Pair devices — quick pairing" role="button">
+          Pair devices
         </a>
 
-        <!-- Language selector (no leading flag to avoid duplicate country icons) -->
-        <div class="lang" role="group" aria-label="Language selector">
-          <label for="lang" id="t-language-label" class="sr-only">Language</label>
-          <select id="lang" aria-labelledby="t-language-label">
-            <option value="en">🇬🇧 English</option>
-            <option value="es">🇪🇸 Español</option>
-            <option value="fr">🇫🇷 Français</option>
-            <option value="pt">🇵🇹 Português</option>
-            <option value="ar">🇸🇦 العربية</option>
-            <option value="ru">🇷🇺 Русский</option>
-            <option value="uk">🇺🇦 Українська</option>
-            <option value="he">🇮🇱 עברית</option>
-            <option value="zh">🇨🇳 中文</option>
-            <option value="ko">🇰🇷 한국어</option>
-            <option value="hi">🇮🇳 हिन्दी</option>
-            <option value="ja">🇯🇵 日本語</option>
-          </select>
+        <a id="menu-invite" class="btn-pill" href="#" aria-label="Share Naptio — show QR and share options" role="button">
+          Share
+        </a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="brand">
+        <h1 id="brand" class="brand">Naptio</h1>
+        <p class="tagline">AI that lets you switch off.</p>
+
+        <!-- NEW: Free badge -->
+        <p class="badge-free" aria-label="Free to use, no sign-up required">
+          <span class="dot" aria-hidden="true"></span>
+          Free to use, no sign-up required
+        </p>
+
+        <p class="subcopy">
+          Turn two devices into a secure baby monitor.<br>
+          On-device AI spots cues and motion, so you get timely, private alerts.<br>
+          No cloud video, no extra hardware, no login.
+        </p>
+        <p class="safety-note">
+          Naptio provides informational insights and is not a medical device. <br>
+          Always supervise your baby.
+        </p>
+      </section>
+    </main>
+
+    <footer role="contentinfo">
+      <span class="footer-left footer-note">© 2025 Fishex Ltd</span>
+      <a class="footer-right footer-note" href="https://hungryfaceai.github.io/hungryface/legal">Legal</a>
+    </footer>
+  </div>
+
+  <!-- Invite Modal -->
+  <div id="invite-modal" class="invite-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="invite-title">
+    <div class="invite-card">
+      <button type="button" class="invite-close" aria-label="Close">
+        &times;
+      </button>
+      <div class="invite-header">
+        <h2 id="invite-title" class="invite-title">Share Naptio</h2>
+      </div>
+      <div class="invite-body">
+        <div class="invite-qr">
+          <img id="invite-qr" src="" alt="QR code" width="220" height="220" loading="lazy" />
+        </div>
+        <input id="invite-url" class="invite-url" type="text" readonly value="" aria-label="Shareable link" />
+        <div class="invite-actions">
+          <a id="invite-open" class="btn-pill" href="#" target="_blank" rel="noopener">Open</a>
+          <button id="invite-copy" class="btn-pill" type="button">Copy</button>
+          <button id="invite-share" class="btn-pill" type="button">Share</button>
         </div>
       </div>
-
-      <h1 id="t-title" class="soft">About Naptio</h1>
-
-      <p id="t-intro-1"></p>
-      <p id="t-intro-2"></p>
-
-      <h2 id="t-how-title"></h2>
-      <p id="t-how-body"></p>
-
-      <h2 id="t-privacy-title"></h2>
-      <ul id="t-privacy-list"></ul>
-
-      <h2 id="t-why-title"></h2>
-      <ul id="t-why-list"></ul>
-
-      <div class="hr" aria-hidden="true"></div>
-
-      <h2 id="t-safety-title"></h2>
-      <p id="t-safety-body" class="fineprint"></p>
-
-      <h2 id="t-team-title"></h2>
-      <p id="t-team-body"></p>
     </div>
   </div>
 
+  <script>
+  // Standalone Invite Modal (same logic as before, with × close)
+  (() => {
+    const trigger  = document.getElementById('menu-invite');
+    const modal    = document.getElementById('invite-modal');
+    const qrImg    = document.getElementById('invite-qr');
+    const urlInput = document.getElementById('invite-url');
+    const btnCopy  = document.getElementById('invite-copy');
+    const btnOpen  = document.getElementById('invite-open');
+    const btnShare = document.getElementById('invite-share');
+    const btnClose = modal?.querySelector('.invite-close');
+
+    if (!trigger || !modal) return;
+
+    const INVITE_URL = window.HF_INVITE_URL
+      || (document.body && document.body.dataset && document.body.dataset.inviteUrl)
+      || location.href;
+
+    const QR_ENDPOINT = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&format=svg&data=';
+
+    function toast(msg) {
+      const el = document.createElement('div');
+      el.className = 'invite-toast';
+      el.textContent = msg;
+      document.body.appendChild(el);
+      requestAnimationFrame(() => el.classList.add('show'));
+      setTimeout(() => {
+        el.classList.remove('show');
+        el.addEventListener('transitionend', () => el.remove(), { once: true });
+      }, 1400);
+    }
+
+    function openInvite() {
+      const url = INVITE_URL;
+      if (qrImg) {
+        qrImg.src = QR_ENDPOINT + encodeURIComponent(url);
+        qrImg.alt = 'QR code for ' + url;
+      }
+      if (urlInput) {
+        urlInput.value = url;
+        setTimeout(() => {
+          try { urlInput.focus({ preventScroll: true }); urlInput.setSelectionRange(url.length, url.length); } catch {}
+          urlInput.scrollLeft = urlInput.scrollWidth;
+        }, 0);
+      }
+      if (btnOpen) btnOpen.href = url;
+
+      modal.classList.add('visible');
+      modal.setAttribute('aria-hidden', 'false');
+
+      document.addEventListener('keydown', onEsc, { once: true });
+    }
+
+    function closeInvite() {
+      modal.classList.remove('visible');
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    function onEsc(e) { if (e.key === 'Escape') closeInvite(); }
+
+    trigger.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openInvite();
+    });
+
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeInvite();
+    });
+
+    if (btnClose) btnClose.addEventListener('click', closeInvite);
+    if (btnCopy) {
+      btnCopy.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(urlInput.value);
+          toast('Link copied');
+        } catch {
+          urlInput?.select?.();
+          toast('Copy failed — select and copy');
+        }
+      });
+    }
+
+    if (btnShare) {
+      const canWebShare = typeof navigator !== 'undefined' && 'share' in navigator;
+      if (!canWebShare) btnShare.style.display = 'none';
+
+      btnShare.addEventListener('click', async () => {
+        const url = (urlInput && urlInput.value) || INVITE_URL;
+        try {
+          if (navigator.canShare && !navigator.canShare({ url })) {
+            throw new Error('URL sharing not supported');
+          }
+          await navigator.share({
+            title: 'Naptio',
+            text: 'Share Naptio with a friend:',
+            url
+          });
+        } catch (err) {
+          if (err && err.name === 'AbortError') return; // user canceled
+          try {
+            await navigator.clipboard.writeText(url);
+            toast('Link copied');
+          } catch {
+            urlInput?.select?.();
+            toast('Share failed — link selected to copy');
+          }
+        }
+      });
+    }
+  })();
+  </script>
   <script type="module">
-    // Simple i18n for the About page. Persists selection and handles RTL.
-    const I18N = {
-      en: {
-        name: "English", dir: "ltr",
-        title: "About Naptio",
-        intro1: "Naptio is a private, on-device baby monitor that runs right in your browser. Pop a spare phone in the nursery as the camera and check in from any other phone or laptop—no accounts, no subscriptions, no ads.",
-        intro2: "",
-        howTitle: "How it works",
-        howBody: "Naptio securely connects your own devices and uses gentle, on-device AI to help you notice the moments that matter—like crying, bigger movements, or sleep-position cues. Because everything runs locally, nothing is uploaded to the cloud and there’s no app to install.",
-        privacyTitle: "Privacy by design",
-        privacyList: [
-          "Your video and audio stay with you. We never see or store your baby’s footage.",
-          "Secure by default. Connections between your devices are end-to-end encrypted.",
-          "You’re in control. Pick the alerts you want, pair/unpair devices, or reset any time."
-        ],
-        whyTitle: "Why parents like it",
-        whyList: [
-          "Works with the phones and laptops you already have",
-          "Quick setup with a simple pairing flow",
-          "Helpful AI cues without complicated settings",
-          "Free to use"
-        ],
-        safetyTitle: "Important safety note",
-        safetyBody: "Naptio is not a medical device and doesn’t diagnose, treat, or prevent any condition. It’s a helper, not a substitute for parental supervision or professional advice. Always follow safe-sleep guidance.",
-        teamTitle: "The Naptio team",
-        teamBody: "We’re a small, hands-on team who love building useful, privacy-first tools. Before Naptio, we spent years crafting high-reliability models in a very demanding industry—work that taught us to obsess over accuracy, security, and performance. Now we’re bringing that same care to something closer to home: helping families rest a little easier. And we’re committed to keeping Naptio available to everyone, for free."
-      },
-      es: {
-        name: "Español", dir: "ltr",
-        title: "Acerca de Naptio",
-        intro1: "Naptio es un vigilabebés privado que funciona en tu propio dispositivo y directamente en el navegador. Coloca un teléfono de repuesto en la habitación como cámara y vigila desde otro teléfono u ordenador—sin cuentas, sin suscripciones, sin anuncios.",
-        intro2: "",
-        howTitle: "Cómo funciona",
-        howBody: "Naptio conecta de forma segura tus propios dispositivos y usa una IA ligera, en el propio dispositivo, para ayudarte a detectar los momentos importantes—como el llanto, movimientos grandes o señales de postura al dormir. Como todo funciona de forma local, no se sube nada a la nube y no hay que instalar ninguna app.",
-        privacyTitle: "Privacidad por diseño",
-        privacyList: [
-          "Tu vídeo y audio se quedan contigo. Nunca vemos ni guardamos las imágenes de tu bebé.",
-          "Seguro por defecto. Las conexiones entre tus dispositivos están cifradas de extremo a extremo.",
-          "Tú tienes el control. Elige las alertas que quieres, empareja/desempareja dispositivos o restablece cuando quieras."
-        ],
-        whyTitle: "Por qué les gusta a los padres",
-        whyList: [
-          "Funciona con los teléfonos y ordenadores que ya tienes",
-          "Configuración rápida con un emparejamiento sencillo",
-          "Indicaciones útiles de IA sin ajustes complicados",
-          "Gratis"
-        ],
-        safetyTitle: "Aviso importante de seguridad",
-        safetyBody: "Naptio no es un dispositivo médico y no diagnostica, trata ni previene ninguna afección. Es una ayuda, no un sustituto de la supervisión de los padres ni del consejo profesional. Sigue siempre las recomendaciones de sueño seguro.",
-        teamTitle: "El equipo de Naptio",
-        teamBody: "Somos un equipo pequeño y cercano al producto; nos encanta crear herramientas útiles y con la privacidad como prioridad. Antes de Naptio, pasamos años desarrollando modelos de alta fiabilidad en un sector muy exigente—un trabajo que nos enseñó a obsesionarnos con la precisión, la seguridad y el rendimiento. Ahora ponemos ese mismo cuidado en algo más cercano: ayudar a las familias a descansar un poco mejor. Y nos comprometemos a mantener Naptio disponible para todos, gratis."
-      },
-      fr: {
-        name: "Français", dir: "ltr",
-        title: "À propos de Naptio",
-        intro1: "Naptio est un babyphone privé, sur votre appareil, qui fonctionne directement dans votre navigateur. Posez un téléphone de rechange dans la chambre comme caméra et surveillez depuis un autre téléphone ou un ordinateur — sans compte, sans abonnement, sans publicité.",
-        intro2: "",
-        howTitle: "Comment ça marche",
-        howBody: "Naptio connecte en toute sécurité vos propres appareils et utilise une IA légère, exécutée localement, pour vous aider à remarquer les moments qui comptent — pleurs, grands mouvements ou indices de position de sommeil. Comme tout fonctionne en local, rien n’est envoyé dans le cloud et il n’y a aucune application à installer.",
-        privacyTitle: "Confidentialité dès la conception",
-        privacyList: [
-          "Vos vidéos et sons restent chez vous. Nous ne voyons ni ne stockons jamais les images de votre bébé.",
-          "Sécurisé par défaut. Les connexions entre vos appareils sont chiffrées de bout en bout.",
-          "Vous gardez la main. Choisissez les alertes, associez/dissociez des appareils ou réinitialisez à tout moment."
-        ],
-        whyTitle: "Pourquoi les parents l’aiment",
-        whyList: [
-          "Fonctionne avec les téléphones et ordinateurs que vous avez déjà",
-          "Mise en route rapide avec un appairage simple",
-          "Aides IA utiles sans réglages compliqués",
-          "Gratuit"
-        ],
-        safetyTitle: "Avertissement important de sécurité",
-        safetyBody: "Naptio n’est pas un dispositif médical et ne diagnostique, ne traite ni ne préviennent aucune maladie. C’est un assistant, pas un substitut à la surveillance parentale ni aux conseils de professionnels. Suivez toujours les recommandations de sommeil sécurisé.",
-        teamTitle: "L’équipe Naptio",
-        teamBody: "Nous sommes une petite équipe, proche du terrain, qui aime créer des outils utiles où la confidentialité passe en premier. Avant Naptio, nous avons passé des années à concevoir des modèles très fiables dans un secteur très exigeant — un travail qui nous a appris à privilégier la précision, la sécurité et la performance. Nous mettons aujourd’hui ce même soin au service de quelque chose de plus proche de nous : aider les familles à dormir un peu plus sereinement. Et nous nous engageons à garder Naptio accessible à tous, gratuitement."
-      },
-      pt: {
-        name: "Português", dir: "ltr",
-        title: "Sobre o Naptio",
-        intro1: "O Naptio é um baby monitor privado que funciona diretamente no seu navegador. Coloque um telefone extra no quarto do bebé como câmara e acompanhe a partir de outro telefone ou computador — sem contas, sem subscrições, sem anúncios.",
-        intro2: "",
-        howTitle: "Como funciona",
-        howBody: "O Naptio liga com segurança os seus próprios dispositivos e utiliza uma IA leve, a correr no próprio dispositivo, para o ajudar a notar os momentos que importam — como choro, movimentos maiores ou indícios de posição de sono. Como tudo funciona localmente, nada é enviado para a nuvem e não é preciso instalar aplicações.",
-        privacyTitle: "Privacidade por conceção",
-        privacyList: [
-          "O seu vídeo e áudio ficam consigo. Nunca vemos nem guardamos as imagens do seu bebé.",
-          "Seguro por omissão. As ligações entre os seus dispositivos são encriptadas de extremo a extremo.",
-          "O controlo é seu. Escolha os alertas que pretende, emparelhe/desemparelhe dispositivos e reponha quando quiser."
-        ],
-        whyTitle: "Porque os pais gostam",
-        whyList: [
-          "Funciona com os telefones e computadores que já tem",
-          "Configuração rápida com emparelhamento simples",
-          "Sinais úteis de IA sem definições complicadas",
-          "Gratuito"
-        ],
-        safetyTitle: "Nota importante de segurança",
-        safetyBody: "O Naptio não é um dispositivo médico e não diagnostica, trata ou previne qualquer condição. É um auxiliar, não um substituto da supervisão parental nem do aconselhamento profissional. Siga sempre as orientações de sono seguro.",
-        teamTitle: "A equipa Naptio",
-        teamBody: "Somos uma equipa pequena e prática que adora criar ferramentas úteis, com a privacidade em primeiro lugar. Antes do Naptio, passámos anos a construir modelos de alta fiabilidade numa área muito exigente — trabalho que nos ensinou a valorizar precisão, segurança e desempenho. Agora trazemos o mesmo cuidado para algo mais próximo de casa: ajudar as famílias a descansar um pouco melhor. E comprometemo-nos a manter o Naptio disponível para todos, gratuitamente."
-      },
-      ar: {
-        name: "العربية", dir: "rtl",
-        title: "نبذة عن Naptio",
-        intro1: "Naptio هو جهاز مراقبة أطفال خاص يعمل على جهازك مباشرة داخل المتصفح. ضع هاتفًا إضافيًا في غرفة الطفل ككاميرا وتابع من أي هاتف أو كمبيوتر آخر — بلا حسابات، بلا اشتراكات، بلا إعلانات.",
-        intro2: "",
-        howTitle: "كيف يعمل",
-        howBody: "يربط Naptio أجهزتك ببعضها بأمان ويستخدم ذكاءً اصطناعيًا خفيفًا يعمل على الجهاز لمساعدتك على ملاحظة اللحظات المهمة — مثل البكاء أو التحركات الكبيرة أو إشارات وضعية النوم. ولأن كل شيء يعمل محليًا، فلا يتم رفع أي شيء إلى السحابة ولا حاجة لتثبيت تطبيق.",
-        privacyTitle: "الخصوصية أولًا",
-        privacyList: [
-          "يبقى الفيديو والصوت لديك. نحن لا نرى أو نخزّن مقاطع طفلك.",
-          "أمان تلقائي. الاتصالات بين أجهزتك مشفّرة من طرف إلى طرف.",
-          "التحكم بين يديك. اختر التنبيهات، واقرن أو افصل الأجهزة، وأعد الضبط في أي وقت."
-        ],
-        whyTitle: "لماذا يفضله الأهل",
-        whyList: [
-          "يعمل مع الهواتف وأجهزة الكمبيوتر المتوفرة لديك",
-          "إعداد سريع وخطوات اقتران بسيطة",
-          "مؤشرات مفيدة من الذكاء الاصطناعي دون إعدادات معقّدة",
-          "مجاني"
-        ],
-        safetyTitle: "ملاحظة أمان مهمة",
-        safetyBody: "Naptio ليس جهازًا طبيًا ولا يشخّص أو يعالج أو يمنع أي حالة. إنه أداة مساعدة وليس بديلًا عن إشراف الوالدين أو المشورة المهنية. اتبع دائمًا إرشادات النوم الآمن.",
-        teamTitle: "فريق Naptio",
-        teamBody: "نحن فريق صغير وعملي نحب بناء أدوات مفيدة تضع الخصوصية أولًا. قبل Naptio أمضينا سنوات نطوّر نماذج عالية الاعتمادية في صناعة شديدة المتطلبات — ما علّمنا التركيز على الدقة والأمان والأداء. واليوم نضع هذا الاهتمام في شيء أقرب إلى قلوبنا: مساعدة العائلات على نوم أكثر راحة. ونحن ملتزمون بأن يبقى Naptio متاحًا للجميع مجانًا."
-      },
-      ru: {
-        name: "Русский", dir: "ltr",
-        title: "О Naptio",
-        intro1: "Naptio — это приватный детский монитор, который работает прямо в браузере на ваших устройствах. Поставьте запасной телефон в детской как камеру и наблюдайте с другого телефона или ноутбука — без аккаунтов, подписок и рекламы.",
-        intro2: "",
-        howTitle: "Как это работает",
-        howBody: "Naptio безопасно соединяет ваши устройства и использует лёгкий ИИ на самом устройстве, чтобы помогать замечать важные моменты — плач, активные движения или подсказки позы сна. Всё работает локально: ничего не загружается в облако и не требуется установка приложений.",
-        privacyTitle: "Конфиденциальность по замыслу",
-        privacyList: [
-          "Ваше видео и звук остаются у вас. Мы никогда не видим и не храним записи вашего ребёнка.",
-          "Безопасность по умолчанию. Соединения между устройствами шифруются сквозным образом.",
-          "Вы управляете. Выбирайте нужные уведомления, подключайте/отключайте устройства и сбрасывайте настройки в любое время."
-        ],
-        whyTitle: "Почему это нравится родителям",
-        whyList: [
-          "Работает с телефонами и компьютерами, которые у вас уже есть",
-          "Быстр
+  import { installLandingPairGate } from '/hungryface/home/landing-pair-gate.js';
+
+  installLandingPairGate({
+    cameraSelector: 'nav.nav-center a[href*="/webrtc/sender/secure/"]',
+    viewerSelector: 'nav.nav-center a[href*="/webrtc/receiver/main/"]',
+    pairRoute: '/hungryface/webrtc/pairpsk/',
+
+    // Optional overrides (you can omit these)
+    // validateToken: (b64u) => { /* return true if >=16 bytes, etc. */ },
+    // detectHasAnyPsk: (ls) => { /* scan ls for 'psk:' keys */ },
+    // copy: {
+    //   sublineCamera: 'Before you use Camera mode, let’s pair your {nounPlural}.',
+    //   sublineViewer: 'Before you use Viewer mode, let’s pair your {nounPlural}.',
+    // },
+    // onEvent: (name, data) => console.log('[pair-gate]', name, data),
+  });
+</script>
+  
+<!-- analytics -->
+<script type="module">
+  import { installAnalytics } from '/hungryface/shared/analytics.js';
+  window.analytics = installAnalytics({ feature: 'naptio-home' });
+  // Later: window.analytics.event('landing_opened');
+</script>
+  
+</body>
+</html>
