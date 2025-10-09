@@ -44,6 +44,7 @@
       background: transparent; color: #fff; font-size: 16px; font-weight: 600;
       cursor: pointer; box-shadow: none;
       text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+      white-space: nowrap;              /* keep labels on one line */
     }
     .btn:active { transform: scale(0.99); }
     .btn.muted { opacity: 0.6; pointer-events: none; }
@@ -54,9 +55,36 @@
       filter: grayscale(0.4);
     }
     #controls {
-      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
-      display: flex; align-items: center; gap: 12px; z-index: 6;
+      position: fixed;
+      bottom: max(12px, env(safe-area-inset-bottom));   /* lift above iOS home bar */
+      left: 50%;
+      transform: translateX(-50%);
+    
+      /* layout */
+      display: flex;
+      flex-wrap: wrap;                  /* allow a second row on small screens */
+      align-items: center;
+      justify-content: center;
+      gap: 10px 12px;                   /* row/column gaps */
+      z-index: 6;
+    
+      /* keep within the visible (small) viewport + notches */
+      max-width: calc(100svw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));
+      padding: 6px 8px;                 /* small breathing room so edges aren’t clipped */
+      box-sizing: border-box;
+    
+      /* fallback if wrapping still overflows (very narrow devices) */
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
     }
+    #controls::-webkit-scrollbar { display: none; }
+    
+    /* Fallback for browsers without svw/safe areas (older) */
+    @supports not (width: 100svw) {
+      #controls { max-width: calc(100vw - 24px); }
+    }
+
     #enableAudioBtn, #disableAudioBtn { display: none; }
 
     .overlay {
@@ -289,6 +317,11 @@
       transition: transform 120ms linear;
     }
     .icon { font-style: normal; margin-right: 6px; }
+    
+    /* Compact buttons on very small screens */
+    @media (max-width: 380px) {
+      .btn { padding: 10px 12px; font-size: 14px; border-radius: 10px; }
+    }
   </style>
 </head>
 <body>
