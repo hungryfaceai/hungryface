@@ -9,7 +9,7 @@ export function installLandingPairGate(userOptions = {}) {
 
   const defaults = {
     cameraSelector: 'a[href*="/webrtc/sender/secure/"]',
-    viewerSelector: 'a[href*="/webrtc/receiver/main"]',
+    viewerSelector: 'a[href*="/webrtc/receiver/shared/alerts/dashboard/"]',
     pairRoute: '/hungryface/webrtc/pairpsk/',
     durations: { sheetInMs: 260, sheetOutMs: 220 },
     onEvent: () => {},
