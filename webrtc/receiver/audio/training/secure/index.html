@@ -889,14 +889,19 @@
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
       btn.textContent = on ? 'Stop' : 'Start';
     }
-    function updateToggleButtonsUI(){
-      const trainingOn = (state.mode === 'train' || state.mode === 'train_file' || state.mode === 'train_folder');
-      const detectOn = (state.mode === 'detect');
-      const calOn = !!state.calActive;
-      setLiveBtn(els.btnTrain, trainingOn);
-      setLiveBtn(els.btnDetect, detectOn);
-      setLiveBtn(els.btnCal, calOn);
-    }
+	function updateToggleButtonsUI(){
+	  const trainingOn = (state.mode === 'train' || state.mode === 'train_file' || state.mode === 'train_folder');
+	  // Don't show Detect as "on" while calibrating, even though the graph runs in 'detect' mode
+	  const detectOn = (state.mode === 'detect' && !state.calActive);
+	  const calOn = !!state.calActive;
+	
+	  setLiveBtn(els.btnTrain, trainingOn);
+	  setLiveBtn(els.btnDetect, detectOn);
+	  setLiveBtn(els.btnCal, calOn);
+	
+	  // While calibrating, disable the Detect button so it can’t be toggled
+	  els.btnDetect.disabled = state.calActive;
+	}
 
     /* ====== Time-windowed chart helpers ====== */
     function hhmmss(tMs){
