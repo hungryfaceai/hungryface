@@ -11,6 +11,7 @@
       margin: 0; height: 100%;
       background: #000; color: #ccc; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       touch-action: manipulation;
+      overflow-x: hidden;
     }
 
     /* UI container (same look/feel as sender) */
@@ -39,6 +40,60 @@
 
     /* Optional small status text under the card title */
     #status { margin-top: 6px; font-size: 13px; color: #9aa; }
+
+    /* ================= Danger zone (drop-in) ================ */
+    :root{
+      --danger-bg:#c62828;
+      --danger-bg-hover:#b71c1c;
+      --danger-border:#7f1313;
+      --danger-text:#fff;
+    }
+    .sr-only{
+      position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;
+    }
+    .danger-zone{
+      margin-top:24px;
+      background:#130909;
+      border:1px solid var(--danger-border);
+      border-radius:14px;
+      padding:16px;
+    }
+    .danger-zone h2{
+      margin:0 0 6px 0;
+      font-size:18px;
+    }
+    .danger-note{
+      margin:0 0 12px 0;
+      opacity:.9;
+      font-size:14px;
+    }
+    .btn{
+      appearance:none;
+      border-radius:9999px;
+      padding:12px 16px;
+      font-weight:700;
+      cursor:pointer;
+      border:1px solid transparent;
+      line-height:1;
+      min-height:44px;
+    }
+    .btn-danger{
+      background:var(--danger-bg);
+      border-color:var(--danger-bg);
+      color:var(--danger-text);
+      width:100%;
+    }
+    .btn-danger:hover{ background:var(--danger-bg-hover); border-color:var(--danger-bg-hover); }
+    .btn-danger:focus-visible{ outline:2px solid #fff; outline-offset:2px; box-shadow:0 0 0 3px rgba(198,40,40,.5); }
+    .btn-secondary{
+      background:#101010;
+      border:1px solid #333;
+      color:#ddd;
+      padding:10px 14px;
+      border-radius:10px;
+    }
+    .btn-secondary:hover{ background:#151515; }
+    /* ======================================================== */
   </style>
 
   <!-- --- Sidebar overlap fix CSS (revised: use padding-left instead of transform) --- -->
@@ -47,21 +102,24 @@
       --sidebar-visible: 0px;
       --sidebar-gutter: 12px;                     /* extra spacing so shadows/borders don't touch card */
       --safe-left: env(safe-area-inset-left, 0px);/* iPhone notch/gesture area */
+	  --menu-hit: 52px; /* reserve tappable area for the hamburger (≈44–56px) */
       --sidebar-offset: calc(var(--sidebar-visible) + var(--safe-left) + var(--sidebar-gutter));
     }
     /* Shift layout using padding so content is not under the drawer/scrim */
-    #ui {
-      padding-left: var(--sidebar-offset);
-      transition: padding-left .18s ease;
-      will-change: padding-left;
-    }
+	/* Reserve hamburger space even when closed, and add drawer width when open */
+	#ui {
+	  padding-left: var(--sidebar-offset);
+	  transition: padding-left .18s ease;
+	  will-change: padding-left;
+	}
     /* Keep the card fully visible within remaining width */
     .card {
       max-width: min(520px, calc(100vw - var(--sidebar-offset) - 32px));
     }
-    @media (max-width: 420px) {
-      body.drawer-open-detected #ui { padding-right: 8px; }
-    }
+	@media (max-width: 480px) {
+	  body.drawer-open-detected #ui { padding-left: 0 !important; }      /* stop the right shift */
+	  .card { max-width: min(520px, calc(100vw - 32px)); }                /* keep the card fully visible */
+	}
   </style>
 </head>
 <body>
@@ -261,19 +319,21 @@
   </script>
 
   <!-- ——— Naptio: Factory Reset (this device) ——— -->
-  <section id="factoryResetSection" style="margin-top:24px">
-    <div style="
-      background:#0b0b0b;border:1px solid #141414;border-radius:14px;padding:16px;max-width:900px;margin:0 auto;">
-      <h2 style="margin:0 0 8px 0;font-size:18px;line-height:1.3;">Factory reset (this device)</h2>
-      <p style="margin:0 0 12px 0;opacity:.85">
-        Delete all Naptio data stored on this browser.
-      </p>
-      <button id="btnFactoryReset" style="
-        appearance:none;border:1px solid #3b0a0a;background:#1a0000;color:#b22222;
-        padding:10px 14px;border-radius:999px;font-weight:600;cursor:pointer;">
-        Erase all local data
-      </button>
-    </div>
+  <section id="factoryResetSection" class="danger-zone">
+    <h2>Danger zone</h2>
+    <p class="danger-note">Erase Naptio data stored in this browser</p>
+    <button id="btnFactoryReset" class="btn btn-danger" aria-describedby="eraseHelp">
+      <!-- <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" style="vertical-align:-3px;margin-right:8px">
+        <path fill="currentColor" d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+      </svg> -->
+      Erase all data on this browser
+    </button>
+    <span id="eraseHelp" class="sr-only">This will permanently delete local preferences, keys, caches and databases in this browser.</span>
+																				  
+																			   
+							
+			   
+		  
   </section>
 
   <!-- Lightweight modal (no dependencies) -->
@@ -293,18 +353,18 @@
           <li>Offline caches and background service workers</li>
           <li>All local databases (IndexedDB), localStorage and sessionStorage</li>
         </ul>
-        <div style="margin-top:10px;color:#b22222">
+        <div style="margin-top:10px;color:#fff">
           This action cannot be undone. It does not delete anything on other devices.
         </div>
       </div>
 
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-        <button id="factoryResetCancel" style="
-          appearance:none;border:1px solid #333;background:#101010;color:#ddd;
-          padding:8px 12px;border-radius:10px;cursor:pointer;">Cancel</button>
-        <button id="factoryResetConfirm" style="
-          appearance:none;border:1px solid #3b0a0a;background:#1a0000;color:#b22222;
-          padding:8px 12px;border-radius:10px;font-weight:700;cursor:pointer;">Erase & Reset</button>
+        <button id="factoryResetCancel" class="btn btn-secondary">Cancel</button>
+																			  
+																			  
+        <button id="factoryResetConfirm" class="btn btn-danger">Erase & Reset</button>
+																					
+																									 
       </div>
 
       <div id="factoryResetStatus" role="status" aria-live="polite"
