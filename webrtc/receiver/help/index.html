@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
   <meta name="description" content="Naptio User Guide — pairing, setup, and use of Camera (Baby) and Viewer (Parent) pages, including audio detection, movement & prone detection, alerts, and safety." />
 
-  <!-- Shared sidebar stylesheet -->
+  <!-- Shared sidebar stylesheet (same as Settings) -->
   <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
 
   <style>
@@ -15,13 +15,9 @@
       margin: 0; background: #000; color: #fff;
       font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
       -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
-    }
-    body { overflow-x: hidden; }
-
-    /* Visually-hidden helper (for the logo’s sr-only text) */
-    .sr-only {
-      position:absolute !important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
-      clip:rect(0,0,0,0); white-space:nowrap; border:0;
+      height: 100%;
+      touch-action: manipulation;
+      overflow-x: hidden;
     }
 
     /* Layout */
@@ -29,6 +25,9 @@
       position: relative; z-index: 5; min-height: 100svh;
       display: flex; align-items: flex-start; justify-content: center;
       padding: 20px;
+      transition: padding-left .18s ease;
+      will-change: padding-left;
+      box-sizing: border-box;
     }
     .panel {
       width: 100%; max-width: 1100px;
@@ -36,45 +35,32 @@
       border: 1px solid #1b1b1b; border-radius: 16px;
       box-shadow: 0 0 0 1px #0a0a0a inset, 0 8px 24px rgba(0,0,0,0.5);
       padding: 20px 16px 40px;
+      box-sizing: border-box;
     }
     @media (min-width: 720px) {
       .panel { padding: 28px 28px 52px; }
     }
 
-    /* Header + logo (kept clear of the hamburger on small screens) */
+    /* Header (auto-hides on scroll) */
     .header {
-      position: sticky; top: 0; z-index: 4;
+      position: sticky; top: 0; z-index: 6;
       padding: 10px 0 12px;
-      /* keep clear of the sidebar hamburger on narrow screens */
-      padding-left: clamp(56px, env(safe-area-inset-left) + 56px, 72px);
       margin: -10px -8px 14px;
       background: linear-gradient(#000, #0009 60%, #0000);
       border-bottom: 1px solid #141414;
       backdrop-filter: blur(4px);
+      transition: transform .18s ease, opacity .18s ease;
+      will-change: transform;
     }
-    .header-row {
-      display: flex; align-items: center; gap: 12px;
+    .header.hide { transform: translateY(-110%); opacity: 0; }
+    @media (prefers-reduced-motion: reduce) {
+      .header { transition: none; }
     }
-
-    /* === Logo styles (mirrors About page usage) === */
-    .logo-link {
-      display: inline-flex; align-items: center; justify-content: center;
-      text-decoration: none; color: inherit;
-      padding: 4px; border-radius: 10px; /* soft touch target */
-      transition: opacity .15s ease, box-shadow .15s ease;
-      line-height: 0; /* remove stray inline spacing around SVG */
-    }
-    .logo-link:hover { opacity: 1; text-decoration: none; }
-    .logo-link:focus-visible { box-shadow: 0 0 0 2px #2aa198; outline: none; }
-    .icon.icon-home { width: 24px; height: 24px; fill: currentColor; opacity: .95; }
-    .logo-link:hover .icon.icon-home { opacity: 1; }
-
-    h1 {
-      margin: 0; font-size: 22px; letter-spacing: .2px; color: #fff;
-    }
+    .header-row { display: flex; align-items: center; gap: 12px; }
+    h1 { margin: 0; font-size: 22px; letter-spacing: .2px; color: #fff; }
     @media (min-width: 720px) {
       h1 { font-size: 26px; }
-      .header { padding-left: 0; margin: 0 0 18px; background: transparent; border-bottom: none; }
+      .header { margin: 0 0 18px; background: transparent; border-bottom: none; }
     }
 
     /* Content */
@@ -114,23 +100,129 @@
     .toc a { color:#dcdcdc; }
     .toc { border:1px solid #1b1b1b; background:#0a0a0a; border-radius:12px; padding:10px 12px; }
   </style>
+
+  <!-- --- Sidebar overlap fix CSS (identical approach to Settings) --- -->
+  <style>
+    :root {
+      --sidebar-visible: 0px;
+      --sidebar-gutter: 12px;
+      --safe-left: env(safe-area-inset-left, 0px);
+      --sidebar-offset: calc(var(--sidebar-visible) + var(--safe-left) + var(--sidebar-gutter));
+    }
+    /* shift content so it never sits under the drawer */
+    #ui { padding-left: var(--sidebar-offset); }
+    /* keep panel within remaining width */
+    .panel { max-width: min(1100px, calc(100vw - var(--sidebar-offset) - 32px)); }
+
+    @media (max-width: 480px) {
+      /* on very small screens, don't push the page when the drawer opens */
+      body.drawer-open-detected #ui { padding-left: 0 !important; }
+      .panel { max-width: min(1100px, calc(100vw - 32px)); }
+    }
+  </style>
 </head>
 <body>
-  <!-- Page UI container -->
+  <!-- Shared sidebar injection (exactly like Settings) -->
+  <script type="module">
+    (async () => {
+      try {
+        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
+        const html = await res.text();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html.trim();
+        document.body.prepend(...wrap.childNodes);
+
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      } catch (err) {
+        console.error('[Sidebar] failed to load shared assets:', err);
+      }
+    })();
+  </script>
+
+  <!-- Sidebar visible-width measurer (same logic as Settings) -->
+  <script type="module">
+    (function () {
+      const root = document.documentElement;
+      let sidebar = null;
+      let ro = null, mo = null;
+      let rafId = 0;
+
+      function px(n) { return Math.max(0, Math.round(n)) + 'px'; }
+
+      function pickSidebarCandidate() {
+        const preferred = document.querySelector(
+          '[data-hf-sidebar], [data-sidebar], .hf-sidebar, #hfSidebar, #sidebar, .sidebar, aside[role="complementary"], nav[aria-label="Sidebar"]'
+        );
+        if (preferred) return preferred;
+        const nodes = Array.from(document.body.querySelectorAll('body > *'));
+        return nodes.find(el => {
+          const cs = getComputedStyle(el);
+          if (cs.position !== 'fixed') return false;
+          if (!(/^0(px)?$/).test(cs.left)) return false;
+          const r = el.getBoundingClientRect();
+          const w = r.width;
+          return w >= 160 && w <= window.innerWidth * 0.9;
+        }) || null;
+      }
+
+      function visibleLeftWidth(el) {
+        const r = el.getBoundingClientRect();
+        const visible = Math.max(0, Math.min(window.innerWidth, r.right) - Math.max(0, r.left));
+        const cs = getComputedStyle(el);
+        const displayOK = cs.display !== 'none' && cs.visibility !== 'hidden' && r.height > 0;
+        return displayOK && r.left < (window.innerWidth / 2) ? visible : 0;
+      }
+
+      function updateShift() {
+        rafId && cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(() => {
+          const w = sidebar ? visibleLeftWidth(sidebar) : 0;
+          root.style.setProperty('--sidebar-visible', px(w));
+          document.body.classList.toggle('drawer-open-detected', w > 8);
+        });
+      }
+
+      function attachObservers() {
+        if (!sidebar) return;
+        try { ro?.disconnect(); mo?.disconnect(); } catch {}
+        ro = new ResizeObserver(updateShift);
+        ro.observe(sidebar);
+        mo = new MutationObserver(updateShift);
+        mo.observe(sidebar, { attributes: true, attributeFilter: ['style', 'class', 'hidden', 'inert'], subtree: false });
+      }
+
+      function boot() {
+        sidebar = pickSidebarCandidate();
+        if (!sidebar) { setTimeout(boot, 120); return; }
+        attachObservers();
+        updateShift();
+      }
+
+      ['resize','orientationchange'].forEach(ev => window.addEventListener(ev, updateShift, { passive: true }));
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', updateShift, { passive: true });
+        window.visualViewport.addEventListener('scroll',  updateShift, { passive: true });
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot, { once: true });
+      } else {
+        boot();
+      }
+    })();
+  </script>
+
   <div id="ui">
     <main class="panel" role="main">
       <div class="header">
         <div class="header-row">
-          <!-- LOGO (same markup & asset as About page) -->
-          <a class="logo-link" href="https://hungryfaceai.github.io/hungryface/home/" aria-label="Home">
-            <svg class="icon icon-home" aria-hidden="true" focusable="false">
-              <use href="/hungryface/assets/icons.svg#icon-cradle-ai"
-                   xlink:href="/hungryface/assets/icons.svg#icon-cradle-ai"></use>
-            </svg>
-            <span class="sr-only">Home</span>
-          </a>
-
-          <h1>User Guide</h1>
+          <h1>User guide</h1>
         </div>
       </div>
 
@@ -466,7 +558,34 @@
     </main>
   </div>
 
-  <!-- Shared sidebar (drawer + hamburger) -->
-  <script type="module" src="/hungryface/webrtc/receiver/shared/sidebar.js"></script>
+  <!-- Auto-hide header on scroll -->
+  <script>
+    (() => {
+      const header = document.querySelector('.header');
+      if (!header) return;
+
+      let lastY = window.scrollY || document.documentElement.scrollTop || 0;
+      let ticking = false;
+      const threshold = 12;
+
+      function run() {
+        const y = window.scrollY || document.documentElement.scrollTop || 0;
+        const delta = y - lastY;
+
+        if (Math.abs(delta) > threshold) {
+          if (delta > 0 && y > 24) header.classList.add('hide');
+          else header.classList.remove('hide');
+          lastY = y;
+        }
+      }
+
+      document.addEventListener('scroll', () => {
+        if (!ticking) {
+          requestAnimationFrame(() => { run(); ticking = false; });
+          ticking = true;
+        }
+      }, { passive: true });
+    })();
+  </script>
 </body>
 </html>
