@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Naptio – Pair devices (Share secret)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Share a one-time PSK to pair two devices. Local secret, quick share." />
+  <link rel="icon" href="data:,">
+  <style>
+    :root { color-scheme: dark; }
+    html, body { height: 100%; margin: 0; background: #000; color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+    a { color: #fff; text-decoration: none; opacity: 0.9; }
+    a:hover, a:focus { opacity: 1; }
+
+    /* Prevent underline on Camera / Viewer pills */
+    .nav-center a,
+    .nav-center a:hover,
+    .nav-center a:focus { text-decoration: none; }
+
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    .page { min-height: 100%; display: flex; flex-direction: column; }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center; padding: 14px 20px; gap: 12px;
+    }
+    .nav-left, .nav-center, .nav-right {
+      display: flex; gap: 18px; align-items: center; white-space: nowrap; font-size: 0.95rem;
+    }
+    .nav-left  { justify-self: start; }
+    .nav-center{ justify-self: center; gap: 12px; min-width: 0; }
+    .nav-right { justify-self: end; gap: 12px; }
+
+    .home-link { display: inline-flex; align-items: center; line-height: 1; }
+    .icon { width: var(--icon-size, 24px); height: var(--icon-size, 24px); display: block; }
+    .icon-home { --icon-size: 26px; }
+
+    .nav-center a {
+      color: #000; background: #fff; border-radius: 9999px; border: 1px solid #fff;
+      opacity: 1; font-weight: 600; line-height: 1; white-space: nowrap;
+      font-size: clamp(0.78rem, 2.6vw, 0.95rem);
+      padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
+    }
+    .nav-center a:hover { background: #eaeaea; }
+    .nav-center a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+    /* Disabled state for Camera/Viewer when PSK is missing */
+    .nav-center a.is-disabled {
+      background: #1a1a1a !important;
+      border-color: #2a2a2a !important;
+      color: #8a8a8a !important;
+      opacity: 0.6 !important;
+      cursor: not-allowed !important;
+      pointer-events: none; /* make non-clickable */
+    }
+
+    .btn-pill {
+      color: #fff; background: #000; border: 1px solid #fff; border-radius: 9999px;
+      font-weight: 600; line-height: 1; opacity: 1; white-space: nowrap;
+      font-size: clamp(0.78rem, 2.6vw, 0.95rem);
+      padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
+      transition: background-color .15s ease, box-shadow .15s ease;
+      cursor: pointer; /* show hand on hover for pills/buttons */
+    }
+    .btn-pill:hover, .btn-pill:focus {
+      background: #141414; border-color: #e6e6e6; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16);
+    }
+    .btn-pill:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+    main { flex: 1; display: grid; place-items: center; padding: 24px; text-align: center; }
+    .hero { width: min(920px, 96vw); }
+
+    .pair-card {
+      background: #0b0b0b; border: 1px solid #141414; border-radius: 16px;
+      padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      display: grid; gap: 14px; justify-items: center;
+    }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:center; }
+    .input { border-radius:12px; padding:12px 14px; border:1px solid #222; background:#0b0b0b; color:#fff; }
+    .label { opacity:.9; }
+    .chip { border-radius:9999px; padding:8px 12px; border:1px solid #242424; background:#0a0a0a; color:#d9d9d9; font-size:.9rem; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    /* Make PSK chip focusable for show/hide on focus/blur */
+    #pskChip { outline: none; }
+    #pskChip:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+    .pair-qr {
+      width: 240px; height: 240px; background: #111; border: 1px solid #222; border-radius: 12px;
+      display: grid; place-items: center; overflow: hidden;
+    }
+
+    .invite-toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(12px);
+      background: #111; border: 1px solid #222; color: #fff; padding: 10px 14px;
+      border-radius: 9999px; opacity: 0; transition: opacity .2s ease, transform .2s ease;
+      z-index: 1100; font-size: 0.9rem;
+    }
+    .invite-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    @media (max-width: 560px) {
+      header { grid-template-columns: 1fr 1fr; grid-auto-rows: minmax(0, auto); row-gap:10px; }
+      .nav-left{ grid-column:1; grid-row:1; justify-self:start; }
+      .nav-right{ grid-column:2; grid-row:1; justify-self:end; gap:10px; }
+      .nav-center{ grid-column:1/-1; grid-row:2; justify-content:center; gap:12px; width:100%; }
+      .nav-center a { font-size: clamp(0.92rem, 3.8vw, 1.12rem); padding: clamp(8px, 2.2vw, 12px) clamp(14px, 4.5vw, 18px); }
+      .btn-pill { font-size: clamp(0.78rem, 3.0vw, 0.92rem); padding: clamp(6px, 1.8vw, 8px) clamp(10px, 3.0vw, 14px); }
+    }
+    @media (max-width: 380px) {
+      .nav-left a, .nav-right a { font-size: 0.82rem; }
+      .nav-left, .nav-right { gap: 10px; } .nav-center { gap: 10px; }
+      header { padding: 12px 14px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <nav class="nav-left" aria-label="Primary">
+        <a href="https://hungryfaceai.github.io/hungryface/home" class="home-link" aria-label="Home" title="Home">
+          <svg class="icon icon-home" aria-hidden="true" focusable="false">
+            <use href="/hungryface/assets/icons.svg#icon-cradle-ai" xlink:href="/hungryface/assets/icons.svg#icon-cradle-ai"></use>
+          </svg>
+          <span class="sr-only">Home</span>
+        </a>
+        <!-- About link removed -->
+      </nav>
+
+      <nav class="nav-center" aria-label="Modes">
+        <a id="linkSender" href="https://hungryfaceai.github.io/hungryface/webrtc/sender/secure/" role="button">Camera (Baby)</a>
+        <a id="linkViewer" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/shared/alerts/dashboard/" role="button">Viewer (Parent)</a>
+      </nav>
+
+      <nav class="nav-right" aria-label="Quick actions">
+        <!-- Pair devices pill removed -->
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="pair-card" aria-labelledby="pair-title">
+          <h2 id="pair-title" style="margin:0">Pair devices (share)</h2>
+
+          <!-- Room above action pills -->
+          <div class="row" style="gap:12px">
+            <label for="room" class="label">Room</label>
+            <input id="room" class="input mono" value="Baby" spellcheck="false" style="min-width:160px"/>
+          </div>
+
+          <div class="row">
+            <button id="regen" class="btn-pill" type="button">Rotate secret</button>
+            <button id="forget" class="btn-pill" type="button" style="border-color:#444">Forget on this device</button>
+          </div>
+
+          <!-- PSK chip (masked). Click/focus to reveal, blur to hide -->
+          <div class="row mono" style="gap:8px;">
+            <div id="pskChip" class="chip" tabindex="0" role="button" aria-label="Temporarily show secret">
+              Key: <span id="tokenMasked" class="mono" style="margin-left:6px; opacity:.9">—</span>
+            </div>
+          </div>
+
+          <!-- QR only (no URL text) -->
+          <div class="pair-qr">
+            <canvas id="qrMain" width="240" height="240" aria-label="Pairing QR"></canvas>
+          </div>
+
+          <div class="row">
+            <button id="shareLink" class="btn-pill" type="button">Share</button>
+            <button id="copyLink" class="btn-pill" type="button">Copy</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer removed -->
+  </div>
+
+  <div id="toast" class="invite-toast" aria-live="polite"></div>
+
+  <script type="module">
+    import { ensurePskForRoom, getPsk } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+
+    // ---- Elements
+    const roomEl = document.getElementById('room');
+    const regenBtn = document.getElementById('regen');
+    const forgetBtn = document.getElementById('forget');
+
+    const linkSender = document.getElementById('linkSender');
+    const linkViewer = document.getElementById('linkViewer');
+
+    const pskChip = document.getElementById('pskChip');
+    const tokenMaskedEl = document.getElementById('tokenMasked');
+
+    const shareBtn = document.getElementById('shareLink');
+    const copyBtn = document.getElementById('copyLink');
+    const qrMain = document.getElementById('qrMain');
+    const toastEl = document.getElementById('toast');
+
+    const INSTALLER_URL = './pair-install.html'; // target page on the other device
+
+    let AUTO_CREATE = true;
+
+    // Helpers
+    function showToast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.add('show');
+      setTimeout(() => { toastEl.classList.remove('show'); }, 1600);
+    }
+    function fingerprint(b64u) { return b64u ? b64u.slice(-6) : '—'; }
+    function maskToken(b64u) { return b64u ? ('•••• (…' + fingerprint(b64u) + ')') : '—'; }
+
+    function currentRoom() { return (roomEl.value || 'Baby').trim(); }
+    function getCurrentToken() {
+      const { tokenB64u = '' } = getPsk(currentRoom()) || {};
+      return tokenB64u;
+    }
+
+    function setModeLinksEnabled(enabled) {
+      [linkSender, linkViewer].forEach(a => {
+        if (!a) return;
+        if (enabled) {
+          a.classList.remove('is-disabled');
+          a.removeAttribute('aria-disabled');
+          a.tabIndex = 0;
+        } else {
+          a.classList.add('is-disabled');
+          a.setAttribute('aria-disabled', 'true');
+          a.tabIndex = -1; // remove from tab order
+        }
+      });
+    }
+
+    // QR
+    async function drawQR(canvas, text) {
+      try {
+        if (!window.QRious) {
+          await new Promise((res, rej) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js';
+            s.onload = res; s.onerror = rej; document.head.appendChild(s);
+          });
+        }
+        // eslint-disable-next-line no-undef
+        new QRious({ element: canvas, value: text, size: 240, level: 'H' });
+      } catch {
+        const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,240,240);
+        ctx.fillStyle = '#000'; ctx.font = '12px monospace'; wrap(ctx, text, 6, 16, 228, 14);
+      }
+    }
+    function wrap(ctx, text, x, y, w, lh){
+      const words = String(text).split(' '); let line = '';
+      for (let n=0;n<words.length;n++){
+        const test = line + words[n] + ' ';
+        if (ctx.measureText(test).width > w && n>0){ ctx.fillText(line, x, y); line = words[n] + ' '; y += lh; }
+        else line = test;
+      } ctx.fillText(line, x, y);
+    }
+
+    function makeInstallUrl(room, tokenB64u) {
+      const url = new URL(INSTALLER_URL, location.href);
+      url.hash = new URLSearchParams({ room, psk: tokenB64u }).toString();
+      return url.toString();
+    }
+
+    async function refresh() {
+      const room = currentRoom();
+
+      if (AUTO_CREATE) {
+        await ensurePskForRoom(room, 'sender');
+      }
+
+      const token = getCurrentToken();
+      tokenMaskedEl.textContent = maskToken(token);
+
+      // Enable/disable top mode pills if PSK is present
+      setModeLinksEnabled(!!token);
+
+      // Build QR to installer, but DO NOT display raw URL
+      if (token) {
+        const smartUrl = makeInstallUrl(room, token);
+        await drawQR(qrMain, smartUrl);
+        shareBtn.disabled = false;
+        copyBtn.disabled = false;
+      } else {
+        const ctx = qrMain.getContext('2d');
+        ctx.clearRect(0,0,qrMain.width,qrMain.height);
+        ctx.fillStyle = '#222'; ctx.fillRect(0,0,qrMain.width,qrMain.height);
+        ctx.fillStyle = '#aaa'; ctx.font = '14px monospace'; ctx.fillText('No PSK', 8, 24);
+        shareBtn.disabled = true;
+        copyBtn.disabled = true;
+      }
+    }
+
+    // --- PSK chip interactions: reveal on click/focus, hide on blur
+    function revealPSK() {
+      const token = getCurrentToken();
+      tokenMaskedEl.textContent = token || '—';
+    }
+    function hidePSK() {
+      const token = getCurrentToken();
+      tokenMaskedEl.textContent = maskToken(token);
+    }
+
+    pskChip.addEventListener('click', () => {
+      pskChip.focus(); // ensure we get blur later
+      revealPSK();
+    });
+    pskChip.addEventListener('focus', revealPSK);
+    pskChip.addEventListener('blur', hidePSK);
+    pskChip.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        revealPSK();
+      }
+    });
+
+    // Rotate / Forget
+    regenBtn.addEventListener('click', async () => {
+      AUTO_CREATE = true;
+      const room = currentRoom();
+      try { localStorage.removeItem('psk:' + room); } catch {}
+      await ensurePskForRoom(room, 'sender');
+      await refresh();
+      showToast('Secret rotated');
+    });
+
+    forgetBtn.addEventListener('click', async () => {
+      AUTO_CREATE = false;
+      try { localStorage.removeItem('psk:' + currentRoom()); } catch {}
+      await refresh();
+      showToast('Forgot on this device');
+    });
+
+    roomEl.addEventListener('change', async () => {
+      AUTO_CREATE = true;
+      await refresh();
+    });
+
+    // Share & Copy (URL only)
+    shareBtn.addEventListener('click', async () => {
+      const room = currentRoom();
+      const token = getCurrentToken();
+      if (!token) return;
+      const url = makeInstallUrl(room, token);
+      try {
+        if (navigator.share && (!navigator.canShare || navigator.canShare({ url }))) {
+          await navigator.share({ title: 'Naptio pairing', text: 'Install secret for room ' + room, url });
+        } else {
+          await navigator.clipboard.writeText(url);
+          showToast('Link copied');
+        }
+      } catch {}
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      const room = currentRoom();
+      const token = getCurrentToken();
+      if (!token) return;
+      const url = makeInstallUrl(room, token);
+      try { await navigator.clipboard.writeText(url); showToast('Link copied'); } catch {}
+    });
+
+    await refresh();
+  </script>
+</body>
+</html>
