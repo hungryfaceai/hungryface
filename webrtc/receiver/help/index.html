@@ -89,13 +89,13 @@
     .toc { border:1px solid #1b1b1b; background:#0a0a0a; border-radius:12px; padding:10px 12px; }
   </style>
 
-  <!-- --- Sidebar overlap fix CSS (copied from Settings pattern) --- -->
+  <!-- --- Sidebar overlap fix CSS (same approach as Settings) --- -->
   <style>
     :root {
       --sidebar-visible: 0px;
       --sidebar-gutter: 12px;                     /* spacing from drawer edge */
       --safe-left: env(safe-area-inset-left, 0px);/* iPhone gesture area */
-      --menu-hit: 52px;                           /* tappable area for hamburger */
+      --menu-hit: 52px;                           /* tappable area for hamburger (if needed elsewhere) */
       --sidebar-offset: calc(var(--sidebar-visible) + var(--safe-left) + var(--sidebar-gutter));
     }
     /* Shift content so it never sits under the drawer */
@@ -111,7 +111,7 @@
   </style>
 </head>
 <body>
-  <!-- Shared sidebar injection (same as Settings) -->
+  <!-- Shared sidebar injection (identical pattern to Settings) -->
   <script type="module">
     (async () => {
       try {
@@ -212,7 +212,7 @@
     <main class="panel" role="main">
       <div class="header">
         <div class="header-row">
-          <h1 style="padding-left:3ch">User guide</h1>
+          <h1>User guide</h1>
         </div>
       </div>
 
@@ -241,7 +241,6 @@
         <a href="#appendix">Appendix</a>
       </div>
 
-      <!-- ======== Rest of your existing content unchanged ======== -->
       <h2 id="need">1) What you need</h2>
       <ul>
         <li>Two devices (e.g., an old phone as the <strong>Camera (Baby)</strong> and your phone/tablet as the <strong>Viewer (Parent)</strong>).</li>
@@ -292,13 +291,260 @@
       </div>
       <hr/>
 
-      <!-- (All remaining sections unchanged) -->
-      <!-- Pairing / Camera / Receivers / Audio / Movement / Prone / Fence / Video / Alerts / Settings / Troubleshooting / Privacy / Support / Appendix -->
-      <!-- ... (keep your existing content here) ... -->
-      
       <h2 id="pairing">3) Pairing devices (PSK secret)</h2>
-      <!-- keep the rest of your original markup from here on -->
-      <!-- ... -->
+      <p>Naptio uses a per-room <strong>pre-shared secret (PSK)</strong> so only devices that hold the secret can exchange signed signaling messages. You typically do this once per room.</p>
+      <h3>A. Generate &amp; share the secret (on the future Camera)</h3>
+      <ol>
+        <li>Open <a href="/hungryface/webrtc/pairpsk/">Pair devices (Share)</a>.</li>
+        <li><strong>Room</strong>: choose a label (e.g., <em>Baby</em>). You can keep one room per child/space.</li>
+        <li><strong>Rotate secret</strong> if you want a fresh token (this invalidates old links).</li>
+        <li>Tap <em>Share</em> (or <em>Copy</em>) to produce a link/QR that embeds <span class="inline-code">#room=…&amp;token=…</span>.</li>
+      </ol>
+      <h3>B. Install the secret (on the future Viewer)</h3>
+      <ol>
+        <li>Open the link or scan the QR on the Viewer device.</li>
+        <li>The <a href="/hungryface/webrtc/pairpsk/pair-install.html">Pair devices (Install)</a> page shows <em>Key installed</em> and <em>Device paired</em>.</li>
+        <li>The secret is stored <strong>locally on that device</strong> for the selected room (you can <em>Forget</em> later).</li>
+      </ol>
+      <h3>C. Using the secret</h3>
+      <ul>
+        <li>Receivers automatically pick the <em>only</em> stored room; if multiple exist, choose one in <a href="/hungryface/webrtc/receiver/settings/">Settings</a>.</li>
+        <li>If a Receiver opens without a valid secret, it redirects you to <em>Install</em>.</li>
+        <li>If you suspect leakage, <strong>Rotate</strong> on Share → re-install on Viewers.</li>
+      </ul>
+      <h3>D. Good hygiene</h3>
+      <ul>
+        <li>Don’t post links publicly.</li>
+        <li>Use a distinct <strong>Room</strong> per child/space.</li>
+        <li>Periodically rotate the secret (optional).</li>
+      </ul>
+      <hr/>
+
+      <h2 id="camera">4) Start the Camera (Baby)</h2>
+      <p>Open <a href="/hungryface/webrtc/sender/secure/">Camera (Baby)</a> on the device you’ll leave near the crib.</p>
+      <h3>Key controls</h3>
+      <ul>
+        <li><strong>Room</strong>: must match the paired room.</li>
+        <li><strong>Camera</strong>: Front/Back. Prefer <em>Back</em> for better low-light.</li>
+        <li><strong>Video / Audio</strong> toggles: choose what to publish.</li>
+        <li><strong>AI placement</strong>: some overlays can run <em>On sender</em> (this device) or <em>On receiver</em>.</li>
+        <li><strong>Preview minutes</strong>: brief local preview to frame the scene.</li>
+        <li><strong>Start streaming</strong>: begins WebRTC and advertises to paired receivers.</li>
+      </ul>
+      <h3>Status &amp; indicators</h3>
+      <ul>
+        <li><em>Connecting → Connected</em>; shows peer count when viewers attach.</li>
+        <li>Permission prompts for camera/microphone appear on first use.</li>
+      </ul>
+      <h3>Placement &amp; power</h3>
+      <ul>
+        <li>Mount securely; keep all cables <strong>out of reach</strong>.</li>
+        <li>Avoid backlight/glare; aim for a clear, stable view of the crib.</li>
+        <li>Keep the device <strong>plugged in</strong> or well-charged; consider screen dimming.</li>
+      </ul>
+      <div class="tip"><strong>Tips:</strong> Repositioning the camera changes geometry → re-run <em>Movement calibration</em> on the Viewer. Talk-back uses the Viewer’s mic → Camera’s speaker; reduce feedback by lowering volumes.</div>
+      <hr/>
+
+      <h2 id="receivers">5) Choose a Receiver page (Viewer)</h2>
+      <p>Open any Receiver page; all share the left sidebar (tap the hamburger to show/hide). You can keep multiple pages open.</p>
+      <ul>
+        <li><strong>Video (Viewer):</strong> Basic monitoring with <em>Enable/Disable audio</em>, <em>Fullscreen</em>, <em>Talk</em> (push-to-talk), and <em>Lullaby</em> controls. <a href="/hungryface/webrtc/receiver/video/secure/">Open</a></li>
+        <li><strong>Audio – Live Detection:</strong> Runs your <em>Active Top-K</em> model; raises alerts when the <em>Fused score</em> exceeds the <em>ON</em> threshold and ends after it drops below <em>OFF</em> for a dwell time. <a href="/hungryface/webrtc/receiver/audio/detect/secure/">Open</a></li>
+        <li><strong>Weighted Top-K Audio — Training:</strong> Collect training statistics from <em>Sender</em>, <em>Microphone</em>, or <em>Audio files/folder</em>; compute <em>weights</em>; calibrate quiet and test live. <a href="/hungryface/webrtc/receiver/audio/training/secure/">Open</a></li>
+        <li><strong>Movement detection:</strong> Pose-based motion using <em>EMA</em> (quick), <em>Integrator</em> (sustained), and <em>Baseline drift</em> (slow shift) detectors. Includes an assisted <em>Calibration</em>. <a href="/hungryface/webrtc/receiver/motion/secure/">Open</a></li>
+        <li><strong>Prone detection:</strong> Monitors head pitch relative to a supine baseline + face visibility to flag sustained face-down risk. <a href="/hungryface/webrtc/receiver/prone/secure/">Open</a></li>
+        <li><strong>Fence (zone):</strong> Draw a polygon; alerts when movement occurs <em>inside</em> the zone. <a href="/hungryface/webrtc/receiver/fence/secure/">Open</a></li>
+        <li><strong>Settings:</strong> Select <em>Room</em>; perform <em>Factory reset</em> (clears local data only). <a href="/hungryface/webrtc/receiver/settings/">Open</a></li>
+        <li><strong>Alerts Dashboard:</strong> Timeline + table of alerts with windows <em>15m (quick)</em>, <em>2h (default)</em>, <em>8h</em>, <em>24h</em>, <em>7d</em>; filter, search, and export. <a href="/hungryface/webrtc/receiver/shared/alerts/dashboard/">Open</a></li>
+      </ul>
+      <p class="note">Each feature has an inline help sheet (“?”) with context and tips.</p>
+      <hr/>
+
+      <h2 id="audio">6) Audio — Train, calibrate, detect</h2>
+      <p>Train a light <strong>Weighted Top-K</strong> model on examples that represent your environment, calibrate quiet, then run live detection.</p>
+      <h3>A. Train a model</h3>
+      <ol>
+        <li>Open <a href="/hungryface/webrtc/receiver/audio/training/secure/">Audio — Training</a>.</li>
+        <li><strong>Source</strong>: choose <em>Microphone (Receiver)</em>, <em>Sender (WebRTC)</em>, or <em>Files/Folder</em>.</li>
+        <li>Click <em>Start</em> to accumulate stats (20–60s per condition).</li>
+        <li><em>Recompute Weights</em> to finalize the current Active model.</li>
+        <li>Optionally <em>Penalty map</em> certain classes (down-weight nuisance sounds).</li>
+        <li><em>Export Model</em> (JSON) and <em>Import</em> later if needed.</li>
+      </ol>
+      <h3>B. Quiet calibration (hysteresis)</h3>
+      <ol>
+        <li>Ensure a quiet room.</li>
+        <li>Set <em>Duration</em> (e.g., 20s) and click <em>Start</em>.</li>
+        <li>The page computes <em>ON</em>/<em>OFF</em> thresholds automatically: ON &gt; OFF for stability.</li>
+      </ol>
+      <h3>C. Live detection</h3>
+      <ol>
+        <li>Open <a href="/hungryface/webrtc/receiver/audio/detect/secure/">Audio – Live Detection</a>.</li>
+        <li>Pick your <em>Active model</em> and <em>Source</em> (Sender/Mic).</li>
+        <li>Click <em>Start</em>; watch the <em>Fused score</em> line vs <em>ON/OFF</em> bands.</li>
+        <li>Use <em>Logs</em> to inspect Top-N class contributions; enable <em>ALL</em> for deeper debugging.</li>
+        <li>Alerts open when score ≥ ON; they end after score ≤ OFF for the hold time.</li>
+      </ol>
+      <div class="tip"><strong>Tips:</strong> Collect a little <em>non-cry</em> audio to help weights discriminate. Re-run quiet calibration after moving devices or changing gain. If false positives occur, raise ON a bit or increase the OFF gap.</div>
+      <hr/>
+
+      <h2 id="movement">7) Movement detection (pose-based)</h2>
+      <p>Detects movement from landmarks (e.g., shoulders/hips) via pose estimation.</p>
+      <h3>Recommended flow</h3>
+      <ol>
+        <li>Verify you see moving pose landmarks (shoulders/hips).</li>
+        <li>Run <em>Calibration → Start</em> during 10–20s of stillness to seed the <em>baseline</em> and auto-tune thresholds.</li>
+        <li>Keep <em>Torso-relative baseline</em> ON for robustness to distance/zoom.</li>
+      </ol>
+      <h3>Detectors</h3>
+      <ul>
+        <li><strong>EMA (quick):</strong> sensitive to sudden motion; <span class="inline-code">α</span> controls smoothing; has ON/OFF thresholds.</li>
+        <li><strong>Integrator (sustained):</strong> accumulates energy over time with time constant <span class="inline-code">τ</span>.</li>
+        <li><strong>Baseline drift:</strong> follows slow changes (e.g., bedding sag); includes reset and optional overlay.</li>
+      </ul>
+      <h3>Gates &amp; filters</h3>
+      <ul>
+        <li><strong>Visibility / Presence gates</strong> ignore low-confidence landmarks.</li>
+        <li><strong>Min landmark count</strong> prevents triggering on partial detections.</li>
+      </ul>
+      <h3>Tuning</h3>
+      <ul>
+        <li>Too many alerts → lower <span class="inline-code">α</span> (more smoothing), raise <em>ON</em>, lengthen <em>dwell</em>.</li>
+        <li>Misses → raise <span class="inline-code">α</span>, lower <em>ON</em>, or reduce <em>dwell</em> slightly.</li>
+      </ul>
+      <hr/>
+
+      <h2 id="prone">8) Prone detection (face-down risk)</h2>
+      <p>Combines <strong>head pitch</strong> relative to a <strong>supine baseline</strong> and <strong>face visibility</strong> to estimate sustained face-down risk.</p>
+      <h3>Setup</h3>
+      <ol>
+        <li>With baby face-up, run <em>Calibration (supine baseline)</em> for a few seconds.</li>
+        <li>Confirm pitch is near 0 in neutral position.</li>
+      </ol>
+      <h3>Operation</h3>
+      <ul>
+        <li>The <em>Risk bar</em> rises with downward pitch and low face visibility.</li>
+        <li>Alerts use <em>hysteresis + dwell</em> to avoid flicker.</li>
+      </ul>
+      <h3>Tuning</h3>
+      <ul>
+        <li>Increase <em>EMA τ</em> for smoother pitch; adjust <span class="inline-code">θ<sub>on</sub></span> (pitch threshold) and dwell to taste.</li>
+        <li>Re-calibrate after major camera repositioning.</li>
+      </ul>
+      <div class="warn">Assistive only; <strong>not a medical device</strong>.</div>
+      <hr/>
+
+      <h2 id="fence">9) Fence (zone) monitoring</h2>
+      <p>Draw a polygonal zone; Naptio alerts on movement <em>inside</em> the zone.</p>
+      <ol>
+        <li>Click <em>Draw zone</em> and tap around the area of interest; finish to close.</li>
+        <li><em>Clear</em> removes the current zone.</li>
+        <li>Use together with Movement detection to limit alerts to the zone.</li>
+      </ol>
+      <div class="tip"><strong>Tips:</strong> Avoid very thin polygons; keep a few pixels margin inside the crib rails. Re-draw after changing camera angle.</div>
+      <hr/>
+
+      <h2 id="video">10) Video viewer: audio, talk, lullaby</h2>
+      <ul>
+        <li><strong>Enable/Disable audio</strong>: listen to the Camera stream from the Viewer.</li>
+        <li><strong>Fullscreen</strong>: immersive view for night mode.</li>
+        <li><strong>Talk (PTT)</strong>: hold to send your voice to the Camera device; reduce echo by lowering volumes.</li>
+        <li><strong>Lullaby</strong>: pick from the built-in playlist; keep playback levels safe.</li>
+      </ul>
+      <div class="note"><strong>Notes:</strong> Some browsers require user interaction before playing audio. If playback is silent, check system mute and page permission prompts.</div>
+      <hr/>
+
+      <h2 id="alerts">11) Alerts: banner, history, dashboard</h2>
+      <h3>Banner</h3>
+      <ul>
+        <li>Red strip at the top with the latest alert; <em>Dismiss for N min</em> to snooze (default 10m).</li>
+      </ul>
+      <h3>Alerts drawer</h3>
+      <ul>
+        <li>Open via the <em>Alerts pill</em> (badge shows unread).</li>
+        <li>Filter by type (<em>Audio</em>, <em>Prone</em>, <em>Motion</em>, <em>Fence</em>), search, sort columns.</li>
+        <li><em>Export JSON/CSV</em>; <em>Clear all</em> to reset local history.</li>
+      </ul>
+      <h3>Dashboard</h3>
+      <ul>
+        <li>Timeline with swimlanes + activity band and a table view.</li>
+        <li>Windows: <em>15m</em>, <em>2h</em> (default), <em>8h</em>, <em>24h</em>, <em>7d</em>.</li>
+        <li>Brush to zoom; toggle types; optional ping sounds.</li>
+      </ul>
+      <h3>How alerts work</h3>
+      <ul>
+        <li>Each detector opens an <em>episode</em> when its metric crosses <em>ON</em>; it ends after dropping below <em>OFF</em> for a hold time.</li>
+        <li>All alert data is stored <strong>locally</strong> on the Viewer device (IndexedDB).</li>
+      </ul>
+      <hr/>
+
+      <h2 id="settings">12) Settings &amp; Factory reset</h2>
+      <ul>
+        <li><strong>Room</strong>: pick which paired room this device should use by default.</li>
+        <li><strong>Factory reset</strong>: clears local data (pairing secrets, calibrations, alerts, preferences, caches/service workers, local/session storage, IndexedDB). This affects <strong>only this device</strong>.</li>
+      </ul>
+      <h3>When to reset</h3>
+      <ul>
+        <li>You rotated/retired a room secret and want to re-pair cleanly.</li>
+        <li>You’re gifting/selling a device.</li>
+        <li>You need to clear a corrupted local cache.</li>
+      </ul>
+      <hr/>
+
+      <h2 id="troubleshooting">13) Tips &amp; troubleshooting</h2>
+      <h3>Connection</h3>
+      <ul>
+        <li>Ensure both devices select the same <strong>Room</strong> and the Viewer has the secret installed.</li>
+        <li>Toggle Wi-Fi on/off; move closer to the router; avoid VPNs that block P2P.</li>
+      </ul>
+      <h3>Permissions &amp; audio</h3>
+      <ul>
+        <li>Allow mic/camera prompts; on iOS, check <em>Settings → Safari/Chrome → Camera/Microphone</em>.</li>
+        <li>If audio is flat: confirm <em>Source</em> (Sender vs Mic), re-train or re-load the model.</li>
+      </ul>
+      <h3>Calibration</h3>
+      <ul>
+        <li>Re-run <em>Quiet</em> (audio) or <em>Calibration</em> (movement/prone) after moving devices.</li>
+        <li>Use longer quiet durations in noisy homes.</li>
+      </ul>
+      <h3>False positives</h3>
+      <ul>
+        <li><strong>Audio:</strong> raise ON, widen OFF gap, adjust Penalty map.</li>
+        <li><strong>Movement:</strong> lower <span class="inline-code">α</span>, lengthen dwell, keep <em>Torso-relative</em> ON.</li>
+        <li><strong>Prone:</strong> increase dwell, re-calibrate supine baseline.</li>
+      </ul>
+      <h3>Power &amp; background</h3>
+      <ul>
+        <li>Keep Camera plugged in; consider disabling battery savers that throttle background tasks.</li>
+        <li>Prevent auto-lock if your platform allows a <em>wake lock</em>; otherwise keep screen dimmed.</li>
+      </ul>
+      <hr/>
+
+      <h2 id="privacy">14) Privacy, safety &amp; consent</h2>
+      <ul>
+        <li>WebRTC streams are encrypted in transit; Naptio avoids cloud video.</li>
+        <li>Secrets remain on your devices; rotate/forget at any time.</li>
+        <li><strong>Not a medical device</strong> — assistive cues only; maintain continuous adult supervision.</li>
+        <li>Obtain consent when monitoring anyone other than your own child; follow local laws.</li>
+      </ul>
+      <hr/>
+
+      <h2 id="support">15) Support</h2>
+      <p>Use <a href="/hungryface/webrtc/receiver/support/">Support</a> in the sidebar to email the team. You can optionally include diagnostics (OS, device, browser, screen) to help reproduce issues.</p>
+      <hr/>
+
+      <h2 id="appendix">Appendix</h2>
+      <h3>Appendix A — How pairing works (high level)</h3>
+      <ul>
+        <li>A PSK token is saved in your browser per Room when you run <em>Pair devices (Install)</em>.</li>
+        <li>Signaling messages are HMAC-signed with this token so only paired devices in that room accept them.</li>
+        <li>You can <em>Rotate secret</em> on the share page to invalidate old links; <em>Forget</em> removes it from the current device.</li>
+      </ul>
+      <h3>Appendix B — Where alerts live</h3>
+      <ul>
+        <li>Alerts (Audio/Prone/Motion/Fence) live in a local IndexedDB database per device.</li>
+        <li>Use the Alerts drawer and Dashboard to search, filter, export, and clear.</li>
+      </ul>
     </main>
   </div>
 </body>
