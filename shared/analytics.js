@@ -3,6 +3,7 @@
 // - Auto-detects ingest endpoint (localhost vs Render) unless overridden
 // - Heartbeats only from one "leader" tab; custom events can be sent by any tab
 // - Option: persistId=false to avoid a stored device ID until consent
+// - CORS-safe: never sends credentials; uses sendBeacon only for same-origin
 
 export function installAnalytics(opts = {}) {
   const {
@@ -102,10 +103,14 @@ export function installAnalytics(opts = {}) {
     };
 
     try {
-      // Try sendBeacon for unloads/low-cost pings
-      if (payload.beacon && navigator.sendBeacon) {
-        const ok = navigator.sendBeacon(ingestUrl, jsonBlob(body));
-        return ok ? Promise.resolve() : fetchJson(ingestUrl, body, onError);
+      // Prefer sendBeacon for unloads only when same-origin; otherwise fall back to fetch.
+      if (payload.beacon) {
+        if (navigator.sendBeacon && sameOrigin(ingestUrl)) {
+          const ok = navigator.sendBeacon(ingestUrl, jsonBlob(body));
+          return ok ? Promise.resolve() : fetchJson(ingestUrl, body, onError);
+        }
+        // Cross-origin beacon would be credentialed → use fetch w/ credentials: 'omit'
+        return fetchJson(ingestUrl, body, onError);
       }
       return fetchJson(ingestUrl, body, onError);
     } catch (e) {
@@ -168,14 +173,21 @@ export function installAnalytics(opts = {}) {
 function fetchJson(url, body, onError) {
   return fetch(url, {
     method: 'POST',
+    mode: 'cors',
+    credentials: 'omit',                 // ensure NOT credentialed
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
-    keepalive: true
+    keepalive: true                      // lets this finish on unload
   }).then(() => {}).catch(e => { try { onError(e); } catch {} });
 }
 
 function jsonBlob(obj) {
   return new Blob([JSON.stringify(obj)], { type: 'application/json' });
+}
+
+function sameOrigin(u) {
+  try { return new URL(u, location.href).origin === location.origin; }
+  catch { return true; } // be conservative if URL fails to parse
 }
 
 function randId() {
