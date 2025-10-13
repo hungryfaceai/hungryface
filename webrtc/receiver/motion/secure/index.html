@@ -353,6 +353,7 @@
     import { DrawingUtils, PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
     import {initAlertsUI, beginAlert, finishAlert, AlertTypes, showAlertBanner} from "/hungryface/webrtc/receiver/shared/alerts/index.js";
+    import { installAlertSound } from "/hungryface/webrtc/receiver/shared/alerts/notify-sound.js";
 
     /* --------- tiny safe addEventListener helper --------- */
     const on = (el, ev, fn, opts) => { if (el && el.addEventListener) el.addEventListener(ev, fn, opts); };
@@ -396,6 +397,11 @@
     const POSE_MODEL_URL =
       "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
     const HAVE_CURRENT_DATA = 2;
+    // Sound for Motion alerts (per-type toggle + cooldown; independent of dashboard gate)
+    const alertSound = installAlertSound({
+      type: 'motion',
+      // debug: true, // optional while testing
+    });
 
     /* ---------- DOM ---------- */
     const stage = document.getElementById('stage');
@@ -1012,9 +1018,9 @@
               type: (AlertTypes?.Motion ?? 'motion'),
               message: 'Movement detected'
             });
-            //showAlertBanner(Date.now());
             showAlertBanner(Date.now(), 'Motion detected');
           })());
+          void alertSound.trigger();
         } else if (prev && _motionAlertId != null) {
           // Finish the Motion alert with an average score (use integrator as sustained proxy)
           const avg = _motionCount > 0 ? (_motionSum / _motionCount) : intScore;
