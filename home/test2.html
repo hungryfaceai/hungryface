@@ -280,6 +280,10 @@
     .yt-player iframe { width:100%; height:100%; border:0; display:block; }
     .yt-fallback { font-size:13px; color:#aaa; margin:8px 2px 0; }
     .yt-fallback a { color:#ddd; text-decoration: underline; }
+
+    /* ---- Scroll-aware header Pair CTA ---- */
+    .header-pair { display: none; }
+    .header-pair.is-sticky { display: inline-block; }
   </style>
 </head>
 <body>
@@ -308,7 +312,7 @@
         <a class="is-hidden" href="https://hungryfaceai.github.io/hungryface/login">Log in</a>
         <a class="is-hidden" href="https://hungryfaceai.github.io/hungryface/signup">Sign up</a>
 
-        <a class="btn-pill" href="https://hungryfaceai.github.io/hungryface/webrtc/pairpsk/" aria-label="Pair devices — quick pairing" role="button">
+        <a class="btn-pill header-pair" href="https://hungryfaceai.github.io/hungryface/webrtc/pairpsk/" aria-label="Pair devices — quick pairing" role="button">
           Pair devices
         </a>
 
@@ -593,6 +597,22 @@
         const id = card.dataset.yt;
         loadYouTube(id);
       });
+    })();
+  </script>
+
+  <!-- Scroll-aware header Pair CTA (hide over hero, show after scroll) -->
+  <script>
+    (() => {
+      const hero = document.querySelector('.hero');
+      const headerPair = document.querySelector('.header-pair');
+      if (!hero || !headerPair || !('IntersectionObserver' in window)) return;
+
+      const io = new IntersectionObserver(([entry]) => {
+        const heroInView = entry.isIntersecting && entry.intersectionRatio > 0;
+        headerPair.classList.toggle('is-sticky', !heroInView);
+      }, { threshold: 0.2 });
+
+      io.observe(hero);
     })();
   </script>
 
