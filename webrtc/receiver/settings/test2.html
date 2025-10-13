@@ -98,9 +98,27 @@
     /* ——— Sound notifications UI ——— */
     .section-title { margin: 16px 0 6px 0; font-size: 16px; }
     .sep { border: 0; border-top: 1px solid #141414; margin: 14px 0; }
-    .inline-radios { display: flex; gap: 12px; flex-wrap: wrap; }
-    .inline-radios label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 14px; }
-    .help { font-size: 12px; opacity: .8; margin-top: 2px; }
+
+    /* iOS-style switch */
+    .switch {
+      position: relative; width: 52px; height: 30px; display: inline-block; flex: 0 0 auto;
+    }
+    .switch input {
+      opacity: 0; width: 0; height: 0; position: absolute;
+    }
+    .slider {
+      position: absolute; inset: 0;
+      background: #222; border: 1px solid #333; border-radius: 9999px;
+      transition: background .18s ease, border-color .18s ease;
+    }
+    .slider:before {
+      content: ""; position: absolute; height: 26px; width: 26px; left: 1px; top: 1px;
+      background: #fff; border-radius: 50%; transition: transform .18s ease;
+      box-shadow: 0 1px 2px rgba(0,0,0,.5);
+    }
+    .switch input:checked + .slider { background: #34C759; border-color: #34C759; }
+    .switch input:checked + .slider:before { transform: translateX(22px); }
+    .switch input:focus-visible + .slider { box-shadow: 0 0 0 3px rgba(52,199,89,.35); }
   </style>
 
   <!-- --- Sidebar overlap fix CSS (revised: use padding-left instead of transform) --- -->
@@ -247,42 +265,41 @@
       <!-- ——— Sound notifications ——— -->
       <section aria-labelledby="notifTitle">
         <h3 id="notifTitle" class="section-title">Sound notifications</h3>
-        <p class="muted-note">Choose which alerts play a sound on this device, and set a minimum gap to avoid rapid repeats.</p>
 
         <!-- Audio -->
-        <div class="row" role="group" aria-labelledby="lab-audio">
-          <div class="inline-radios" aria-label="Audio notifications">
-            <label><input type="radio" name="notif-audio" value="on"> On</label>
-            <label><input type="radio" name="notif-audio" value="off"> Off</label>
-          </div>
-          <span id="lab-audio" class="muted-note">Audio</span>
+        <div class="row">
+          <span class="muted-note">Audio</span>
+          <label class="switch" aria-label="Audio notifications">
+            <input id="sw-audio" type="checkbox" role="switch" />
+            <span class="slider"></span>
+          </label>
         </div>
 
         <!-- Motion -->
-        <div class="row" role="group" aria-labelledby="lab-motion">
-          <div class="inline-radios" aria-label="Motion notifications">
-            <label><input type="radio" name="notif-motion" value="on"> On</label>
-            <label><input type="radio" name="notif-motion" value="off"> Off</label>
-          </div>
-          <span id="lab-motion" class="muted-note">Motion</span>
+        <div class="row">
+          <span class="muted-note">Motion</span>
+          <label class="switch" aria-label="Motion notifications">
+            <input id="sw-motion" type="checkbox" role="switch" />
+            <span class="slider"></span>
+          </label>
         </div>
 
         <!-- Fence -->
-        <div class="row" role="group" aria-labelledby="lab-fence">
-          <div class="inline-radios" aria-label="Fence notifications">
-            <label><input type="radio" name="notif-fence" value="on"> On</label>
-            <label><input type="radio" name="notif-fence" value="off"> Off</label>
-          </div>
-          <span id="lab-fence" class="muted-note">Fence</span>
+        <div class="row">
+          <span class="muted-note">Fence</span>
+          <label class="switch" aria-label="Fence notifications">
+            <input id="sw-fence" type="checkbox" role="switch" />
+            <span class="slider"></span>
+          </label>
         </div>
 
         <!-- Prone -->
-        <div class="row" role="group" aria-labelledby="lab-prone">
-          <div class="inline-radios" aria-label="Prone notifications">
-            <label><input type="radio" name="notif-prone" value="on"> On</label>
-            <label><input type="radio" name="notif-prone" value="off"> Off</label>
-          </div>
-          <span id="lab-prone" class="muted-note">Prone</span>
+        <div class="row">
+          <span class="muted-note">Prone</span>
+          <label class="switch" aria-label="Prone notifications">
+            <input id="sw-prone" type="checkbox" role="switch" />
+            <span class="slider"></span>
+          </label>
         </div>
 
         <!-- Shared cooldown -->
@@ -290,7 +307,6 @@
           <input id="notifCooldownMin" type="number" min="0" max="180" step="1" inputmode="numeric" placeholder="2" />
           <label for="notifCooldownMin" class="muted-note" style="cursor:pointer;">Min gap between alerts (minutes)</label>
         </div>
-        <div class="help" id="cooldownHelp">Applies to all alert types above. Set to 0 to allow immediate repeats.</div>
       </section>
       <!-- ——— End: Sound notifications ——— -->
     </div>
@@ -393,23 +409,19 @@
     }
     function setOnOff(key, val) {
       localStorage.setItem(key, (val === 'off') ? 'off' : 'on');
-      // notify other tabs (optional consumers)
       try { localStorage.setItem('naptio:notify:ts', String(Date.now())); } catch {}
     }
 
-    function wireGroup(name, key) {
-      const nodes = Array.from(document.querySelectorAll(`input[name="notif-${name}"]`));
-      const current = getOnOff(key, 'on');
-      nodes.forEach(n => { n.checked = (n.value === current); });
-      nodes.forEach(n => n.addEventListener('change', () => {
-        if (n.checked) setOnOff(key, n.value);
-      }));
+    function wireSwitch(inputId, key) {
+      const el = document.getElementById(inputId);
+      el.checked = getOnOff(key, 'on') === 'on';
+      el.addEventListener('change', () => setOnOff(key, el.checked ? 'on' : 'off'));
     }
 
-    wireGroup('audio', KEYS.audio);
-    wireGroup('motion', KEYS.motion);
-    wireGroup('fence', KEYS.fence);
-    wireGroup('prone', KEYS.prone);
+    wireSwitch('sw-audio', KEYS.audio);
+    wireSwitch('sw-motion', KEYS.motion);
+    wireSwitch('sw-fence', KEYS.fence);
+    wireSwitch('sw-prone', KEYS.prone);
 
     // Cooldown (minutes)
     const cooldownInput = document.getElementById('notifCooldownMin');
