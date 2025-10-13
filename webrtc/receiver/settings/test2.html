@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Baby Monitor – Receiver Settings</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
+  <style>
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; height: 100%;
+      background: #000; color: #ccc; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+      touch-action: manipulation;
+      overflow-x: hidden;
+    }
+
+    /* UI container (same look/feel as sender) */
+    #ui {
+      position: relative; z-index: 5; min-height: 100svh;
+      display: flex; align-items: center; justify-content: center; padding: 20px;
+    }
+    @media (max-height: 820px) { #ui { align-items: flex-start; padding-top: 0; } }
+    @media (max-height: 740px) { #ui { padding-top: 0; } }
+
+    .card {
+      width: 100%; max-width: 520px; background: #0b0b0b; border: 1px solid #141414; border-radius: 14px;
+      padding: 18px; box-sizing: border-box;
+    }
+    .card h2 { font-size: clamp(16px, 2.6vw, 18px); margin: 0 0 8px 0; }
+
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; }
+
+    input[type="text"], select, input[type="number"] {
+      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222; background:#0b0b0b; color:#ddd;
+      -moz-appearance:textfield;
+    }
+    #roomSel { font-size: 18px; padding: 14px 16px; height: 52px; border-radius: 12px; }
+
+    .muted-note { opacity:.7; font-size:13px; }
+
+    /* Optional small status text under the card title */
+    #status { margin-top: 6px; font-size: 13px; color: #9aa; }
+
+    /* ================= Danger zone (drop-in) ================ */
+    :root{
+      --danger-bg:#c62828;
+      --danger-bg-hover:#b71c1c;
+      --danger-border:#7f1313;
+      --danger-text:#fff;
+    }
+    .sr-only{
+      position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;
+    }
+    .danger-zone{
+      margin-top:24px;
+      background:#130909;
+      border:1px solid var(--danger-border);
+      border-radius:14px;
+      padding:16px;
+    }
+    .danger-zone h2{
+      margin:0 0 6px 0;
+      font-size:18px;
+    }
+    .danger-note{
+      margin:0 0 12px 0;
+      opacity:.9;
+      font-size:14px;
+    }
+    .btn{
+      appearance:none;
+      border-radius:9999px;
+      padding:12px 16px;
+      font-weight:700;
+      cursor:pointer;
+      border:1px solid transparent;
+      line-height:1;
+      min-height:44px;
+    }
+    .btn-danger{
+      background:var(--danger-bg);
+      border-color:var(--danger-bg);
+      color:var(--danger-text);
+      width:100%;
+    }
+    .btn-danger:hover{ background:var(--danger-bg-hover); border-color:var(--danger-bg-hover); }
+    .btn-danger:focus-visible{ outline:2px solid #fff; outline-offset:2px; box-shadow:0 0 0 3px rgba(198,40,40,.5); }
+    .btn-secondary{
+      background:#101010;
+      border:1px solid #333;
+      color:#ddd;
+      padding:10px 14px;
+      border-radius:10px;
+    }
+    .btn-secondary:hover{ background:#151515; }
+    /* ======================================================== */
+  </style>
+
+  <!-- --- Sidebar overlap fix CSS (revised: use padding-left instead of transform) --- -->
+  <style>
+    :root {
+      --sidebar-visible: 0px;
+      --sidebar-gutter: 12px;                     /* extra spacing so shadows/borders don't touch card */
+      --safe-left: env(safe-area-inset-left, 0px);/* iPhone notch/gesture area */
+	  --menu-hit: 52px; /* reserve tappable area for the hamburger (≈44–56px) */
+      --sidebar-offset: calc(var(--sidebar-visible) + var(--safe-left) + var(--sidebar-gutter));
+    }
+    /* Shift layout using padding so content is not under the drawer/scrim */
+	/* Reserve hamburger space even when closed, and add drawer width when open */
+	#ui {
+	  padding-left: var(--sidebar-offset);
+	  transition: padding-left .18s ease;
+	  will-change: padding-left;
+	}
+    /* Keep the card fully visible within remaining width */
+    .card {
+      max-width: min(520px, calc(100vw - var(--sidebar-offset) - 32px));
+    }
+	@media (max-width: 480px) {
+	  body.drawer-open-detected #ui { padding-left: 0 !important; }      /* stop the right shift */
+	  .card { max-width: min(520px, calc(100vw - 32px)); }                /* keep the card fully visible */
+	}
+  </style>
+</head>
+<body>
+  <!-- Shared sidebar injection (same as receiver pages) -->
+  <script type="module">
+    (async () => {
+      try {
+        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
+        const html = await res.text();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html.trim();
+        document.body.prepend(...wrap.childNodes);
+
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      } catch (err) {
+        console.error('[Sidebar] failed to load shared assets:', err);
+      }
+    })();
+  </script>
+
+  <!-- --- Sidebar overlap fix JS (measures visible drawer width) --- -->
+  <script type="module">
+    (function () {
+      const root = document.documentElement;
+      let sidebar = null;
+      let ro = null, mo = null;
+      let rafId = 0;
+
+      function px(n) { return Math.max(0, Math.round(n)) + 'px'; }
+
+      function pickSidebarCandidate() {
+        const preferred = document.querySelector(
+          '[data-hf-sidebar], [data-sidebar], .hf-sidebar, #hfSidebar, #sidebar, .sidebar, aside[role="complementary"], nav[aria-label="Sidebar"]'
+        );
+        if (preferred) return preferred;
+
+        const nodes = Array.from(document.body.querySelectorAll('body > *'));
+        return nodes.find(el => {
+          const cs = getComputedStyle(el);
+          if (cs.position !== 'fixed') return false;
+          if (!(/^0(px)?$/).test(cs.left)) return false;
+          const r = el.getBoundingClientRect();
+          const w = r.width;
+          return w >= 160 && w <= window.innerWidth * 0.9;
+        }) || null;
+      }
+
+      function visibleLeftWidth(el) {
+        const r = el.getBoundingClientRect();
+        const visible = Math.max(0, Math.min(window.innerWidth, r.right) - Math.max(0, r.left));
+        const cs = getComputedStyle(el);
+        const displayOK = cs.display !== 'none' && cs.visibility !== 'hidden' && r.height > 0;
+        return displayOK && r.left < (window.innerWidth / 2) ? visible : 0;
+      }
+
+      function updateShift() {
+        rafId && cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(() => {
+          const w = sidebar ? visibleLeftWidth(sidebar) : 0;
+          root.style.setProperty('--sidebar-visible', px(w));
+          document.body.classList.toggle('drawer-open-detected', w > 8);
+        });
+      }
+
+      function attachObservers() {
+        if (!sidebar) return;
+        try { ro?.disconnect(); mo?.disconnect(); } catch {}
+        ro = new ResizeObserver(updateShift);
+        ro.observe(sidebar);
+        mo = new MutationObserver(updateShift);
+        mo.observe(sidebar, { attributes: true, attributeFilter: ['style', 'class', 'hidden', 'inert'], subtree: false });
+      }
+
+      function boot() {
+        sidebar = pickSidebarCandidate();
+        if (!sidebar) {
+          setTimeout(boot, 120);
+          return;
+        }
+        attachObservers();
+        updateShift();
+      }
+
+      ['resize','orientationchange'].forEach(ev => window.addEventListener(ev, updateShift, { passive: true }));
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', updateShift, { passive: true });
+        window.visualViewport.addEventListener('scroll',  updateShift, { passive: true });
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot, { once: true });
+      } else {
+        boot();
+      }
+    })();
+  </script>
+
+  <div id="ui">
+    <div class="card">
+      <h2 style="padding-left:3ch">Settings</h2>
+
+      <!-- Room selector (label on the RIGHT, same as sender) -->
+      <div class="row">
+        <select id="roomSel"></select>
+        <label for="roomSel" class="muted-note" style="cursor:pointer;">Room</label>
+      </div>
+
+      <div id="status" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <!-- PSK + Rooms bootstrap -->
+  <script type="module">
+    import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+    import { requirePskOrRedirect, listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
+
+    const roomSel = document.getElementById('roomSel');
+    const statusEl = document.getElementById('status');
+
+    // Ensure a PSK exists (redirects to pairing if none)
+    const qs = new URLSearchParams(location.search);
+    const preferRoom = (qs.get('room') || '').trim();
+    const env = await requirePskOrRedirect({
+      intent: 'viewer',
+      pairRoute: '/hungryface/webrtc/pairpsk/',
+      preferRoom,
+      fallbackRoom: 'Baby',
+    });
+
+    // If we’re still here, PSKs exist; install shim for current env room.
+    if (!env.redirected) {
+      const undo = installPskShim({ room: env.room });
+      console.log('[PSK][receiver-settings] shim installed for room:', env.room);
+    }
+
+    /* ---------- Populate dropdown from stored rooms (mimics sender) ---------- */
+    function hasOption(sel, val) {
+      return !!Array.from(sel?.options || []).find(o => o.value === val);
+    }
+
+    (function initRoomDropdown() {
+      const rooms = listValidPskRooms();                     // all rooms with a valid PSK
+      const qsRoom = new URLSearchParams(location.search).get('room') || '';
+      const lastRoom = (localStorage.getItem('naptio:lastRoom') || '').trim();
+      const persisted = (localStorage.getItem('bm_receiver_room') || '').trim(); // receiver’s persistence key
+      const envRoom = (env?.room || '').trim();
+
+      // Unique set, include envRoom if not present
+      const uniq = new Set(rooms);
+      if (envRoom) uniq.add(envRoom);
+
+      // Handle empty state (shouldn’t happen due to redirect)
+      roomSel.innerHTML = '';
+      if (uniq.size === 0) {
+        roomSel.innerHTML = `<option value="" disabled selected>No PSK rooms</option>`;
+        roomSel.disabled = true;
+        statusEl.textContent = 'No paired rooms found. Pair devices to create a room.';
+        return;
+      }
+
+      // Create options
+      for (const r of Array.from(uniq).sort()) {
+        const opt = document.createElement('option');
+        opt.value = opt.textContent = r;
+        roomSel.appendChild(opt);
+      }
+
+      // Default selection priority: ?room → lastRoom → persisted → envRoom → first
+      const pick =
+        (qsRoom && uniq.has(qsRoom) && qsRoom) ||
+        (lastRoom && uniq.has(lastRoom) && lastRoom) ||
+        (persisted && uniq.has(persisted) && persisted) ||
+        envRoom ||
+        Array.from(uniq)[0];
+
+      roomSel.value = hasOption(roomSel, pick) ? pick : roomSel.options[0].value;
+
+      // Persist immediately
+      try { localStorage.setItem('bm_receiver_room', roomSel.value); } catch {}
+      try { localStorage.setItem('naptio:lastRoom', roomSel.value); } catch {}
+
+      statusEl.textContent = `Active room: ${roomSel.value}`;
+
+      // Persist on change
+      roomSel.addEventListener('change', () => {
+        try { localStorage.setItem('bm_receiver_room', roomSel.value); } catch {}
+        try { localStorage.setItem('naptio:lastRoom', roomSel.value); } catch {}
+        statusEl.textContent = `Active room: ${roomSel.value}`;
+      });
+    })();
+  </script>
+
+  <!-- ——— Naptio: Factory Reset (this device) ——— -->
+  <section id="factoryResetSection" class="danger-zone">
+    <h2>Danger zone</h2>
+    <!-- <p class="danger-note">Erase Naptio data stored in this browser</p> -->
+    <button id="btnFactoryReset" class="btn btn-danger" aria-describedby="eraseHelp">
+      <!-- <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" style="vertical-align:-3px;margin-right:8px">
+        <path fill="currentColor" d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+      </svg> -->
+	  Erase all Naptio data on this browser
+    </button>
+    <span id="eraseHelp" class="sr-only">This will permanently delete local preferences, keys, caches and databases in this browser.</span>
+																				  
+																			   
+							
+			   
+		  
+  </section>
+
+  <!-- Lightweight modal (no dependencies) -->
+  <div id="factoryResetModal" hidden
+       style="position:fixed;inset:0;display:none;place-items:center;z-index:9999;">
+    <div class="backdrop" style="position:absolute;inset:0;background:#0008;"></div>
+    <div role="dialog" aria-modal="true" aria-labelledby="factoryResetTitle"
+         style="position:relative;width:min(90vw,560px);background:#0b0b0b;border:1px solid #222;border-radius:16px;padding:18px;box-shadow:0 10px 30px #0009;">
+      <h3 id="factoryResetTitle" style="margin:0 0 8px 0;font-size:18px;">
+        Factory reset Naptio on this device?
+      </h3>
+      <div style="opacity:.9;font-size:14px;line-height:1.5;margin-bottom:10px">
+        This will permanently delete your device-specific data for Naptio in this browser, including:
+        <ul style="margin:8px 0 0 18px;padding:0">
+          <li>Preferences, calibration and alert history</li>
+          <li>Pairing keys / room tokens and saved settings</li>
+          <li>Offline caches and background service workers</li>
+          <li>All local databases (IndexedDB), localStorage and sessionStorage</li>
+        </ul>
+        <div style="margin-top:10px;color:#fff">
+          This action cannot be undone. It does not delete anything on other devices.
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button id="factoryResetCancel" class="btn btn-secondary">Cancel</button>
+																			  
+																			  
+        <button id="factoryResetConfirm" class="btn btn-danger">Erase & Reset</button>
+																					
+																									 
+      </div>
+
+      <div id="factoryResetStatus" role="status" aria-live="polite"
+           style="margin-top:10px;font-size:13px;opacity:.9"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    // ——— Factory reset routine (no external deps) ———
+    async function factoryResetNaptio({ includeSessionStorage = true, knownDbNames = [] } = {}) {
+      const results = { indexedDB: [], localStorage: null, sessionStorage: null, caches: [], serviceWorkers: [] };
+
+      // 1) Enumerate IndexedDB DBs (best effort)
+      const dbNames = new Set();
+      try {
+        if (indexedDB && typeof indexedDB.databases === 'function') {
+          const dbs = await indexedDB.databases();
+          for (const db of dbs) if (db?.name) dbNames.add(db.name);
+        }
+      } catch (e) {
+        /* ignore; we'll just use knownDbNames */
+      }
+      for (const n of knownDbNames) if (n) dbNames.add(n);
+
+      // 2) Delete each IndexedDB DB
+      async function deleteDb(name) {
+        return new Promise((resolve) => {
+          const req = indexedDB.deleteDatabase(name);
+          req.onsuccess = () => resolve({ name, status: 'deleted' });
+          req.onerror = () => resolve({ name, status: 'error', error: String(req.error) });
+          req.onblocked = () => resolve({ name, status: 'blocked' });
+        });
+      }
+      for (const name of dbNames) results.indexedDB.push(await deleteDb(name));
+
+      // 3) Clear storage
+      try { localStorage.clear(); results.localStorage = 'cleared'; }
+      catch (e) { results.localStorage = 'error: ' + e; }
+
+      if (includeSessionStorage) {
+        try { sessionStorage.clear(); results.sessionStorage = 'cleared'; }
+        catch (e) { results.sessionStorage = 'error: ' + e; }
+      }
+
+      // 4) Clear Cache Storage
+      if ('caches' in window) {
+        try {
+          const keys = await caches.keys();
+          for (const key of keys) {
+            const ok = await caches.delete(key);
+            results.caches.push({ key, deleted: ok });
+          }
+        } catch (e) {
+          results.caches.push({ error: String(e) });
+        }
+      }
+
+      // 5) Unregister Service Workers
+      if ('serviceWorker' in navigator) {
+        try {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const reg of regs) {
+            const ok = await reg.unregister();
+            results.serviceWorkers.push({ scope: reg.scope, unregistered: ok });
+          }
+        } catch (e) {
+          results.serviceWorkers.push({ error: String(e) });
+        }
+      }
+
+      return results;
+    }
+
+    // ——— Minimal modal wiring ———
+    const $ = (s) => document.querySelector(s);
+    const modal = $('#factoryResetModal');
+    const btnOpen = $('#btnFactoryReset');
+    const btnCancel = $('#factoryResetCancel');
+    const btnConfirm = $('#factoryResetConfirm');
+    const statusEl = $('#factoryResetStatus');
+
+    function openModal() {
+      modal.hidden = false;
+      modal.style.display = 'grid';      // ensure visible
+      document.body.style.overflow = 'hidden';
+      statusEl.textContent = '';
+      btnConfirm.disabled = false;
+      btnCancel.disabled = false;
+    }
+    function closeModal() {
+      modal.hidden = true;
+      modal.style.display = 'none';      // ensure hidden
+      document.body.style.overflow = '';
+    }
+
+    btnOpen?.addEventListener('click', openModal);
+    btnCancel?.addEventListener('click', closeModal);
+    modal?.addEventListener('click', (e) => {
+      if (e.target === modal || e.target.classList.contains('backdrop')) closeModal();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (!modal.hidden && e.key === 'Escape') closeModal();
+    });
+
+    btnConfirm?.addEventListener('click', async () => {
+      btnConfirm.disabled = true;
+      btnCancel.disabled = true;
+      statusEl.textContent = 'Deleting local data…';
+
+      try {
+        const summary = await factoryResetNaptio({
+          includeSessionStorage: true,
+          // Fallback DB names (adjust if your app uses different ones)
+          knownDbNames: ['naptio-audio', 'naptio-video', 'naptio-settings', 'naptio']
+        });
+
+        const blocked = summary.indexedDB.some(x => x.status === 'blocked');
+        const errored = summary.indexedDB.some(x => x.status === 'error');
+
+        if (!blocked && !errored) {
+          statusEl.innerHTML = '✅&nbsp;Reset complete';
+          btnCancel.disabled = false;               // allow closing the dialog
+        } else if (blocked) {
+          statusEl.textContent = 'Almost done — another Naptio tab is still open. Close other Naptio tabs to finish.';
+          btnCancel.disabled = false;
+        } else {
+          statusEl.textContent = 'Couldn’t finish the reset. Close other Naptio tabs and try again.';
+          btnCancel.disabled = false;
+        }
+      } catch (e) {
+        statusEl.textContent = 'Unexpected error. Please close this dialog and try again.';
+        btnCancel.disabled = false;
+        console.error('[FactoryReset] error', e);
+      }
+    });
+  </script>
+  <!-- ——— End: Naptio Factory Reset ——— -->
+
+    <!-- analytics -->
+  <script type="module">
+    import { installAnalytics } from '/hungryface/shared/analytics.js';
+    window.analytics = installAnalytics({ feature: 'receiver-settings' });
+    // Later: window.analytics.event('settings_opened');
+  </script>
+  
+</body>
+</html>
