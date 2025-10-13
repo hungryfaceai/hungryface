@@ -1,12 +1,6 @@
 // /webrtc/receiver/shared/alerts/notify-sound.js
 // Reproduces dashboard "triple pip" alert sound + respects per-type switches + global cooldown.
-//
-// Settings (from Receiver Settings page):
-//   naptio:notify:audio|motion|fence|prone  => "on" / "off"  (default: on)
-//   naptio:notifyCooldownMin                => integer minutes (default: 2)
-//
-// Also respects (if present) the dashboard master toggle:
-//   alerts_sounds_enabled => "1" or "0" (default: allow)
+// Debug logging can be enabled via: installAlertSound({debug:true}) OR ?notifyDebug=1 OR localStorage 'naptio:notify:debug' = '1'
 
 const KEYS = {
   audio: 'naptio:notify:audio',
@@ -43,37 +37,66 @@ function getCooldownMs() {
 
 let audioCtx = null;
 let lastBeepWallNow = 0; // dashboard-like 1s rate-limit (in addition to minutes cooldown)
+let DEBUG = false;
+
+const dlog = (...a) => { if (DEBUG) console.log('[notify-sound]', ...a); };
+const dwarn = (...a) => { if (DEBUG) console.warn('[notify-sound]', ...a); };
 
 function ensureCtx() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (!audioCtx) {
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      dlog('AudioContext created:', { sampleRate: audioCtx?.sampleRate, state: audioCtx?.state });
+    } catch (e) {
+      dwarn('AudioContext creation failed:', e);
+    }
+  }
   return audioCtx;
 }
+
 function unlockOnFirstGesture() {
-  const once = async () => {
+  const once = async (ev) => {
     const ac = ensureCtx();
+    if (!ac) { dwarn('No AudioContext on gesture'); return; }
+    const before = ac.state;
     try { await ac.resume(); } catch {}
+    dlog('Gesture unlock', ev?.type, 'state:', before, '→', ac.state);
   };
   ['pointerdown','touchend','keydown','click'].forEach(ev =>
     window.addEventListener(ev, once, { once:true, passive:true })
   );
 }
+
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && audioCtx?.state === 'suspended') {
-    audioCtx.resume().catch(()=>{});
+    dlog('Tab visible; resuming suspended AudioContext…');
+    audioCtx.resume().then(() => dlog('AudioContext state:', audioCtx.state)).catch((e)=>dwarn('resume error', e));
   }
 });
 
 // ----- Dashboard-like triple pip (1.7k→2.6k chirps) -----
 async function playDashboardPips() {
   const ac = ensureCtx();
-  if (ac.state === 'suspended') { try { await ac.resume(); } catch {} }
-  if (ac.state !== 'running') return;
+  if (!ac) { dwarn('No AudioContext; cannot play'); return; }
+
+  if (ac.state === 'suspended') { 
+    try { await ac.resume(); } catch {}
+  }
+  if (ac.state !== 'running') {
+    dwarn('AudioContext not running; aborting beep. state=', ac.state);
+    return;
+  }
 
   const nowPerf = performance.now();
-  if (nowPerf - lastBeepWallNow < 1000) return; // dashboard 1s rate-limit
+  if (nowPerf - lastBeepWallNow < 1000) {
+    dlog('Dashboard 1s rate-limit active; skipping pip.');
+    return;
+  }
   lastBeepWallNow = nowPerf;
 
   const t0 = ac.currentTime;
+  dlog('Playing triple pip at t0=', t0);
+
   const pip = (start, dur = 0.12) => {
     const o = ac.createOscillator();
     const g = ac.createGain();
@@ -98,31 +121,63 @@ async function playDashboardPips() {
 
 function inMinutesCooldown(nowMs = Date.now()) {
   const last = parseInt(localStorage.getItem(KEYS.lastTs), 10) || 0;
-  return (nowMs - last) < getCooldownMs();
+  const inCd = (nowMs - last) < getCooldownMs();
+  dlog('Cooldown check:', { nowMs, lastTs: last, cooldownMs: getCooldownMs(), inCooldown: inCd });
+  return inCd;
 }
 function stampPlayed(nowMs = Date.now()) {
-  try { localStorage.setItem(KEYS.lastTs, String(nowMs)); } catch {}
+  try { localStorage.setItem(KEYS.lastTs, String(nowMs)); dlog('Stamped lastTs=', nowMs); } catch {}
+}
+
+function gateSnapshot(type) {
+  return {
+    type,
+    dashboardGate: dashboardGateAllows(),
+    perTypeOn: settingIsOn(KEYS[type], 'on'),
+    cooldownMin: getCooldownMs() / 60000,
+    lastTs: parseInt(localStorage.getItem(KEYS.lastTs), 10) || 0,
+    dashMasterRaw: localStorage.getItem(KEYS.dashGate),
+    audioCtxState: audioCtx?.state || 'none',
+  };
 }
 
 export function installAlertSound(opts = {}) {
   const pageType = (opts.type || inferTypeFromPath());
+  // establish DEBUG from opts, URL, or localStorage
+  const qsDebug = new URLSearchParams(location.search).get('notifyDebug');
+  DEBUG = !!opts.debug || qsDebug === '1' || (localStorage.getItem('naptio:notify:debug') === '1');
+  dlog('installAlertSound:', { pageType, DEBUG });
 
   ensureCtx();
   unlockOnFirstGesture();
 
-  // optional cross-tab nudge (we just observe; values read at trigger time)
+  // optional cross-tab nudge (we just observe; values are read at trigger time)
   window.addEventListener('storage', (e) => {
-    if (e.key === KEYS.tsPing) { /* noop */ }
+    if (e.key === KEYS.tsPing) { dlog('storage ping observed'); }
   });
 
   async function trigger(type = pageType) {
-    // Per-type switch + dashboard master gate + per-minute cooldown
-    if (!dashboardGateAllows()) return false;
-    if (!['audio','motion','fence','prone'].includes(type)) return false;
-    if (!settingIsOn(KEYS[type], 'on')) return false;
+    const snap = gateSnapshot(type);
+    dlog('trigger()', snap);
+
+    if (!['audio','motion','fence','prone'].includes(type)) {
+      dwarn('Invalid type for trigger:', type);
+      return false;
+    }
+    if (!dashboardGateAllows()) {
+      dlog('Blocked by dashboard master gate (alerts_sounds_enabled ≠ "1")');
+      return false;
+    }
+    if (!settingIsOn(KEYS[type], 'on')) {
+      dlog(`Blocked by per-type toggle: ${type} is OFF`);
+      return false;
+    }
 
     const now = Date.now();
-    if (inMinutesCooldown(now)) return false;
+    if (inMinutesCooldown(now)) {
+      dlog('Blocked by minutes cooldown.');
+      return false;
+    }
 
     await playDashboardPips(); // reproduces dashboard sound
     stampPlayed(now);
@@ -130,12 +185,39 @@ export function installAlertSound(opts = {}) {
   }
 
   // Optional event API: window.dispatchEvent(new CustomEvent('naptio:alert', { detail:{ type:'audio' }}))
-  const onEvt = (e) => trigger((e?.detail?.type) || pageType);
+  const onEvt = (e) => {
+    const t = (e?.detail?.type) || pageType;
+    dlog('naptio:alert event → trigger', t);
+    trigger(t);
+  };
   window.addEventListener('naptio:alert', onEvt);
+
+  // Debug helpers (not used in prod flow)
+  async function debugPing() {
+    dlog('debugPing() — bypassing gates, attempting to play');
+    await playDashboardPips();
+  }
+  function report() {
+    const t = pageType;
+    const snap = gateSnapshot(t);
+    snap.cooldownMs = getCooldownMs();
+    snap.localStorage = {
+      audio: localStorage.getItem(KEYS.audio),
+      motion: localStorage.getItem(KEYS.motion),
+      fence: localStorage.getItem(KEYS.fence),
+      prone: localStorage.getItem(KEYS.prone),
+      cooldown: localStorage.getItem(KEYS.cooldown),
+      lastTs: localStorage.getItem(KEYS.lastTs),
+      dashGate: localStorage.getItem(KEYS.dashGate),
+    };
+    dlog('report()', snap);
+    return snap;
+  }
 
   return {
     trigger,                              // call when your page raises a new alert
     emit: (type) => window.dispatchEvent(new CustomEvent('naptio:alert', { detail:{ type:type || pageType } })),
     destroy: () => window.removeEventListener('naptio:alert', onEvt),
+    _debug: { ping: debugPing, report },  // <-- devtools helpers
   };
 }
