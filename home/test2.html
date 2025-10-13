@@ -269,12 +269,6 @@
     .yt-title { font-weight: 600; }
     .yt-close { border:0; background:transparent; color:#fff; font-size:18px; cursor:pointer; }
     .yt-body { padding: 12px; display: grid; gap: 12px; }
-    .yt-picker { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; }
-    .yt-card { display:flex; flex-direction:column; gap:8px; align-items:stretch; border:0; cursor:pointer; border-radius: 16px; background:#0f0f0f; padding:8px; text-align:left; color:#fff; }
-    .yt-card:focus-visible { outline: 2px solid #7aa2ff; outline-offset: 2px; }
-    .yt-thumb { width:100%; aspect-ratio:16/9; border-radius:12px; background:#111 center/cover no-repeat; }
-    .yt-label { font-size:14px; color:#ddd; display:flex; justify-content:space-between; gap:8px; }
-    .yt-duration { color:#aaa; font-variant-numeric: tabular-nums; }
     .yt-player-wrap { border-radius: 16px; background:#0f0f0f; padding:12px; }
     .yt-player { position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:8px; overflow:hidden; display:grid; place-items:center; }
     .yt-player iframe { width:100%; height:100%; border:0; display:block; }
@@ -383,33 +377,14 @@
     </div>
   </div>
 
-  <!-- YouTube Modal (click-to-load, privacy friendly) -->
-  <dialog class="yt-modal" id="ytDialog" aria-label="Naptio video demos">
+  <!-- YouTube Modal (single video, click-to-load) -->
+  <dialog class="yt-modal" id="ytDialog" aria-label="Naptio video demo">
     <form method="dialog" class="yt-bar">
       <span class="yt-title">Watch a quick demo</span>
       <button class="yt-close" aria-label="Close">✕</button>
     </form>
 
     <div class="yt-body">
-      <!-- Choices (thumbnails are set ONLY when the dialog opens to avoid 3P requests until user clicks) -->
-      <div class="yt-picker" role="list" aria-label="Choose a demo">
-        <button class="yt-card" role="listitem" data-yt="rYT7JpbrhKk" data-title="Audio & overview (0:42)" aria-label="Play the 42-second demo">
-          <div class="yt-thumb" data-thumb="https://i.ytimg.com/vi/rYT7JpbrhKk/hqdefault.jpg" aria-hidden="true"></div>
-          <span class="yt-label">
-            <span>Audio & overview</span>
-            <span class="yt-duration">0:42</span>
-          </span>
-        </button>
-
-        <button class="yt-card" role="listitem" data-yt="_59sA5Fuxsw" data-title="Motion & prone (0:53)" aria-label="Play the 53-second demo">
-          <div class="yt-thumb" data-thumb="https://i.ytimg.com/vi/_59sA5Fuxsw/hqdefault.jpg" aria-hidden="true"></div>
-          <span class="yt-label">
-            <span>Motion & prone</span>
-            <span class="yt-duration">0:53</span>
-          </span>
-        </button>
-      </div>
-
       <div class="yt-player-wrap">
         <div class="yt-player" id="ytPlayer" aria-live="polite"></div>
         <p class="yt-fallback">Prefer YouTube? <a id="ytLink" href="#" target="_blank" rel="noopener">Open on YouTube</a></p>
@@ -530,18 +505,14 @@
   })();
   </script>
 
-  <!-- YouTube modal logic (click-to-load, zero 3P until opened) -->
+  <!-- YouTube modal logic (single video, click-to-load, zero 3P until opened) -->
   <script>
     (function() {
+      const YT_ID = '_59sA5Fuxsw'; // your single video
       const heroWatch = document.getElementById('hero-watch');
       const dialog = document.getElementById('ytDialog');
       const player = document.getElementById('ytPlayer');
       const ytLink = document.getElementById('ytLink');
-
-      const videos = [
-        { id: 'rYT7JpbrhKk', title: 'Audio & overview', duration: '0:42', thumb: 'https://i.ytimg.com/vi/rYT7JpbrhKk/hqdefault.jpg' },
-        { id: '_59sA5Fuxsw', title: 'Motion & prone',   duration: '0:53', thumb: 'https://i.ytimg.com/vi/_59sA5Fuxsw/hqdefault.jpg' }
-      ];
 
       function track(name, data={}) {
         try {
@@ -550,16 +521,7 @@
         } catch {}
       }
 
-      function loadThumbsLazily() {
-        // Only set thumbnail backgrounds once the dialog is opened (no i.ytimg.com requests before)
-        dialog.querySelectorAll('.yt-thumb').forEach(div => {
-          const src = div.getAttribute('data-thumb');
-          if (src && !div.style.backgroundImage) div.style.backgroundImage = `url('${src}')`;
-        });
-      }
-
       function loadYouTube(id) {
-        // Clean any previous iframe
         player.replaceChildren();
         const iframe = document.createElement('iframe');
         iframe.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&modestbranding=1&playsinline=1`;
@@ -570,32 +532,18 @@
         track('demo_play', { provider: 'youtube', id });
       }
 
-      // Open dialog or fallback to YouTube
       heroWatch?.addEventListener('click', () => {
         track('demo_open', { location: 'hero' });
         if (window.HTMLDialogElement && dialog?.showModal) {
           dialog.showModal();
-          // Defer thumbs until opened to avoid 3P before consent
-          loadThumbsLazily();
-          // For keyboard users
-          dialog.querySelector('.yt-card')?.focus({ preventScroll: true });
+          loadYouTube(YT_ID); // load immediately on open
         } else {
-          // Fallback: open first video directly
-          window.open(`https://youtu.be/${videos[0].id}`, '_blank', 'noopener');
+          window.open(`https://youtu.be/${YT_ID}`, '_blank', 'noopener');
         }
       });
 
-      // Close: remove iframe to stop playback
       dialog?.addEventListener('close', () => {
-        player.replaceChildren();
-      });
-
-      // Handle picking a video
-      dialog?.addEventListener('click', (e) => {
-        const card = e.target.closest('.yt-card');
-        if (!card) return;
-        const id = card.dataset.yt;
-        loadYouTube(id);
+        player.replaceChildren(); // stop playback + free memory
       });
     })();
   </script>
