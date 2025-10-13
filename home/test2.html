@@ -80,17 +80,14 @@
       font-weight: 600; line-height: 1; display: inline-block; opacity: 1; white-space: nowrap;
       font-size: clamp(0.78rem, 2.6vw, 0.95rem);
       padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
-      transition: background-color .15s ease, box-shadow .15s ease; /* ← add this */
+      transition: background-color .15s ease, box-shadow .15s ease;
     }
-
-    /* Subtle hover/focus cue for Pair / Share pills */
     .btn-pill:hover,
     .btn-pill:focus {
-      background: #141414;                 /* deeper change than #0d0d0d */
-      border-color: #e6e6e6;               /* slight border lift for contrast */
-      box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16); /* faint inner ring */
+      background: #141414;
+      border-color: #e6e6e6;
+      box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16);
     }
-
     .btn-pill:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 
     main { flex: 1; display: grid; place-items: center; padding: 24px; text-align: center; }
@@ -118,6 +115,24 @@
 
     /* Safety note (smaller, centered) */
     .safety-note { font-size: 0.8rem; opacity: 0.8; margin-top: 24px; text-align: center; }
+
+    /* --- HERO CTAs --- */
+    .hero-ctas {
+      display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;
+      margin-top: 16px;
+    }
+    .btn {
+      appearance: none; border: 0; border-radius: 9999px; padding: 12px 16px;
+      font-size: 16px; cursor: pointer; line-height: 1; font-weight: 600;
+    }
+    .btn-primary {
+      background: #fff; color: #000;
+    }
+    .btn-primary:focus-visible { outline: 2px solid #7aa2ff; outline-offset: 2px; }
+    .btn-ghost {
+      background: rgba(255,255,255,0.12); color: #fff; border: 1px solid rgba(255,255,255,0.25);
+    }
+    .btn-ghost:focus-visible { outline: 2px solid #7aa2ff; outline-offset: 2px; }
 
     /* Footer */
     footer {
@@ -246,6 +261,25 @@
         padding: clamp(6px, 1.2vw, 8px) clamp(10px, 2.2vw, 14px);
       }
     }
+
+    /* ---------- YouTube modal styles ---------- */
+    .yt-modal { border: none; padding: 0; background: #000; color: #fff; width: min(100vw, 920px); max-height: 90vh; }
+    .yt-modal::backdrop { background: rgba(0,0,0,.6); }
+    .yt-bar { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; background:#111; position:sticky; top:0; z-index:2; }
+    .yt-title { font-weight: 600; }
+    .yt-close { border:0; background:transparent; color:#fff; font-size:18px; cursor:pointer; }
+    .yt-body { padding: 12px; display: grid; gap: 12px; }
+    .yt-picker { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; }
+    .yt-card { display:flex; flex-direction:column; gap:8px; align-items:stretch; border:0; cursor:pointer; border-radius: 16px; background:#0f0f0f; padding:8px; text-align:left; color:#fff; }
+    .yt-card:focus-visible { outline: 2px solid #7aa2ff; outline-offset: 2px; }
+    .yt-thumb { width:100%; aspect-ratio:16/9; border-radius:12px; background:#111 center/cover no-repeat; }
+    .yt-label { font-size:14px; color:#ddd; display:flex; justify-content:space-between; gap:8px; }
+    .yt-duration { color:#aaa; font-variant-numeric: tabular-nums; }
+    .yt-player-wrap { border-radius: 16px; background:#0f0f0f; padding:12px; }
+    .yt-player { position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:8px; overflow:hidden; display:grid; place-items:center; }
+    .yt-player iframe { width:100%; height:100%; border:0; display:block; }
+    .yt-fallback { font-size:13px; color:#aaa; margin:8px 2px 0; }
+    .yt-fallback a { color:#ddd; text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -300,6 +334,15 @@
           On-device AI spots cues and motion, so you get timely, private alerts.<br>
           No cloud video, no extra hardware, no login.
         </p>
+
+        <!-- HERO CTAs -->
+        <div class="hero-ctas" role="group" aria-label="Get started">
+          <a class="btn btn-primary" href="https://hungryfaceai.github.io/hungryface/webrtc/pairpsk/">Pair devices</a>
+          <button id="hero-watch" class="btn btn-ghost" type="button" aria-haspopup="dialog" aria-controls="ytDialog">
+            ▶ Watch demo
+          </button>
+        </div>
+
         <p class="safety-note">
           Naptio provides informational insights and is not a medical device. <br>
           Always supervise your baby.
@@ -313,7 +356,7 @@
     </footer>
   </div>
 
-  <!-- Invite Modal -->
+  <!-- Invite Modal (unchanged) -->
   <div id="invite-modal" class="invite-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="invite-title">
     <div class="invite-card">
       <button type="button" class="invite-close" aria-label="Close">
@@ -336,8 +379,42 @@
     </div>
   </div>
 
+  <!-- YouTube Modal (click-to-load, privacy friendly) -->
+  <dialog class="yt-modal" id="ytDialog" aria-label="Naptio video demos">
+    <form method="dialog" class="yt-bar">
+      <span class="yt-title">Watch a quick demo</span>
+      <button class="yt-close" aria-label="Close">✕</button>
+    </form>
+
+    <div class="yt-body">
+      <!-- Choices (thumbnails are set ONLY when the dialog opens to avoid 3P requests until user clicks) -->
+      <div class="yt-picker" role="list" aria-label="Choose a demo">
+        <button class="yt-card" role="listitem" data-yt="rYT7JpbrhKk" data-title="Audio & overview (0:42)" aria-label="Play the 42-second demo">
+          <div class="yt-thumb" data-thumb="https://i.ytimg.com/vi/rYT7JpbrhKk/hqdefault.jpg" aria-hidden="true"></div>
+          <span class="yt-label">
+            <span>Audio & overview</span>
+            <span class="yt-duration">0:42</span>
+          </span>
+        </button>
+
+        <button class="yt-card" role="listitem" data-yt="_59sA5Fuxsw" data-title="Motion & prone (0:53)" aria-label="Play the 53-second demo">
+          <div class="yt-thumb" data-thumb="https://i.ytimg.com/vi/_59sA5Fuxsw/hqdefault.jpg" aria-hidden="true"></div>
+          <span class="yt-label">
+            <span>Motion & prone</span>
+            <span class="yt-duration">0:53</span>
+          </span>
+        </button>
+      </div>
+
+      <div class="yt-player-wrap">
+        <div class="yt-player" id="ytPlayer" aria-live="polite"></div>
+        <p class="yt-fallback">Prefer YouTube? <a id="ytLink" href="#" target="_blank" rel="noopener">Open on YouTube</a></p>
+      </div>
+    </div>
+  </dialog>
+
   <script>
-  // Standalone Invite Modal (same logic as before, with × close)
+  // Standalone Invite Modal (existing)
   (() => {
     const trigger  = document.getElementById('menu-invite');
     const modal    = document.getElementById('invite-modal');
@@ -448,31 +525,91 @@
     }
   })();
   </script>
+
+  <!-- YouTube modal logic (click-to-load, zero 3P until opened) -->
+  <script>
+    (function() {
+      const heroWatch = document.getElementById('hero-watch');
+      const dialog = document.getElementById('ytDialog');
+      const player = document.getElementById('ytPlayer');
+      const ytLink = document.getElementById('ytLink');
+
+      const videos = [
+        { id: 'rYT7JpbrhKk', title: 'Audio & overview', duration: '0:42', thumb: 'https://i.ytimg.com/vi/rYT7JpbrhKk/hqdefault.jpg' },
+        { id: '_59sA5Fuxsw', title: 'Motion & prone',   duration: '0:53', thumb: 'https://i.ytimg.com/vi/_59sA5Fuxsw/hqdefault.jpg' }
+      ];
+
+      function track(name, data={}) {
+        try {
+          window.analytics?.event ? window.analytics.event(name, data)
+            : window.dispatchEvent(new CustomEvent('analytics', { detail: { name, data } }));
+        } catch {}
+      }
+
+      function loadThumbsLazily() {
+        // Only set thumbnail backgrounds once the dialog is opened (no i.ytimg.com requests before)
+        dialog.querySelectorAll('.yt-thumb').forEach(div => {
+          const src = div.getAttribute('data-thumb');
+          if (src && !div.style.backgroundImage) div.style.backgroundImage = `url('${src}')`;
+        });
+      }
+
+      function loadYouTube(id) {
+        // Clean any previous iframe
+        player.replaceChildren();
+        const iframe = document.createElement('iframe');
+        iframe.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&modestbranding=1&playsinline=1`;
+        iframe.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+        iframe.allowFullscreen = true;
+        player.appendChild(iframe);
+        ytLink.href = `https://youtu.be/${id}`;
+        track('demo_play', { provider: 'youtube', id });
+      }
+
+      // Open dialog or fallback to YouTube
+      heroWatch?.addEventListener('click', () => {
+        track('demo_open', { location: 'hero' });
+        if (window.HTMLDialogElement && dialog?.showModal) {
+          dialog.showModal();
+          // Defer thumbs until opened to avoid 3P before consent
+          loadThumbsLazily();
+          // For keyboard users
+          dialog.querySelector('.yt-card')?.focus({ preventScroll: true });
+        } else {
+          // Fallback: open first video directly
+          window.open(`https://youtu.be/${videos[0].id}`, '_blank', 'noopener');
+        }
+      });
+
+      // Close: remove iframe to stop playback
+      dialog?.addEventListener('close', () => {
+        player.replaceChildren();
+      });
+
+      // Handle picking a video
+      dialog?.addEventListener('click', (e) => {
+        const card = e.target.closest('.yt-card');
+        if (!card) return;
+        const id = card.dataset.yt;
+        loadYouTube(id);
+      });
+    })();
+  </script>
+
   <script type="module">
-  import { installLandingPairGate } from '/hungryface/home/landing-pair-gate.js';
+    import { installLandingPairGate } from '/hungryface/home/landing-pair-gate.js';
+    installLandingPairGate({
+      cameraSelector: 'nav.nav-center a[href*="/webrtc/sender/secure/"]',
+      viewerSelector: 'nav.nav-center a[href*="/webrtc/receiver/shared/alerts/dashboard/"]',
+      pairRoute: '/hungryface/webrtc/pairpsk/',
+    });
+  </script>
 
-  installLandingPairGate({
-    cameraSelector: 'nav.nav-center a[href*="/webrtc/sender/secure/"]',
-    viewerSelector: 'nav.nav-center a[href*="/webrtc/receiver/shared/alerts/dashboard/"]',
-    pairRoute: '/hungryface/webrtc/pairpsk/',
-
-    // Optional overrides (you can omit these)
-    // validateToken: (b64u) => { /* return true if >=16 bytes, etc. */ },
-    // detectHasAnyPsk: (ls) => { /* scan ls for 'psk:' keys */ },
-    // copy: {
-    //   sublineCamera: 'Before you use Camera mode, let’s pair your {nounPlural}.',
-    //   sublineViewer: 'Before you use Viewer mode, let’s pair your {nounPlural}.',
-    // },
-    // onEvent: (name, data) => console.log('[pair-gate]', name, data),
-  });
-</script>
-  
-<!-- analytics -->
-<script type="module">
-  import { installAnalytics } from '/hungryface/shared/analytics.js';
-  window.analytics = installAnalytics({ feature: 'naptio-home' });
-  // Later: window.analytics.event('landing_opened');
-</script>
-  
+  <!-- analytics -->
+  <script type="module">
+    import { installAnalytics } from '/hungryface/shared/analytics.js';
+    window.analytics = installAnalytics({ feature: 'naptio-home' });
+    // window.analytics.event('landing_opened');
+  </script>
 </body>
 </html>
