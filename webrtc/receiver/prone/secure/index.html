@@ -493,6 +493,7 @@
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
     /* === Shared Alerts (banner + drawer + persistence) === */
     import { initAlertsUI, beginAlert, finishAlert, AlertTypes, showAlertBanner } from "/hungryface/webrtc/receiver/shared/alerts/index.js";
+    import { installAlertSound } from "/hungryface/webrtc/receiver/shared/alerts/notify-sound.js";
 
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
@@ -511,6 +512,11 @@
     const HAVE_CURRENT_DATA = 2;
     // --- Unified scale: pose instant risk ranges 0..POSE_RANGE, normalize to 0..1 for the fused bar ---
     const POSE_RANGE = 0.8;
+    // Sound for Prone alerts (per-type toggle + cooldown; dashboard gate ignored)
+    const alertSound = installAlertSound({
+      type: 'prone',
+      // debug: true, // optional while testing
+    });
 
     /* ---------- DOM ---------- */
     const stage = document.getElementById('stage');
@@ -1301,6 +1307,7 @@
               .then(id => { _proneAlertId = id; })
               .catch(()=>{});
             try { showAlertBanner(_proneStartMs, bannerMsg); } catch {}
+            void alertSound.trigger();   // 🔊 play triple-pip on ON transition
 
             showStatus(`PRONE suspected • ${cause}`);
           } else {
