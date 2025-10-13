@@ -1,23 +1,14 @@
-//https://chatgpt.com/c/68ec3f8a-24cc-832e-a723-6bab67bf563b
-// /webrtc/receiver/shared/mini-dash.js
-// Reusable "Mini dashboard" overlay with drag, resize, zoom, persistence.
-// Mounts only if localStorage['naptio:miniDash:enabled'] === 'on'.
-// Works on desktop & phones (Pointer Events). Safe-area aware.
+// /hungryface/webrtc/receiver/shared/mini-dash.js
+// Mini dashboard overlay with drag, resize, zoom, position persistence.
+// Shows only if localStorage['naptio:miniDash:enabled'] === 'on'.
 //
-// Public API (attached to window.MiniDash):
-//   installMiniDashboard(opts)
-//   MiniDash.show(), MiniDash.hide(), MiniDash.toggle()
-//   MiniDash.setSrc(url), MiniDash.refresh()          // re-checks enabled flag
-//   MiniDash.resetState()                              // forget pos/size/zoom
-//
-// Storage keys:
-//   enabled: localStorage['naptio:miniDash:enabled']   -> "on"/"off"
-//   pos:     localStorage['naptio:miniDash:pos']       -> {mode:'absolute',left,top} or {mode:'corner',corner:'TR'}
-//   size:    localStorage['naptio:miniDash:size']      -> {w,h}
-//   zoom:    localStorage['naptio:miniDash:zoom']      -> number (0.25–1.25)
+// Storage:
+//   naptio:miniDash:pos  -> { mode:'absolute', left, top } (px)
+//   naptio:miniDash:size -> { w, h } (px)
+//   naptio:miniDash:zoom -> number (0.25–1.25)
 
 export function installMiniDashboard(opts = {}) {
-  const SRC_DEFAULT = 'https://hungryfaceai.github.io/hungryface/webrtc/receiver/shared/alerts/dashboard/';
+  const SRC_DEFAULT = opts.defaultSrc || 'https://hungryfaceai.github.io/hungryface/webrtc/receiver/shared/alerts/dashboard/';
   const src = opts.src || SRC_DEFAULT;
   const featureKey = opts.featureKey || 'naptio:miniDash:enabled';
 
@@ -27,14 +18,14 @@ export function installMiniDashboard(opts = {}) {
     zoom: 'naptio:miniDash:zoom',
   };
 
-  const CSS_ID = 'naptio-mini-dash-style';
+  const CSS_ID  = 'naptio-mini-dash-style';
   const ROOT_ID = 'naptio-mini-dash';
+  const TITLEBAR_H = 38;                 // keep title visible at all times
+  const MARGIN = 8;                      // outer margin against edges
 
-  // ---- Utilities ----
   const px = (n) => `${Math.round(n)}px`;
   const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
   const load = (k, fallback=null) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; } catch { return fallback; } };
-  const el = (sel) => document.querySelector(sel);
   const make = (tag, cls) => { const x = document.createElement(tag); if (cls) x.className = cls; return x; };
 
   function ensureStyle() {
@@ -61,13 +52,13 @@ export function installMiniDashboard(opts = {}) {
   box-shadow: 0 10px 30px rgba(0,0,0,.55);
   overflow: hidden;
   z-index: 9999;
-  touch-action: none; /* avoid scroll hijacking during drag on touch */
+  touch-action: none;
 }
 #${ROOT_ID}[hidden] { display: none !important; }
 
 #${ROOT_ID} .md-titlebar {
   position: relative;
-  height: 38px;
+  height: ${TITLEBAR_H}px;
   display: grid;
   grid-template-columns: 1fr auto auto auto;
   align-items: center;
@@ -92,6 +83,7 @@ export function installMiniDashboard(opts = {}) {
   padding:0 8px; font-weight:600;
 }
 #${ROOT_ID} .md-btn:hover { background:#222; }
+
 #${ROOT_ID} .md-icon {
   width: 26px; height: 26px; border-radius: 50%; background:#1a1a1a; color:#eee; cursor:pointer;
   display:flex; align-items:center; justify-content:center; border:0;
@@ -113,7 +105,7 @@ export function installMiniDashboard(opts = {}) {
 }
 #${ROOT_ID} .md-zoom .pct { width:48px; text-align:right; }
 
-#${ROOT_ID} .md-viewport { position:absolute; top:38px; left:0; right:0; bottom:0; overflow:hidden; }
+#${ROOT_ID} .md-viewport { position:absolute; top:${TITLEBAR_H}px; left:0; right:0; bottom:0; overflow:hidden; }
 #${ROOT_ID} .md-scale {
   width: calc(100% / var(--miniDash-zoom));
   height: calc(100% / var(--miniDash-zoom));
@@ -142,25 +134,30 @@ export function installMiniDashboard(opts = {}) {
     document.head.appendChild(s);
   }
 
-  function clampToViewport(box) {
-    const rect = box.getBoundingClientRect();
+  // Clamp such that the whole window stays on-screen horizontally
+  // and at least the TITLEBAR_H remains visible vertically.
+  function clampPositionForTitle(box, left, top) {
     const vw = document.documentElement.clientWidth;
     const vh = document.documentElement.clientHeight;
     const styles = getComputedStyle(document.documentElement);
-    const safeTop = parseFloat(styles.getPropertyValue('--miniDash-safe-top')) || 0;
-    const safeRight = parseFloat(styles.getPropertyValue('--miniDash-safe-right')) || 0;
-    const safeBottom = parseFloat(styles.getPropertyValue('--miniDash-safe-bottom')) || 0;
-    const safeLeft = parseFloat(styles.getPropertyValue('--miniDash-safe-left')) || 0;
-    const margin = 8;
 
-    const minLeft = margin + safeLeft;
-    const minTop = margin + safeTop;
-    const maxLeft = vw - rect.width - margin - safeRight;
-    const maxTop = vh - rect.height - margin - safeBottom;
+    const safeTop    = parseFloat(styles.getPropertyValue('--miniDash-safe-top'))    || 0;
+    const safeRight  = parseFloat(styles.getPropertyValue('--miniDash-safe-right'))  || 0;
+    const safeBottom = parseFloat(styles.getPropertyValue('--miniDash-safe-bottom')) || 0;
+    const safeLeft   = parseFloat(styles.getPropertyValue('--miniDash-safe-left'))   || 0;
+
+    const rect = box.getBoundingClientRect();
+
+    const minLeft = MARGIN + safeLeft;
+    const maxLeft = vw - rect.width - MARGIN - safeRight;
+
+    // Ensure the title bar stays within the visible vertical area.
+    const minTop = MARGIN + safeTop;                                   // not under the notch/status bar
+    const maxTop = vh - TITLEBAR_H - MARGIN - safeBottom;              // title can't go below bottom
 
     return {
-      left: Math.max(minLeft, Math.min(maxLeft, rect.left)),
-      top: Math.max(minTop, Math.min(maxTop, rect.top)),
+      left: Math.max(minLeft, Math.min(maxLeft, left)),
+      top:  Math.max(minTop,  Math.min(maxTop,  top)),
     };
   }
 
@@ -168,31 +165,31 @@ export function installMiniDashboard(opts = {}) {
     const vw = document.documentElement.clientWidth;
     const vh = document.documentElement.clientHeight;
     const styles = getComputedStyle(document.documentElement);
-    const safeRight = parseFloat(styles.getPropertyValue('--miniDash-safe-right')) || 0;
+    const safeRight  = parseFloat(styles.getPropertyValue('--miniDash-safe-right'))  || 0;
     const safeBottom = parseFloat(styles.getPropertyValue('--miniDash-safe-bottom')) || 0;
-    const margin = 8;
-    const maxW = vw - margin*2 - safeRight;
-    const maxH = vh - margin*2 - safeBottom;
+
+    const maxW = vw - MARGIN*2 - safeRight;
+    const maxH = vh - MARGIN*2 - safeBottom;
     const minW = 220, minH = 140;
-    return {
-      w: Math.max(minW, Math.min(maxW, w)),
-      h: Math.max(minH, Math.min(maxH, h)),
-    };
+    return { w: Math.max(minW, Math.min(maxW, w)),
+             h: Math.max(minH, Math.min(maxH, h)) };
   }
 
   function snapTopRight(box) {
     box.style.left = 'auto';
     box.style.bottom = 'auto';
-    box.style.right = 'calc(12px + var(--miniDash-safe-right))';
-    box.style.top = 'calc(12px + var(--miniDash-safe-top))';
-    save(KEYS.pos, { mode: 'corner', corner: 'TR' });
+    box.style.right = `calc(12px + var(--miniDash-safe-right))`;
+    box.style.top = `calc(12px + var(--miniDash-safe-top))`;
+    // Also persist approximate absolute position so we can restore after reload.
+    const r = box.getBoundingClientRect();
+    save(KEYS.pos, { mode:'absolute', left:r.left, top:r.top });
   }
 
   function setZoom(root, z, slider, label) {
     z = Math.max(0.25, Math.min(1.25, z));
     root.style.setProperty('--miniDash-zoom', z);
-    if (slider) slider.value = String(z);
-    if (label)  label.textContent = `${Math.round(z * 100)}%`;
+    slider && (slider.value = String(z));
+    label  && (label.textContent = `${Math.round(z*100)}%`);
     save(KEYS.zoom, z);
   }
 
@@ -202,10 +199,11 @@ export function installMiniDashboard(opts = {}) {
 
     const root = make('div'); root.id = ROOT_ID; root.hidden = true;
 
+    // === Title bar (always visible, draggable area) ===
     const titlebar = make('div', 'md-titlebar');
     const title = make('div', 'md-title'); title.textContent = 'Dashboard';
 
-    // Zoom controls
+    // Zoom
     const zoomWrap = make('div', 'md-zoom');
     const zMinus = make('button', 'md-btn'); zMinus.textContent = '−';
     const zSlider = document.createElement('input');
@@ -214,18 +212,16 @@ export function installMiniDashboard(opts = {}) {
     const zPct   = make('span', 'pct'); zPct.textContent = '100%';
     zoomWrap.append(zMinus, zSlider, zPlus, zPct);
 
-    // Snap-to-top-right
-    const snapBtn = make('button', 'md-btn'); snapBtn.title = 'Snap top-right'; snapBtn.textContent = '↗︎';
-
-    // Close
-    const closeBtn = make('button', 'md-icon'); closeBtn.setAttribute('aria-label', 'Close'); closeBtn.textContent = '×';
+    // Snap & Close
+    const snapBtn  = make('button', 'md-btn');  snapBtn.title = 'Snap top-right'; snapBtn.textContent = '↗︎';
+    const closeBtn = make('button', 'md-icon'); closeBtn.setAttribute('aria-label','Close'); closeBtn.textContent = '×';
 
     titlebar.append(title, zoomWrap, snapBtn, closeBtn);
 
-    // Viewport + scale wrapper + iframe
-    const viewport = make('div', 'md-viewport');
+    // === Viewport with scale wrapper (keeps zoom cross-origin) ===
+    const viewport  = make('div', 'md-viewport');
     const scaleWrap = make('div', 'md-scale');
-    const iframe = document.createElement('iframe');
+    const iframe    = document.createElement('iframe');
     iframe.loading = 'lazy';
     iframe.referrerPolicy = 'no-referrer';
     iframe.allow = 'autoplay; fullscreen; picture-in-picture; clipboard-read; clipboard-write; camera; microphone';
@@ -233,34 +229,27 @@ export function installMiniDashboard(opts = {}) {
     scaleWrap.appendChild(iframe);
     viewport.appendChild(scaleWrap);
 
-    // Resize grip
-    const resizeGrip = make('div', 'md-resize');
+    // Resize handle
+    const resizer = make('div', 'md-resize');
 
-    root.append(titlebar, viewport, resizeGrip);
+    root.append(titlebar, viewport, resizer);
     document.body.appendChild(root);
 
-    // ----- Wire up behavior -----
+    const ensureSrc = () => { if (!iframe.src) iframe.src = src; };
 
-    // Set src lazily once we show the UI
-    function ensureSrc() {
-      if (!iframe.src) iframe.src = src;
-    }
-
-    // Zoom
+    // === Zoom wiring ===
     const onSetZoom = (z) => setZoom(document.documentElement, z, zSlider, zPct);
     zSlider.addEventListener('input', () => onSetZoom(parseFloat(zSlider.value)));
     zMinus.addEventListener('click', () => onSetZoom((parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--miniDash-zoom')) || 1) - 0.05));
-    zPlus.addEventListener('click',  () => onSetZoom((parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--miniDash-zoom')) || 1) + 0.05));
-
-    // Ctrl/⌘ + wheel to zoom
+    zPlus .addEventListener('click', () => onSetZoom((parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--miniDash-zoom')) || 1) + 0.05));
     root.addEventListener('wheel', (e) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
       const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--miniDash-zoom')) || 1;
       onSetZoom(cur + (e.deltaY > 0 ? -0.05 : 0.05));
-    }, { passive: false });
+    }, { passive:false });
 
-    // Double-click/tap title to reset
+    // Double-tap/click title to reset zoom
     let lastTap = 0;
     titlebar.addEventListener('click', () => {
       const now = Date.now();
@@ -268,22 +257,21 @@ export function installMiniDashboard(opts = {}) {
       lastTap = now;
     });
 
-    // Drag
-    let dragging = false, dragDX = 0, dragDY = 0;
+    // === Drag (continuous clamp so title always remains visible) ===
+    let dragging = false, dx = 0, dy = 0;
     titlebar.addEventListener('pointerdown', (e) => {
-      // ignore drags that start on controls
       if (e.target.closest('.md-btn') || e.target === closeBtn) return;
       if (root.hidden) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
 
       dragging = true;
       root.classList.add('dragging');
-      const rect = root.getBoundingClientRect();
-      dragDX = e.clientX - rect.left;
-      dragDY = e.clientY - rect.top;
+      const r = root.getBoundingClientRect();
+      dx = e.clientX - r.left;
+      dy = e.clientY - r.top;
 
-      root.style.left = px(rect.left);
-      root.style.top  = px(rect.top);
+      root.style.left = px(r.left);
+      root.style.top  = px(r.top);
       root.style.right = 'auto';
       root.style.bottom = 'auto';
 
@@ -291,13 +279,16 @@ export function installMiniDashboard(opts = {}) {
       titlebar.setPointerCapture(e.pointerId);
       e.preventDefault();
     });
+
     titlebar.addEventListener('pointermove', (e) => {
       if (!dragging) return;
-      const left = e.clientX - dragDX;
-      const top  = e.clientY - dragDY;
+      const targetLeft = e.clientX - dx;
+      const targetTop  = e.clientY - dy;
+      const { left, top } = clampPositionForTitle(root, targetLeft, targetTop);
       root.style.left = px(left);
       root.style.top  = px(top);
     });
+
     function endDrag(e) {
       if (!dragging) return;
       dragging = false;
@@ -305,18 +296,18 @@ export function installMiniDashboard(opts = {}) {
       iframe.style.pointerEvents = '';
       titlebar.releasePointerCapture?.(e.pointerId);
 
-      // Clamp into viewport and persist
-      const clamped = clampToViewport(root);
-      root.style.left = px(clamped.left);
-      root.style.top  = px(clamped.top);
-      save(KEYS.pos, { mode: 'absolute', left: clamped.left, top: clamped.top });
+      const r = root.getBoundingClientRect();
+      const { left, top } = clampPositionForTitle(root, r.left, r.top);
+      root.style.left = px(left);
+      root.style.top  = px(top);
+      save(KEYS.pos, { mode:'absolute', left, top });
     }
     titlebar.addEventListener('pointerup', endDrag);
     titlebar.addEventListener('pointercancel', endDrag);
 
-    // Resize
-    let resizing = false, startX = 0, startY = 0, startW = 0, startH = 0;
-    resizeGrip.addEventListener('pointerdown', (e) => {
+    // === Resize (with clamp + position persistence) ===
+    let resizing=false, startX=0, startY=0, startW=0, startH=0;
+    resizer.addEventListener('pointerdown', (e) => {
       if (root.hidden) return;
       resizing = true;
       root.classList.add('resizing');
@@ -324,75 +315,82 @@ export function installMiniDashboard(opts = {}) {
       startX = e.clientX; startY = e.clientY;
       startW = r.width;   startH = r.height;
       iframe.style.pointerEvents = 'none';
-      resizeGrip.setPointerCapture(e.pointerId);
+      resizer.setPointerCapture(e.pointerId);
       e.preventDefault();
     });
-    resizeGrip.addEventListener('pointermove', (e) => {
+    resizer.addEventListener('pointermove', (e) => {
       if (!resizing) return;
       const { w, h } = clampSize(root, startW + (e.clientX - startX), startH + (e.clientY - startY));
       root.style.width = px(w);
       root.style.height = px(h);
-      // keep on-screen while resizing
-      const clamped = clampToViewport(root);
-      root.style.left = px(clamped.left);
-      root.style.top  = px(clamped.top);
+      // keep title visible while resizing
+      const r = root.getBoundingClientRect();
+      const clamp = clampPositionForTitle(root, r.left, r.top);
+      root.style.left = px(clamp.left);
+      root.style.top  = px(clamp.top);
     });
     function endResize(e) {
       if (!resizing) return;
       resizing = false;
       root.classList.remove('resizing');
       iframe.style.pointerEvents = '';
-      resizeGrip.releasePointerCapture?.(e.pointerId);
-      save(KEYS.size, { w: root.offsetWidth, h: root.offsetHeight });
-      // persist new position as well (after clamp)
-      const r = root.getBoundingClientRect();
-      save(KEYS.pos, { mode: 'absolute', left: r.left, top: r.top });
-    }
-    resizeGrip.addEventListener('pointerup', endResize);
-    resizeGrip.addEventListener('pointercancel', endResize);
+      resizer.releasePointerCapture?.(e.pointerId);
 
-    // Snap & Close
-    snapBtn.addEventListener('click', () => {
-      snapTopRight(root);
+      save(KEYS.size, { w: root.offsetWidth, h: root.offsetHeight });
+
       const r = root.getBoundingClientRect();
-      save(KEYS.pos, { mode: 'absolute', left: r.left, top: r.top });
-    });
+      const { left, top } = clampPositionForTitle(root, r.left, r.top);
+      root.style.left = px(left);
+      root.style.top  = px(top);
+      save(KEYS.pos, { mode:'absolute', left, top });
+    }
+    resizer.addEventListener('pointerup', endResize);
+    resizer.addEventListener('pointercancel', endResize);
+
+    // === Snap / Close ===
+    snapBtn.addEventListener('click', () => { snapTopRight(root); });
     closeBtn.addEventListener('click', () => { root.hidden = true; });
 
-    // Keep inside viewport on resize/rotate
+    // Keep inside viewport (and title visible) on rotate/resize
     window.addEventListener('resize', () => {
       if (root.hidden) return;
-      const clamp = clampToViewport(root);
-      root.style.left = px(clamp.left);
-      root.style.top  = px(clamp.top);
+      const r = root.getBoundingClientRect();
+      const { left, top } = clampPositionForTitle(root, r.left, r.top);
+      root.style.left = px(left);
+      root.style.top  = px(top);
+      save(KEYS.pos, { mode:'absolute', left, top });
     });
 
-    // Restore zoom/size/pos
+    // === Restore zoom/size/pos and clamp ===
     (function restore() {
-      const z = load(KEYS.zoom, 1); setZoom(document.documentElement, z, zSlider, zPct);
+      const z  = load(KEYS.zoom, 1); setZoom(document.documentElement, z, zSlider, zPct);
       const sz = load(KEYS.size, null);
       if (sz?.w && sz?.h) { root.style.width = px(sz.w); root.style.height = px(sz.h); }
+
       const pos = load(KEYS.pos, null);
       if (pos?.mode === 'absolute') {
-        root.style.left = px(pos.left); root.style.top = px(pos.top);
+        // Clamp against current viewport and safe-areas
+        const clamped = clampPositionForTitle(root, pos.left, pos.top);
+        root.style.left = px(clamped.left);
+        root.style.top  = px(clamped.top);
         root.style.right = 'auto'; root.style.bottom = 'auto';
       } else {
         snapTopRight(root);
       }
-      // final clamp
-      const c = clampToViewport(root);
-      root.style.left = px(c.left);
-      root.style.top  = px(c.top);
     })();
 
-    // Public helpers bound to window for convenience
-    function show() { ensureSrc(); root.hidden = false; }
+    // Public helpers
+    function show() { ensureSrc(); root.hidden = false;
+      // After show, ensure clamped again (in case viewport changed while hidden)
+      const r = root.getBoundingClientRect();
+      const { left, top } = clampPositionForTitle(root, r.left, r.top);
+      root.style.left = px(left); root.style.top = px(top);
+    }
     function hide() { root.hidden = true; }
-    function toggle() { if (root.hidden) show(); else hide(); }
+    function toggle() { root.hidden ? show() : hide(); }
     function setSrc(url) { iframe.removeAttribute('srcdoc'); iframe.src = url || SRC_DEFAULT; }
     function resetState() {
       ['naptio:miniDash:pos','naptio:miniDash:size','naptio:miniDash:zoom'].forEach(k => localStorage.removeItem(k));
-      // Reset zoom/pos/size immediately
       setZoom(document.documentElement, 1, zSlider, zPct);
       root.style.width = ''; root.style.height = '';
       snapTopRight(root);
@@ -400,27 +398,26 @@ export function installMiniDashboard(opts = {}) {
 
     window.MiniDash = Object.assign(window.MiniDash || {}, {
       show, hide, toggle, setSrc, resetState,
-      refresh() { // re-check enabled flag and show/hide
+      refresh() {
         const enabled = (localStorage.getItem(featureKey) || 'off') === 'on';
         if (enabled) { setSrc(src); show(); } else { hide(); }
       }
     });
 
-    // Initial visibility (only if enabled)
+    // Initial visibility
     const enabled = (localStorage.getItem(featureKey) || 'off') === 'on';
     if (enabled) { setSrc(src); root.hidden = false; } else { root.hidden = true; }
 
-    // Esc to hide
+    // ESC hides
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
 
     return root;
   }
 
-  const root = build();
-  return root;
+  return build();
 }
 
-// Auto-install when imported as a module (with default options)
+// Auto-install when imported directly
 if (typeof window !== 'undefined' && !window.__MiniDashAuto) {
   window.__MiniDashAuto = true;
   installMiniDashboard();
