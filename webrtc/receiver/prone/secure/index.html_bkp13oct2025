@@ -1,0 +1,1585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Baby Monitor – Receiver (Face Landmarks + Prone Detection)</title>
+  <link rel="icon" href="data:,">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+
+  <!-- Shared sidebar stylesheet -->
+  <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
+
+  <style>
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; height: 100%;
+      background: #000; color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+      overflow: hidden;
+    }
+
+    /* Fullscreen stage so video + canvas scale together */
+    #stage {
+      position: fixed; inset: 0;
+      width: 100vw; height: 100vh;   /* fallback */
+      width: 100dvw; height: 100dvh; /* dynamic viewport */
+      width: 100svw; height: 100svh; /* iOS URL bar safe */
+      z-index: 1; background: #000;
+    }
+    #stage > video {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: contain; background: #000;
+      z-index: 0; pointer-events: none;
+    }
+    #stage > canvas {
+      position: absolute;
+      z-index: 2; background: transparent; display: none;
+      pointer-events: none;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
+      background: transparent; color: #fff; font-size: 16px; font-weight: 600;
+      cursor: pointer; box-shadow: none;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+      white-space: nowrap;              /* keep labels on one line */
+    }
+    .btn:active { transform: scale(0.99); }
+    .btn.muted { opacity: 0.6; pointer-events: none; }
+    
+    button.btn:disabled { 
+      opacity: 0.45;
+      cursor: not-allowed;
+      filter: grayscale(0.4);
+    }
+    #controls {
+      position: fixed;
+      bottom: max(12px, env(safe-area-inset-bottom));   /* lift above iOS home bar */
+      left: 50%;
+      transform: translateX(-50%);
+    
+      /* layout */
+      display: flex;
+      flex-wrap: wrap;                  /* allow a second row on small screens */
+      align-items: center;
+      justify-content: center;
+      gap: 10px 12px;                   /* row/column gaps */
+      z-index: 6;
+    
+      /* keep within the visible (small) viewport + notches */
+      max-width: calc(100svw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));
+      padding: 6px 8px;                 /* small breathing room so edges aren’t clipped */
+      box-sizing: border-box;
+    
+      /* fallback if wrapping still overflows (very narrow devices) */
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    #controls::-webkit-scrollbar { display: none; }
+    
+    /* Fallback for browsers without svw/safe areas (older) */
+    @supports not (width: 100svw) {
+      #controls { max-width: calc(100vw - 24px); }
+    }
+
+    #enableAudioBtn, #disableAudioBtn { display: none; }
+
+    .overlay {
+      position: fixed; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      pointer-events: none; z-index: 5;
+    }
+    .status {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
+      text-align: center; white-space: pre-line; max-width: 90vw;
+    }
+    .overlay.hidden { display: none; }
+
+    /* Side help sheet (Motion style) */
+    .help-sheet {
+      position: fixed;
+      top: max(12px, env(safe-area-inset-top));
+      right: max(12px, env(safe-area-inset-right));
+      bottom: max(12px, env(safe-area-inset-bottom));
+      width: min(92vw, 520px);
+      z-index: 9; /* above backdrop (8) and settings (7) */
+      background: rgba(12,12,12,0.58);
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+      transform: translateX(110%);
+      transition: transform 180ms ease;
+      overflow: hidden;
+    }
+    .help-sheet.open { transform: translateX(0); }
+    
+    .help-header {
+      position: sticky; top: 0; z-index: 1;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08);
+      background: rgba(18,18,18,0.96);
+      -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    }
+    
+    /* Bare “×” (already added) */
+    .help-header .close:hover, #helpClose:hover { color: #fff; }
+    .help-header .close:active, #helpClose:active { transform: scale(0.98); }
+    
+    /* Backdrop */
+    .help-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 8; /* above settings (7) */
+      background: rgba(0,0,0,0.45);
+      -webkit-backdrop-filter: blur(6px);
+      backdrop-filter: blur(6px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms ease;
+    }
+    .help-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+     
+    /* Bare “×” icon (NOT a .btn rectangle) */
+    .help-header .close, #helpClose {
+      appearance: none;
+      background: transparent !important;
+      border: none !important;
+      box-shadow: none !important;
+      color: #aaa;
+      font-size: 22px;
+      line-height: 1;
+      padding: 2px 6px;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+    
+    .help-body {
+      padding: 12px;
+      overflow: auto;
+      max-height: calc(100svh - 48px);
+      font-size: 13px;
+      color: #ddd;
+      line-height: 1.45;
+    }
+    
+    /* Optional: small TOC / tables styling if you reuse Motion blocks */
+    .help-body .help-toc { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 10px; }
+    .help-body .help-toc a {
+      font-size: 12px; padding: 4px 8px; border-radius: 10px;
+      background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); color:#ddd; text-decoration:none;
+    }
+    .help-body .help-kv { width:100%; border-collapse:collapse; font-size:12px; }
+    .help-body .help-kv th { text-align:left; white-space:nowrap; padding:4px 8px; color:#ddd; }
+    .help-body .help-kv td { padding:4px 8px; color:#bbb; }
+
+    /* Settings drawer — match motion app transparency */
+    #settingsBtn { /* now lives beside Calibration in #controls */ }
+    #settingsDrawer {
+      position: fixed; right: max(12px, env(safe-area-inset-right)); bottom: 64px; z-index: 7;
+      width: min(92vw, 420px);
+      background: rgba(12,12,12,0.52);              /* translucent */
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);                   /* frosted glass */
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+      display: none;
+    }
+    #settingsDrawer.open { display: block; }
+    .sd-head { position: sticky; top: 0; display:flex; align-items:center; gap:8px; justify-content:space-between; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,0.08);}
+    .sd-head h2 { margin:0; font-size:16px; }
+    .sd-head-right { display:flex; align-items:center; gap:8px; }
+    /* Settings header close icon */
+    .sd-head-right .close {
+      appearance: none;
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      color: #aaa;
+      font-size: 22px;
+      line-height: 1;
+      padding: 2px 6px;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+    .sd-head-right .close:hover { color: #fff; }
+    .sd-head-right .close:active { transform: scale(0.98); }
+
+    .sd-body { padding: 10px 14px; display: grid; gap: 12px; max-height: 70vh; overflow:auto; }
+    .sd-group { border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:10px; background: rgba(0,0,0,0.25); }
+    .sd-group h3 { margin:0 0 6px; font-size:14px; color:#ddd; }
+    .row { display:grid; grid-template-columns: 1fr auto; align-items:center; gap:10px; margin:6px 0; }
+    .row label { font-size:13px; color:#bbb; }
+    .row input[type="range"] { width: 180px; }
+    .row input[type="number"] { width:88px; background:#0a0a0a; color:#fff; border:1px solid #222; border-radius:8px; padding:6px 8px; }
+    .row input[type="checkbox"] { transform: translateY(1px); }
+    .subtle { color:#999; font-size:12px; }
+    .muted  { color:#aaa; }
+
+    /* Calibration progress bar */
+    .prog { height:8px; border-radius:999px; background:#111; border:1px solid #222; overflow:hidden; }
+    .prog > i { display:block; height:100%; width:0%; background:linear-gradient(90deg,#15c,#3df); }
+
+    /* HUD pill — move to left side and include alert pill inside */
+    .hud {
+      position: absolute;
+      left: 0;
+      top: 0;
+      z-index: 6;
+      padding: 10px 12px;
+      background: rgba(0,0,0,0.45);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      color:#ddd;
+      min-width: 220px;
+    }
+    .hud .lines { font: 12px/1.35 -apple-system, system-ui, Segoe UI, Roboto, sans-serif; white-space: pre; }
+    .hud .riskbar {
+      margin-top: 8px;
+      height: 8px; border-radius: 999px; background: rgba(255,255,255,0.10);
+      position: relative; overflow: hidden; border:1px solid rgba(255,255,255,0.12);
+    }
+    .hud .riskbar i {
+      position:absolute; left:0; top:0; height:100%; width:0%;
+      background: #9ae6b4;  /* will be green/orange/red */
+      transition: width 120ms linear, background-color 120ms linear;
+    }
+    .hud .riskbar .pct {
+      position:absolute; right:6px; top:50%; transform:translateY(-50%);
+      font-size:10px; color:#ddd;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+    .hud .riskbar .tick {
+      position: absolute;
+      top: -2px;
+      bottom: -2px;
+      width: 2px;
+      background: rgba(255,255,255,0.7);
+      border-radius: 2px;
+      pointer-events: none;
+    }
+    .hud-head {
+      display: flex;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    /* Small alert pill INSIDE the HUD (top-right corner) */
+    #alertPill {
+      position: static;
+      margin-left: auto;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.06);
+      backdrop-filter: blur(6px);
+    }
+    #alertPill.prone-safe { color:#9ae6b4; border-color:#1f3b2a; background:rgba(25,60,35,0.45); }
+    #alertPill.prone-risk { color:#f6ad55; border-color:#4a321d; background:rgba(74,50,29,0.5); }
+    #alertPill.prone-on   { color:#fecaca; border-color:#5a1e1e; background:rgba(90,30,30,0.55); }
+    #alertPill::before, #alertPill::after { content:'' !important; }
+
+    /* Stopwatch badge — match Motion receiver look */
+    .icon.timer {
+      display: none;
+      place-items: center;
+      width: 18px;
+      height: 18px;
+      margin-right: 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.18);
+      box-shadow: inset 0 1px 1px rgba(0,0,0,0.25);
+      vertical-align: -2px;
+    }
+    .icon.timer svg { width: 12px; height: 12px; }
+    /* When calibrating, show it and keep your existing running styles */
+    #calBtn.running .icon.timer { display: inline-grid; }
+    #calBtn.running .icon.timer {
+      background: rgba(255,180,0,0.10);
+      border-color: rgba(255,180,0,0.40);
+    }
+    .icon.timer .hand {
+      transform-origin: 12px 12px;
+      transform: rotate(var(--hand-rot, 0deg));
+      transition: transform 120ms linear;
+    }
+    .icon { font-style: normal; margin-right: 6px; }
+    
+    /* Compact buttons on very small screens */
+    @media (max-width: 380px) {
+      .btn { padding: 10px 12px; font-size: 14px; border-radius: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- ⬇️ Shared sidebar -->
+  <script type="module">
+    (async () => {
+      try {
+        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
+        const html = await res.text();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html.trim();
+        document.body.prepend(...wrap.childNodes);
+
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      } catch (err) {
+        console.error('[Sidebar] failed to load shared assets:', err);
+      }
+    })();
+  </script>
+
+  <!-- HUD pill (now left side). Alert pill lives inside it. -->
+  <div id="hud" class="hud">
+    <div class="hud-head">
+      <div id="alertPill" class="prone-safe">Safe</div>
+    </div>
+    <div id="hudLines" class="lines">pitch↓: –°  •  risk: –</div>
+    <div class="riskbar" aria-label="Risk">
+      <i id="riskFill"></i><span id="riskPct" class="pct">0%</span>
+      <b class="tick" id="tick-occl" title="Occlusion ceiling"></b>
+      <b class="tick" id="tick-on"   title="Alert on (pose)"></b>
+      <b class="tick" id="tick-off"  title="Alert off (pose)"></b>
+    </div>
+  </div>
+
+  <!-- Bottom controls (Calibration + Settings added here) -->
+  <div id="controls">
+    <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
+    <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
+    <button id="fsBtn" class="btn" type="button">Fullscreen</button>
+    <button id="calBtn" class="btn" type="button">
+      <span class="icon timer" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="7" opacity=".9"/>
+          <path d="M12 12 L12 7" class="hand"/>
+          <path d="M9 3h6" />
+        </svg>
+      </span>
+      <span class="label">Calibration</span>
+    </button>
+    <button id="settingsBtn" class="btn" type="button">Settings</button>
+  </div>
+
+  <!-- Settings drawer -->
+  <div id="settingsDrawer" aria-label="Settings">
+    <div class="sd-head">
+      <h2>Prone detection settings</h2>
+      <div class="sd-head-right">
+        <button id="helpBtn" class="btn" type="button" style="padding:6px 10px;font-size:13px;">Help</button>
+        <button id="closeSettingsBtn" class="close" type="button" title="Close" aria-label="Close">×</button>
+      </div>
+    </div>
+    <div class="sd-body">
+      <div class="sd-group">
+        <h3>General</h3>
+        <div class="row"><label>Enable prone detection</label><input id="st-enabled" type="checkbox"></div>
+        <div class="row"><label>Show landmarks</label><input id="st-showLM" type="checkbox"></div>
+        <div class="row"><label>Show orientation arrow</label><input id="st-showOrient" type="checkbox"></div>
+        <div class="row"><label>Show 3D axes</label><input id="st-showAxes" type="checkbox"></div>
+        <div class="row"><label>Arrow length (×)</label><input id="st-arrowScale" type="number" min="0.5" max="3" step="0.1"></div>
+        <div class="row"><label>Flip pitch sign (if reversed)</label><input id="st-flipPitch" type="checkbox"></div>
+      </div>
+
+      <div class="sd-group">
+        <h3>Calibration (supine baseline)</h3>
+        <div class="row"><label>Duration (s)</label><input id="st-calDur" type="number" min="3" max="30" step="1"></div>
+        <div class="row">
+          <button id="calStartBtn" class="btn" type="button">Start</button>
+          <button id="calResetBtn" class="btn" type="button">Reset</button>
+        </div>
+        <div class="prog"><i id="calProg"></i></div>
+        <div class="subtle">Supine baseline (°): <span id="supineVal">–</span></div>
+      </div>
+
+      <div class="sd-group">
+        <h3>Smoothing & thresholds</h3>
+        <div class="row"><label>EMA τ (s)</label><input id="st-emaTau" type="number" min="0.2" max="10" step="0.1"></div>
+        <div class="row"><label>Pitch θ<sub>on</sub> (deg below supine)</label><input id="st-thetaOn" type="number" min="10" max="90" step="1"></div>
+        <div class="row"><label>Pose thr<sub>on</sub></label><input id="st-poseThrOn" type="number" min="0.1" max="0.8" step="0.05"></div>
+        <div class="row"><label>Pose thr<sub>off</sub></label><input id="st-poseThrOff" type="number" min="0.05" max="0.8" step="0.05"></div>
+        <div class="row"><label>Pose dwell on (s)</label><input id="st-poseDwellOn" type="number" min="1" max="60" step="1"></div>
+        <div class="row"><label>Pose dwell off (s)</label><input id="st-poseDwellOff" type="number" min="1" max="60" step="1"></div>
+        <div class="row"><label>Occlusion thr<sub>on</sub></label><input id="st-occThrOn" type="number" min="0.1" max="1" step="0.05"></div>
+        <div class="row"><label>Occlusion thr<sub>off</sub></label><input id="st-occThrOff" type="number" min="0.05" max="0.95" step="0.05"></div>
+        <div class="row"><label>Occlusion dwell on (s)</label><input id="st-occDwellOn" type="number" min="1" max="60" step="1"></div>
+        <div class="row"><label>Occlusion dwell off (s)</label><input id="st-occDwellOff" type="number" min="1" max="60" step="1"></div>
+      </div>
+
+      <div class="sd-group">
+        <h3>FaceLandmarker</h3>
+        <div class="row"><label>minFaceDetectionConfidence</label><input id="st-minDet" type="number" min="0" max="1" step="0.05"></div>
+        <div class="row"><label>minTrackingConfidence</label><input id="st-minTrack" type="number" min="0" max="1" step="0.05"></div>
+        <div class="row"><label>minFacePresenceConfidence</label><input id="st-minPres" type="number" min="0" max="1" step="0.05"></div>
+        <div class="row"><button id="reinitFaceBtn" class="btn" type="button">Apply to model</button></div>
+        <div class="row"><button id="resetDefaultsBtn" class="btn" type="button">Reset all defaults</button></div>
+      </div>
+    </div>
+  </div>
+
+
+  <div id="stage">
+    <video id="remote" autoplay playsinline></video>
+    <canvas id="faceCanvas"></canvas>
+  </div>
+
+  <div id="overlay" class="overlay">
+    <div id="status" class="status">Idle</div>
+  </div>
+
+  <!-- Hosts for shared Alerts UI (banner + history drawer) -->
+  <div id="alertBannerHost"></div>
+  <div id="alertsModalHost"></div>
+
+  <!-- ⬇️ PSK bootstrap (viewer); resolves room from query/Settings and installs shim -->
+  <script type="module">
+    import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+    import { requirePskOrRedirect } from '/hungryface/webrtc/shared/psk/require-psk.js';
+
+    const qs = new URLSearchParams(location.search);
+    const qsRoom   = (qs.get('room') || '').trim();
+    const stored   = (localStorage.getItem('bm_receiver_room') || '').trim();
+    const lastRoom = (localStorage.getItem('naptio:lastRoom') || '').trim();
+
+    const preferRoom = qsRoom || stored || lastRoom || '';
+
+    const env = await requirePskOrRedirect({
+      intent: 'viewer',
+      pairRoute: '/hungryface/webrtc/pairpsk/',
+      preferRoom,
+      fallbackRoom: 'Baby',
+    });
+
+    // Expose env + safe re-install hook (same API shape as sender)
+    window.__pskEnv = env;
+    window.__installPskForRoom = (room) => {
+      try { window.__pskUndo?.(); } catch {}
+      window.__pskUndo = installPskShim({ room });
+      console.log('[PSK][receiver-fence] shim installed for room:', room);
+      try {
+        localStorage.setItem('bm_receiver_room', room);
+        localStorage.setItem('naptio:lastRoom', room);
+      } catch {}
+    };
+
+    if (!env.redirected) {
+      const resolvedRoom = qsRoom || stored || lastRoom || env.room || 'Baby';
+      window.__installPskForRoom(resolvedRoom);
+      window.__pskRoom = resolvedRoom;
+    }
+  </script>
+  
+  <script type="module">
+    import { DrawingUtils, FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+    import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
+    /* === Shared Alerts (banner + drawer + persistence) === */
+    import { initAlertsUI, beginAlert, finishAlert, AlertTypes, showAlertBanner } from "/hungryface/webrtc/receiver/shared/alerts/index.js";
+
+    /* ---------- Constants ---------- */
+    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const room = window.__pskRoom || "Baby";
+    const LS_KEY = "naptio:face-prone-settings:v1.2";
+    const LS_SUPINE_KEY = "naptio:face-prone-supine:" + room;
+
+    const STATUS_HIDE_MS = 3000;
+
+    // MediaPipe assets
+    const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+    const WASM_DIR = TASKS_URL + "/wasm";
+    const FACE_MODEL_URL =
+      "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task";
+
+    const HAVE_CURRENT_DATA = 2;
+    // --- Unified scale: pose instant risk ranges 0..POSE_RANGE, normalize to 0..1 for the fused bar ---
+    const POSE_RANGE = 0.8;
+
+    /* ---------- DOM ---------- */
+    const stage = document.getElementById('stage');
+    const remoteVideo = document.getElementById('remote');
+    const faceCanvas = document.getElementById('faceCanvas');
+    const faceCtx = faceCanvas.getContext('2d', { alpha: true });
+
+    const fsBtn = document.getElementById('fsBtn');
+    const enableAudioBtn = document.getElementById('enableAudioBtn');
+    const disableAudioBtn = document.getElementById('disableAudioBtn');
+    const overlay = document.getElementById('overlay');
+    const statusEl = document.getElementById('status');
+
+    const settingsBtn = document.getElementById('settingsBtn');
+    const settingsDrawer = document.getElementById('settingsDrawer');
+    const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+    const helpBtn = document.getElementById('helpBtn');
+
+    const alertPill = document.getElementById('alertPill');
+    const hud = document.getElementById('hud');
+    const hudLines = document.getElementById('hudLines');
+
+    const riskBar = document.getElementById('riskFill');
+    const riskPct = document.getElementById('riskPct');
+    
+    const tickOccl = document.getElementById('tick-occl');
+    const tickOn   = document.getElementById('tick-on');
+    const tickOff  = document.getElementById('tick-off');
+
+    // Muted axis colors (standard mapping kept)
+    const AXIS_STYLE = {
+      x: { stroke: 'rgba(200, 80, 80, 0.65)'  },
+      y: { stroke: 'rgba( 40,155,135,0.90)'  },
+      z: { stroke: 'rgba( 90,120,210,0.95)'  },
+      width: 1.0
+    };
+
+    /* ---------- Settings state ---------- */
+    const defaults = {
+      enabled: true,
+      showLM: true,
+      showOrient: true,
+      showAxes: true,
+      arrowScale: 1.8,
+      flipPitch: false,
+
+      // Filtering
+      emaTau: 2.0,
+
+      // Pose mapping + hysteresis
+      thetaOn: 55,
+      poseThrOn: 0.70,
+      poseThrOff: 0.40,
+      poseDwellOn: 12,
+      poseDwellOff: 5,
+
+      // Occlusion hysteresis (on EMA of presence: 1 when missing, 0 when present)
+      occThrOn: 0.75,
+      occThrOff: 0.45,
+      occDwellOn: 10,
+      occDwellOff: 3,
+
+      // FaceLandmarker
+      minDet: 0.5,
+      minTrack: 0.5,
+      minPres: 0.5,
+
+      // Calibration
+      calDur: 10
+    };
+    let S = loadSettings();
+    let pitchSupine = loadSupine();
+
+    /* === Alerts UI init (injects banner + drawer & pill) === */
+    initAlertsUI({ drawerHostId: 'alertsModalHost' });
+
+    /* ---------- UI wire-up (settings) ---------- */
+    const $ = (id) => document.getElementById(id);
+    const ui = {
+      enabled: $('st-enabled'),
+      showLM: $('st-showLM'),
+      showOrient: $('st-showOrient'),
+      showAxes: $('st-showAxes'),
+      arrowScale: $('st-arrowScale'),
+      flipPitch: $('st-flipPitch'),
+      emaTau: $('st-emaTau'),
+      thetaOn: $('st-thetaOn'),
+      poseThrOn: $('st-poseThrOn'),
+      poseThrOff: $('st-poseThrOff'),
+      poseDwellOn: $('st-poseDwellOn'),
+      poseDwellOff: $('st-poseDwellOff'),
+      occThrOn: $('st-occThrOn'),
+      occThrOff: $('st-occThrOff'),
+      occDwellOn: $('st-occDwellOn'),
+      occDwellOff: $('st-occDwellOff'),
+      minDet: $('st-minDet'),
+      minTrack: $('st-minTrack'),
+      minPres: $('st-minPres'),
+      calDur: $('st-calDur'),
+      calProg: $('calProg'),
+      supineVal: $('supineVal'),
+      calStartBtn: $('calStartBtn'),
+      calResetBtn: $('calResetBtn'),
+      reinitFaceBtn: $('reinitFaceBtn'),
+      resetDefaultsBtn: $('resetDefaultsBtn')
+    };
+
+    function applySettingsToUI(){
+      ui.enabled.checked = !!S.enabled;
+      ui.showLM.checked = !!S.showLM;
+      ui.showOrient.checked = !!S.showOrient;
+      ui.showAxes.checked = !!S.showAxes;
+      ui.arrowScale.value = S.arrowScale;
+      ui.flipPitch.checked = !!S.flipPitch;
+
+      ui.emaTau.value = S.emaTau;
+      ui.thetaOn.value = S.thetaOn;
+
+      ui.poseThrOn.value = S.poseThrOn;
+      ui.poseThrOff.value = S.poseThrOff;
+      ui.poseDwellOn.value = S.poseDwellOn;
+      ui.poseDwellOff.value = S.poseDwellOff;
+
+      ui.occThrOn.value = S.occThrOn;
+      ui.occThrOff.value = S.occThrOff;
+      ui.occDwellOn.value = S.occDwellOn;
+      ui.occDwellOff.value = S.occDwellOff;
+
+      ui.minDet.value = S.minDet;
+      ui.minTrack.value = S.minTrack;
+      ui.minPres.value = S.minPres;
+      ui.calDur.value = S.calDur;
+
+      ui.supineVal.textContent = Number.isFinite(pitchSupine) ? pitchSupine.toFixed(1) : '–';
+    }
+    function readSettingsFromUI(){
+      S.enabled = ui.enabled.checked;
+      S.showLM = ui.showLM.checked;
+      S.showOrient = ui.showOrient.checked;
+      S.showAxes = ui.showAxes.checked;
+      S.arrowScale = clampNum(parseFloat(ui.arrowScale.value), 0.5, 3);
+      S.flipPitch = ui.flipPitch.checked;
+
+      S.emaTau = clampNum(parseFloat(ui.emaTau.value), 0.1, 20);
+      S.thetaOn = clampNum(parseFloat(ui.thetaOn.value), 5, 120);
+
+      S.poseThrOn = clampNum(parseFloat(ui.poseThrOn.value), 0, POSE_RANGE);
+      S.poseThrOff = clampNum(parseFloat(ui.poseThrOff.value), 0, POSE_RANGE);
+      S.poseDwellOn = clampNum(parseFloat(ui.poseDwellOn.value), 0, 120);
+      S.poseDwellOff = clampNum(parseFloat(ui.poseDwellOff.value), 0, 120);
+
+      S.occThrOn = clampNum(parseFloat(ui.occThrOn.value), 0, 1);
+      S.occThrOff = clampNum(parseFloat(ui.occThrOff.value), 0, 1);
+      S.occDwellOn = clampNum(parseFloat(ui.occDwellOn.value), 0, 120);
+      S.occDwellOff = clampNum(parseFloat(ui.occDwellOff.value), 0, 120);
+
+      S.minDet = clampNum(parseFloat(ui.minDet.value), 0, 1);
+      S.minTrack = clampNum(parseFloat(ui.minTrack.value), 0, 1);
+      S.minPres = clampNum(parseFloat(ui.minPres.value), 0, 1);
+      S.calDur = clampNum(parseFloat(ui.calDur.value), 3, 60);
+      saveSettings();
+    }
+    function loadSettings(){
+      try { return {...defaults, ...(JSON.parse(localStorage.getItem(LS_KEY)||'{}'))}; }
+      catch { return {...defaults}; }
+    }
+    function saveSettings(){ localStorage.setItem(LS_KEY, JSON.stringify(S)); }
+    function loadSupine(){
+      const v = parseFloat(localStorage.getItem(LS_SUPINE_KEY)||'NaN');
+      return Number.isFinite(v) ? v : NaN;
+    }
+    function saveSupine(v){
+      pitchSupine = v;
+      localStorage.setItem(LS_SUPINE_KEY, String(v));
+      ui.supineVal.textContent = Number.isFinite(v) ? v.toFixed(1) : '–';
+    }
+
+    /* Settings open/close */
+    settingsBtn.addEventListener('click', () => {
+      settingsDrawer.classList.toggle('open');
+      applySettingsToUI();
+    });
+    closeSettingsBtn.addEventListener('click', () => settingsDrawer.classList.remove('open'));
+    settingsDrawer.addEventListener('change', () => { readSettingsFromUI(); });
+
+    // Close settings when clicking on the main page (video stage)
+    stage.addEventListener('click', () => {
+      settingsDrawer.classList.remove('open');
+      closeHelp();
+    });
+
+    ui.reinitFaceBtn.addEventListener('click', async () => {
+      readSettingsFromUI();
+      await recreateFaceTask();
+      sendFaceConfig(); 
+      showStatus('Face task reinitialized');
+    });
+    ui.calResetBtn.addEventListener('click', () => {
+      saveSupine(NaN);
+      showStatus('Supine baseline cleared');
+    });
+    ui.resetDefaultsBtn.addEventListener('click', async () => {
+      S = {...defaults};
+      saveSettings();
+      applySettingsToUI();
+      await recreateFaceTask();
+      sendFaceConfig();   
+      showStatus('All settings reset to defaults');
+    });
+
+    // OPEN/CLOSE: Motion-style side sheet
+    async function ensureHelpSheetLoaded() {
+    // Already present?
+    if (document.getElementById('helpSheet')) return;
+  
+    // Ensure the injector script is in the page
+    if (!document.getElementById('helpSheetLoader')) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.id = 'helpSheetLoader';
+        s.src = '/hungryface/webrtc/receiver/prone/help-sheet.js'; // <- use shared injector
+        s.onload = resolve;
+        s.onerror = reject;
+        document.body.appendChild(s);
+      });
+    }
+  
+    // Wait until the injector actually appended #helpSheet/#helpBackdrop
+    if (!document.getElementById('helpSheet')) {
+      await new Promise((resolve) => {
+        const done = () => resolve();
+        document.addEventListener('help:ready', done, { once: true });
+      });
+    }
+  }
+
+    function wireHelpEventsOnce() {
+      const sheet = document.getElementById('helpSheet');
+      const backdrop = document.getElementById('helpBackdrop');
+      if (!sheet || !backdrop || sheet.dataset.wired) return;
+    
+      const closeBtn = document.getElementById('helpClose');
+    
+      const onEsc = (e) => {
+        if (e.key === 'Escape' && sheet.classList.contains('open')) close();
+      };
+    
+      const close = () => {
+        sheet.classList.remove('open');
+        backdrop.classList.remove('open');
+        backdrop.setAttribute('aria-hidden', 'true');
+        document.removeEventListener('keydown', onEsc);
+      };
+    
+      backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); }, { passive: true });
+      closeBtn?.addEventListener('click', (e) => { e.stopPropagation(); close(); });
+      document.addEventListener('keydown', onEsc);
+    
+      sheet.dataset.wired = '1';
+    }
+    
+    async function openHelp() {
+      await ensureHelpSheetLoaded();
+      wireHelpEventsOnce();
+      const sheet = document.getElementById('helpSheet');
+      const backdrop = document.getElementById('helpBackdrop');
+      sheet?.classList.add('open');
+      backdrop?.classList.add('open');
+      backdrop?.setAttribute('aria-hidden', 'false');
+    }
+    
+    function closeHelp() {
+      const sheet = document.getElementById('helpSheet');
+      const backdrop = document.getElementById('helpBackdrop');
+      sheet?.classList.remove('open');
+      backdrop?.classList.remove('open');
+      backdrop?.setAttribute('aria-hidden', 'true');
+    }
+    
+    // keep your existing binding
+    helpBtn.addEventListener('click', openHelp);
+
+    /* Calibration control (shared with main "Calibration" button) */
+    let calRunning = false, calStartTs = 0, calAccum = 0, calCount = 0, calUItimer = null;
+    const calBtn = document.getElementById('calBtn');
+    /* NEW: start hidden-icon & disabled until we have landmarks */ //https://chatgpt.com/c/68c45774-e95c-832b-8011-c612280af8fa
+    calBtn.disabled = true;
+    setCalBtn(false, 0);
+
+    function setCalBtn(running, remainingSec = 0){
+      const label = calBtn.querySelector('.label');
+      const icon  = calBtn.querySelector('.icon.timer');
+      if (!label || !icon) return;
+      if (running){
+        const secs = Math.max(0, Math.ceil(remainingSec));
+        label.textContent = `Calibrating… ${secs} s`;
+        calBtn.classList.add('running');
+        const pct  = S.calDur > 0 ? (1 - (remainingSec / S.calDur)) : 0;
+        const deg  = Math.max(0, Math.min(1, pct)) * 360;
+        icon.style.setProperty('--hand-rot', deg + 'deg');
+      } else {
+        label.textContent = 'Calibration';
+        calBtn.classList.remove('running');
+        icon.style.removeProperty('--hand-rot');
+      }
+    }
+
+    function updateCalButtonState(hasLandmarks) {
+      // If calibration is running, keep the button enabled so the user can stop it.
+      if (calRunning) {
+        calBtn.disabled = false;
+        return;
+      }
+      calBtn.disabled = !hasLandmarks;
+    }
+
+    calBtn.addEventListener('click', () => {
+      if (!settingsDrawer.classList.contains('open')) {
+        settingsDrawer.classList.add('open');
+        applySettingsToUI();
+      }
+      if (!calRunning) {
+        startCalibrationUI();
+      }
+    });
+
+    ui.calStartBtn.addEventListener('click', () => {
+      if (!calRunning) startCalibrationUI(); else finishCalibration(true);
+    });
+
+    function startCalibrationUI(){
+      readSettingsFromUI();
+      calRunning = true; calStartTs = performance.now(); calAccum = 0; calCount = 0;
+      ui.calProg.style.width = '0%';
+      ui.calStartBtn.textContent = 'Stop';
+      showStatus('Calibration started… Keep face-up / neutral');
+      clearInterval(calUItimer);
+      calUItimer = setInterval(() => {
+        const elapsed = (performance.now() - calStartTs)/1000;
+        const remaining = Math.max(0, S.calDur - elapsed);
+        setCalBtn(true, remaining);
+        if (remaining <= 0) { clearInterval(calUItimer); }
+      }, 250);
+      setCalBtn(true, S.calDur);
+    }
+
+    function finishCalibration(stopped=false){
+      if (!calRunning) return;
+      calRunning = false;
+      ui.calStartBtn.textContent = 'Start';
+      ui.calProg.style.width = '0%';
+      clearInterval(calUItimer);
+      setCalBtn(false, 0);
+      if (calCount >= 5) {
+        const baseline = calAccum / calCount;
+        saveSupine(baseline);
+        showStatus(`Calibration ${stopped?'stopped':'done'} • Supine = ${baseline.toFixed(1)}°`);
+      } else {
+        showStatus('Calibration not enough samples');
+      }
+    }
+
+    /* ---------- Status overlay ---------- */
+    let hideStatusTimer = null;
+    function showStatus(msg) {
+      statusEl.textContent = msg;
+      overlay.classList.remove('hidden');
+      console.log('[STATUS]', msg);
+    
+      if (hideStatusTimer) clearTimeout(hideStatusTimer);
+      hideStatusTimer = setTimeout(() => {
+        overlay.classList.add('hidden');
+      }, STATUS_HIDE_MS);
+    }
+
+
+    /* ---------- Audio UI ---------- */
+    function updateAudioButtons() {
+      if (remoteVideo.muted) {
+        enableAudioBtn.style.display = 'block';
+        disableAudioBtn.style.display = 'none';
+      } else {
+        enableAudioBtn.style.display = 'none';
+        disableAudioBtn.style.display = 'block';
+      }
+    }
+    enableAudioBtn.style.display = 'block';
+
+    async function tryStartMuted() {
+      try {
+        remoteVideo.muted = true;
+        remoteVideo.volume = 1.0;
+        await remoteVideo.play();
+      } catch (e) { console.warn('autoplay (muted) blocked:', e); }
+      updateAudioButtons();
+    }
+    enableAudioBtn.addEventListener('click', async (e) => {
+      e?.stopPropagation?.(); e?.preventDefault?.();
+      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); }
+      catch (err) { console.warn('unmute play blocked:', err); }
+      updateAudioButtons();
+    });
+    disableAudioBtn.addEventListener('click', (e) => {
+      e?.stopPropagation?.(); e?.preventDefault?.();
+      remoteVideo.muted = true;
+      updateAudioButtons();
+    });
+
+    /* ---------- Fullscreen ---------- */
+    fsBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        if (!document.fullscreenElement) {
+          await (stage.requestFullscreen?.call(stage) || document.documentElement.requestFullscreen());
+          fsBtn.textContent = 'Exit fullscreen';
+        } else {
+          await document.exitFullscreen();
+          fsBtn.textContent = 'Fullscreen';
+        }
+      } catch (err) { console.warn('fullscreen error', err); }
+      beginViewportSettle();
+    });
+    document.addEventListener('fullscreenchange', () => {
+      fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+      beginViewportSetle();
+    });
+
+    remoteVideo.addEventListener('loadedmetadata', () => {
+      console.log('[MEDIA] remote meta', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
+      beginViewportSettle();
+    });
+    remoteVideo.addEventListener('playing', () => {
+      console.log('[MEDIA] remote playing (muted=', remoteVideo.muted, ')');
+      updateAudioButtons();
+      beginViewportSettle();
+    });
+    remoteVideo.addEventListener('resize', beginViewportSettle);
+
+    /* ---------- Canvas alignment ---------- */
+    function containRect(containerW, containerH, contentW, contentH) {
+      const scale = Math.min(containerW / (contentW||1), containerH / (contentH||1));
+      const w = Math.round(contentW * scale);
+      const h = Math.round(contentH * scale);
+      const x = Math.floor((containerW - w) / 2);
+      const y = Math.floor((containerH - h) / 2);
+      return { left:x, top:y, width:w, height:h };
+    }
+
+    function alignCanvasToVideo() {
+      const stageBox = stage.getBoundingClientRect();
+      const videoBox = remoteVideo.getBoundingClientRect();
+      const containerW = Math.round(videoBox.width);
+      const containerH = Math.round(videoBox.height);
+      const vidW = remoteVideo.videoWidth || 1;
+      const vidH = remoteVideo.videoHeight || 1;
+
+      const fit = containRect(containerW, containerH, vidW, vidH);
+      const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
+      const topCSS = Math.round((videoBox.top - stageBox.top) + fit.top);
+      hud.style.left = (leftCSS + 8) + 'px';
+      hud.style.top  = (topCSS  + 8) + 'px';
+
+      faceCanvas.style.left = leftCSS + 'px';
+      faceCanvas.style.top = topCSS + 'px';
+      faceCanvas.style.width = fit.width + 'px';
+      faceCanvas.style.height = fit.height + 'px';
+
+      const dpr = window.devicePixelRatio || 1;
+      const needW = Math.max(1, Math.round(fit.width * dpr));
+      const needH = Math.max(1, Math.round(fit.height * dpr));
+      if (faceCanvas.width !== needW || faceCanvas.height !== needH) {
+        faceCanvas.width = needW;
+        faceCanvas.height = needH;
+      }
+      faceCtx.setTransform(1,0,0,1,0,0);
+    }
+
+    let settleRAF = 0, settleUntil = 0;
+    function beginViewportSettle(durationMs = 1200) {
+      settleUntil = performance.now() + durationMs;
+      if (settleRAF) return;
+      const tick = () => {
+        alignCanvasToVideo();
+        if (performance.now() < settleUntil) {
+          settleRAF = requestAnimationFrame(tick);
+        } else {
+          cancelAnimationFrame(settleRAF); settleRAF = 0;
+          alignCanvasToVideo();
+        }
+      };
+      tick();
+    }
+    const vpAlign = () => beginViewportSettle();
+    ['resize','orientationchange','scroll'].forEach(ev =>
+      window.addEventListener(ev, vpAlign, { passive: true })
+    );
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', vpAlign, { passive: true });
+      window.visualViewport.addEventListener('scroll',  vpAlign, { passive: true });
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) beginViewportSettle();
+    });
+
+    /* ---------- Overlay helpers ---------- */
+    function setOverlayVisible(v) {
+      faceCanvas.style.display = v ? 'block' : 'none';
+      if (v) beginViewportSettle();
+      else faceCtx.clearRect(0,0, faceCanvas.width, faceCanvas.height);
+    }
+    function clearOverlayDrawing() {
+      try {
+        faceCtx.setTransform(1,0,0,1,0,0);
+        faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
+      } catch {}
+    }
+
+    /* ---------- MediaPipe Face Landmarker (Receiver) ---------- */
+    let faceTask = null;
+    let faceLoopRunning = false;
+    let faceEnabled = true;
+    let faceWhere = 'receiver';
+    let faceDC = null;
+
+    function sendFaceConfig() {
+      if (!faceDC || faceDC.readyState !== 'open') return;
+      const payload = { type: 'face-config', minDet: S.minDet, minTrack: S.minTrack, minPres: S.minPres };
+      try { faceDC.send(JSON.stringify(payload)); } catch {}
+    }
+
+    async function ensureFaceTask() {
+      if (faceTask) return faceTask;
+      const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
+      faceTask = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate: "GPU" },
+        runningMode: "VIDEO",
+        numFaces: 1,
+        outputFaceBlendshapes: false,
+        outputFacialTransformationMatrixes: true,
+        minFaceDetectionConfidence: S.minDet,
+        minTrackingConfidence: S.minTrack,
+        minFacePresenceConfidence: S.minPres
+      });
+      return faceTask;
+    }
+    async function recreateFaceTask(){
+      try { await faceTask?.close?.(); } catch {}
+      faceTask = null;
+      await ensureFaceTask();
+    }
+
+    function videoHasFrame(v) {
+      return v && v.readyState >= HAVE_CURRENT_DATA && v.videoWidth>0 && v.videoHeight>0;
+    }
+    function waitForVideoFrame(video) {
+      if (videoHasFrame(video)) return Promise.resolve();
+      return new Promise((resolve) => {
+        const check = () => { if (videoHasFrame(video)) { cleanup(); resolve(); } };
+        const cleanup = () => {
+          video.removeEventListener('loadedmetadata', check);
+          video.removeEventListener('playing', check);
+          video.removeEventListener('resize', check);
+        };
+        video.addEventListener('loadedmetadata', check);
+        video.addEventListener('playing', check);
+        video.addEventListener('resize', check);
+      });
+    }
+
+    /* ---------- Prone detection state ---------- */
+    let lastTs = 0;
+
+    // Visuals
+    let pitchEma = NaN;   // EMA of pitch-down (for HUD)
+    let riskEma  = 0;     // EMA of fused visual risk (bar only) — normalized 0..1
+
+    // Global alert (OR of poseAlert, occAlert)
+    let alert = false;
+
+    // Pose path
+    let poseRiskEma = 0;
+    let poseAlert = false, poseAboveT = 0, poseBelowT = 0;
+
+    // Occlusion path
+    let occEma = 0;
+    let occAlert = false, occAboveT = 0, occBelowT = 0;
+
+    // === Alerts episode state (Prone) ===
+    let _proneAlertId = null;
+    let _proneSum = 0, _proneCount = 0, _proneStartMs = 0;
+
+    function emaUpdate(prev, x, tau, dt){
+      if (!Number.isFinite(x)) return prev;
+      const a = 1 - Math.exp(-dt / Math.max(0.001, tau));
+      return Number.isFinite(prev) ? (prev + a*(x - prev)) : x;
+    }
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+    function clampNum(v, lo, hi){ v = Number(v); return Number.isFinite(v) ? clamp(v, lo, hi) : lo; }
+
+    function computeEulerXYZ(m){ // m: Float32Array[16] row-major
+      const m00=m[0], m01=m[1], m02=m[2];
+      const m10=m[4], m11=m[5], m12=m[6];
+      const m20=m[8], m21=m[9], m22=m[10];
+      const sy = Math.hypot(m00, m10);
+      let x,y,z;
+      if (sy > 1e-6) {
+        x = Math.atan2(m21, m22);     // pitch around X
+        y = Math.atan2(-m20, sy);     // yaw around Y
+        z = Math.atan2(m10, m00);     // roll around Z
+      } else {
+        x = Math.atan2(-m12, m11);
+        y = Math.atan2(-m20, sy);
+        z = 0;
+      }
+      const R2D = 180/Math.PI;
+      return { pitch: x*R2D, yaw: y*R2D, roll: z*R2D };
+    }
+
+    function averagePoint(lms){
+      let sx=0, sy=0, n=lms.length;
+      for (let i=0;i<n;i++){ sx+=lms[i].x; sy+=lms[i].y; }
+      return { x:sx/n, y:sy/n };
+    }
+
+    /* draw 3D axis triad */
+    function drawAxisTriad(m, centroid, scalePx){
+      let xaxis = { x:m[0], y:m[1], z:m[2]  };
+      let yaxis = { x:m[4], y:m[5], z:m[6]  };
+      let zaxis = { x:m[8], y:m[9], z:m[10] };
+      const norm = (v)=>{ const n = Math.hypot(v.x,v.y,v.z)||1; return {x:v.x/n, y:v.y/n, z:v.z/n}; };
+      xaxis = norm(xaxis); yaxis = norm(yaxis); zaxis = norm(zaxis);
+      const cx = centroid.x * faceCanvas.width;
+      const cy = centroid.y * faceCanvas.height;
+      const drawVec = (v, style)=>{
+        faceCtx.save();
+        faceCtx.setLineDash([]);
+        faceCtx.lineWidth = AXIS_STYLE.width;
+        faceCtx.lineCap = 'round';
+        faceCtx.strokeStyle = style.stroke;
+        faceCtx.shadowColor = style.stroke;
+        faceCtx.shadowBlur = 2;
+        const tipX = cx + v.x*scalePx, tipY = cy - v.y*scalePx;
+        faceCtx.beginPath(); faceCtx.moveTo(cx, cy); faceCtx.lineTo(tipX, tipY); faceCtx.stroke();
+        const ang = Math.atan2(-v.y, v.x), ah = 9;
+        faceCtx.beginPath();
+        faceCtx.moveTo(tipX, tipY);
+        faceCtx.lineTo(tipX - ah*Math.cos(ang - Math.PI/6), tipY - ah*Math.sin(ang - Math.PI/6));
+        faceCtx.moveTo(tipX, tipY);
+        faceCtx.lineTo(tipX - ah*Math.cos(ang + Math.PI/6), tipY - ah*Math.sin(ang + Math.PI/6));
+        faceCtx.stroke();
+        faceCtx.restore();
+      };
+      drawVec(xaxis, AXIS_STYLE.x);
+      drawVec(yaxis, AXIS_STYLE.y);
+      drawVec(zaxis, AXIS_STYLE.z);
+    }
+
+    function drawFaceAndHUD(result, opts){
+      const { showLM, showOrient, yawDeg, pitchDeg, rollDeg, relPitchDeg, risk, alert, rotMat } = opts;
+      faceCtx.save();
+      faceCtx.clearRect(0,0, faceCanvas.width, faceCanvas.height);
+      const utils = new DrawingUtils(faceCtx);
+
+      if (showLM && result.faceLandmarks?.length) {
+        const lm = result.faceLandmarks[0];
+        try { utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_TESSELATION, { color:"#C0C0C070", lineWidth:1 }); } catch {}
+        try { utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE, { color:"#00FF00", lineWidth:1 }); } catch {}
+        try { utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,  { color:"#00FF00", lineWidth:1 }); } catch {}
+        try { utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LIPS,      { color:"#00FF00", lineWidth:1 }); } catch {}
+        try { utils.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, { color:"#00FF00", lineWidth:1 }); } catch {}
+      }
+
+      const hasPose = Number.isFinite(yawDeg) && Number.isFinite(pitchDeg) && Number.isFinite(rollDeg) && result.faceLandmarks?.length;
+      if (hasPose){
+        const cen = averagePoint(result.faceLandmarks[0]);
+        const cx = cen.x * faceCanvas.width;
+        const cy = cen.y * faceCanvas.height;
+        const minDim = Math.min(faceCanvas.width, faceCanvas.height);
+
+        if (S.showAxes && rotMat && rotMat.length >= 16){
+          const axisLen = minDim * 0.10 * (S.arrowScale || 1);
+          drawAxisTriad(rotMat, cen, axisLen);
+        }
+
+        if (S.showOrient){
+          const yawRad = yawDeg * Math.PI/180;
+          const pitchRad = (Number.isFinite(relPitchDeg) ? relPitchDeg : 0) * Math.PI/180;
+          const L = minDim * 0.14 * (S.arrowScale || 1);
+          const dx = -Math.sin(yawRad) * L;
+          const dy = -Math.sin(pitchRad) * L;
+
+          faceCtx.beginPath();
+          faceCtx.moveTo(cx, cy);
+          faceCtx.lineTo(cx + dx, cy + dy);
+          faceCtx.lineWidth = 4;
+          const mid = (S.poseThrOn + S.poseThrOff) / 2;
+          faceCtx.strokeStyle = alert ? '#ff6b6b' : (risk>mid ? '#f6ad55' : '#9ae6b4');
+          faceCtx.stroke();
+
+          const ah = 10, ang = Math.atan2(dy, dx);
+          faceCtx.beginPath();
+          faceCtx.moveTo(cx+dx, cy+dy);
+          faceCtx.lineTo(cx+dx - ah*Math.cos(ang - Math.PI/6), cy+dy - ah*Math.sin(ang - Math.PI/6));
+          faceCtx.lineTo(cx+dx - ah*Math.cos(ang + Math.PI/6), cy+dy - ah*Math.sin(ang + Math.PI/6));
+          faceCtx.closePath();
+          faceCtx.fillStyle = faceCtx.strokeStyle;
+          faceCtx.fill();
+        }
+      }
+      faceCtx.restore();
+    }
+
+    // --- One symmetric step for prone logic (used by both receiver loop and sender-DC) ---
+    function processProneStep(obs, ts, dt) {
+      const { present, yawDeg, pitchDeg, rollDeg, rotMat, landmarks } = obs;
+    
+      updateCalButtonState(!!present);
+    
+      // Calibration sampling / progress
+      if (calRunning) {
+        const elapsed = (ts - calStartTs)/1000;
+        ui.calProg.style.width = clamp((elapsed / S.calDur)*100, 0, 100) + '%';
+        setCalBtn(true, Math.max(0, S.calDur - elapsed));
+        if (present && Number.isFinite(pitchDeg)) { calAccum += pitchDeg; calCount++; }
+        if (elapsed >= S.calDur) finishCalibration(false);
+      }
+    
+      // Relative pitch (baseline + optional flip)
+      let relPitchDeg = NaN;
+      if (Number.isFinite(pitchDeg) && Number.isFinite(pitchSupine)) {
+        relPitchDeg = (pitchDeg - pitchSupine) * (S.flipPitch ? -1 : 1);
+      }
+    
+      if (S.enabled) {
+        const faceRisk = present ? 0 : 1;  // 0 visible, 1 missing
+    
+        // Pose path (instant pose risk → EMA + dwell/hysteresis)
+        const pitchDownNow = Number.isFinite(relPitchDeg) ? Math.max(0, -relPitchDeg) : NaN;
+        let rPoseInst = 0;
+        if (Number.isFinite(pitchDownNow)) {
+          const over = pitchDownNow - S.thetaOn;
+          rPoseInst = POSE_RANGE * clamp((over + 10) / 30, 0, 1);  // 0..POSE_RANGE
+        }
+        poseRiskEma = emaUpdate(poseRiskEma, rPoseInst, S.emaTau, dt);
+        pitchEma    = emaUpdate(pitchEma,  pitchDownNow, S.emaTau, dt);
+    
+        if (!poseAlert) {
+          if (poseRiskEma > S.poseThrOn) { poseAboveT += dt; poseBelowT = 0; }
+          else { poseAboveT = Math.max(0, poseAboveT - dt*0.5); }
+          if (poseAboveT >= S.poseDwellOn) { poseAlert = true; poseAboveT = 0; poseBelowT = 0; }
+        } else {
+          if (poseRiskEma < S.poseThrOff) { poseBelowT += dt; poseAboveT = 0; }
+          else { poseBelowT = Math.max(0, poseBelowT - dt*0.5); }
+          if (poseBelowT >= S.poseDwellOff) { poseAlert = false; poseAboveT = 0; poseBelowT = 0; }
+        }
+    
+        // Occlusion path (EMA of faceRisk) + dwell/hysteresis
+        occEma = emaUpdate(occEma, faceRisk, S.emaTau, dt);
+    
+        if (!occAlert) {
+          if (occEma > S.occThrOn) { occAboveT += dt; occBelowT = 0; }
+          else { occAboveT = Math.max(0, occAboveT - dt*0.5); }
+          if (occAboveT >= S.occDwellOn) { occAlert = true; occAboveT = 0; occBelowT = 0; }
+        } else {
+          if (occEma < S.occThrOff) { occBelowT += dt; occAboveT = 0; }
+          else { occBelowT = Math.max(0, occBelowT - dt*0.5); }
+          if (occBelowT >= S.occDwellOff) { occAlert = false; occAboveT = 0; occBelowT = 0; }
+        }
+    
+        // Global alert toggle + status cause
+        const newAlert = poseAlert || occAlert;
+        if (newAlert !== alert) {
+          alert = newAlert;
+
+          if (alert) {
+            const cause = (poseAlert && !occAlert) ? 'Pose' : (!poseAlert && occAlert) ? 'Occlusion' : 'Pose + Occlusion';
+            // Banner text aligned with audio page style
+            const bannerMsg =
+              (poseAlert && !occAlert) ? 'Prone sleeping detected' :
+              (!poseAlert && occAlert) ? 'Occlusion detected' :
+              'Prone sleeping detected (with occlusion)';
+
+            _proneStartMs = Date.now();
+            _proneSum = 0; _proneCount = 0;
+
+            // Persist start + show banner (fire-and-forget)
+            beginAlert({ type: (AlertTypes?.Prone ?? 'Prone'), message: bannerMsg })
+              .then(id => { _proneAlertId = id; })
+              .catch(()=>{});
+            try { showAlertBanner(_proneStartMs, bannerMsg); } catch {}
+
+            showStatus(`PRONE suspected • ${cause}`);
+          } else {
+            showStatus('Recovered from prone');
+
+            // Finish episode and persist average fused risk
+            const avg = _proneCount > 0 ? (_proneSum / _proneCount) : (riskEma || 0);
+            const id = _proneAlertId; _proneAlertId = null;
+            if (id != null) {
+              finishAlert(id, {
+                avgScore: Number((avg || 0).toFixed(4)),
+                message: 'Recovered from prone'
+              }).catch(()=>{});
+            }
+            _proneStartMs = 0; _proneSum = 0; _proneCount = 0;
+          }
+        }
+
+        // Accumulate fused risk while ON for episode averaging
+        if (alert) { _proneSum += (riskEma || 0); _proneCount++; }
+    
+        // Fused risk bar (instant occlusion vs normalized pose)
+        const pPoseInst = clamp(rPoseInst / POSE_RANGE, 0, 1); // 0..1
+        const fusedInst = Math.max(faceRisk, pPoseInst);       // 0..1
+        riskEma = emaUpdate(riskEma, fusedInst, S.emaTau, dt);
+    
+      } else {
+        // Disabled: reset FSM + UI
+        poseAlert = false; occAlert = false; alert = false;
+        poseAboveT = poseBelowT = 0;
+        occAboveT = occBelowT = 0;
+        riskEma = 0;
+        pitchEma = NaN;
+      }
+    
+      // Draw overlay + HUD/pill (works for both paths)
+      drawFaceAndHUD(
+        { faceLandmarks: landmarks ? [landmarks] : [] },
+        {
+          showLM: S.showLM, showOrient: S.showOrient,
+          yawDeg, pitchDeg, rollDeg, relPitchDeg,
+          risk: riskEma || 0, alert, rotMat
+        }
+      );
+      updatePill(riskEma || 0, alert);
+      updateHud(Number.isFinite(pitchEma) ? pitchEma : NaN, riskEma || 0, yawDeg, pitchDeg, rollDeg, relPitchDeg);
+    }
+
+    function updatePill(risk, alertOn){
+      alertPill.classList.remove('prone-safe','prone-risk','prone-on');
+      const mid = (S.poseThrOn + S.poseThrOff) / 2;
+      const cls = alertOn ? 'prone-on' : (risk>mid ? 'prone-risk' : 'prone-safe');
+      alertPill.classList.add(cls);
+
+      // Show dominant channel on the pill (unified 0..1 scale)
+      const poseNorm = clamp(poseRiskEma / POSE_RANGE, 0, 1);      // 0..1
+      const dominant = (occEma >= poseNorm) ? 'Occlusion' : 'Pose';
+
+      alertPill.textContent = alertOn
+        ? `PRONE suspected • ${dominant}`
+        : (risk>mid ? `Risk rising • ${dominant}` : 'Safe');
+    }
+
+    /* HUD text + risk bar — unified 0..100% scale */
+    function updateHud(pitchDownDeg, fused, yawDeg, pitchDeg, rollDeg, relPitchDeg){
+      const fmt = v => Number.isFinite(v) ? v.toFixed(1) : '–';
+      hudLines.textContent =
+        `pitch↓: ${fmt(pitchDownDeg)}°  •  risk: ${(fused||0).toFixed(2)}\n` +
+        `yaw: ${fmt(yawDeg)}°  pitch(raw): ${fmt(pitchDeg)}°  roll: ${fmt(rollDeg)}°  pitch(rel): ${fmt(relPitchDeg)}°`;
+
+      const pct = Math.round(clamp(((fused || 0)), 0, 1) * 100);
+      if (riskBar) riskBar.style.width = pct + '%';
+      if (riskPct) riskPct.textContent = pct + '%';
+
+      // Pose thresholds mapped to unified scale via POSE_RANGE
+      if (tickOn)  tickOn.style.left  = (clamp(S.poseThrOn  / POSE_RANGE, 0, 1) * 100) + '%';
+      if (tickOff) tickOff.style.left = (clamp(S.poseThrOff / POSE_RANGE, 0, 1) * 100) + '%';
+
+      // Hide the old occlusion ceiling tick in the unified-scale UI
+      if (tickOccl) tickOccl.style.display = 'none';
+
+      if (riskBar) {
+        if (pct >= 100)      riskBar.style.background = '#ff6b6b';
+        else if (pct >= 50)  riskBar.style.background = '#f6ad55';
+        else                 riskBar.style.background = '#9ae6b4';
+      }
+    }
+
+    async function startReceiverFaceLoop() {
+      if (faceLoopRunning) return;
+      await ensureFaceTask();
+      sendFaceConfig();
+      await waitForVideoFrame(remoteVideo);
+
+      faceLoopRunning = true;
+      console.log('[FACE][receiver] inference START (receiver)');
+
+      const useRVFC = 'requestVideoFrameCallback' in remoteVideo;
+
+      const onFrame = () => {
+        if (!faceLoopRunning || !faceEnabled || faceWhere !== 'receiver') {
+          console.log('[FACE][receiver] inference STOP (receiver)');
+          return;
+        }
+
+        if (!videoHasFrame(remoteVideo)) {
+          faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
+          scheduleNext();
+          return;
+        }
+
+        const ts = performance.now();
+        const dt = lastTs ? (ts - lastTs)/1000 : 0.016;
+        lastTs = ts;
+
+        try {
+          const result = faceTask.detectForVideo(remoteVideo, ts);
+          const present = !!(result?.faceLandmarks?.length);
+          updateCalButtonState(present);
+
+          let yawDeg = NaN, pitchDeg = NaN, rollDeg = NaN, rotMat = null, relPitchDeg = NaN;
+
+          if (present && result.facialTransformationMatrixes?.length){
+            const mat = result.facialTransformationMatrixes[0];
+            const m = (mat instanceof Float32Array || Array.isArray(mat)) ? mat : (mat?.data || []);
+            if (m.length >= 16) {
+              const e = computeEulerXYZ(m);
+              yawDeg = e.yaw;
+              pitchDeg = e.pitch;
+              rollDeg = e.roll;
+              rotMat = m;
+            }
+          }
+
+          //https://chatgpt.com/c/68caf7f6-0270-8320-a6cd-a1c82d55eb39
+          processProneStep({
+            present,
+            yawDeg, pitchDeg, rollDeg,
+            rotMat,
+            landmarks: present && result.faceLandmarks ? result.faceLandmarks[0] : null
+          }, ts, dt);
+        } catch (err) {
+          console.warn('[FACE][receiver] detect error (retrying next frame)', err);
+        } finally {
+          scheduleNext();
+        }
+      };
+
+      const scheduleNext = () => {
+        if (useRVFC) remoteVideo.requestVideoFrameCallback(onFrame);
+        else requestAnimationFrame(onFrame);
+      };
+
+      scheduleNext();
+    }
+
+    function stopReceiverFaceLoop() {
+      faceLoopRunning = false;
+      faceCtx.clearRect(0,0, faceCanvas.width, faceCanvas.height);
+    }
+
+    function applyFaceMode() {
+      setOverlayVisible(faceEnabled);
+      if (!faceEnabled) { stopReceiverFaceLoop(); return; }
+      if (faceWhere === 'receiver') startReceiverFaceLoop();
+      else stopReceiverFaceLoop();
+    }
+
+    /* ---------- ReceiverCore hookup ---------- */
+    const core = new ReceiverCore({
+      wsEndpoint: WS_ENDPOINT,
+      room,
+      onStatus: showStatus,
+
+      onStream: (stream, track) => {
+        if (remoteVideo.srcObject !== stream) {
+          remoteVideo.srcObject = stream;
+          tryStartMuted();
+          attachStreamEndHandlers(stream);
+        }
+        console.log('[TRACK][receiver]', track.kind);
+        beginViewportSettle();
+      },
+
+      onIceState: (state) => {
+        if (state === 'connected' || state === 'completed') {
+          showStatus('Connected');
+        } else if (state === 'failed') {
+          clearOverlayDrawing();
+          showStatus('ICE: failed – retrying…');
+        } else if (state === 'disconnected') {
+          clearOverlayDrawing();
+          showStatus('ICE: disconnected');
+        } else if (state === 'closed') {
+          clearOverlayDrawing();
+          showStatus('ICE: closed');
+        } else {
+          showStatus('ICE: ' + state);
+        }
+      },
+
+      onCreatePC: (pc) => {
+        const ch = pc.createDataChannel('pose');
+        ch.onopen  = () => console.log('[DC][receiver] pose DC open');
+        ch.onclose = () => console.log('[DC][receiver] pose DC close');
+        ch.onerror = (e) => console.warn('[DC][receiver] pose DC error', e);
+        ch.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'need-face-config') { sendFaceConfig(); return; }
+            if (msg.type === 'ai-modes' && msg.face) {
+              faceEnabled = !!msg.face.enabled;
+              faceWhere   = msg.face.where || 'sender';
+              applyFaceMode();
+            } else if (msg.type === 'face-mode') {
+              faceEnabled = !!msg.enabled;
+              faceWhere   = msg.where || 'sender';
+              applyFaceMode();
+            } else if (msg.type === 'face') {
+              if (faceEnabled && faceWhere === 'sender') {
+                const ts = performance.now();
+                const dt = lastTs ? (ts - lastTs)/1000 : 0.016;
+                lastTs = ts;
+            
+                processProneStep({
+                  present: !!msg.present,
+                  yawDeg:  Number.isFinite(msg.yawDeg)  ? msg.yawDeg  : NaN,
+                  pitchDeg:Number.isFinite(msg.pitchDeg)? msg.pitchDeg: NaN,
+                  rollDeg: Number.isFinite(msg.rollDeg) ? msg.rollDeg : NaN,
+                  rotMat:  msg.rotMat || null,
+                  landmarks: (msg.present && msg.landmarks) ? msg.landmarks : null
+                }, ts, dt);
+              }
+            }
+          } catch {}
+        };
+        faceDC = ch;
+      },
+    });
+
+    // Clear drawings on common video stoppage states
+    ['pause','ended','emptied','stalled','suspend','waiting'].forEach((ev) => {
+      remoteVideo.addEventListener(ev, clearOverlayDrawing, { passive: true });
+    });
+
+    function attachStreamEndHandlers(stream) {
+      if (!stream) return;
+      stream.getVideoTracks().forEach((t) => {
+        t.addEventListener('ended',  clearOverlayDrawing);
+        t.addEventListener('mute',   clearOverlayDrawing);
+      });
+      stream.addEventListener('removetrack', (e) => {
+        if (e.track?.kind === 'video') clearOverlayDrawing();
+      });
+    }
+
+    window.addEventListener('beforeunload', () => {
+      try { core?.stop?.(); } catch {}
+      if (hideStatusTimer) clearTimeout(hideStatusTimer);
+      stopReceiverFaceLoop();
+    });
+
+    // Settings init
+    applySettingsToUI();
+
+    // Start!
+    core.start();
+    setOverlayVisible(true); // show canvas immediately for alignment
+
+    // tiny typo guard used in logs
+    function beginViewportSetle(){ beginViewportSettle(); }
+  </script>
+  
+    <!-- analytics -->
+  <script type="module">
+    import { installAnalytics } from '/hungryface/shared/analytics.js';
+    window.analytics = installAnalytics({ feature: 'receiver-prone' });
+    // Later: window.analytics.event('prone_opened');
+  </script>
+  
+</body>
+</html>
