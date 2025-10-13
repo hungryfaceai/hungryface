@@ -32,7 +32,7 @@
     .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; min-height: 52px; }
     .setting-label {
       font-size: 16px; font-weight: 600; color: #ddd; line-height: 1.25;
-      flex: 1; /* allows control to align right and label to wrap if needed */
+      flex: 1;
     }
 
     input[type="text"], select, input[type="number"] {
@@ -47,12 +47,14 @@
     /* Optional small status text under the card title */
     #status { margin-top: 6px; font-size: 13px; color: #9aa; }
 
-    /* Compact numeric input for cooldown */
+    /* Compact numeric input for cooldown (shorter height) */
     .num-compact { 
-      width: 7ch !important;        /* enough for 3 digits + some padding */
+      width: 7ch !important;        /* 3 digits + padding */
       text-align: right;
       flex: 0 0 auto;
-      height: 44px;
+      height: 36px;                  /* reduced height */
+      padding: 6px 10px;             /* tighter padding */
+      border-radius: 10px;
     }
 
     /* ================= Danger zone (existing styles) ================ */
@@ -318,7 +320,7 @@
         <!-- Gap between alerts: label left, compact number on the right -->
         <div class="row">
           <label for="notifCooldownMin" class="setting-label" style="cursor:pointer;">Gap between alerts (minutes)</label>
-          <input id="notifCooldownMin" class="num-compact" type="number" min="0" max="999" step="1" inputmode="numeric" pattern="[0-9]*" placeholder="2" />
+          <input id="notifCooldownMin" class="num-compact" type="number" min="0" max="999" step="1" inputmode="numeric" pattern="[0-9]*" placeholder="1" />
         </div>
       </section>
 
@@ -330,8 +332,8 @@
         <p id="miniDashHelp" class="help-line">Show a small, in-app dashboard overlay on Audio, Motion, Fence and Prone pages.</p>
 
         <div class="row">
-          <span class="setting-label">Mini dashboard (in-app)</span>
-          <label class="switch" aria-label="Mini dashboard (in-app)">
+          <span class="setting-label">In-app dashboard</span>
+          <label class="switch" aria-label="In-app dashboard">
             <input id="sw-miniDash" type="checkbox" role="switch" aria-describedby="miniDashHelp" />
             <span class="slider"></span>
           </label>
@@ -414,7 +416,7 @@
     })();
   </script>
 
-  <!-- ——— Alerts + Mini dashboard persistence & wiring ——— -->
+  <!-- ——— Alerts + In-app dashboard persistence & wiring ——— -->
   <script type="module">
     const KEYS = {
       audio: 'naptio:notify:audio',
@@ -440,17 +442,17 @@
       el.addEventListener('change', () => setOnOff(key, el.checked ? 'on' : 'off'));
     }
 
-    /* Default ON for all switches (including Mini dashboard) */
+    /* Default ON for all switches (including In-app dashboard) */
     wireSwitch('sw-audio', KEYS.audio, 'on');
     wireSwitch('sw-motion', KEYS.motion, 'on');
     wireSwitch('sw-fence', KEYS.fence, 'on');
     wireSwitch('sw-prone', KEYS.prone, 'on');
     wireSwitch('sw-miniDash', KEYS.miniDash, 'on');
 
-    // Cooldown (minutes)
+    // Cooldown (minutes) — default to 1 if nothing saved
     const cooldownInput = document.getElementById('notifCooldownMin');
     const saved = parseInt(localStorage.getItem(KEYS.cooldown), 10);
-    cooldownInput.value = Number.isFinite(saved) ? saved : 2; // default 2 minutes
+    cooldownInput.value = Number.isFinite(saved) ? saved : 1;
 
     function clampInt(n, lo, hi) {
       n = Math.round(Number(n) || 0);
@@ -470,7 +472,7 @@
       if (e.key === 'Enter') { e.preventDefault(); persistCooldown(); }
     });
   </script>
-  <!-- ——— End: Alerts + Mini dashboard ——— -->
+  <!-- ——— End: Alerts + In-app dashboard ——— -->
 
   <!-- ——— Naptio: Factory Reset (this device) ——— -->
   <section id="factoryResetSection" class="danger-zone">
