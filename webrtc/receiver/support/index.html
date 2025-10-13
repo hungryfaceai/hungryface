@@ -42,11 +42,9 @@
     .checkbox { display:flex; align-items:flex-start; gap:10px; font-size:14px; color:#ccc; }
     .checkbox input { margin-top:2px; }
 
-    /* ▼▼ dynamic offset for fixed top drawer/sidebar */
-    :root { --nav-offset: 56px; } /* fallback */
-    main.wrap {
-      padding-top: var(--nav-offset);
-    }
+    /* ▼▼ simple constant offset, like Settings page */
+    :root { --nav-offset: 56px; } /* adjust here if your top bar height changes */
+    main.wrap { padding-top: var(--nav-offset); }
     @supports (height: 100dvh) {
       main.wrap { min-height: calc(100dvh - var(--nav-offset)); }
     }
@@ -84,72 +82,6 @@
         console.error('[Sidebar] failed to load shared assets:', err);
       }
     })();
-  </script>
-
-  <!-- auto-measure topbar height and set --nav-offset (robust against hard refresh) -->
-  <script>
-  (function () {
-    const SEL = '.sidebar-top, .topbar, #topbar, header[role="banner"], nav[role="navigation"]';
-    const clamp = (n, min, max) => Math.min(Math.max(n, min), max);
-    let topEl = null, ro = null;
-
-    function setOffsetNow() {
-      if (!topEl) return;
-      const h = Math.ceil(topEl.getBoundingClientRect().height || 0);
-      const safe = clamp(h, 0, 120); // prevent runaway values
-      if (safe > 0) {
-        document.documentElement.style.setProperty('--nav-offset', safe + 'px');
-      }
-    }
-
-    function scheduleSetOffset() {
-      // Defer a couple frames to let layout & fonts settle
-      requestAnimationFrame(() => requestAnimationFrame(setOffsetNow));
-      if (document.fonts && document.fonts.ready) {
-        document.fonts.ready.then(setOffsetNow).catch(() => {});
-      }
-    }
-
-    function bind(el) {
-      topEl = el;
-      scheduleSetOffset();
-      if ('ResizeObserver' in window) {
-        ro && ro.disconnect();
-        ro = new ResizeObserver(scheduleSetOffset);
-        ro.observe(topEl);
-      }
-      window.addEventListener('resize', scheduleSetOffset, { passive: true });
-      window.addEventListener('orientationchange', scheduleSetOffset, { passive: true });
-      window.addEventListener('pageshow', scheduleSetOffset, { passive: true });
-    }
-
-    function findTopbar() {
-      return document.querySelector(SEL);
-    }
-
-    function init() {
-      const el = findTopbar();
-      if (el) { bind(el); return; }
-
-      // Wait for sidebar/header to be injected after hard refresh
-      const mo = new MutationObserver((_muts, obs) => {
-        const found = findTopbar();
-        if (found) {
-          bind(found);
-          obs.disconnect();
-        }
-      });
-      mo.observe(document.documentElement, { childList: true, subtree: true });
-
-      // If no header ever appears (unlikely), avoid a permanent fallback gap
-      setTimeout(() => {
-        if (!topEl) document.documentElement.style.setProperty('--nav-offset', '0px');
-      }, 2000);
-    }
-
-    if (document.readyState === 'complete' || document.readyState === 'interactive') init();
-    else document.addEventListener('DOMContentLoaded', init);
-  })();
   </script>
 
   <main class="wrap">
@@ -351,7 +283,8 @@
         diag.env.battery ? `Battery: ${Math.round(diag.env.battery.level*100)}% ${diag.env.battery.charging?'(charging)':''}` : null,
         `Permissions: camera=${diag.env.camPerm || 'n/a'} mic=${diag.env.micPerm || 'n/a'}`,
         `Security: https=${diag.env.secure} coi=${diag.env.coi} dnt=${diag.env.dnt}`,
-        (gpu.vendor || gpu.renderer) ? `GPU: ${[gpu.vendor,gpu.renderer].filter(Boolean).join(' / ')}` : null,
+        (gpu.vendor || gpu.renderer) ? `GPU: ${[gpu.vendor,gpu.renderer].filter(Boolean).join(' / ')}`
+        : null,
         (storage.usage || storage.quota) ? `Storage: ${toMB(storage.usage)}/${toMB(storage.quota)}` : null,
         `PWA: standalone=${pwa.standalone ? 1 : 0} sw=${pwa.sw ? 1 : 0}`,
         (dev.ai!=null || dev.vi!=null || dev.ao!=null) ? `Devices: mic=${dev.ai ?? 0} cam=${dev.vi ?? 0} spk=${dev.ao ?? 0}` : null,
