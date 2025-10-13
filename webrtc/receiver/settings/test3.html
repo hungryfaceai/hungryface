@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -28,7 +28,12 @@
     }
     .card h2 { font-size: clamp(16px, 2.6vw, 18px); margin: 0 0 8px 0; }
 
-    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; }
+    /* Touch-friendly rows + consistent label typography */
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; min-height: 52px; }
+    .setting-label {
+      font-size: 16px; font-weight: 600; color: #ddd; line-height: 1.25;
+      flex: 1; /* lets the control align right and allows label wrapping */
+    }
 
     input[type="text"], select, input[type="number"] {
       width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222; background:#0b0b0b; color:#ddd;
@@ -37,6 +42,7 @@
     #roomSel { font-size: 18px; padding: 14px 16px; height: 52px; border-radius: 12px; }
 
     .muted-note { opacity:.7; font-size:13px; }
+    .help-line { opacity:.8; font-size: 13px; margin: 2px 0 0 0; }
 
     /* Optional small status text under the card title */
     #status { margin-top: 6px; font-size: 13px; color: #9aa; }
@@ -95,8 +101,8 @@
     .btn-secondary:hover{ background:#151515; }
     /* ======================================================== */
 
-    /* ——— Sound notifications UI ——— */
-    .section-title { margin: 16px 0 6px 0; font-size: 16px; }
+    /* ——— Section headings & separators ——— */
+    .section-title { margin: 16px 0 4px 0; font-size: 16px; font-weight: 700; color: #eee; }
     .sep { border: 0; border-top: 1px solid #141414; margin: 14px 0; }
 
     /* iOS-style switch */
@@ -252,23 +258,30 @@
     <div class="card">
       <h2 style="padding-left:3ch">Settings</h2>
 
-      <!-- Room selector (label on the RIGHT, same as sender) -->
-      <div class="row">
-        <select id="roomSel"></select>
-        <label for="roomSel" class="muted-note" style="cursor:pointer;">Room</label>
-      </div>
+      <!-- ——— Room ——— -->
+      <section aria-labelledby="roomTitle">
+        <h3 id="roomTitle" class="section-title">Room</h3>
+        <p class="help-line">Pick which room this device listens to.</p>
 
-      <div id="status" aria-live="polite"></div>
+        <!-- Room selector (label on the RIGHT, same as sender) -->
+        <div class="row">
+          <select id="roomSel"></select>
+          <label for="roomSel" class="setting-label" style="cursor:pointer;">Room</label>
+        </div>
+
+        <div id="status" aria-live="polite"></div>
+      </section>
 
       <hr class="sep" />
 
       <!-- ——— Sound notifications ——— -->
       <section aria-labelledby="notifTitle">
         <h3 id="notifTitle" class="section-title">Sound notifications</h3>
+        <p class="help-line">Choose which events should play a sound.</p>
 
         <!-- Audio -->
         <div class="row">
-          <span class="muted-note">Audio</span>
+          <span class="setting-label">Audio</span>
           <label class="switch" aria-label="Audio notifications">
             <input id="sw-audio" type="checkbox" role="switch" />
             <span class="slider"></span>
@@ -277,7 +290,7 @@
 
         <!-- Motion -->
         <div class="row">
-          <span class="muted-note">Motion</span>
+          <span class="setting-label">Motion</span>
           <label class="switch" aria-label="Motion notifications">
             <input id="sw-motion" type="checkbox" role="switch" />
             <span class="slider"></span>
@@ -286,7 +299,7 @@
 
         <!-- Fence -->
         <div class="row">
-          <span class="muted-note">Fence</span>
+          <span class="setting-label">Fence</span>
           <label class="switch" aria-label="Fence notifications">
             <input id="sw-fence" type="checkbox" role="switch" />
             <span class="slider"></span>
@@ -295,7 +308,7 @@
 
         <!-- Prone -->
         <div class="row">
-          <span class="muted-note">Prone</span>
+          <span class="setting-label">Prone</span>
           <label class="switch" aria-label="Prone notifications">
             <input id="sw-prone" type="checkbox" role="switch" />
             <span class="slider"></span>
@@ -305,10 +318,26 @@
         <!-- Shared cooldown -->
         <div class="row">
           <input id="notifCooldownMin" type="number" min="0" max="180" step="1" inputmode="numeric" placeholder="2" />
-          <label for="notifCooldownMin" class="muted-note" style="cursor:pointer;">Min gap between alerts (minutes)</label>
+          <label for="notifCooldownMin" class="setting-label" style="cursor:pointer;">Min gap between alerts (minutes)</label>
         </div>
       </section>
-      <!-- ——— End: Sound notifications ——— -->
+
+      <hr class="sep" />
+
+      <!-- ——— Mini dashboard ——— -->
+      <section aria-labelledby="miniDashTitle">
+        <h3 id="miniDashTitle" class="section-title">Mini dashboard</h3>
+        <p id="miniDashHelp" class="help-line">Show a small, in-app dashboard overlay on Audio, Motion, Fence and Prone pages.</p>
+
+        <div class="row">
+          <span class="setting-label">Mini dashboard (in-app)</span>
+          <label class="switch" aria-label="Mini dashboard (in-app)">
+            <input id="sw-miniDash" type="checkbox" role="switch" aria-describedby="miniDashHelp" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </section>
+      <!-- ——— End sections ——— -->
     </div>
   </div>
 
@@ -393,14 +422,15 @@
     })();
   </script>
 
-  <!-- ——— Sound notifications persistence & wiring ——— -->
+  <!-- ——— Sound notifications + Mini dashboard persistence & wiring ——— -->
   <script type="module">
     const KEYS = {
       audio: 'naptio:notify:audio',
       motion: 'naptio:notify:motion',
       fence: 'naptio:notify:fence',
       prone: 'naptio:notify:prone',
-      cooldown: 'naptio:notifyCooldownMin'
+      cooldown: 'naptio:notifyCooldownMin',
+      miniDash: 'naptio:miniDash:enabled'   // new
     };
 
     function getOnOff(key, def = 'on') {
@@ -412,16 +442,21 @@
       try { localStorage.setItem('naptio:notify:ts', String(Date.now())); } catch {}
     }
 
-    function wireSwitch(inputId, key) {
+    // Accept a default for first-boot
+    function wireSwitch(inputId, key, def = 'on') {
       const el = document.getElementById(inputId);
-      el.checked = getOnOff(key, 'on') === 'on';
+      el.checked = getOnOff(key, def) === 'on';
       el.addEventListener('change', () => setOnOff(key, el.checked ? 'on' : 'off'));
     }
 
-    wireSwitch('sw-audio', KEYS.audio);
-    wireSwitch('sw-motion', KEYS.motion);
-    wireSwitch('sw-fence', KEYS.fence);
-    wireSwitch('sw-prone', KEYS.prone);
+    // Existing alert switches (default ON)
+    wireSwitch('sw-audio', KEYS.audio, 'on');
+    wireSwitch('sw-motion', KEYS.motion, 'on');
+    wireSwitch('sw-fence', KEYS.fence, 'on');
+    wireSwitch('sw-prone', KEYS.prone, 'on');
+
+    // Mini dashboard (default OFF)
+    wireSwitch('sw-miniDash', KEYS.miniDash, 'off');
 
     // Cooldown (minutes)
     const cooldownInput = document.getElementById('notifCooldownMin');
@@ -446,7 +481,7 @@
       if (e.key === 'Enter') { e.preventDefault(); persistCooldown(); }
     });
   </script>
-  <!-- ——— End: Sound notifications ——— -->
+  <!-- ——— End: Sound notifications + Mini dashboard ——— -->
 
   <!-- ——— Naptio: Factory Reset (this device) ——— -->
   <section id="factoryResetSection" class="danger-zone">
