@@ -165,6 +165,8 @@
     import { DrawingUtils, PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     import { ReceiverCore } from '/hungryface/webrtc/receiver/shared/receiver-core.js';
     import { initAlertsUI, beginAlert, finishAlert, AlertTypes, showAlertBanner } from "/hungryface/webrtc/receiver/shared/alerts/index.js";
+    import { installAlertSound } from "/hungryface/webrtc/receiver/shared/alerts/notify-sound.js";
+
 
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
@@ -176,6 +178,11 @@
       "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
 
     const HAVE_CURRENT_DATA = 2;
+    // Sound for Fence alerts (per-type toggle + cooldown; dashboard gate ignored)
+    const alertSound = installAlertSound({
+    type: 'fence',   // explicit
+    // debug: true    // optional while testing
+    });
 
     /* ---------- DOM ---------- */
     const stage = document.getElementById('stage');
@@ -509,6 +516,8 @@
             message: 'Movement outside virtual fence'
           });
           showAlertBanner(fenceStartMs, 'Movement outside virtual fence');
+          // 🔊 play the triple-pip (per-type toggle + cooldown enforced)
+          alertSound.trigger();   // (or: alertSound.emit('fence'))
         })());
       }
       // accumulate while ON
