@@ -94,6 +94,13 @@
     }
     .btn-secondary:hover{ background:#151515; }
     /* ======================================================== */
+
+    /* ——— Sound notifications UI ——— */
+    .section-title { margin: 16px 0 6px 0; font-size: 16px; }
+    .sep { border: 0; border-top: 1px solid #141414; margin: 14px 0; }
+    .inline-radios { display: flex; gap: 12px; flex-wrap: wrap; }
+    .inline-radios label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 14px; }
+    .help { font-size: 12px; opacity: .8; margin-top: 2px; }
   </style>
 
   <!-- --- Sidebar overlap fix CSS (revised: use padding-left instead of transform) --- -->
@@ -102,24 +109,24 @@
       --sidebar-visible: 0px;
       --sidebar-gutter: 12px;                     /* extra spacing so shadows/borders don't touch card */
       --safe-left: env(safe-area-inset-left, 0px);/* iPhone notch/gesture area */
-	  --menu-hit: 52px; /* reserve tappable area for the hamburger (≈44–56px) */
+      --menu-hit: 52px; /* reserve tappable area for the hamburger (≈44–56px) */
       --sidebar-offset: calc(var(--sidebar-visible) + var(--safe-left) + var(--sidebar-gutter));
     }
     /* Shift layout using padding so content is not under the drawer/scrim */
-	/* Reserve hamburger space even when closed, and add drawer width when open */
-	#ui {
-	  padding-left: var(--sidebar-offset);
-	  transition: padding-left .18s ease;
-	  will-change: padding-left;
-	}
+    /* Reserve hamburger space even when closed, and add drawer width when open */
+    #ui {
+      padding-left: var(--sidebar-offset);
+      transition: padding-left .18s ease;
+      will-change: padding-left;
+    }
     /* Keep the card fully visible within remaining width */
     .card {
       max-width: min(520px, calc(100vw - var(--sidebar-offset) - 32px));
     }
-	@media (max-width: 480px) {
-	  body.drawer-open-detected #ui { padding-left: 0 !important; }      /* stop the right shift */
-	  .card { max-width: min(520px, calc(100vw - 32px)); }                /* keep the card fully visible */
-	}
+    @media (max-width: 480px) {
+      body.drawer-open-detected #ui { padding-left: 0 !important; }      /* stop the right shift */
+      .card { max-width: min(520px, calc(100vw - 32px)); }                /* keep the card fully visible */
+    }
   </style>
 </head>
 <body>
@@ -234,6 +241,58 @@
       </div>
 
       <div id="status" aria-live="polite"></div>
+
+      <hr class="sep" />
+
+      <!-- ——— Sound notifications ——— -->
+      <section aria-labelledby="notifTitle">
+        <h3 id="notifTitle" class="section-title">Sound notifications</h3>
+        <p class="muted-note">Choose which alerts play a sound on this device, and set a minimum gap to avoid rapid repeats.</p>
+
+        <!-- Audio -->
+        <div class="row" role="group" aria-labelledby="lab-audio">
+          <div class="inline-radios" aria-label="Audio notifications">
+            <label><input type="radio" name="notif-audio" value="on"> On</label>
+            <label><input type="radio" name="notif-audio" value="off"> Off</label>
+          </div>
+          <span id="lab-audio" class="muted-note">Audio</span>
+        </div>
+
+        <!-- Motion -->
+        <div class="row" role="group" aria-labelledby="lab-motion">
+          <div class="inline-radios" aria-label="Motion notifications">
+            <label><input type="radio" name="notif-motion" value="on"> On</label>
+            <label><input type="radio" name="notif-motion" value="off"> Off</label>
+          </div>
+          <span id="lab-motion" class="muted-note">Motion</span>
+        </div>
+
+        <!-- Fence -->
+        <div class="row" role="group" aria-labelledby="lab-fence">
+          <div class="inline-radios" aria-label="Fence notifications">
+            <label><input type="radio" name="notif-fence" value="on"> On</label>
+            <label><input type="radio" name="notif-fence" value="off"> Off</label>
+          </div>
+          <span id="lab-fence" class="muted-note">Fence</span>
+        </div>
+
+        <!-- Prone -->
+        <div class="row" role="group" aria-labelledby="lab-prone">
+          <div class="inline-radios" aria-label="Prone notifications">
+            <label><input type="radio" name="notif-prone" value="on"> On</label>
+            <label><input type="radio" name="notif-prone" value="off"> Off</label>
+          </div>
+          <span id="lab-prone" class="muted-note">Prone</span>
+        </div>
+
+        <!-- Shared cooldown -->
+        <div class="row">
+          <input id="notifCooldownMin" type="number" min="0" max="180" step="1" inputmode="numeric" placeholder="2" />
+          <label for="notifCooldownMin" class="muted-note" style="cursor:pointer;">Min gap between alerts (minutes)</label>
+        </div>
+        <div class="help" id="cooldownHelp">Applies to all alert types above. Set to 0 to allow immediate repeats.</div>
+      </section>
+      <!-- ——— End: Sound notifications ——— -->
     </div>
   </div>
 
@@ -318,22 +377,72 @@
     })();
   </script>
 
+  <!-- ——— Sound notifications persistence & wiring ——— -->
+  <script type="module">
+    const KEYS = {
+      audio: 'naptio:notify:audio',
+      motion: 'naptio:notify:motion',
+      fence: 'naptio:notify:fence',
+      prone: 'naptio:notify:prone',
+      cooldown: 'naptio:notifyCooldownMin'
+    };
+
+    function getOnOff(key, def = 'on') {
+      const v = (localStorage.getItem(key) || '').toLowerCase();
+      return (v === 'on' || v === 'off') ? v : def;
+    }
+    function setOnOff(key, val) {
+      localStorage.setItem(key, (val === 'off') ? 'off' : 'on');
+      // notify other tabs (optional consumers)
+      try { localStorage.setItem('naptio:notify:ts', String(Date.now())); } catch {}
+    }
+
+    function wireGroup(name, key) {
+      const nodes = Array.from(document.querySelectorAll(`input[name="notif-${name}"]`));
+      const current = getOnOff(key, 'on');
+      nodes.forEach(n => { n.checked = (n.value === current); });
+      nodes.forEach(n => n.addEventListener('change', () => {
+        if (n.checked) setOnOff(key, n.value);
+      }));
+    }
+
+    wireGroup('audio', KEYS.audio);
+    wireGroup('motion', KEYS.motion);
+    wireGroup('fence', KEYS.fence);
+    wireGroup('prone', KEYS.prone);
+
+    // Cooldown (minutes)
+    const cooldownInput = document.getElementById('notifCooldownMin');
+    const saved = parseInt(localStorage.getItem(KEYS.cooldown), 10);
+    cooldownInput.value = Number.isFinite(saved) ? saved : 2; // default 2 minutes
+
+    function clampInt(n, lo, hi) {
+      n = Math.round(Number(n) || 0);
+      return Math.min(hi, Math.max(lo, n));
+    }
+
+    const persistCooldown = () => {
+      const v = clampInt(cooldownInput.value, 0, 180);
+      cooldownInput.value = v;
+      localStorage.setItem(KEYS.cooldown, String(v));
+      try { localStorage.setItem('naptio:notify:ts', String(Date.now())); } catch {}
+    };
+
+    cooldownInput.addEventListener('change', persistCooldown);
+    cooldownInput.addEventListener('blur', persistCooldown);
+    cooldownInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); persistCooldown(); }
+    });
+  </script>
+  <!-- ——— End: Sound notifications ——— -->
+
   <!-- ——— Naptio: Factory Reset (this device) ——— -->
   <section id="factoryResetSection" class="danger-zone">
     <h2>Danger zone</h2>
-    <!-- <p class="danger-note">Erase Naptio data stored in this browser</p> -->
     <button id="btnFactoryReset" class="btn btn-danger" aria-describedby="eraseHelp">
-      <!-- <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" style="vertical-align:-3px;margin-right:8px">
-        <path fill="currentColor" d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
-      </svg> -->
-	  Erase all Naptio data on this browser
+      Erase all Naptio data on this browser
     </button>
     <span id="eraseHelp" class="sr-only">This will permanently delete local preferences, keys, caches and databases in this browser.</span>
-																				  
-																			   
-							
-			   
-		  
   </section>
 
   <!-- Lightweight modal (no dependencies) -->
@@ -360,11 +469,7 @@
 
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
         <button id="factoryResetCancel" class="btn btn-secondary">Cancel</button>
-																			  
-																			  
         <button id="factoryResetConfirm" class="btn btn-danger">Erase & Reset</button>
-																					
-																									 
       </div>
 
       <div id="factoryResetStatus" role="status" aria-live="polite"
@@ -384,9 +489,7 @@
           const dbs = await indexedDB.databases();
           for (const db of dbs) if (db?.name) dbNames.add(db.name);
         }
-      } catch (e) {
-        /* ignore; we'll just use knownDbNames */
-      }
+      } catch (e) { /* ignore; we'll just use knownDbNames */ }
       for (const n of knownDbNames) if (n) dbNames.add(n);
 
       // 2) Delete each IndexedDB DB
@@ -503,12 +606,11 @@
   </script>
   <!-- ——— End: Naptio Factory Reset ——— -->
 
-    <!-- analytics -->
+  <!-- analytics -->
   <script type="module">
     import { installAnalytics } from '/hungryface/shared/analytics.js';
     window.analytics = installAnalytics({ feature: 'receiver-settings' });
     // Later: window.analytics.event('settings_opened');
   </script>
-  
 </body>
 </html>
