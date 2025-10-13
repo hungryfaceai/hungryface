@@ -1,0 +1,1385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Naptio – Live Audio Detection (Weighted Top-K)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <link rel="icon" href="data:," />
+  <!-- Shared sidebar stylesheet -->
+  <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
+
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin:0; background:#000; color:#fff; font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
+    #stage { padding:16px; box-sizing:border-box; display:flex; justify-content:center; }
+    .panel { width:min(100%,1100px); background:#0b0b0b; border:1px solid #141414; border-radius:14px; padding:16px; margin:0 auto 24px; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    h1 { margin:.2rem 0 .1rem; font-size:22px; }
+    .muted { color:#aaa; font-size:12px; }
+    .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .btn { padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.4); background:transparent; color:#fff; font-weight:600; cursor:pointer; }
+    .btn:active { transform:scale(.98); }
+    .btn[disabled] { opacity:.6; cursor:default; }
+    .small { padding:8px 10px; font-size:13px; border-radius:10px; }
+    /* live state for toggle button */
+    .btn.live {
+      border-color: #ff5252;
+      box-shadow: 0 0 0 2px rgba(255,82,82,0.2), 0 0 12px rgba(255,82,82,0.35);
+    }
+
+    .status-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .meter { height:10px; border-radius:8px; background:#0a0a0a; border:1px solid #222; overflow:hidden; }
+    .fill { height:100%; width:0%; background:linear-gradient(to right, rgba(96,165,250,.9), rgba(239,68,68,.9)); transition:width 120ms linear; }
+    .pill { display:none; align-items:center; gap:8px; padding:6px 12px; border-radius:999px; border:1px solid #333; font-size:13px; font-weight:700; }
+    .status-row + .meter { margin-top: 6px; }
+
+    .card { background:#0a0a0a; border:1px solid #171717; border-radius:12px; padding:12px; margin-top:12px; }
+    .card h2 { margin:0 0 8px 0; font-size:16px; }
+    .subgroup { display:flex; gap:14px; align-items:center; padding:10px; border:1px dashed #1b1b1b; border-radius:10px; background:#0b0b0b; }
+    .subgroup strong { min-width:150px; }
+
+    input[type="number"], input[type="text"] { padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; }
+    select { padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; }
+    .slider-wrap { display:flex; align-items:center; gap:10px; }
+
+    .chart-wrap { position: relative; }
+    .chart-wrap > canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; display: block; background:#0a0a0a; border-radius:10px; }
+    .h160{height:160px;} .h170{height:170px;} .h320{height:320px;}
+    .legend { margin-top:6px; display:flex; gap:12px; font-size:12px; color:#ccc; flex-wrap:wrap; }
+    .key { width:14px; height:3px; border-radius:2px; display:inline-block; margin-right:4px; vertical-align:middle; }
+    .blue { background:#60a5fa; } .red { background:#ef4444; } .green{ background:#22c55e; } .darkred { background:#991b1b; }
+
+    /* Alerts badge (iOS-style) */
+    #btnOpenAlerts { position:relative; }
+
+    @media (max-width:560px){
+      .subgroup { flex-direction:column; align-items:stretch; }
+      .subgroup strong { min-width:unset; }
+      select, input[type="number"], input[type="text"] { width:100%; box-sizing:border-box; }
+    }
+
+    /* Hidden remote video host (for audio track) */
+    #remote { position:absolute; width:1px; height:1px; left:-99999px; top:-99999px; }
+
+    /* Help + modal (help above settings) */
+    .help-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:180;opacity:0;pointer-events:none;transition:opacity .2s ease;}
+    .help-backdrop.show{opacity:1;pointer-events:auto;}
+    .help-sheet{position:fixed;right:0;top:0;height:100svh;width:min(92vw,420px);background:#121212;color:#f3f3f3;border-left:1px solid rgba(255,255,255,0.12);box-shadow:-12px 0 32px rgba(0,0,0,0.6);z-index:190;transform:translateX(100%);transition:transform .24s cubic-bezier(.2,.8,.2,1);display:flex;flex-direction:column;}
+    .help-sheet.show{transform:translateX(0);}
+    .help-header{position:sticky;top:0;z-index:1;background:rgba(18,18,18,0.96);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid rgba(255,255,255,0.08);}
+    .help-header h3{margin:0;font-size:16px;font-weight:700;color:#fff;}
+    .help-header .close{appearance:none;border:none;background:transparent;color:#aaa;font-size:22px;cursor:pointer;padding:2px 6px;}
+    .help-body{padding:10px 12px 16px;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+    .help-toc{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px;padding-bottom:8px;border-bottom:1px dashed rgba(255,255,255,0.15);}
+    .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);z-index:140;}
+    .modal.show{display:flex;}
+    .modal-card{width:min(96%,1000px);max-height:90vh;overflow-y:auto;background:#0b0b0b;border:1px solid #242424;border-radius:14px;}
+    .modal-head{position:sticky;top:0;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #1a1a1a;background:#0d0d0d;border-top-left-radius:14px;border-top-right-radius:14px;}
+    .modal-actions{display:flex;gap:8px;align-items:center;}
+    .modal-body{padding:12px;}
+    .modal-head .close{appearance:none;border:none;background:transparent;color:#aaa;font-size:22px;cursor:pointer;padding:2px 6px;}
+
+    /* Logs (match training page style) */
+    .log-panel { margin-top:12px; background:#0a0a0a; border:1px solid #222; border-radius:12px; }
+    .log-toolbar { display:flex; gap:10px; align-items:center; padding:8px 10px; border-bottom:1px solid #1a1a1a; font-size:12px; color:#ddd; flex-wrap:wrap; }
+    .log-body { max-height:300px; overflow:auto; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; line-height:1.4; padding:10px; }
+    .log-line { white-space:pre-wrap; margin:0; padding:2px 0; border-bottom:1px dotted #111; }
+    .log-time { color:#9ca3af; }
+    .log-kind-info { color:#e5e7eb; }
+    .log-kind-ok   { color:#86efac; }
+    .log-kind-warn { color:#fbbf24; }
+    .log-kind-err  { color:#fca5a5; }
+    .log-kind-inf  { color:#93c5fd; }
+    .log-code { display:block; background:#0b0b0b; border:1px solid #1f2937; border-radius:8px; padding:6px; margin-top:4px; overflow:auto; }
+  </style>
+</head>
+<body>
+  <!-- Inject the shared sidebar markup + behavior (same snippet as pose/cry pages) -->
+  <script type="module">
+    (async () => {
+      try {
+        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
+        const html = await res.text();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html.trim();
+        document.body.prepend(...wrap.childNodes);
+  
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+        console.log('[LIVE][sidebar] loaded');
+      } catch (err) {
+        console.error('[LIVE][sidebar] failed to load shared assets:', err);
+      }
+    })();
+  </script>
+
+  <div id="stage">
+    <div class="panel">
+      <header class="topbar">
+        <div class="row">
+          <h1 style="padding-left:2ch">Audio – Live Detection</h1>
+        </div>
+        <!-- RIGHT: Help above Settings -->
+        <div class="row">
+          <button id="btnHelp" class="btn">Help</button>
+          <button id="btnOpenSettings" class="btn">Settings</button>
+        </div>
+      </header>
+
+      <div class="row status-row" style="margin-top:8px;">
+        <div id="status" class="muted">Booting…</div>
+        <div id="statePill" class="pill">idle</div>
+      </div>
+      <div class="meter" title="Input level (RMS)">
+        <div id="rmsFill" class="fill"></div>
+      </div>
+
+      <!-- ===== Reorganized layout ===== -->
+
+      <!-- Top: Fused score chart -->
+      <div class="card">
+        <h2>Fused score over time</h2>
+        <div class="subgroup" style="justify-content:flex-end">
+          <label style="display:flex;align-items:center;gap:8px;">
+            <span class="muted">Window (s)</span>
+            <input id="CHART_WINDOW_S" type="number" min="5" step="5" value="30" style="width:84px;">
+          </label>
+        </div>
+        <div class="chart-wrap h320">
+          <canvas id="chart"></canvas>
+        </div>
+        <div class="legend">
+          <span class="key blue"></span> fused (raw)
+          <span class="key red"></span> fused (EMA)
+          <span class="key darkred"></span> thresh ON
+          <span class="key green"></span> thresh OFF
+        </div>
+      </div>
+
+      <!-- Below: Start/Stop -->
+      <div class="card" id="cardDetect">
+        <h2>Live audio detection</h2>
+        <div class="subgroup">
+          <strong>Detection</strong>
+          <div class="row" style="gap:10px;">
+            <button id="btnDetect" class="btn" aria-pressed="false">Start</button>
+          </div>
+          <span class="muted"></span>
+        </div>
+      </div>
+
+      <!-- Below: Thresholds -->
+      <div class="card" id="cardThr">
+        <h2>Thresholds</h2>
+        <div class="subgroup">
+          <strong>Hysteresis</strong>
+          <div class="slider-wrap">
+            <span class="muted" style="min-width:28px;">OFF</span>
+            <input id="THR_OFF_SLIDER" type="number" min="0" max="1" step="0.01" value="0.25" style="width:84px;" inputmode="decimal" />
+          </div>
+          <div class="slider-wrap">
+            <span class="muted" style="min-width:28px;">ON</span>
+            <input id="THR_ON_SLIDER" type="number" min="0" max="1" step="0.01" value="0.35" style="width:84px;" inputmode="decimal" />
+          </div>
+          <span class="muted"></span>
+        </div>
+      </div>
+
+      <!-- Below: Model -->
+      <div class="card" id="cardModel">
+        <h2>Model</h2>
+        <div class="row" style="gap:8px 10px;">
+          <label style="display:flex;align-items:center;gap:8px;">
+            <span>Active model</span>
+            <select id="MODEL_SELECT" style="width:220px;"></select>
+          </label>
+        </div>
+        <div class="muted" style="margin-top:6px;">Select a previously trained model.</div>
+      </div>
+
+      <!-- Below: Source -->
+      <div class="card">
+        <h2>Source</h2>
+        <div class="subgroup">
+          <strong>Audio input</strong>
+          <select id="TRAIN_SRC" style="min-width:220px;">
+            <option value="sender" selected>Sender (WebRTC)</option>
+            <option value="mic">Microphone (Receiver)</option>
+          </select>
+          <span id="trainInfo" class="muted" style="margin-left:auto;"></span>
+        </div>
+      </div>
+
+      <!-- Below: Live top classes (chart hidden by default; appears on click) -->
+      <div class="card" id="cardLiveBars">
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <h2 style="margin:0;">Live top classes</h2>
+          <button id="btnToggleLiveBars" class="btn small">Show chart</button>
+        </div>
+        <div id="liveBarsWrap" class="chart-wrap h160" style="display:none">
+          <canvas id="bars"></canvas>
+        </div>
+        <div class="muted" style="margin-top:6px;">Displays the model’s Top-K (non-excluded) classes. Scores are raw (not percentages).</div>
+      </div>
+
+      <!-- Below: Active model weights (chart hidden by default; appears on click) -->
+      <div class="card">
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <h2 style="margin:0;">Active model weights</h2>
+          <button id="btnToggleSavedW" class="btn small">Show chart</button>
+        </div>
+        <div id="savedWWrap" class="chart-wrap h170" style="display:none">
+          <canvas id="barsSavedW"></canvas>
+        </div>
+        <span class="muted">Normalized Top-K weights used by detection.</span>
+      </div>
+
+      <!-- Below: Logs -->
+      <div class="card">
+        <div class="row" style="justify-content:space-between; width:100%;">
+          <h2 style="margin:0;">Logs</h2>
+        <button id="btnToggleLogs" class="btn">Display logs</button>
+        </div>
+        <div id="logsContainer" class="log-panel" style="display:none">
+          <div class="log-toolbar">
+            <label><input type="checkbox" id="LOG_ENABLE" checked> Log inference</label>
+            <label><input type="checkbox" id="LOG_ALL"> Log ALL classes</label>
+            <label>Top-N <input id="LOG_TOPN" type="number" min="1" step="1" value="5" style="width:64px;margin-left:6px;"></label>
+            <label><input type="checkbox" id="LOG_AUTOSCROLL" checked> Autoscroll</label>
+            <button id="LOG_CLEAR" class="btn" style="padding:6px 10px;">Clear Logs</button>
+            <button id="LOG_EXPORT" class="btn" style="padding:6px 10px;">Export JSON</button>
+          </div>
+          <div id="logBody" class="log-body"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hosts for injected UI -->
+  <div id="alertBannerHost"></div>
+  <div id="alertsModalHost"></div>
+
+  <!-- Hidden host for remote audio track -->
+  <video id="remote" autoplay playsinline muted></video>
+
+  <!-- Settings modal -->
+  <div id="settingsModal" class="modal" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <strong>Settings</strong>
+        <div class="modal-actions">
+          <button id="btnSettingsClose" class="close" type="button" title="Close" aria-label="Close">×</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="row" style="gap:10px; flex-wrap:wrap;">
+          <label style="display:grid; gap:6px; min-width:220px;"><span>Sample Rate (target Hz)</span><input id="SR_TARGET" type="number" min="8000" step="1000" value="16000" /></label>
+          <label style="display:grid; gap:6px; min-width:220px;"><span>Frame length (s)</span><input id="FRAME_LEN_S" type="number" min="0.1" step="0.005" value="0.975" /></label>
+          <label style="display:grid; gap:6px; min-width:220px;"><span>Hop (s)</span><input id="HOP_S" type="number" min="0.01" step="0.01" value="0.48" /></label>
+
+          <label style="display:grid; gap:6px; min-width:220px;"><span>Per-class EMA τ (s)</span><input id="CLASS_EMA_TAU_S" type="number" min="0.1" step="0.1" value="0.8" /></label>
+          <label style="display:grid; gap:6px; min-width:220px;"><span>Fused score EMA τ (s)</span><input id="FUSED_EMA_TAU_S" type="number" min="0.1" step="0.1" value="0.8" /></label>
+          <label style="display:grid; gap:6px; min-width:220px;"><span>Min ON hold (ms)</span><input id="ALERT_HOLD_MS" type="number" min="0" step="100" value="3000" /></label>
+
+          <label style="display:grid; gap:6px; min-width:220px;"><span>OFF delta (below ON)</span><input id="ALERT_OFF_DELTA" type="number" min="0" step="0.01" value="0.10" /></label>
+          <label style="display:grid; gap:6px; min-width:220px;"><span>Max results from MP</span><input id="MAX_RESULTS" type="number" min="5" step="1" value="25" /></label>
+
+          <label style="display:grid; gap:6px; min-width:320px;"><span>Penalty map (inference)</span>
+            <input id="PENALTY_MAP" type="text" value="Silence:-0.01, White noise:-0.01" placeholder="Silence:-0.4, White noise:-0.2">
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⬇️ PSK bootstrap (viewer); resolves room from query/Settings and installs shim -->
+  <script type="module">
+    import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+    import { requirePskOrRedirect } from '/hungryface/webrtc/shared/psk/require-psk.js';
+
+    const qs = new URLSearchParams(location.search);
+    const qsRoom   = (qs.get('room') || '').trim();
+    const stored   = (localStorage.getItem('bm_receiver_room') || '').trim();
+    const lastRoom = (localStorage.getItem('naptio:lastRoom') || '').trim();
+
+    const preferRoom = qsRoom || stored || lastRoom || '';
+
+    const env = await requirePskOrRedirect({
+      intent: 'viewer',
+      pairRoute: '/hungryface/webrtc/pairpsk/',
+      preferRoom,
+      fallbackRoom: 'Baby',
+    });
+
+    // Expose env + safe re-install hook (same API shape as sender)
+    window.__pskEnv = env;
+    window.__installPskForRoom = (room) => {
+      try { window.__pskUndo?.(); } catch {}
+      window.__pskUndo = installPskShim({ room });
+      console.log('[PSK][receiver-fence] shim installed for room:', room);
+      try {
+        localStorage.setItem('bm_receiver_room', room);
+        localStorage.setItem('naptio:lastRoom', room);
+      } catch {}
+    };
+
+    if (!env.redirected) {
+      const resolvedRoom = qsRoom || stored || lastRoom || env.room || 'Baby';
+      window.__installPskForRoom(resolvedRoom);
+      window.__pskRoom = resolvedRoom;
+    }
+  </script>
+  
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <!-- External Help HTML (unchanged) -->
+  <script type="module" src="./help-sheet.js"></script>
+
+  <script type="module">
+    /* ========= Shared alerts (same as motion page) ========= */
+    import {initAlertsUI, beginAlert, finishAlert, AlertTypes, showAlertBanner} from "/hungryface/webrtc/receiver/shared/alerts/index.js";
+
+
+    /* ========= WebRTC (ReceiverCore) ========= */
+    import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
+    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const room = window.__pskRoom || "Baby";
+
+    const wrtc = { core:null, dc:null, stream:null, ctx:null, src:null, sink:null, node:null,
+                   audioEnabled:true, where:'sender', connected:false };
+
+    /* ========= Helpers & UI ========= */
+    const EL = id => document.getElementById(id);
+    const ASM_LOG_MS = 2000, SCORE_LOG_MS = 800;
+
+    // Top-level buttons
+    const _modal = EL('settingsModal');
+    EL('btnOpenSettings').onclick = () => { _modal.classList.add('show'); _modal.setAttribute('aria-hidden','false'); };
+    EL('btnSettingsClose').onclick = () => { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); };
+    _modal.addEventListener('click', (e) => { if (e.target === _modal) { _modal.classList.remove('show'); _modal.setAttribute('aria-hidden','true'); }});
+
+    // Help wiring (drawer/sheet; above settings)
+    function wireHelpOnce() {
+      const sheet = document.getElementById('helpSheet');
+      const backdrop = document.getElementById('helpBackdrop');
+      const closeBtn = document.getElementById('helpClose');
+      const bodyEl   = document.getElementById('helpBody');
+      const helpBtn  = document.getElementById('btnHelp');
+      if (!sheet || sheet.dataset.wired === '1') return;
+      sheet.dataset.wired = '1';
+      const openHelp = () => { sheet.classList.add('show'); backdrop?.classList.add('show'); };
+      const closeHelp = () => { sheet.classList.remove('show'); backdrop?.classList.remove('show'); };
+      helpBtn?.addEventListener('click', (e)=>{ e.stopPropagation(); openHelp(); });
+      closeBtn?.addEventListener('click', (e)=>{ e.stopPropagation(); closeHelp(); });
+      backdrop?.addEventListener('click', closeHelp);
+      document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeHelp(); });
+      document.addEventListener('click', (e) => { if (!sheet.classList.contains('show')) return; if (sheet.contains(e.target)) return; closeHelp(); });
+      bodyEl?.addEventListener('click', (e) => {
+        const a = e.target.closest('a[href^="#"]'); if (!a) return;
+        const id = a.getAttribute('href'); const el = bodyEl.querySelector(id);
+        if (el) { e.preventDefault(); el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      });
+    }
+    document.addEventListener('help:ready', wireHelpOnce);
+    if (document.getElementById('helpSheet')) wireHelpOnce();
+
+    // Logs toggle
+    const btnToggleLogs = EL('btnToggleLogs');
+    const logsContainer = EL('logsContainer');
+    btnToggleLogs.onclick = () => {
+      const visible = logsContainer.style.display !== 'none';
+      logsContainer.style.display = visible ? 'none' : '';
+      btnToggleLogs.textContent = visible ? 'Display logs' : 'Hide logs';
+    };
+
+    const LOGS = {
+      body: EL('logBody'),
+      enable: EL('LOG_ENABLE'),
+      all: EL('LOG_ALL'),
+      topn: EL('LOG_TOPN'),
+      autoscroll: EL('LOG_AUTOSCROLL'),
+      clearBtn: EL('LOG_CLEAR'),
+      exportBtn: EL('LOG_EXPORT'),
+      maxLines: 1200, lines: 0, records: []
+    };
+    function ts(){ return new Date().toLocaleTimeString(undefined,{hour12:false}); }
+    function log(kind, msg, extraHtml, data){
+      const p = document.createElement('div');
+      p.className = `log-line log-kind-${kind}`;
+      p.innerHTML = `<span class="log-time">[${ts()}]</span> ${msg}${extraHtml ? extraHtml : ''}`;
+      LOGS.body.appendChild(p);
+      LOGS.lines++; LOGS.records.push({ t: Date.now(), ts: new Date().toISOString(), kind, msg, data: data ?? null });
+      while (LOGS.lines > LOGS.maxLines) { LOGS.body.removeChild(LOGS.body.firstChild); LOGS.lines--; }
+      if (LOGS.records.length > LOGS.maxLines) LOGS.records.shift();
+      if (LOGS.autoscroll.checked) LOGS.body.scrollTop = LOGS.body.scrollHeight;
+    }
+    LOGS.clearBtn.onclick = () => { LOGS.body.innerHTML = ''; LOGS.lines = 0; LOGS.records = []; };
+    LOGS.exportBtn.onclick = () => {
+      const payload = { version: 1, exportedAt: new Date().toISOString(), params: getParams(), records: LOGS.records };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `cry_logs_${getModelName()}_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+      a.click(); URL.revokeObjectURL(a.href);
+      log('ok','Exported logs JSON');
+    };
+
+    const els = (id => Object.fromEntries([
+      'status','statePill','rmsFill','SR_TARGET','FRAME_LEN_S','HOP_S',
+      'CLASS_EMA_TAU_S','FUSED_EMA_TAU_S','ALERT_HOLD_MS','ALERT_OFF_DELTA','MAX_RESULTS',
+      'btnDetect','chart','bars','barsSavedW','PENALTY_MAP',
+      'THR_OFF_SLIDER','THR_ON_SLIDER',
+      'MODEL_SELECT','CHART_WINDOW_S','TRAIN_SRC','trainInfo',
+      'btnToggleLiveBars','btnToggleSavedW','liveBarsWrap','savedWWrap'
+    ].map(x => [x, document.getElementById(x)])) )();
+
+    function setInferWhere(where){ localStorage.setItem('cryInferWhere', (where === 'receiver') ? 'receiver' : 'sender'); }
+    function getInferWhere(){ return localStorage.getItem('cryInferWhere') || 'sender'; }
+
+    function setStatus(s){
+      let msg = s;
+      if (els.TRAIN_SRC?.value === 'sender') {
+        const where = getInferWhere();
+        const tag = (where === 'receiver')
+          ? 'WebRTC: streamed audio → inference @ receiver'
+          : 'WebRTC: sender scores → inference @ sender';
+        msg = `${s}  •  ${tag}`;
+      }
+      els.status.textContent = msg;
+      log('info', msg);
+    }
+
+    function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+    function emaStep(prev, x, a){ return prev + a * (x - prev); }
+    function rmsToMeter(rms){
+      const db = 20 * Math.log10(Math.max(1e-8, rms));
+      const FLOOR_DB = -85;
+      const norm = (db - FLOOR_DB) / (0 - FLOOR_DB);
+      return clamp01(norm);
+    }
+    function alphaForTau(dt, tau){ return 1 - Math.exp(-dt / Math.max(1e-3, tau)); }
+    function setRMS(x){ els.rmsFill.style.width = Math.round(rmsToMeter(x)*100)+'%'; }
+    function resampleLinear(x, fromSr, toSr){
+      if (fromSr === toSr) return x;
+      const ratio = toSr / fromSr, n = Math.max(1, Math.round(x.length * ratio)), out = new Float32Array(n);
+      const dx = (x.length - 1) / (n - 1);
+      for (let i=0;i<n;i++){ const pos=i*dx, i0=Math.floor(pos), i1=Math.min(i0+1,x.length-1), t=pos-i0; out[i]=x[i0]*(1-t)+x[i1]*t; }
+      return out;
+    }
+
+    /* ========= Chart.js helper (percent labels for weights only) ========= */
+    const pctLabelPlugin = { id:'pctLabel', afterDatasetsDraw(chart, args, options) {
+      if (!options || options.enabled !== true) return;
+      if (chart.config.type !== 'bar') return;
+      const ds = chart.data.datasets?.[0]; if (!ds) return;
+      const { ctx } = chart; const meta = chart.getDatasetMeta(0);
+      ctx.save(); ctx.font = (options?.font) || '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.fillStyle = options?.color || '#ddd';
+      const data = ds.data || [];
+      meta.data.forEach((bar, i) => {
+        const v = Number(data[i]) || 0;
+        const txt = `${Math.round(v * 100)}%`;
+        const x = bar.x + 6; const y = bar.y + 4;
+        ctx.fillText(txt, x, y);
+      });
+      ctx.restore();
+    }};
+    Chart.register(pctLabelPlugin);
+
+    /* ========= MediaPipe (Audio) ========= */
+    const AUDIO_PKG_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0";
+    const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite";
+    const WASM_DIR  = AUDIO_PKG_URL + "/wasm";
+    let AudioClassifier, FilesetResolver, _yamTask = null, _yamTaskPromise = null;
+
+    try {
+      const AudioMod = await import(AUDIO_PKG_URL);
+      AudioClassifier = AudioMod.AudioClassifier;
+      FilesetResolver = AudioMod.FilesetResolver;
+      log('ok', 'MediaPipe Tasks Audio module loaded.');
+    } catch (e) {
+      log('err', 'Failed to import MediaPipe Tasks Audio. See console.'); console.error(e);
+    }
+
+    async function ensureAudioTask(maxResults=25) {
+      if (_yamTask) return _yamTask;
+      if (_yamTaskPromise) return _yamTaskPromise;
+      _yamTaskPromise = (async () => {
+        if (!AudioClassifier || !FilesetResolver) throw new Error('MediaPipe not available');
+        log('info','Loading YAMNet model…');
+        const resolver = await FilesetResolver.forAudioTasks(WASM_DIR);
+        try {
+          _yamTask = await AudioClassifier.createFromOptions(resolver, {
+            baseOptions: { modelAssetPath: MODEL_URL },
+            runningMode: "AUDIO_CLIPS",
+            classifierOptions: { scoreThreshold: 0.0, maxResults: Math.max(5, maxResults|0) }
+          });
+          log('ok', `YAMNet ready (maxResults=${maxResults}).`);
+          return _yamTask;
+        } catch (e1) {
+          const resp = await fetch(MODEL_URL + "?cb=" + Date.now(), { cache: "no-store" });
+          if (!resp.ok) throw new Error(`yamnet fetch ${resp.status}`);
+          const buf = new Uint8Array(await resp.arrayBuffer());
+          _yamTask = await AudioClassifier.createFromOptions(resolver, {
+            baseOptions: { modelAssetBuffer: buf },
+            runningMode: "AUDIO_CLIPS",
+            classifierOptions: { scoreThreshold: 0.0, maxResults: Math.max(5, maxResults|0) }
+          });
+          log('ok', `YAMNet ready (buffer, maxResults=${maxResults}).`);
+          return _yamTask;
+        }
+      })();
+      try { return await _yamTaskPromise; } finally { _yamTaskPromise = null; }
+    }
+
+    async function classifyMP(task, w, sr) {
+      try { return await task.classify(w, sr); }
+      catch (e1) {
+        try { return await task.classify({ audioClip: w, sampleRateHz: sr }); }
+        catch (e2) { log('err', `MediaPipe classify failed: ${e1?.message || e1} / ${e2?.message || e2}`); return null; }
+      }
+    }
+    function extractCategories(result) {
+      if (!result) return [];
+      const r = Array.isArray(result) ? result[0] : result;
+      const cats = r?.classifications?.[0]?.categories ?? r?.classificationResult?.classifications?.[0]?.categories ?? [];
+      return (cats||[]).map(c => ({ score: c.score ?? 0, categoryName: (c.displayName || c.categoryName || '').trim() }));
+    }
+
+    /* ========= Model persistence ========= */
+    const ACTIVE_MODEL_NAME_KEY = 'cryActiveModelName';
+    function getModelName(){ return els.MODEL_SELECT?.value || localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default'; }
+    function setModelName(name){
+      localStorage.setItem(ACTIVE_MODEL_NAME_KEY, name);
+      if (els.MODEL_SELECT) els.MODEL_SELECT.value = name;
+    }
+    function MODEL_KEY(){ return `cryModelV1_${getModelName()}`; }
+    function CALIB_KEY(){ return `cryCalibV1_${getModelName()}`; }
+    function PENALTY_KEY(){ return `cryPenalty_${getModelName()}`; }
+
+    function loadModel() {
+      const raw = localStorage.getItem(MODEL_KEY());
+      if (raw) { try { return JSON.parse(raw); } catch {} }
+      // Fallback defaults if no model saved yet:
+      return {
+        version: 1,
+        name: getModelName(),
+        halfLifeSec: 3600,
+        K: 6,
+        kPrior: 50,
+        classes: {},
+        weights: { "Crying, sobbing": 0.493, "Baby cry, infant cry": 0.421, "Whimper": 0.086 },
+        updatedAt: Date.now()
+      };
+    }
+
+    function listModelNames(){
+      const names = [];
+      for (let i=0;i<localStorage.length;i++){
+        const k = localStorage.key(i);
+        if (k && k.startsWith('cryModelV1_')) names.push(k.replace('cryModelV1_',''));
+      }
+      if (!names.includes('default')) names.push('default');
+      names.sort((a,b)=>a.localeCompare(b));
+      return names;
+    }
+    function refreshModelSelect(activeName){
+      const sel = els.MODEL_SELECT; if (!sel) return;
+      const names = listModelNames();
+      sel.innerHTML = '';
+      for (const n of names){
+        const opt = document.createElement('option');
+        opt.value = n; opt.textContent = n;
+        sel.appendChild(opt);
+      }
+      sel.value = names.includes(activeName) ? activeName : (localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default');
+    }
+
+    /* ========= Penalty map ========= */
+    function getPenaltyMap(){
+      const s = (els.PENALTY_MAP?.value ?? localStorage.getItem(PENALTY_KEY()) ?? '').trim();
+      const map = {};
+      if (!s) return map;
+      s.split(',').forEach(pair=>{
+        const [k,v] = pair.split(':');
+        if (!k) return;
+        const w = Math.max(-1, Math.min(0, parseFloat(v)));
+        map[k.trim().toLowerCase()] = Number.isFinite(w) ? w : -0.3;
+      });
+      return map;
+    }
+    ['PENALTY_MAP'].forEach(id=>{
+      const el = document.getElementById(id); if (!el) return;
+      const save = () => {
+        localStorage.setItem(PENALTY_KEY(), el.value);
+        log('info', `Penalty map updated for “${getModelName()}”.`);
+      };
+      el.addEventListener('change', save);
+      el.addEventListener('blur', save);
+    });
+
+    /* ========= Detection state & charts ========= */
+    const state = {
+      running: false, mode: 'idle',
+      micCtx: null, srcNode: null, procNode: null, sinkNode: null,
+      ring: new Float32Array(0), lastPos: 0,
+      perClassEma: new Map(), fusedEma: 0,
+      alertOn: false, alertUntil: 0,
+      // alert episode accumulation
+      alertStartMs: 0,
+      chart: null, barChart: null, barSavedW: null,
+      labels: [], fusedRaw: [], fusedSm: [],
+      thrOn: 0.35, thrOff: 0.25,
+      frameCount: 0, asmLastLogTs: 0, scoreLastLogTs: 0,
+      hopSec: 0.48, chartWindowSec: 30, chartCap: 0
+    };
+
+    // Live chart vis toggles
+    let liveBarsUserVisible = false;
+    let savedWUserVisible   = false;
+    // ===== Alerts episode state (Audio) =====
+    let _audioAlertId = null;
+    let _audioSum = 0, _audioCount = 0;
+    const runAsync = (p) => Promise.resolve(p).catch(()=>{});
+
+    // Charts
+    function hhmmss(tMs){
+      const d = new Date(tMs);
+      return d.toLocaleTimeString([], { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    }
+    function computeChartCap(){ return Math.max(10, Math.round(state.chartWindowSec / Math.max(0.01, state.hopSec))); }
+    function initChartBuffers(){
+      state.chartCap = computeChartCap();
+      state.labels   = new Array(state.chartCap).fill('');
+      state.fusedRaw = new Array(state.chartCap).fill(null);
+      state.fusedSm  = new Array(state.chartCap).fill(null);
+    }
+    function setupChart(){
+      state.chart?.destroy?.();
+      const ctx = els.chart.getContext('2d');
+      initChartBuffers();
+      state.chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: state.labels,
+          datasets: [
+            { label:'fused(raw)', data: state.fusedRaw, type:'bar', borderWidth:0, pointRadius:0, barPercentage:1.0, categoryPercentage:1.0, backgroundColor:'rgba(96,165,250,0.55)' },
+            { label:'fused(EMA)', data: state.fusedSm, type:'line', borderWidth:2, pointRadius:0, tension:0.15, borderColor:'rgba(239,68,68,0.95)', spanGaps:true },
+            { label:'thr ON',  data:new Array(state.chartCap).fill(state.thrOn), type:'line', borderWidth:1, pointRadius:0, borderDash:[6,4],  borderColor:'rgba(153,27,27,1)', spanGaps:true },
+            { label:'thr OFF', data:new Array(state.chartCap).fill(state.thrOff), type:'line', borderWidth:1, pointRadius:0, borderDash:[2,2],  borderColor:'rgba(34,197,94,1)', spanGaps:true }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation:false, plugins:{ legend:{ display:false } },
+          scales:{ x:{ title:{display:true, text:'time (local)'}, ticks:{ maxRotation:0, autoSkip:true } },
+                  y:{ title:{display:true, text:'score'}, min:0, grid:{ color:'rgba(255,255,255,0.08)' } } }
+        }
+      });
+    }
+    function pushChart(nowMs, raw, sm){
+      const capNow = computeChartCap();
+      if (capNow !== state.chartCap) { setupChart(); }
+      state.fusedRaw.shift(); state.fusedRaw.push(raw);
+      state.fusedSm.shift();  state.fusedSm.push(sm);
+      const dt = state.hopSec * 1000;
+      for (let i=0;i<state.chartCap;i++){
+        const t = nowMs - (state.chartCap - 1 - i) * dt;
+        state.labels[i] = hhmmss(t);
+      }
+      state.chart.data.datasets[2].data = new Array(state.chartCap).fill(state.thrOn);
+      state.chart.data.datasets[3].data = new Array(state.chartCap).fill(state.thrOff);
+      state.chart.data.labels = state.labels.slice();
+      state.chart.data.datasets[0].data = state.fusedRaw.slice();
+      state.chart.data.datasets[1].data = state.fusedSm.slice();
+      
+      /*const nums = [...state.fusedRaw, ...state.fusedSm].filter(v => typeof v === 'number' && isFinite(v));
+      const ymax = nums.length ? Math.max(...nums, state.thrOn, state.thrOff) + 0.05 : 1.0;
+      state.chart.options.scales.y.max = Math.max(0.6, Math.min(1.5, ymax));*/ //https://chatgpt.com/c/68c1d208-4b84-832c-a6dc-a9652ef0fba8
+      function niceCeil(x, step=0.02){ return Math.ceil(x/step)*step; }
+      const nums = [...state.fusedRaw, ...state.fusedSm].filter(v => Number.isFinite(v));
+      let ymax = nums.length ? Math.max(...nums, state.thrOn, state.thrOff) : 1.0;
+      
+      // Add a little headroom so the line doesn’t kiss the top
+      const pad = Math.max(0.02, ymax * 0.08);   // 8% or at least 0.02
+      ymax = niceCeil(Math.min(1.5, ymax + pad), 0.02);
+      
+      state.chart.options.scales.y.min = 0;
+      state.chart.options.scales.y.max = ymax;
+
+      
+      state.chart.update();
+    }
+
+    // Bars
+    function showLiveBars(){
+      els.liveBarsWrap.style.display = '';
+      setTimeout(()=>{ state.barChart?.resize?.(); }, 0);
+    }
+    function hideLiveBars(){ els.liveBarsWrap.style.display = 'none'; }
+    function setupBars(){
+      if (!state.barChart && els.bars) {
+        state.barChart = new Chart(els.bars.getContext('2d'), {
+          type: 'bar',
+          data: { labels: [], datasets: [{ label: 'score', data: [], borderWidth: 1, backgroundColor: [], borderColor: [], barThickness: 12, maxBarThickness: 14, categoryPercentage: 0.55, barPercentage: 0.9 }]},
+          options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display:false } },
+            scales: { x: { min: 0, max: 1, title: { display:true, text:'score' }, ticks: { font: { size: 11 } } },
+                      y: { ticks: { autoSkip: false, font: { size: 11 } } } }
+          }
+        });
+      }
+      if (!state.barSavedW && els.barsSavedW) {
+        state.barSavedW = new Chart(els.barsSavedW.getContext('2d'), {
+          type: 'bar',
+          data: { labels: [], datasets: [{ label:'weight', data: [], borderWidth:1, barThickness:10, maxBarThickness:12, categoryPercentage:0.5, barPercentage:0.9 }]},
+          options: {
+            indexAxis:'y', responsive:true, maintainAspectRatio:false, animation:false,
+            plugins:{ legend:{display:false}, pctLabel:{enabled: true, font:'11px system-ui', color:'#bbb'} },
+            scales:{ x:{ min:0, max:1, title:{display:true, text:'weight'}, ticks:{ font:{ size:11 } } } , y:{ ticks:{ autoSkip:false, font:{ size:11 } } } }
+          }
+        });
+      }
+    }
+    function clearTopBars(){
+      if (!state.barChart) { hideLiveBars(); return; }
+      state.barChart.data.labels = [];
+      state.barChart.data.datasets[0].data = [];
+      state.barChart.data.datasets[0].backgroundColor = [];
+      state.barChart.data.datasets[0].borderColor = [];
+      state.barChart.update();
+      hideLiveBars();
+    }
+    function updateTopBars(cats){
+      if (!els.bars) return;
+      setupBars();
+      const model = loadModel();
+      const K = Math.max(1, Number(model.K) || 6);
+      const sorted = [...cats].sort((a,b)=> (b.score||0)-(a.score||0));
+      const display = sorted.slice(0, K).map(c => ({ name: c.categoryName || '(unnamed)', v: c.score || 0 }));
+      state.barChart.data.labels = display.map(d => d.name);
+      state.barChart.data.datasets[0].data = display.map(d => d.v);
+      const bg = display.map(()=>'rgba(96,165,250,0.85)');
+      const bd = display.map(()=>'rgba(59,130,246,1)');
+      state.barChart.data.datasets[0].backgroundColor = bg;
+      state.barChart.data.datasets[0].borderColor = bd;
+      state.barChart.update();
+      if (display.length > 0 && liveBarsUserVisible) showLiveBars();
+    }
+    function setWeightsChart(weightsDict){
+      setupBars();
+      const entries = Object.entries(weightsDict || {}).sort((a,b)=>b[1]-a[1]);
+      state.barSavedW.data.labels = entries.map(([n]) => n);
+      state.barSavedW.data.datasets[0].data = entries.map(([,v]) => v);
+      state.barSavedW.update();
+    }
+
+    /* ========= Fusion scoring ========= */
+    function fusedScoreFromCategories(categories, weights, dt) {
+      const a = alphaForTau(dt, Number(els.CLASS_EMA_TAU_S.value) || 0.8);
+      for (const c of categories) {
+        const name = c.categoryName; if (!name) continue;
+        const prev = state.perClassEma.get(name) || 0;
+        state.perClassEma.set(name, emaStep(prev, c.score || 0, a));
+      }
+      let fused = 0;
+      for (const [name, w] of Object.entries(weights || {})) {
+        fused += (w || 0) * (state.perClassEma.get(name) || 0);
+      }
+      const pmap = getPenaltyMap();
+      if (Object.keys(pmap).length) {
+        for (const [tok, pen] of Object.entries(pmap)) {
+          const token = String(tok || '').toLowerCase(); if (!token) continue;
+          for (const [nm, ema] of state.perClassEma.entries()) {
+            if (nm.toLowerCase().includes(token)) fused += (pen || 0) * (ema || 0);
+          }
+        }
+      }
+      fused = clamp01(fused);
+      state.fusedEma = emaStep(state.fusedEma, fused, alphaForTau(dt, Number(els.FUSED_EMA_TAU_S.value) || 0.8));
+      return { raw: fused, sm: state.fusedEma };
+    }
+    function applyHysteresis(sm, nowMs){
+      const hold = Number(els.ALERT_HOLD_MS.value) || 0;
+      if (state.alertOn) { if (nowMs < state.alertUntil) return true; return sm >= state.thrOff; }
+      else { if (sm >= state.thrOn) { state.alertUntil = nowMs + hold; return true; } return false; }
+    }
+
+    /* ========= Threshold slider helpers ========= */
+    /* ========= Threshold inputs (numbers) ========= */
+    // Keep this for programmatic updates (boot/model switch). Do NOT call it during typing.
+    function setThrUI() {
+      els.THR_OFF_SLIDER.value = String(state.thrOff.toFixed(2));
+      els.THR_ON_SLIDER.value  = String(state.thrOn.toFixed(2));
+    }
+    
+    // Persist calibration to localStorage
+    function persistThresholds(extra = {}) {
+      const prev = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null') || {};
+      const payload = { ...prev, version: 1, thr_on: state.thrOn, thr_off: state.thrOff, at: new Date().toISOString(), ...extra };
+      localStorage.setItem(CALIB_KEY(), JSON.stringify(payload));
+      log('ok','Saved thresholds.', `<div class="log-code">${JSON.stringify(payload, null, 2)}</div>`);
+    }
+    
+    // Update the dashed threshold lines on the chart
+    function updateChartThresholdLines(){
+      if (!state.chart) return;
+      const n = state.chart.data.labels?.length || state.chartCap || computeChartCap();
+      state.chart.data.datasets[2].data = new Array(n).fill(state.thrOn);  // thr ON
+      state.chart.data.datasets[3].data = new Array(n).fill(state.thrOff); // thr OFF
+      state.chart.update();
+    }
+    
+    /* Allow free typing:
+       - On 'input': only update state if the value parses; never write back (no rounding).
+       - Enforce thrOn >= thrOff in state; if we change the *other* threshold, reflect it in its field (safe; not focused).
+       - On 'change'/'blur': clamp [0,1], round to 2dp, write back, persist. */
+    
+    els.THR_OFF_SLIDER.addEventListener('input', () => {
+      const v = parseFloat(els.THR_OFF_SLIDER.value);
+      if (!Number.isFinite(v)) return;                    // let the user keep typing
+      state.thrOff = clamp01(v);
+      if (state.thrOn < state.thrOff) {
+        state.thrOn = state.thrOff;
+        // Update the other field (not the one being typed in)
+        if (document.activeElement !== els.THR_ON_SLIDER) {
+          els.THR_ON_SLIDER.value = state.thrOn.toFixed(2);
+        }
+      }
+      updateChartThresholdLines();
+    });
+    
+    els.THR_ON_SLIDER.addEventListener('input', () => {
+      const v = parseFloat(els.THR_ON_SLIDER.value);
+      if (!Number.isFinite(v)) return;
+      state.thrOn = clamp01(v);
+      if (state.thrOn < state.thrOff) {
+        state.thrOff = state.thrOn;
+        if (document.activeElement !== els.THR_OFF_SLIDER) {
+          els.THR_OFF_SLIDER.value = state.thrOff.toFixed(2);
+        }
+      }
+      updateChartThresholdLines();
+    });
+    
+    ['change','blur'].forEach(evt => {
+      els.THR_OFF_SLIDER.addEventListener(evt, () => {
+        let v = parseFloat(els.THR_OFF_SLIDER.value);
+        if (!Number.isFinite(v)) v = state.thrOff;
+        v = clamp01(v);
+        state.thrOff = v;
+        if (state.thrOn < v) {
+          state.thrOn = v;
+          els.THR_ON_SLIDER.value = v.toFixed(2);
+        }
+        els.THR_OFF_SLIDER.value = v.toFixed(2);
+        updateChartThresholdLines();
+        persistThresholds();
+      });
+    
+      els.THR_ON_SLIDER.addEventListener(evt, () => {
+        let v = parseFloat(els.THR_ON_SLIDER.value);
+        if (!Number.isFinite(v)) v = state.thrOn;
+        v = clamp01(v);
+        state.thrOn = v;
+        if (v < state.thrOff) {
+          state.thrOff = v;
+          els.THR_OFF_SLIDER.value = v.toFixed(2);
+        }
+        els.THR_ON_SLIDER.value = v.toFixed(2);
+        updateChartThresholdLines();
+        persistThresholds();
+      });
+    });
+
+    /* ========= Common categories handler ========= */
+    function onCategories(cats) {
+      const HOP_S = Number(els.HOP_S.value)||0.48;
+      updateTopBars(cats);
+
+      if (LOGS.enable.checked) {
+        const topN = Math.max(1, parseInt(LOGS.topn.value,10) || 5);
+        const list = [...cats].sort((a,b)=>(b.score||0)-(a.score||0)).slice(0, LOGS.all.checked ? cats.length : topN)
+                      .map(c => `${c.categoryName || '(unnamed)'}:${(c.score||0).toFixed(3)}`);
+        const msg  = `Inf#${++state.frameCount} cats=${cats.length}`;
+        log('inf', msg, `<div class="log-code"><strong>Top ${LOGS.all.checked ? cats.length : topN}</strong>:\n${list.join('\n')}</div>`, { frame: state.frameCount, cats });
+      }
+
+      const model = loadModel();
+      const weights = model.weights || {"Baby cry, infant cry":1};
+      const { raw, sm } = fusedScoreFromCategories(cats, weights, HOP_S);
+
+      /*const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+      if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; }
+      else { state.thrOn = 0.35; state.thrOff = Math.max(0, state.thrOn - (Number(els.ALERT_OFF_DELTA.value)||0.1)); }*/
+
+      pushChart(Date.now(), raw, sm);
+
+      if (LOGS.enable.checked) {
+        const nowTs = performance.now();
+        if (nowTs - state.scoreLastLogTs >= SCORE_LOG_MS) {
+          const nextOn = state.alertOn ? (sm >= state.thrOff) : (sm >= state.thrOn);
+          log('inf', `[run] score raw=${raw.toFixed(3)} sm=${sm.toFixed(3)} | thrOn=${state.thrOn.toFixed(3)} thrOff=${state.thrOff.toFixed(3)} | alert=${nextOn ? 'ON' : 'off'}`);
+          state.scoreLastLogTs = nowTs;
+        }
+      }
+
+      const on = applyHysteresis(sm, performance.now());
+
+      // OFF -> ON
+     if (on && !state.alertOn) {
+       state.alertStartMs = Date.now();
+       _audioSum = 0; _audioCount = 0;
+       runAsync((async () => {
+         _audioAlertId = await beginAlert({
+           type: (AlertTypes?.Audio ?? 'audio'),
+           message: 'Crying detected'
+         });
+         showAlertBanner(state.alertStartMs, 'Crying detected');
+       })());
+       log('ok','ALERT ON (cry detected).');
+     }
+      // Accumulate while ON
+      if (on) {
+        _audioSum += sm;
+        _audioCount++;
+      }
+      // ON -> OFF
+      if (!on && state.alertOn) {
+        const avg = _audioCount > 0 ? (_audioSum / _audioCount) : sm;
+        const id = _audioAlertId; _audioAlertId = null;
+        if (id != null) runAsync(finishAlert(id, {
+          avgScore: Number(avg.toFixed(4)),
+          message: 'Crying ended'
+        }));
+        log('warn','ALERT OFF.');
+        state.alertStartMs = 0;
+        _audioSum = 0;
+        _audioCount = 0;
+      }
+      state.alertOn = on;
+    }
+
+    /* ========= Classify loop ========= */
+    function concatFloat32(a,b){ const out=new Float32Array(a.length+b.length); out.set(a,0); out.set(b,a.length); return out; }
+
+    async function classifyChunk(chunk, deviceSr){
+      if (state.mode !== 'detect') return;
+
+      const SR_TARGET = Number(els.SR_TARGET.value)||16000;
+      const HOP_S = Number(els.HOP_S.value)||0.48;
+      state.hopSec = HOP_S;
+      const MAX_RESULTS = Number(els.MAX_RESULTS.value)||25;
+      const task = await ensureAudioTask(MAX_RESULTS);
+
+      let s=0; for(let i=0;i<chunk.length;i++){ const v=chunk[i]; s+=v*v; }
+      setRMS(Math.sqrt(s/Math.max(1,chunk.length)));
+
+      const x16 = resampleLinear(chunk, deviceSr, SR_TARGET);
+      state.ring = concatFloat32(state.ring, x16);
+      const fram = Math.round((Number(els.FRAME_LEN_S.value)||0.975) * SR_TARGET);
+      const hop  = Math.round(HOP_S * SR_TARGET);
+
+      const now = performance.now();
+      if (now - state.asmLastLogTs >= ASM_LOG_MS) {
+        log('info', `Audio buf len=${state.ring.length}, need≥${state.lastPos + hop} (hop=${hop}, frame=${fram})`);
+        state.asmLastLogTs = now;
+      }
+
+      while (state.ring.length - state.lastPos >= hop) {
+        const end = state.lastPos + hop, start = Math.max(0, end - fram);
+        let w = state.ring.slice(start, end); if (w.length !== fram) { const pad = new Float32Array(fram); pad.set(w, 0); w = pad; }
+
+        const res = await classifyMP(task, w, SR_TARGET);
+        const cats = extractCategories(res);
+
+        onCategories(cats);
+        state.lastPos += hop;
+        if (state.lastPos > fram * 4) {
+          const cut = state.lastPos - fram;
+          state.ring = state.ring.slice(cut);
+          state.lastPos -= cut;
+        }
+      }
+    }
+
+    /* ========= Mic control ========= */
+    async function startMic() {
+      await stopAll();
+      setStatus('Starting microphone (detect)…');
+      const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
+      state.micCtx = ctx;
+      await ctx.resume();
+      log('info', `Mic AudioContext sampleRate=${ctx.sampleRate} Hz`);
+
+      //const stream = await navigator.mediaDevices.getUserMedia({
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false },
+          video: false
+        });
+      } catch (e) {
+        log('err', 'Mic permission/device error: ' + (e?.message || e));
+        setStatus('Microphone unavailable.');
+        await stopMicOnly();
+        return;
+      }
+      const src = ctx.createMediaStreamSource(stream);
+      const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
+      state.srcNode = src; state.sinkNode = sink;
+
+      try {
+        const Code = `
+          class Tap extends AudioWorkletProcessor {
+            process(inputs){ const i=inputs[0]; if(i&&i[0]) this.port.postMessage(i[0].slice(0)); return true; }
+          }
+          registerProcessor("tap", Tap);
+        `;
+        const url = URL.createObjectURL(new Blob([Code], { type: 'application/javascript; charset=utf-8' }));
+        await ctx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
+        const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
+        node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate);
+        src.connect(node).connect(sink);
+        state.procNode = node;
+        log('info', 'AudioWorklet active @ '+ctx.sampleRate+' Hz');
+      } catch (e) {
+        const node = ctx.createScriptProcessor(4096,1,1);
+        node.onaudioprocess = (ev)=> classifyChunk(new Float32Array(ev.inputBuffer.getChannelData(0)), ctx.sampleRate);
+        src.connect(node).connect(sink);
+        state.procNode = node;
+        setStatus('ScriptProcessor active @ '+ctx.sampleRate+' Hz');
+        log('warn', 'AudioWorklet fell back: ' + (e?.message || e));
+        log('info', 'ScriptProcessor active @ '+ctx.sampleRate+' Hz');
+      }
+      state.running = true; state.mode = 'detect';
+      setupChart();
+      setStatus('Detection started (mic).');
+    }
+
+    async function stopMicOnly(){
+      try { state.procNode?.disconnect(); } catch {}
+      try { state.srcNode?.disconnect(); } catch {}
+      try { state.sinkNode?.disconnect(); } catch {}
+      try { state.micCtx && state.micCtx.state!=='closed' && state.micCtx.close(); } catch {}
+      state.procNode=null; state.srcNode=null; state.sinkNode=null; state.micCtx=null;
+    }
+
+    async function stopAll(){
+      // finalize open alert if any
+      if (state.alertOn && _audioAlertId != null) {
+        const avg = _audioCount > 0 ? (_audioSum / _audioCount) : 0;
+        //coull;
+        const id = _audioAlertId; _audioAlertId = null;
+        if (id != null) runAsync(finishAlert(id, {
+          avgScore: Number(avg.toFixed(4)),
+          message: 'Detection stopped'
+        }));
+        log('warn', 'ALERT OFF (stop).');
+        state.alertOn = false;
+        state.alertStartMs = 0;
+        _audioSum = 0;
+        _audioCount = 0;
+      }
+
+      const wasRunning = state.running || state.mode!=='idle';
+      state.running=false; state.mode='idle';
+      await stopMicOnly();
+      await stopRemoteAudioTap();
+      state.ring=new Float32Array(0); state.lastPos=0; state.perClassEma.clear(); state.fusedEma=0; state.frameCount=0;
+      state.asmLastLogTs = 0; state.scoreLastLogTs = 0;
+      setRMS(0); clearTopBars(); setupChart();
+      if (wasRunning) log('warn','Stopped audio graph.');
+      updateDetectButtonUI();
+    }
+
+    /* ========= WebRTC integration ========= */
+    // Kick detection on first incoming sender score if auto-start raced.
+    function kickDetectIfIdle() {
+      if (els.TRAIN_SRC.value !== 'sender') return;      // only when using Sender as source
+    
+      if (state.mode !== 'detect') {
+        log('info', '[RUN] First score arrived; starting detection (sender).');
+        try { startDetectBasedOnSource(); } catch {}
+        updateDetectButtonUI();
+        return;
+      }
+    
+      // If we're supposed to infer at receiver and the audio tap isn't running yet, start it.
+      if (wrtc.where === 'receiver' && wrtc.stream && !wrtc.ctx) {
+        log('info', '[RUN] Starting remote audio tap (receiver infer).');
+        try { startRemoteAudioTap(); } catch {}
+      }
+    }
+
+    function ensureCoreStarted(){
+      if (wrtc.core) return;
+    
+      function wireDC(ch){
+        if (!ch) return;
+        if (wrtc.dc && wrtc.dc === ch) return;
+        wrtc.dc = ch;
+    
+        ch.onopen  = () => {
+          log('ok','[RTC] DC open');
+          try { ch.send(JSON.stringify({ type: 'need-modes' })); } catch {}
+        };
+        ch.onclose = () => log('warn','[RTC] DC close');
+        ch.onerror = (e) => log('err', `[RTC] DC error: ${e?.message||e}`);
+    
+        ch.onmessage = (ev) => {
+          let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+          if (!msg || !msg.type) return;
+    
+          if (msg.type === 'audio-mode') {
+            wrtc.audioEnabled = !!msg.enabled;
+            wrtc.where        = msg.where || 'sender';
+            if (msg.where) setInferWhere(msg.where);
+            setStatus('Connected to sender');
+            log('info', `[RTC] audio-mode: enabled=${wrtc.audioEnabled} where=${wrtc.where}`);
+    
+            if (!wrtc.audioEnabled) {
+              stopRemoteAudioTap();
+            } else if (wrtc.where === 'receiver' && wrtc.stream && state.mode === 'detect') {
+              startRemoteAudioTap();
+            }
+    
+          } else if (msg.type === 'ai-modes' && msg.audio) {
+            wrtc.audioEnabled = !!msg.audio.enabled;
+            wrtc.where        = msg.audio.where || 'sender';
+            if (msg.audio.where) setInferWhere(msg.audio.where);
+            setStatus('Connected to sender');
+            log('info', `[RTC] ai-modes: enabled=${wrtc.audioEnabled} where=${wrtc.where}`);
+    
+            if (!wrtc.audioEnabled) {
+              stopRemoteAudioTap();
+            } else if (wrtc.where === 'receiver' && wrtc.stream && state.mode === 'detect') {
+              startRemoteAudioTap();
+            }
+    
+          } else if (msg.type === 'audio') {
+              // Force sender mode on first score and make sure detection is actually running.
+              setInferWhere('sender');
+              wrtc.where = 'sender'; 
+              if (els.TRAIN_SRC.value !== 'sender') return;
+            
+              kickDetectIfIdle(); // <- ensures state.mode === 'detect' (and tap running if needed)
+            
+              const categories = (msg.categories || []).map(c => ({
+                categoryName: (c.displayName || c.categoryName || '').trim(),
+                score: c.score || 0
+              }));
+              onCategories(categories);            
+          }
+        };
+      }
+    
+      wrtc.core = new ReceiverCore({
+        wsEndpoint: WS_ENDPOINT,
+        room,
+        onStatus: (m) => log('info', `[RTC] ${m}`),
+        onStream: (stream) => {
+          if (EL('remote').srcObject !== stream) EL('remote').srcObject = stream;
+          wrtc.stream = stream;
+          log('ok', `[RTC] Remote stream: tracks=${stream.getTracks().map(t=>t.kind).join(',')}`);
+          if (state.mode === 'detect' && wrtc.audioEnabled && wrtc.where === 'receiver') {
+            startRemoteAudioTap().catch(()=>{});
+          }
+        },
+        onIceState: (s) => log('info', `[RTC] ICE: ${s}`),
+        onCreatePC: (pc) => {
+          const ch = pc.createDataChannel('pose');
+          wireDC(ch);
+        },
+        onDataChannel: (e) => {
+          log('info', `[RTC] inbound DC: ${e.channel?.label}`);
+          wireDC(e.channel);
+        },
+        onBye: () => log('warn', '[RTC] bye')
+      });
+    
+      wrtc.core.start()
+        .then(()=>{ wrtc.connected = true; log('ok', `Connected to room “${room}”.`); })
+        .catch(e => log('err', `[RTC] start error: ${e?.message||e}`));
+    }
+
+
+    async function startRemoteAudioTap(){
+      if (!wrtc.stream) { log('warn','[RTC] No remote stream yet.'); return; }
+      await stopRemoteAudioTap();
+      const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
+      wrtc.ctx = ctx; await ctx.resume().catch(()=>{});
+      const src = ctx.createMediaStreamSource(wrtc.stream);
+      const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
+      wrtc.src = src; wrtc.sink = sink;
+
+      try {
+        const workletURL = URL.createObjectURL(new Blob([`
+          class Tap extends AudioWorkletProcessor {
+            process(inputs) { const i = inputs[0]; if (i && i[0]) this.port.postMessage(i[0].slice(0)); return true; }
+          }
+          registerProcessor('tap', Tap);
+        `], { type: 'application/javascript' }));
+        await ctx.audioWorklet.addModule(workletURL); URL.revokeObjectURL(workletURL);
+        const node = new AudioWorkletNode(ctx, 'tap', { numberOfInputs:1, numberOfOutputs:1, channelCount:1 });
+        node.port.onmessage = (ev)=> classifyChunk(ev.data, ctx.sampleRate);
+        src.connect(node).connect(sink);
+        wrtc.node = node;
+        log('info','[RTC] Remote tap (worklet) active.');
+      } catch (e) {
+        const node = ctx.createScriptProcessor(4096,1,1);
+        node.onaudioprocess = (ev)=> classifyChunk(new Float32Array(ev.inputBuffer.getChannelData(0)), ctx.sampleRate);
+        src.connect(node).connect(sink);
+        wrtc.node = node;
+        log('warn','[RTC] Worklet failed; using ScriptProcessor.');
+      }
+      state.running = true; state.mode = 'detect';
+      setupChart();
+      setStatus('Detection started (sender audio → local inference).');
+    }
+
+    async function stopRemoteAudioTap(){
+      try { wrtc.node?.disconnect?.(); } catch {}
+      try { wrtc.src?.disconnect?.(); } catch {}
+      try { wrtc.sink?.disconnect?.(); } catch {}
+      try { wrtc.ctx && wrtc.ctx.state!=='closed' && wrtc.ctx.close(); } catch {}
+      wrtc.node = null; wrtc.src = null; wrtc.sink = null; wrtc.ctx = null;
+    }
+
+    /* ========= Mode selection ========= */
+    async function startDetectBasedOnSource(){
+      const src = els.TRAIN_SRC.value;
+      if (src === 'mic') {
+        await startMic();
+      } else if (src === 'sender') {
+        ensureCoreStarted();
+        if (wrtc.where === 'receiver' && wrtc.stream) await startRemoteAudioTap();
+        state.mode = 'detect';
+        if (wrtc.where === 'sender') setStatus('Detection started (sender).');
+      }
+    }
+
+    /* ========= Detect toggle button ========= */
+    function updateDetectButtonUI(){
+      const active = (state.mode === 'detect');
+      els.btnDetect.textContent = active ? 'Stop' : 'Start';
+      els.btnDetect.classList.toggle('live', active);
+      els.btnDetect.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+    els.btnDetect.onclick = async () => {
+      const active = (state.mode === 'detect');
+      if (!active) {
+        await startDetectBasedOnSource();
+      } else {
+        await stopAll();
+        setStatus('Detection stopped.');
+      }
+      updateDetectButtonUI();
+    };
+
+    // Live bars / Saved weights toggles
+    els.btnToggleLiveBars.addEventListener('click', () => {
+      liveBarsUserVisible = !liveBarsUserVisible;
+      els.btnToggleLiveBars.textContent = liveBarsUserVisible ? 'Hide chart' : 'Show chart';
+      if (liveBarsUserVisible) { setupBars(); showLiveBars(); }
+      else { hideLiveBars(); }
+    });
+    els.btnToggleSavedW.addEventListener('click', () => {
+      savedWUserVisible = !savedWUserVisible;
+      els.btnToggleSavedW.textContent = savedWUserVisible ? 'Hide chart' : 'Show chart';
+      els.savedWWrap.style.display = savedWUserVisible ? '' : 'none';
+      if (savedWUserVisible) { setupBars(); setWeightsChart(loadModel().weights || {}); setTimeout(()=>state.barSavedW?.resize?.(),0); }
+    });
+
+    function getParams(){
+      return {
+        SR_TARGET: Number(els.SR_TARGET.value)||16000,
+        FRAME_LEN_S: Number(els.FRAME_LEN_S.value)||0.975,
+        HOP_S: Number(els.HOP_S.value)||0.48,
+        MAX_RESULTS: Number(els.MAX_RESULTS.value)||25
+      };
+    }
+
+    // Source description text
+    function updateSourceUI(){
+      const v = els.TRAIN_SRC.value;
+      if (v === 'mic') els.trainInfo.textContent = 'Using the receiver microphone.';
+      if (v === 'sender') {
+        const where = (localStorage.getItem('cryInferWhere') || 'sender') === 'receiver'
+          ? 'receiver (from streamed audio)'
+          : 'sender (scores via data channel)';
+        els.trainInfo.textContent = `WebRTC source (Sender). Inference @ ${where}. Room “${room}”.`;
+        ensureCoreStarted();
+      }
+    }
+    els.TRAIN_SRC.addEventListener('change', updateSourceUI);
+
+    // Chart window control
+    els.CHART_WINDOW_S.addEventListener('change', () => {
+      const v = Math.max(5, Number(els.CHART_WINDOW_S.value) || 30);
+      els.CHART_WINDOW_S.value = String(v);
+      state.chartWindowSec = v;
+      setupChart();
+      log('info', `Chart window set to ${v}s`);
+    });
+
+    // Model switch
+    els.MODEL_SELECT.addEventListener('change', () => {
+      const v = els.MODEL_SELECT.value;
+      setModelName(v);
+      const m = loadModel();
+      if (savedWUserVisible) setWeightsChart(m.weights || {});
+      const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+      if (calib) { state.thrOn = calib.thr_on; state.thrOff = calib.thr_off; setThrUI(); updateChartThresholdLines(); log('ok', `Loaded thresholds for “${v}”.`, `<div class="log-code">${JSON.stringify(calib,null,2)}</div>`); }
+      const pen = localStorage.getItem(PENALTY_KEY()); if (pen) els.PENALTY_MAP.value = pen;
+      setStatus(`Active model set to “${v}”.`);
+    });
+
+    /* ========= Boot ========= */
+    (function boot(){
+      // Inject shared Alerts UI (adds drawer into #alertsModalHost)
+      initAlertsUI({ drawerHostId: 'alertsModalHost' });
+
+      const active = localStorage.getItem('cryActiveModelName') || 'default';
+      refreshModelSelect(active);
+      setModelName(active);
+
+      setupBars();
+      els.chart.getContext && setupChart();
+
+      const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+      if (calib) {
+        state.thrOn=calib.thr_on; state.thrOff=calib.thr_off;
+        log('ok',`Loaded thresholds for “${getModelName()}”.`, `<div class="log-code">${JSON.stringify(calib, null, 2)}</div>`);
+      } else {
+        const offDelta = Number(els.ALERT_OFF_DELTA.value) || 0.10;
+        state.thrOn = 0.35; state.thrOff = Math.max(0, state.thrOn - offDelta);
+      }
+      setThrUI();
+      updateChartThresholdLines();
+      const penaltySaved = localStorage.getItem(PENALTY_KEY()); if (penaltySaved) els.PENALTY_MAP.value = penaltySaved;
+
+      // Hidden by default
+      hideLiveBars();
+      els.savedWWrap.style.display = 'none';
+
+      updateSourceUI();
+
+      setStatus('Ready. Detection will auto-start…');
+      // === AUTO-START DETECTION ===
+      startDetectBasedOnSource().then(updateDetectButtonUI).catch(()=>{});
+    })();
+  </script>
+
+  <!-- analytics -->
+  <script type="module">
+    import { installAnalytics } from '/hungryface/shared/analytics.js';
+    window.analytics = installAnalytics({ feature: 'receiver-audio-detect' });
+    // Later: window.analytics.event('audio_detect_opened');
+  </script>
+  
+</body>
+</html>
