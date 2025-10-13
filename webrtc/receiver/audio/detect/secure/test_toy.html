@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Naptio Mini Dashboard — Test Harness</title>
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin:0; background:#000; color:#fff; font-family:-apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+    .wrap { max-width:900px; margin:0 auto; padding:24px 14px 120px; }
+    h1 { font-size:24px; margin:0 0 8px; }
+    p { color:#cfcfcf; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .btn { padding:10px 12px; border-radius:10px; border:1px solid #333; background:#111; color:#fff; font-weight:600; cursor:pointer; }
+    .btn:hover { background:#181818; }
+    input[type="text"] { padding:10px 12px; border-radius:10px; border:1px solid #333; background:#0c0c0c; color:#eee; min-width:300px; }
+    .muted { color:#9aa; font-size:12px; }
+    code { background:#111; padding:2px 6px; border-radius:6px; }
+    .card { background:#0b0b0b; border:1px solid #141414; border-radius:14px; padding:14px; margin-top:14px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Naptio Mini Dashboard — Test</h1>
+    <p>Use these controls to toggle the in-app dashboard and test drag/resize/zoom persistence. This page imports <code>mini-dash.js</code> and calls <code>installMiniDashboard()</code>.</p>
+
+    <div class="card">
+      <div class="row">
+        <button id="enable" class="btn">Enable (set <code>on</code>)</button>
+        <button id="disable" class="btn">Disable (set <code>off</code>)</button>
+        <button id="toggle" class="btn">Toggle overlay</button>
+        <button id="reset" class="btn">Reset saved pos/size/zoom</button>
+      </div>
+      <p class="muted" id="status">Status: …</p>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <input id="src" type="text" placeholder="iframe src…" value="https://hungryfaceai.github.io/hungryface/webrtc/receiver/shared/alerts/dashboard/" />
+        <button id="applySrc" class="btn">Set iframe src</button>
+      </div>
+      <p class="muted">Tip: If a site refuses to be embedded (X-Frame-Options / CSP), try another URL that allows framing.</p>
+    </div>
+
+    <div class="card">
+      <p class="muted">Persisted keys: <code>naptio:miniDash:enabled</code>, <code>naptio:miniDash:pos</code>, <code>naptio:miniDash:size</code>, <code>naptio:miniDash:zoom</code></p>
+    </div>
+  </div>
+
+  <script type="module">
+    import { installMiniDashboard } from './mini-dash.js';
+
+    installMiniDashboard({
+      src: 'https://hungryfaceai.github.io/hungryface/webrtc/receiver/shared/alerts/dashboard/',
+      featureKey: 'naptio:miniDash:enabled'
+    });
+
+    const status = document.getElementById('status');
+    const updateStatus = () => {
+      status.textContent = 'Status: naptio:miniDash:enabled = ' + (localStorage.getItem('naptio:miniDash:enabled') || 'off');
+    };
+
+    document.getElementById('enable').onclick = () => {
+      localStorage.setItem('naptio:miniDash:enabled', 'on');
+      window.MiniDash.refresh();
+      updateStatus();
+    };
+    document.getElementById('disable').onclick = () => {
+      localStorage.setItem('naptio:miniDash:enabled', 'off');
+      window.MiniDash.refresh();
+      updateStatus();
+    };
+    document.getElementById('toggle').onclick = () => window.MiniDash.toggle();
+    document.getElementById('reset').onclick = () => window.MiniDash.resetState();
+
+    document.getElementById('applySrc').onclick = () => {
+      const url = document.getElementById('src').value.trim();
+      if (url) window.MiniDash.setSrc(url);
+      localStorage.setItem('naptio:miniDash:enabled', 'on');
+      window.MiniDash.refresh();
+      updateStatus();
+    };
+
+    updateStatus();
+  </script>
+</body>
+</html>
