@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -7,12 +7,18 @@
   <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
   <style>
     :root { color-scheme: dark; }
-    html, body {
-      margin: 0; height: 100%;
+
+    /* —— Option A: Let the document own the scroll —— */
+    html { height: auto; overflow-y: auto; }
+    html, body { scroll-behavior: smooth; } /* optional nicety */
+    body {
+      margin: 0; min-height: 100%;
       background: #000; color: #ccc; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       touch-action: manipulation;
-      overflow-x: hidden;
+      overflow-x: hidden;               /* keep horizontal clipped */
+      overflow-y: visible;              /* no inner scrollers fighting */
     }
+    #ui, .card { overflow: visible; }   /* avoid nested scrollbars */
 
     /* UI container (same look/feel as sender) */
     #ui {
@@ -28,7 +34,12 @@
     }
     .card h2 { font-size: clamp(16px, 2.6vw, 18px); margin: 0 0 8px 0; }
 
-    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; }
+    /* Touch-friendly rows + consistent label typography */
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; min-height: 52px; }
+    .setting-label {
+      font-size: 16px; font-weight: 600; color: #ddd; line-height: 1.25;
+      flex: 1; /* allows control to align right and label to wrap if needed */
+    }
 
     input[type="text"], select, input[type="number"] {
       width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #222; background:#0b0b0b; color:#ddd;
@@ -37,11 +48,22 @@
     #roomSel { font-size: 18px; padding: 14px 16px; height: 52px; border-radius: 12px; }
 
     .muted-note { opacity:.7; font-size:13px; }
+    .help-line { opacity:.8; font-size: 13px; margin: 2px 0 0 0; }
 
     /* Optional small status text under the card title */
     #status { margin-top: 6px; font-size: 13px; color: #9aa; }
 
-    /* ================= Danger zone (drop-in) ================ */
+    /* Compact numeric input for cooldown (shorter height) */
+    .num-compact { 
+      width: 7ch !important;        /* 3 digits + padding */
+      text-align: right;
+      flex: 0 0 auto;
+      height: 36px;                  /* reduced height */
+      padding: 6px 10px;             /* tighter padding */
+      border-radius: 10px;
+    }
+
+    /* ================= Danger zone (existing styles) ================ */
     :root{
       --danger-bg:#c62828;
       --danger-bg-hover:#b71c1c;
@@ -95,8 +117,8 @@
     .btn-secondary:hover{ background:#151515; }
     /* ======================================================== */
 
-    /* ——— Sound notifications UI ——— */
-    .section-title { margin: 16px 0 6px 0; font-size: 16px; }
+    /* ——— Section headings & separators ——— */
+    .section-title { margin: 16px 0 4px 0; font-size: 16px; font-weight: 700; color: #eee; }
     .sep { border: 0; border-top: 1px solid #141414; margin: 14px 0; }
 
     /* iOS-style switch */
@@ -121,34 +143,31 @@
     .switch input:focus-visible + .slider { box-shadow: 0 0 0 3px rgba(52,199,89,.35); }
   </style>
 
-  <!-- --- Sidebar overlap fix CSS (revised: use padding-left instead of transform) --- -->
+  <!-- --- Sidebar overlap fix CSS (use padding-left) --- -->
   <style>
     :root {
       --sidebar-visible: 0px;
-      --sidebar-gutter: 12px;                     /* extra spacing so shadows/borders don't touch card */
-      --safe-left: env(safe-area-inset-left, 0px);/* iPhone notch/gesture area */
-      --menu-hit: 52px; /* reserve tappable area for the hamburger (≈44–56px) */
+      --sidebar-gutter: 12px;
+      --safe-left: env(safe-area-inset-left, 0px);
+      --menu-hit: 52px;
       --sidebar-offset: calc(var(--sidebar-visible) + var(--safe-left) + var(--sidebar-gutter));
     }
-    /* Shift layout using padding so content is not under the drawer/scrim */
-    /* Reserve hamburger space even when closed, and add drawer width when open */
     #ui {
       padding-left: var(--sidebar-offset);
       transition: padding-left .18s ease;
       will-change: padding-left;
     }
-    /* Keep the card fully visible within remaining width */
     .card {
       max-width: min(520px, calc(100vw - var(--sidebar-offset) - 32px));
     }
     @media (max-width: 480px) {
-      body.drawer-open-detected #ui { padding-left: 0 !important; }      /* stop the right shift */
-      .card { max-width: min(520px, calc(100vw - 32px)); }                /* keep the card fully visible */
+      body.drawer-open-detected #ui { padding-left: 0 !important; }
+      .card { max-width: min(520px, calc(100vw - 32px)); }
     }
   </style>
 </head>
 <body>
-  <!-- Shared sidebar injection (same as receiver pages) -->
+  <!-- Shared sidebar injection -->
   <script type="module">
     (async () => {
       try {
@@ -171,7 +190,7 @@
     })();
   </script>
 
-  <!-- --- Sidebar overlap fix JS (measures visible drawer width) --- -->
+  <!-- Sidebar overlap fix JS -->
   <script type="module">
     (function () {
       const root = document.documentElement;
@@ -252,63 +271,81 @@
     <div class="card">
       <h2 style="padding-left:3ch">Settings</h2>
 
-      <!-- Room selector (label on the RIGHT, same as sender) -->
-      <div class="row">
-        <select id="roomSel"></select>
-        <label for="roomSel" class="muted-note" style="cursor:pointer;">Room</label>
-      </div>
+      <!-- ——— Room ——— -->
+      <section aria-labelledby="roomTitle">
+        <h3 id="roomTitle" class="section-title">Room</h3>
+        <p class="help-line">Pick which room this device listens to.</p>
 
-      <div id="status" aria-live="polite"></div>
+        <div class="row">
+          <select id="roomSel"></select>
+          <label for="roomSel" class="setting-label" style="cursor:pointer;">Room</label>
+        </div>
+
+        <div id="status" aria-live="polite"></div>
+      </section>
 
       <hr class="sep" />
 
       <!-- ——— Sound notifications ——— -->
       <section aria-labelledby="notifTitle">
         <h3 id="notifTitle" class="section-title">Sound notifications</h3>
+        <p class="help-line">Choose which events should play a sound.</p>
 
-        <!-- Audio -->
         <div class="row">
-          <span class="muted-note">Audio</span>
+          <span class="setting-label">Audio</span>
           <label class="switch" aria-label="Audio notifications">
             <input id="sw-audio" type="checkbox" role="switch" />
             <span class="slider"></span>
           </label>
         </div>
 
-        <!-- Motion -->
         <div class="row">
-          <span class="muted-note">Motion</span>
+          <span class="setting-label">Motion</span>
           <label class="switch" aria-label="Motion notifications">
             <input id="sw-motion" type="checkbox" role="switch" />
             <span class="slider"></span>
           </label>
         </div>
 
-        <!-- Fence -->
         <div class="row">
-          <span class="muted-note">Fence</span>
+          <span class="setting-label">Fence</span>
           <label class="switch" aria-label="Fence notifications">
             <input id="sw-fence" type="checkbox" role="switch" />
             <span class="slider"></span>
           </label>
         </div>
 
-        <!-- Prone -->
         <div class="row">
-          <span class="muted-note">Prone</span>
+          <span class="setting-label">Prone</span>
           <label class="switch" aria-label="Prone notifications">
             <input id="sw-prone" type="checkbox" role="switch" />
             <span class="slider"></span>
           </label>
         </div>
 
-        <!-- Shared cooldown -->
+        <!-- Gap between alerts: label left, compact number on the right -->
         <div class="row">
-          <input id="notifCooldownMin" type="number" min="0" max="180" step="1" inputmode="numeric" placeholder="2" />
-          <label for="notifCooldownMin" class="muted-note" style="cursor:pointer;">Min gap between alerts (minutes)</label>
+          <label for="notifCooldownMin" class="setting-label" style="cursor:pointer;">Gap between alerts (minutes)</label>
+          <input id="notifCooldownMin" class="num-compact" type="number" min="0" max="999" step="1" inputmode="numeric" pattern="[0-9]*" placeholder="1" />
         </div>
       </section>
-      <!-- ——— End: Sound notifications ——— -->
+
+      <hr class="sep" />
+
+      <!-- ——— Mini dashboard ——— -->
+      <section aria-labelledby="miniDashTitle">
+        <h3 id="miniDashTitle" class="section-title">Mini dashboard</h3>
+        <p id="miniDashHelp" class="help-line">Show a small, in-app dashboard overlay on Audio, Motion, Fence and Prone pages.</p>
+
+        <div class="row">
+          <span class="setting-label">In-app dashboard</span>
+          <label class="switch" aria-label="In-app dashboard">
+            <input id="sw-miniDash" type="checkbox" role="switch" aria-describedby="miniDashHelp" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </section>
+      <!-- ——— End sections ——— -->
     </div>
   </div>
 
@@ -330,29 +367,25 @@
       fallbackRoom: 'Baby',
     });
 
-    // If we’re still here, PSKs exist; install shim for current env room.
     if (!env.redirected) {
       const undo = installPskShim({ room: env.room });
       console.log('[PSK][receiver-settings] shim installed for room:', env.room);
     }
 
-    /* ---------- Populate dropdown from stored rooms (mimics sender) ---------- */
     function hasOption(sel, val) {
       return !!Array.from(sel?.options || []).find(o => o.value === val);
     }
 
     (function initRoomDropdown() {
-      const rooms = listValidPskRooms();                     // all rooms with a valid PSK
+      const rooms = listValidPskRooms();
       const qsRoom = new URLSearchParams(location.search).get('room') || '';
       const lastRoom = (localStorage.getItem('naptio:lastRoom') || '').trim();
-      const persisted = (localStorage.getItem('bm_receiver_room') || '').trim(); // receiver’s persistence key
+      const persisted = (localStorage.getItem('bm_receiver_room') || '').trim();
       const envRoom = (env?.room || '').trim();
 
-      // Unique set, include envRoom if not present
       const uniq = new Set(rooms);
       if (envRoom) uniq.add(envRoom);
 
-      // Handle empty state (shouldn’t happen due to redirect)
       roomSel.innerHTML = '';
       if (uniq.size === 0) {
         roomSel.innerHTML = `<option value="" disabled selected>No PSK rooms</option>`;
@@ -361,14 +394,12 @@
         return;
       }
 
-      // Create options
       for (const r of Array.from(uniq).sort()) {
         const opt = document.createElement('option');
         opt.value = opt.textContent = r;
         roomSel.appendChild(opt);
       }
 
-      // Default selection priority: ?room → lastRoom → persisted → envRoom → first
       const pick =
         (qsRoom && uniq.has(qsRoom) && qsRoom) ||
         (lastRoom && uniq.has(lastRoom) && lastRoom) ||
@@ -378,13 +409,11 @@
 
       roomSel.value = hasOption(roomSel, pick) ? pick : roomSel.options[0].value;
 
-      // Persist immediately
       try { localStorage.setItem('bm_receiver_room', roomSel.value); } catch {}
       try { localStorage.setItem('naptio:lastRoom', roomSel.value); } catch {}
 
       statusEl.textContent = `Active room: ${roomSel.value}`;
 
-      // Persist on change
       roomSel.addEventListener('change', () => {
         try { localStorage.setItem('bm_receiver_room', roomSel.value); } catch {}
         try { localStorage.setItem('naptio:lastRoom', roomSel.value); } catch {}
@@ -393,14 +422,15 @@
     })();
   </script>
 
-  <!-- ——— Sound notifications persistence & wiring ——— -->
+  <!-- ——— Alerts + In-app dashboard persistence & wiring ——— -->
   <script type="module">
     const KEYS = {
       audio: 'naptio:notify:audio',
       motion: 'naptio:notify:motion',
       fence: 'naptio:notify:fence',
       prone: 'naptio:notify:prone',
-      cooldown: 'naptio:notifyCooldownMin'
+      cooldown: 'naptio:notifyCooldownMin',
+      miniDash: 'naptio:miniDash:enabled'
     };
 
     function getOnOff(key, def = 'on') {
@@ -412,21 +442,23 @@
       try { localStorage.setItem('naptio:notify:ts', String(Date.now())); } catch {}
     }
 
-    function wireSwitch(inputId, key) {
+    function wireSwitch(inputId, key, def = 'on') {
       const el = document.getElementById(inputId);
-      el.checked = getOnOff(key, 'on') === 'on';
+      el.checked = getOnOff(key, def) === 'on';
       el.addEventListener('change', () => setOnOff(key, el.checked ? 'on' : 'off'));
     }
 
-    wireSwitch('sw-audio', KEYS.audio);
-    wireSwitch('sw-motion', KEYS.motion);
-    wireSwitch('sw-fence', KEYS.fence);
-    wireSwitch('sw-prone', KEYS.prone);
+    /* Default ON for all switches (including In-app dashboard) */
+    wireSwitch('sw-audio', KEYS.audio, 'on');
+    wireSwitch('sw-motion', KEYS.motion, 'on');
+    wireSwitch('sw-fence', KEYS.fence, 'on');
+    wireSwitch('sw-prone', KEYS.prone, 'on');
+    wireSwitch('sw-miniDash', KEYS.miniDash, 'on');
 
-    // Cooldown (minutes)
+    // Cooldown (minutes) — default to 1 if nothing saved
     const cooldownInput = document.getElementById('notifCooldownMin');
     const saved = parseInt(localStorage.getItem(KEYS.cooldown), 10);
-    cooldownInput.value = Number.isFinite(saved) ? saved : 2; // default 2 minutes
+    cooldownInput.value = Number.isFinite(saved) ? saved : 1;
 
     function clampInt(n, lo, hi) {
       n = Math.round(Number(n) || 0);
@@ -434,7 +466,7 @@
     }
 
     const persistCooldown = () => {
-      const v = clampInt(cooldownInput.value, 0, 180);
+      const v = clampInt(cooldownInput.value, 0, 999);
       cooldownInput.value = v;
       localStorage.setItem(KEYS.cooldown, String(v));
       try { localStorage.setItem('naptio:notify:ts', String(Date.now())); } catch {}
@@ -446,7 +478,7 @@
       if (e.key === 'Enter') { e.preventDefault(); persistCooldown(); }
     });
   </script>
-  <!-- ——— End: Sound notifications ——— -->
+  <!-- ——— End: Alerts + In-app dashboard ——— -->
 
   <!-- ——— Naptio: Factory Reset (this device) ——— -->
   <section id="factoryResetSection" class="danger-zone">
@@ -494,17 +526,17 @@
     async function factoryResetNaptio({ includeSessionStorage = true, knownDbNames = [] } = {}) {
       const results = { indexedDB: [], localStorage: null, sessionStorage: null, caches: [], serviceWorkers: [] };
 
-      // 1) Enumerate IndexedDB DBs (best effort)
+      // Enumerate DBs (best effort)
       const dbNames = new Set();
       try {
         if (indexedDB && typeof indexedDB.databases === 'function') {
           const dbs = await indexedDB.databases();
           for (const db of dbs) if (db?.name) dbNames.add(db.name);
         }
-      } catch (e) { /* ignore; we'll just use knownDbNames */ }
+      } catch (e) {}
       for (const n of knownDbNames) if (n) dbNames.add(n);
 
-      // 2) Delete each IndexedDB DB
+      // Delete DBs
       async function deleteDb(name) {
         return new Promise((resolve) => {
           const req = indexedDB.deleteDatabase(name);
@@ -515,7 +547,7 @@
       }
       for (const name of dbNames) results.indexedDB.push(await deleteDb(name));
 
-      // 3) Clear storage
+      // Storage
       try { localStorage.clear(); results.localStorage = 'cleared'; }
       catch (e) { results.localStorage = 'error: ' + e; }
 
@@ -524,7 +556,7 @@
         catch (e) { results.sessionStorage = 'error: ' + e; }
       }
 
-      // 4) Clear Cache Storage
+      // Cache Storage
       if ('caches' in window) {
         try {
           const keys = await caches.keys();
@@ -537,7 +569,7 @@
         }
       }
 
-      // 5) Unregister Service Workers
+      // Service Workers
       if ('serviceWorker' in navigator) {
         try {
           const regs = await navigator.serviceWorker.getRegistrations();
@@ -553,7 +585,7 @@
       return results;
     }
 
-    // ——— Minimal modal wiring ———
+    // Modal wiring
     const $ = (s) => document.querySelector(s);
     const modal = $('#factoryResetModal');
     const btnOpen = $('#btnFactoryReset');
@@ -563,7 +595,7 @@
 
     function openModal() {
       modal.hidden = false;
-      modal.style.display = 'grid';      // ensure visible
+      modal.style.display = 'grid';
       document.body.style.overflow = 'hidden';
       statusEl.textContent = '';
       btnConfirm.disabled = false;
@@ -571,7 +603,7 @@
     }
     function closeModal() {
       modal.hidden = true;
-      modal.style.display = 'none';      // ensure hidden
+      modal.style.display = 'none';
       document.body.style.overflow = '';
     }
 
@@ -592,7 +624,6 @@
       try {
         const summary = await factoryResetNaptio({
           includeSessionStorage: true,
-          // Fallback DB names (adjust if your app uses different ones)
           knownDbNames: ['naptio-audio', 'naptio-video', 'naptio-settings', 'naptio']
         });
 
@@ -601,7 +632,7 @@
 
         if (!blocked && !errored) {
           statusEl.innerHTML = '✅&nbsp;Reset complete';
-          btnCancel.disabled = false;               // allow closing the dialog
+          btnCancel.disabled = false;
         } else if (blocked) {
           statusEl.textContent = 'Almost done — another Naptio tab is still open. Close other Naptio tabs to finish.';
           btnCancel.disabled = false;
@@ -616,13 +647,11 @@
       }
     });
   </script>
-  <!-- ——— End: Naptio Factory Reset ——— -->
 
   <!-- analytics -->
   <script type="module">
     import { installAnalytics } from '/hungryface/shared/analytics.js';
     window.analytics = installAnalytics({ feature: 'receiver-settings' });
-    // Later: window.analytics.event('settings_opened');
   </script>
 </body>
 </html>
