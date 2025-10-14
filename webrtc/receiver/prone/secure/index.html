@@ -22,15 +22,19 @@
     /* Fullscreen stage so video + canvas scale together */
     #stage {
       position: fixed; inset: 0;
-      width: 100vw; height: 100vh;   /* fallback */
+      width: 100vw; height: 100vh;            /* fallback */
       width: 100dvw; height: 100dvh; /* dynamic viewport */
-      width: 100svw; height: 100svh; /* iOS URL bar safe */
+	    /* EDIT: JS-updated fallback for iOS 15/older and URL bar changes */
+      width: var(--app-vw, 100vw); height: var(--app-vh, 100vh);
+      width: 100svw; height: 100svh;          /* iOS URL bar safe */
+      width: 100dvw; height: 100dvh;          /* EDIT: dynamic viewport preferred */
       z-index: 1; background: #000;
     }
     #stage > video {
       position: absolute; inset: 0;
       width: 100%; height: 100%;
-      object-fit: contain; background: #000;
+      /* EDIT: fill screen; expect cropping vs. contain */
+      object-fit: cover; background: #000;
       z-index: 0; pointer-events: none;
     }
     #stage > canvas {
@@ -326,6 +330,26 @@
   </style>
 </head>
 <body>
+  <!-- EDIT: iOS visible-viewport fallback (no module; early in body) -->
+  <script>
+    (function () {
+      function setVUnits() {
+        const vv = window.visualViewport;
+        const w = Math.round((vv ? vv.width  : window.innerWidth)  || 0);
+        const h = Math.round((vv ? vv.height : window.innerHeight) || 0);
+        document.documentElement.style.setProperty('--app-vw', w + 'px');
+        document.documentElement.style.setProperty('--app-vh', h + 'px');
+      }
+      setVUnits();
+      window.addEventListener('resize', setVUnits, { passive: true });
+      window.addEventListener('orientationchange', setVUnits, { passive: true });
+      if (window.visualViewport) {
+        visualViewport.addEventListener('resize', setVUnits, { passive: true });
+        visualViewport.addEventListener('scroll',  setVUnits, { passive: true });
+      }
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) setVUnits(); });
+    })();
+  </script>
   <!-- ⬇️ Shared sidebar -->
   <script type="module">
     (async () => {
