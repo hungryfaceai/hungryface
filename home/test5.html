@@ -306,7 +306,6 @@
       padding: 0 20px;
       text-align: center;
     }
-    /* Full-width, one slide per "page" */
     .snapshots {
       position: relative;
       display: flex;
@@ -318,7 +317,9 @@
       box-shadow: inset 0 0 0 1px #111, 0 12px 30px rgba(0,0,0,.35);
       align-items: center;
       margin-top: 14px;
+      touch-action: pan-y; /* allow vertical scroll; we handle horizontal drag */
     }
+    .snapshots.is-dragging { scroll-snap-type: none; } /* smoother while dragging */
     .snapshot {
       flex: 0 0 100%;
       scroll-snap-align: center;
@@ -328,25 +329,23 @@
       padding: 20px 10px 26px;
       box-sizing: border-box;
     }
-    /* BIGGER device; no cropping on desktop */
+    /* CARD fits image exactly (image controls size) */
     .device {
-      width: clamp(280px, 54vw, 600px);
-      max-height: min(78vh, 80svh);
-      aspect-ratio: 1170/2532;
+      display: inline-block;
       border-radius: 28px;
       background: #0a0a0a;
       box-shadow: 0 6px 20px rgba(0,0,0,.45), inset 0 0 0 1px #1a1a1a;
-      overflow: hidden;
       position: relative;
+      line-height: 0; /* remove inline-gap */
     }
     .device img {
-      width: 100%; height: 100%;
-      object-fit: cover; /* mobile default fills nicely */
-      display: block; border-radius: 24px;
-    }
-    /* On desktop and larger tablets, don't crop */
-    @media (min-width: 768px){
-      .device img { object-fit: contain; }
+      width: clamp(280px, 54vw, 600px);
+      height: auto;
+      display: block;
+      border-radius: 24px;
+      -webkit-user-drag: none;
+      user-select: none;
+      pointer-events: none; /* ensures drag scroll grabs container */
     }
     .device::before {
       content: ""; position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
@@ -366,7 +365,6 @@
     .snap-dots button[aria-selected="true"] { background: #fff; transform: scale(1.25); }
     .snap-dots button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 
-    /* desktop drag affordance (optional) */
     @media (hover:hover){
       .snapshots{ cursor: grab; }
       .snapshots:active{ cursor: grabbing; }
@@ -453,42 +451,42 @@
         <div class="snapshots" id="snapshots" role="region" aria-roledescription="carousel" aria-label="App screenshots">
           <figure class="snapshot">
             <div class="device">
-              <img src="/hungryface/home/snapshots/prone.jpg" alt="Prone sleep alert detection on iPhone" loading="lazy" decoding="async" />
+              <img src="/hungryface/home/snapshots/prone.jpg" alt="Prone sleep alert detection on iPhone" loading="lazy" decoding="async" draggable="false" />
             </div>
             <figcaption>Prone detection</figcaption>
           </figure>
 
           <figure class="snapshot">
             <div class="device">
-              <img src="/hungryface/home/snapshots/motion.jpg" alt="Motion detection view on iPhone" loading="lazy" decoding="async" />
+              <img src="/hungryface/home/snapshots/motion.jpg" alt="Motion detection view on iPhone" loading="lazy" decoding="async" draggable="false" />
             </div>
             <figcaption>Motion detection</figcaption>
           </figure>
 
           <figure class="snapshot">
             <div class="device">
-              <img src="/hungryface/home/snapshots/audio.jpg" alt="Audio detection alert on iPhone" loading="lazy" decoding="async" />
+              <img src="/hungryface/home/snapshots/audio.jpg" alt="Audio detection alert on iPhone" loading="lazy" decoding="async" draggable="false" />
             </div>
             <figcaption>Audio detection</figcaption>
           </figure>
 
           <figure class="snapshot">
             <div class="device">
-              <img src="/hungryface/home/snapshots/training.jpg" alt="Audio training interface on iPhone" loading="lazy" decoding="async" />
+              <img src="/hungryface/home/snapshots/training.jpg" alt="Audio training interface on iPhone" loading="lazy" decoding="async" draggable="false" />
             </div>
             <figcaption>Audio training</figcaption>
           </figure>
 
           <figure class="snapshot">
             <div class="device">
-              <img src="/hungryface/home/snapshots/dashboard.jpg" alt="Live dashboard on iPhone" loading="lazy" decoding="async" />
+              <img src="/hungryface/home/snapshots/dashboard.jpg" alt="Live dashboard on iPhone" loading="lazy" decoding="async" draggable="false" />
             </div>
             <figcaption>Live dashboard</figcaption>
           </figure>
 
           <figure class="snapshot">
             <div class="device">
-              <img src="/hungryface/home/snapshots/sender.jpg" alt="Camera (Baby) sender view on iPhone" loading="lazy" decoding="async" />
+              <img src="/hungryface/home/snapshots/sender.jpg" alt="Camera (Baby) sender view on iPhone" loading="lazy" decoding="async" draggable="false" />
             </div>
             <figcaption>Camera (Baby)</figcaption>
           </figure>
@@ -697,7 +695,7 @@
   <!-- YouTube modal logic (full-screen attempt + button) -->
   <script>
     (function() {
-      const YT_ID = 'xZeZnS3wTbs'; // your single video
+      const YT_ID = 'HvIA_OH9to8'; // updated video id
       const heroWatch = document.getElementById('hero-watch');
       const dialog = document.getElementById('ytDialog');
       const player = document.getElementById('ytPlayer');
@@ -817,17 +815,23 @@
 
       slides.forEach(s => io.observe(s));
 
-      // Desktop drag-to-scroll
+      // Desktop drag-to-scroll with snap suppression while dragging
       let isDown = false, startX = 0, startLeft = 0, pointerId = null;
       scroller.addEventListener('pointerdown', (e) => {
         isDown = true; pointerId = e.pointerId; startX = e.clientX; startLeft = scroller.scrollLeft;
+        scroller.classList.add('is-dragging');
         scroller.setPointerCapture(pointerId);
       });
       scroller.addEventListener('pointermove', (e) => {
         if (!isDown) return;
+        e.preventDefault(); // avoid text/image selection
         scroller.scrollLeft = startLeft - (e.clientX - startX);
       });
-      const endDrag = () => { if (pointerId != null) scroller.releasePointerCapture(pointerId); isDown = false; pointerId = null; };
+      const endDrag = () => {
+        if (pointerId != null) scroller.releasePointerCapture(pointerId);
+        isDown = false; pointerId = null;
+        scroller.classList.remove('is-dragging');
+      };
       ['pointerup','pointercancel','mouseleave'].forEach(t => scroller.addEventListener(t, endDrag));
 
       // Keyboard nav
