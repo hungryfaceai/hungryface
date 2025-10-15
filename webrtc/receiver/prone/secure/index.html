@@ -1008,45 +1008,55 @@
 	  const y = Math.floor((CH - h) / 2);
 	  return { left: x, top: y, width: w, height: h };
 	}
-	
+
 	function alignCanvasToVideo() {
 	  const stageBox = stage.getBoundingClientRect();
 	  const videoBox = remoteVideo.getBoundingClientRect();
 	
-	  const containerW = Math.round(videoBox.width);
-	  const containerH = Math.round(videoBox.height);
-	  const vidW = remoteVideo.videoWidth || 1;
-	  const vidH = remoteVideo.videoHeight || 1;
+	  const CW = Math.round(videoBox.width);   // container (video CSS box) width
+	  const CH = Math.round(videoBox.height);  // container (video CSS box) height
+	  const W  = remoteVideo.videoWidth  || 1; // source frame
+	  const H  = remoteVideo.videoHeight || 1;
 	
-	  const mode = getComputedStyle(remoteVideo).objectFit || 'contain'; // 'contain' or 'cover'
-	  const fit = fitRect(mode, containerW, containerH, vidW, vidH);
+	  // Put the canvas exactly over the video element’s CSS box
+	  const leftCSS = Math.round(videoBox.left - stageBox.left);
+	  const topCSS  = Math.round(videoBox.top  - stageBox.top);
+	  faceCanvas.style.left   = leftCSS + 'px';
+	  faceCanvas.style.top    = topCSS + 'px';
+	  faceCanvas.style.width  = CW + 'px';
+	  faceCanvas.style.height = CH + 'px';
 	
-	  const stageLeft = Math.round(videoBox.left - stageBox.left);
-	  const stageTop  = Math.round(videoBox.top  - stageBox.top);
-	
-	  // Canvas exactly over the video element’s CSS box
-	  faceCanvas.style.left   = stageLeft + 'px';
-	  faceCanvas.style.top    = stageTop + 'px';
-	  faceCanvas.style.width  = containerW + 'px';
-	  faceCanvas.style.height = containerH + 'px';
-	
+	  // Backing store in device pixels
 	  const dpr = window.devicePixelRatio || 1;
-	  const needW = Math.max(1, Math.round(containerW * dpr));
-	  const needH = Math.max(1, Math.round(containerH * dpr));
+	  const needW = Math.max(1, Math.round(CW * dpr));
+	  const needH = Math.max(1, Math.round(CH * dpr));
 	  if (faceCanvas.width !== needW || faceCanvas.height !== needH) {
-	    faceCanvas.width = needW; faceCanvas.height = needH;
+	    faceCanvas.width = needW;
+	    faceCanvas.height = needH;
 	  }
 	
-	  // Map normalized video coords (0..1) → visible pixels via the object-fit math
+	  // Compute object-fit scale + offsets for current mode
+	  const fitMode = (getComputedStyle(remoteVideo).objectFit || 'contain').trim();
+	  const sContain = Math.min(CW / W, CH / H);
+	  const sCover   = Math.max(CW / W, CH / H);
+	  const s   = (fitMode === 'cover') ? sCover : sContain;
+	  const offX = (CW - W * s) * 0.5;   // crop/letterbox offset INSIDE the video box
+	  const offY = (CH - H * s) * 0.5;
+	
+	  // Map from “what your code draws” (norm*canvas.width/height) to the visible video
+	  // Your code draws at (nx * CW, ny * CH) in canvas units.
+	  // We need that to become (off + nx*W*s, off + ny*H*s).
+	  const sx = (s * W) / CW;
+	  const sy = (s * H) / CH;
 	  faceCtx.setTransform(
-	    (fit.width  / containerW) * dpr, 0,
-	    0, (fit.height / containerH) * dpr,
-	    (fit.left) * dpr, (fit.top) * dpr
+	    sx * dpr, 0,
+	    0, sy * dpr,
+	    offX * dpr, offY * dpr
 	  );
 	
-	  // HUD: 8px inside the visible video area
-	  hud.style.left = (stageLeft + 8 + Math.max(0, fit.left)) + 'px';
-	  hud.style.top  = (stageTop  + 8 + Math.max(0, fit.top))  + 'px';
+	  // HUD lives inside the visible video area
+	  hud.style.left = (leftCSS + 8 + Math.max(0, Math.round(offX))) + 'px';
+	  hud.style.top  = (topCSS  + 8 + Math.max(0, Math.round(offY))) + 'px';
 	}
 
     let settleRAF = 0, settleUntil = 0;
