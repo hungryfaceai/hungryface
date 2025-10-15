@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Baby Monitor – Receiver</title>
+  <link rel="icon" href="data:,">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+
+  <!-- ⬇️ Add shared sidebar stylesheet -->
+  <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
+
+  <style>
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; height: 100%;
+      background: #000; color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+      overflow: hidden;
+    }
+    /* Fullscreen wrapper so video scales */
+    #stage {
+      position: fixed; inset: 0;
+      width: 100vw; height: 100vh;   /* fallback */
+      width: 100dvw; height: 100dvh; /* dynamic viewport */
+      width: 100svw; height: 100svh; /* small viewport (iOS URL bar safe) */
+      z-index: 1; background: #000;
+    }
+    #stage > video {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: contain; background: #000;
+    }
+
+    .btn {
+      padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
+      background: transparent; color: #fff; font-size: 16px; font-weight: 600;
+      cursor: pointer; box-shadow: none;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+    .btn:active { transform: scale(0.99); }
+
+    /* Talk button states */
+    .btn.live {
+      border-color: #ff5252;
+      box-shadow: 0 0 0 2px rgba(255,82,82,0.2), 0 0 12px rgba(255,82,82,0.35);
+    }
+    .btn.ptt {
+      border-color: #ffa252;
+      box-shadow: 0 0 0 2px rgba(255,162,82,0.2), 0 0 12px rgba(255,162,82,0.35);
+    }
+
+    #controls {
+      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 12px; z-index: 6;
+      flex-wrap: wrap; justify-content: center;
+    }
+    #enableAudioBtn, #disableAudioBtn { display: none; }
+
+    .overlay {
+      position: fixed; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      pointer-events: none; z-index: 5;
+    }
+    .status {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
+      text-align: center; white-space: pre-line; max-width: 90vw;
+    }
+    .overlay.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <!-- ⬇️ Inject shared sidebar markup and behavior (kept separate from your code) -->
+  <script type="module">
+    (async () => {
+      try {
+        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
+        const html = await res.text();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html.trim();
+        document.body.prepend(...wrap.childNodes);
+
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      } catch (err) {
+        console.error('[Sidebar] failed to load shared assets:', err);
+      }
+    })();
+  </script>
+
+  <div id="controls">
+    <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
+    <button id="disableAudioBtn" class="btn" type="button">Disable audio</button>
+    <button id="fsBtn" class="btn" type="button">Fullscreen</button>
+    <!-- ⬇️ Hybrid Talk button (short press = toggle, long press = hold) -->
+    <button id="talkBtn" class="btn" type="button" aria-pressed="false" title="Short press = toggle • Long press = hold">Talk</button>
+    <!-- ⬇️ Lullaby button -->
+    <button id="lullabyBtn" class="btn" type="button" title="Play lullaby to baby (sender)">Lullaby</button>
+  </div>
+
+  <div id="stage">
+    <video id="remote" autoplay playsinline></video>
+  </div>
+
+  <div id="overlay" class="overlay">
+    <div id="status" class="status">Idle</div>
+  </div>
+
+  <script type="module">
+    import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+    import { requirePskOrRedirect } from '/hungryface/webrtc/shared/psk/require-psk.js';
+  
+    const qs = new URLSearchParams(location.search);
+    const preferRoom = (qs.get('room') || '').trim();
+  
+    const env = await requirePskOrRedirect({
+      intent: 'viewer',
+      pairRoute: '/hungryface/webrtc/pairpsk/',
+      preferRoom,
+      fallbackRoom: 'Baby',
+    });
+  
+    if (env.redirected) {
+      console.log('[PSK][viewer] no PSK found → redirecting to Pair Devices…');
+    } else {
+      const { room } = env;
+      const undo = installPskShim({ room });
+      console.log('[PSK][viewer] using existing PSK for room:', room);
+      // continue with your existing receiver setup…
+    }
+  </script>
+
+
+  <script type="module">
+    import { ReceiverCore } from '/hungryface/webrtc/receiver/shared/receiver-core.js';
+
+    /* ---------- Constants ---------- */
+    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    const room = new URLSearchParams(location.search).get("room") || "Baby";
+    const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
+
+    /* ---------- DOM ---------- */
+    const stage = document.getElementById('stage');
+    const remoteVideo = document.getElementById('remote');
+
+    const fsBtn = document.getElementById('fsBtn');
+    const enableAudioBtn = document.getElementById('enableAudioBtn');
+    const disableAudioBtn = document.getElementById('disableAudioBtn');
+    const overlay = document.getElementById('overlay');
+    const statusEl = document.getElementById('status');
+    const talkBtn = document.getElementById('talkBtn');
+    const lullabyBtn = document.getElementById('lullabyBtn');
+
+    /* ---------- Status overlay ---------- */
+    let hideStatusTimer = null;
+    function showStatus(msg) {
+      statusEl.textContent = msg;
+      overlay.classList.remove('hidden');
+      if (msg === 'Connected') {
+        if (hideStatusTimer) clearTimeout(hideStatusTimer);
+        hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
+      } else {
+        if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
+        overlay.classList.remove('hidden');
+      }
+    }
+
+    /* ---------- Audio UI ---------- */
+    function updateAudioButtons() {
+      if (remoteVideo.muted) {
+        enableAudioBtn.style.display = 'block';
+        disableAudioBtn.style.display = 'none';
+      } else {
+        enableAudioBtn.style.display = 'none';
+        disableAudioBtn.style.display = 'block';
+      }
+    }
+    enableAudioBtn.style.display = 'block';
+
+    async function tryStartMuted() {
+      try {
+        remoteVideo.muted = true;
+        remoteVideo.volume = 1.0;
+        await remoteVideo.play();
+      } catch {}
+      updateAudioButtons();
+    }
+    enableAudioBtn.addEventListener('click', async (e) => {
+      e?.preventDefault?.();
+      try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
+      updateAudioButtons();
+    });
+    disableAudioBtn.addEventListener('click', (e) => {
+      e?.preventDefault?.();
+      remoteVideo.muted = true;
+      updateAudioButtons();
+    });
+
+    /* ---------- Fullscreen ---------- */
+    fsBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        if (!document.fullscreenElement) {
+          await (stage.requestFullscreen?.call(stage) || document.documentElement.requestFullscreen());
+          fsBtn.textContent = 'Exit fullscreen';
+        } else {
+          await document.exitFullscreen();
+          fsBtn.textContent = 'Fullscreen';
+        }
+      } catch {}
+      beginViewportSettle();
+    });
+    document.addEventListener('fullscreenchange', () => {
+      fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+      beginViewportSetle();
+    });
+
+    remoteVideo.addEventListener('loadedmetadata', beginViewportSettle);
+    remoteVideo.addEventListener('playing', () => { updateAudioButtons(); beginViewportSettle(); });
+    remoteVideo.addEventListener('resize', beginViewportSettle);
+
+    function beginViewportSettle(){ /* no-op for video-only */ }
+    function beginViewportSetle(){ beginViewportSettle(); } // typo guard
+
+    /* ---------- Talkback (receiver -> sender): short-press toggle + long-press hold ---------- */
+    const LONG_PRESS_MS = 450;           // hold ≥ this → push-to-talk
+    let pcRef = null;                    // RTCPeerConnection from ReceiverCore
+    let talkStream = null;               // local mic stream
+    let talkTrack = null;                // audio track from talkStream
+    let talkSender = null;               // RTCRtpSender
+    let talkTx = null;                   // ⬅️ preallocated sendonly transceiver
+
+    // UI state
+    let latched = false;                 // toggle mode ON/OFF
+    let pressed = false;                 // pointer is down
+    let pttSession = false;              // currently in PTT hold
+    let pressTimer = null;
+
+    async function ensureTalkStream() {
+      if (talkStream && talkTrack) return;
+      talkStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        },
+        video: false
+      });
+      talkTrack = talkStream.getAudioTracks()[0];
+    
+      const mic = talkTrack;
+      console.log('[RX] mic track:', { id: mic.id, enabled: mic.enabled, readyState: mic.readyState });
+      mic.addEventListener('mute',   () => console.log('[RX] mic muted'));
+      mic.addEventListener('unmute', () => console.log('[RX] mic unmuted'));
+      mic.addEventListener('ended',  () => console.log('[RX] mic ended'));
+    
+      try { talkTrack.contentHint = 'speech'; } catch {}
+      talkTrack.enabled = false; // we toggle this; attach once
+    }
+
+    function tryAttachOnce() {
+      if (!talkTrack || !talkTx) return;
+      const sender = talkTx.sender || talkSender;
+      if (!sender) return;
+      if (sender.track === talkTrack) return;
+      sender.replaceTrack(talkTrack)
+        .then(() => {
+          talkSender = sender;
+          console.log('[Receiver] talkback track bound to preallocated sender');
+        })
+        .catch(err => console.warn('[Receiver] replaceTrack failed:', err));
+    }
+
+    async function prepareIfNeeded() {
+      await ensureTalkStream();
+      tryAttachOnce();
+    }
+
+    function setTalking(on) {
+      if (!talkTrack) return;
+      console.log('[RX] setTalking:', on ? 'ENABLED' : 'DISABLED');
+      talkTrack.enabled = !!on;
+      console.log('[RX] mic.enabled now =', talkTrack.enabled);
+      try { remoteVideo.volume = on ? 0.25 : 1.0; } catch {}
+      updateTalkUI();
+    }
+
+    function updateTalkUI() {
+      talkBtn.classList.toggle('ptt', pttSession);
+      talkBtn.classList.toggle('live', (pttSession || latched));
+      talkBtn.setAttribute('aria-pressed', (pttSession || latched) ? 'true' : 'false');
+
+      if (pttSession) {
+        talkBtn.textContent = 'Talking… (hold)';
+      } else if (latched) {
+        talkBtn.textContent = 'Talking…';
+      } else {
+        talkBtn.textContent = 'Talk';
+      }
+    }
+
+    // ---- Mutual exclusivity helpers (Talk vs Lullaby) ----
+    async function ensureLullabyStoppedIfNeeded() {
+      if (sendingLullaby) {
+        await stopLullaby();
+      }
+    }
+
+    async function handlePressStart(e) {
+      e.preventDefault();
+      pressed = true;
+      clearTimeout(pressTimer);
+      pressTimer = setTimeout(async () => {
+        if (!pressed) return;
+        // Long press → PTT session
+        await ensureLullabyStoppedIfNeeded();   // ⬅️ stop lullaby before talking
+        pttSession = true;
+        await prepareIfNeeded();
+        setTalking(true);
+      }, LONG_PRESS_MS);
+    }
+
+    function handlePressEnd(e) {
+      e.preventDefault();
+      if (!pressed) return;
+      pressed = false;
+
+      // If timer hasn't fired → short press (toggle)
+      if (!pttSession) {
+        clearTimeout(pressTimer);
+        latched = !latched;
+        if (latched) {
+          (async () => {
+            await ensureLullabyStoppedIfNeeded();   // ⬅️ stop lullaby before talking
+            await prepareIfNeeded();
+            setTalking(true);
+          })().catch(console.warn);
+        } else {
+          setTalking(false);
+        }
+        return;
+      }
+
+      // If we were in PTT session → end hold, restore to latched state
+      setTalking(latched);
+      pttSession = false;
+      updateTalkUI();  
+    }
+
+    // Pointer + touch handlers
+    ['pointerdown','touchstart','mousedown'].forEach(ev =>
+      talkBtn.addEventListener(ev, handlePressStart, { passive: false })
+    );
+    ['pointerup','pointercancel','touchend','touchcancel','mouseup','mouseleave'].forEach(ev =>
+      talkBtn.addEventListener(ev, handlePressEnd, { passive: false })
+    );
+
+    // Keyboard accessibility: Space/Enter supports both toggle and hold
+    talkBtn.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' || e.code === 'Enter') handlePressStart(e);
+    });
+    talkBtn.addEventListener('keyup', (e) => {
+      if (e.code === 'Space' || e.code === 'Enter') handlePressEnd(e);
+    });
+
+    // --------- Lullaby playlist over the same sendonly transceiver (no mic mixing) ---------
+    const LULLABY_DIR = '/hungryface/lullaby/';
+
+    let lullabyEl = null;
+    let lullabyCtx = null;
+    let lullabyDest = null;
+    let lullabyTrack = null;
+    let musicNode = null;
+
+    let sendingLullaby = false;
+    let lullabyList = [];   // discovered absolute URLs
+    let playlist = [];      // shuffled order
+    let trackIdx = 0;
+
+    function shuffle(arr) {
+      const a = arr.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    async function urlExists(url) {
+      try {
+        const h = await fetch(url, { method: 'HEAD', cache: 'no-cache' });
+        if (h.ok) return true;
+      } catch {}
+      try {
+        const g = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' }, cache: 'no-cache' });
+        return g.ok;
+      } catch { return false; }
+    }
+
+    async function discoverLullabies() {
+      if (lullabyList.length) return lullabyList;
+
+      // (A) Try JSON manifest: /hungryface/lullaby/playlist.json
+      try {
+        const res = await fetch(LULLABY_DIR + 'playlist.json', { cache: 'no-cache' });
+        if (res.ok) {
+          const data = await res.json();
+          const items = (Array.isArray(data) ? data : (Array.isArray(data.tracks) ? data.tracks : []))
+            .map(x => ('' + x).trim())
+            .filter(x => x.toLowerCase().endsWith('.mp3'))
+            .map(x => x.startsWith('http') ? x : (LULLABY_DIR + x.replace(/^\/+/, '')));
+          if (items.length) {
+            lullabyList = items;
+            console.log('[RX] discovered lullabies via playlist.json:', lullabyList);
+            return lullabyList;
+          }
+        }
+      } catch {
+        // ignore; fall through to probing
+      }
+
+      // (B) Fallback: numbered files lullaby1.mp3 … lullaby30.mp3
+      const found = [];
+      for (let i = 1; i <= 30; i++) {
+        const url = `${LULLABY_DIR}lullaby${i}.mp3`;
+        /* eslint-disable no-await-in-loop */
+        if (await urlExists(url)) found.push(url);
+      }
+      if (found.length) {
+        lullabyList = found;
+      } else {
+        // (C) last resort: assume at least lullaby1.mp3 exists
+        lullabyList = [`${LULLABY_DIR}lullaby1.mp3`];
+      }
+      console.log('[RX] discovered lullabies via probing:', lullabyList);
+      return lullabyList;
+    }
+
+    function buildPlaylist() {
+      playlist = shuffle(lullabyList);
+      trackIdx = 0;
+      console.log('[RX] reshuffled lullabies:', playlist);
+    }
+
+    async function ensureLullabyGraph() {
+      if (!lullabyCtx) {
+        lullabyCtx = new (window.AudioContext || window.webkitAudioContext)();
+        try { await lullabyCtx.resume(); } catch {}
+      }
+      if (!lullabyDest) lullabyDest = lullabyCtx.createMediaStreamDestination();
+
+      if (!lullabyEl) {
+        lullabyEl = new Audio();
+        lullabyEl.crossOrigin = 'anonymous';
+        lullabyEl.preload = 'auto';
+        lullabyEl.loop = false; // loop handled by playlist order
+        lullabyEl.addEventListener('ended', () => { nextTrack(); });
+      }
+      if (!musicNode) {
+        musicNode = lullabyCtx.createMediaElementSource(lullabyEl);
+        musicNode.connect(lullabyDest);
+      }
+
+      lullabyTrack = lullabyDest.stream.getAudioTracks()[0];
+      try { lullabyTrack.contentHint = 'music'; } catch {}
+    }
+
+    async function playTrackAt(i) {
+      if (!playlist.length) return;
+      trackIdx = ((i % playlist.length) + playlist.length) % playlist.length;
+      const url = playlist[trackIdx];
+      lullabyEl.src = url;
+      lullabyEl.volume = 0.8;
+      try { await lullabyEl.play(); } catch (e) { console.warn('[RX] lullaby play blocked:', e); }
+      console.log('[RX] playing lullaby:', url);
+    }
+
+    async function nextTrack() {
+      if (!playlist.length) return;
+      let next = trackIdx + 1;
+      if (next >= playlist.length) {
+        buildPlaylist(); // reached end — shuffle fresh cycle
+        next = 0;
+      }
+      await playTrackAt(next);
+    }
+
+    async function startLullaby() {
+      // ⬅️ If talking, stop it first (mutual exclusivity)
+      if (pttSession || latched || talkTrack?.enabled) {
+        latched = false; pttSession = false; setTalking(false);
+      }
+
+      if (!talkSender) { console.warn('[RX] no talkSender yet'); return; }
+      await ensureLullabyGraph();
+
+      // Discover tracks (JSON first, else numbered), then shuffle
+      await discoverLullabies();
+      buildPlaylist();
+
+      // Swap the sender’s track: mic → lullaby
+      await talkSender.replaceTrack(lullabyTrack);
+
+      // Start playback of the first track
+      await playTrackAt(0);
+
+      sendingLullaby = true;
+      lullabyBtn.textContent = 'Stop Lullaby';
+      lullabyBtn.classList.add('live'); // red frame like Talking
+      try { remoteVideo.volume = 0.2; } catch {}
+      updateTalkUI(); // reflect that we're not talking now
+      console.log('[RX] lullabies → sender (shuffle loop active)');
+    }
+
+    async function stopLullaby() {
+      if (!sendingLullaby) return;
+      sendingLullaby = false;
+    
+      // Stop music
+      try { lullabyEl?.pause(); } catch {}
+    
+      // Swap back: if we ALREADY have a mic track (user has talked before), use it.
+      // Otherwise do NOT ask for permission here — detach the track (or send silence).
+      if (talkSender) {
+        if (talkTrack) {
+          try { talkTrack.contentHint = 'speech'; } catch {}
+          await talkSender.replaceTrack(talkTrack);
+        } else {
+          try {
+            await talkSender.replaceTrack(null);        // most browsers: OK
+          } catch (e) {
+            // Fallback for older Safari: send a silent track (no permission needed)
+            try {
+              const silentCtx = new (window.AudioContext || window.webkitAudioContext)();
+              const silentTrack = silentCtx.createMediaStreamDestination().stream.getAudioTracks()[0];
+              await talkSender.replaceTrack(silentTrack);
+            } catch {}
+          }
+        }
+      }
+    
+      lullabyBtn.textContent = 'Lullaby';
+      lullabyBtn.classList.remove('live');
+      try { remoteVideo.volume = 1.0; } catch {}
+      console.log('[RX] lullaby stopped → back to', talkTrack ? 'mic' : 'silence (no mic permission yet)');
+    }
+
+
+    lullabyBtn.addEventListener('click', async (e) => {
+      e?.preventDefault?.();
+      if (sendingLullaby) {
+        await stopLullaby();
+      } else {
+        // ⬅️ Stop talking if active, then play lullaby
+        if (pttSession || latched || talkTrack?.enabled) {
+          latched = false; pttSession = false; setTalking(false);
+        }
+        if (!talkSender && talkTx?.sender) talkSender = talkTx.sender;
+        await startLullaby();
+      }
+    });
+
+    // Cleanup on unload
+    window.addEventListener('beforeunload', () => {
+      try { setTalking(false); } catch {}
+      try { talkSender && pcRef && pcRef.removeTrack(talkSender); } catch {}
+      try { talkStream && talkStream.getTracks().forEach(t => t.stop()); } catch {}
+      try { lullabyEl && lullabyEl.pause(); } catch {}
+    });
+
+    /* ---------- Shared core ---------- */
+    const core = new ReceiverCore({
+      wsEndpoint: WS_ENDPOINT,
+      room,
+      onStatus: showStatus,
+      onStream: (stream) => {
+        if (remoteVideo.srcObject !== stream) {
+          remoteVideo.srcObject = stream;
+          tryStartMuted();
+        }
+      },
+      onCreatePC: (pc) => {
+        // Save PC for talkback and attach if mic already prepared
+        pcRef = pc;
+
+        // ⬇️ Pre-allocate a sendonly audio transceiver so talkback doesn't need renegotiation
+        try {
+          talkTx = pc.addTransceiver('audio', { direction: 'sendonly' });
+          talkSender = talkTx.sender;
+        } catch (e) {
+          console.warn('[Receiver] addTransceiver failed:', e);
+        }
+
+        tryAttachOnce();
+
+        // keep SDP shape consistent with other pages: create a 'pose' DC but ignore messages here
+        const ch = pc.createDataChannel('pose');
+        ch.onopen  = () => console.log('[DC][receiver] pose DC open (video-only)');
+        ch.onclose = () => console.log('[DC][receiver] pose DC close (video-only)');
+        ch.onmessage = () => {};
+      },
+      onDataChannel: (e) => {
+        console.log('[DC][receiver] inbound datachannel (leaving open):', e.channel?.label);
+      }
+    });
+
+    core.start().catch(console.warn);
+    window.addEventListener('beforeunload', () => core.close());
+  </script>
+
+<!-- analytics -->
+<script type="module">
+  import { installAnalytics } from '/hungryface/shared/analytics.js';
+  window.analytics = installAnalytics({ feature: 'receiver-video' });
+  // Later: window.analytics.event('video_opened');
+</script>
+  
+</body>
+</html>
