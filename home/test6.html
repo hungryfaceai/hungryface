@@ -11,11 +11,13 @@
     /* Consistent box sizing */
     *, *::before, *::after { box-sizing: border-box; }
 
-    /* ✅ Asymmetric, per-side safe-area padding so iPhone aligns perfectly */
+    /* ✅ Logical, per-side safe-area padding: use the larger of base or inset (don't sum). */
     :root{
       --basePad: 16px;
-      --padL: calc(var(--basePad) + env(safe-area-inset-left));
-      --padR: calc(var(--basePad) + env(safe-area-inset-right));
+      --safeL: env(safe-area-inset-left, 0px);
+      --safeR: env(safe-area-inset-right, 0px);
+      --padStart: max(var(--basePad), var(--safeL)); /* inline-start (LTR: left) */
+      --padEnd:   max(var(--basePad), var(--safeR)); /* inline-end   (LTR: right) */
     }
 
     html, body {
@@ -49,7 +51,8 @@
       grid-template-columns: 1fr auto 1fr;
       align-items: center;
       gap: 12px;
-      padding: 14px var(--padR) 14px var(--padL);
+      padding-block: 14px;
+      padding-inline: var(--padStart) var(--padEnd); /* ⬅️ logical padding */
     }
 
     .nav-left, .nav-center, .nav-right {
@@ -94,10 +97,21 @@
       flex: 1;
       display: grid;
       place-items: center;
-      padding: 24px var(--padR) 24px var(--padL);
+      padding-block: 24px;
+      padding-inline: var(--padStart) var(--padEnd); /* ⬅️ logical padding */
       text-align: center;
     }
+
+    /* ⬅️ On phones, left-align hero so it hugs the safe edge (fixes "too far right"). */
+    @media (max-width: 560px) {
+      main { justify-items: start; text-align: left; }
+    }
+
     .hero { max-width: 900px; margin-inline: auto; }
+    @media (max-width: 560px) {
+      .hero { margin-inline: 0; } /* ⬅️ no auto-centering on iPhone */
+    }
+
     .brand {
       font-size: clamp(2.5rem, 6vw, 5rem);
       line-height: 1.05; letter-spacing: -0.012em; margin: 0 0 12px;
@@ -118,12 +132,16 @@
     @media (max-width:560px){ .badge-free{ font-size:.9rem; } }
 
     .subcopy { font-size: clamp(0.98rem, 2vw, 1.15rem); margin: 0 auto; opacity: 0.9; }
-    .safety-note { font-size: 0.8rem; opacity: 0.8; margin-top: 24px; text-align: center; }
+    @media (max-width:560px){ .subcopy { margin: 0; } }
+
+    .safety-note { font-size: 0.8rem; opacity: 0.8; margin-top: 24px; }
 
     .hero-ctas {
       display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;
       margin-top: 16px;
     }
+    @media (max-width:560px){ .hero-ctas { justify-content: flex-start; } }
+
     .btn { appearance: none; border: 0; border-radius: 9999px; padding: 12px 16px;
       font-size: 16px; cursor: pointer; line-height: 1; font-weight: 600; }
     .btn-primary { background: #fff; color: #000; }
@@ -133,7 +151,8 @@
 
     footer {
       display: flex; justify-content: space-between; align-items: center;
-      padding: 16px var(--padR) 16px var(--padL);
+      padding-block: 16px;
+      padding-inline: var(--padStart) var(--padEnd); /* ⬅️ logical padding */
       font-size: 0.9rem; opacity: 0.85;
     }
 
@@ -212,12 +231,14 @@
     /* ============ Screenshots carousel ============ */
     .shots {
       width: 100%;
-      display: grid; justify-items: center;
+      display: grid;
+      justify-items: center;
       margin-top: 22px;
-      padding: 0 var(--padR) 0 var(--padL);
+      padding-inline: var(--padStart) var(--padEnd); /* ⬅️ logical padding */
     }
     .shots .title { margin: 0 0 10px; font-size: 1rem; opacity: .9; }
     .shots-wrap { width: 100%; max-width: 1100px; margin-inline: auto; }
+    @media (max-width:560px){ .shots-wrap { margin-inline: 0; } } /* ⬅️ no auto-centering on iPhone */
 
     .shots-track {
       position: relative;
@@ -226,6 +247,8 @@
       gap: 0; padding-bottom: 10px;
       -webkit-overflow-scrolling: touch;
       cursor: grab;
+      /* ⬅️ ensure snapping respects the safe edges */
+      scroll-padding-inline: var(--padStart) var(--padEnd);
     }
     .shots-track.dragging { scroll-snap-type: none; cursor: grabbing; }
     .slide {
@@ -234,6 +257,12 @@
       scroll-snap-align: center;
       padding: 8px 0;
     }
+    /* ⬅️ Left-align the cards/images on phones so they don't look pushed right */
+    @media (max-width:560px){
+      .slide { place-items: start; }
+      .device-card { justify-items: start; }
+    }
+
     .device-card {
       display: grid; justify-items: center; gap: 10px;
       background: #0c0c0c; border: 1px solid #1b1b1b; border-radius: 16px;
