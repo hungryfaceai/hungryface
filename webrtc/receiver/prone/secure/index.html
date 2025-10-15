@@ -990,34 +990,49 @@
       return { left:x, top:y, width:w, height:h };
     }
 
-    function alignCanvasToVideo() {
-      const stageBox = stage.getBoundingClientRect();
-      const videoBox = remoteVideo.getBoundingClientRect();
-      const containerW = Math.round(videoBox.width);
-      const containerH = Math.round(videoBox.height);
-      const vidW = remoteVideo.videoWidth || 1;
-      const vidH = remoteVideo.videoHeight || 1;
-
-      const fit = containRect(containerW, containerH, vidW, vidH);
-      const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
-      const topCSS = Math.round((videoBox.top - stageBox.top) + fit.top);
-      hud.style.left = (leftCSS + 8) + 'px';
-      hud.style.top  = (topCSS  + 8) + 'px';
-
-      faceCanvas.style.left = leftCSS + 'px';
-      faceCanvas.style.top = topCSS + 'px';
-      faceCanvas.style.width = fit.width + 'px';
-      faceCanvas.style.height = fit.height + 'px';
-
-      const dpr = window.devicePixelRatio || 1;
-      const needW = Math.max(1, Math.round(fit.width * dpr));
-      const needH = Math.max(1, Math.round(fit.height * dpr));
-      if (faceCanvas.width !== needW || faceCanvas.height !== needH) {
-        faceCanvas.width = needW;
-        faceCanvas.height = needH;
-      }
-      faceCtx.setTransform(1,0,0,1,0,0);
-    }
+	function alignCanvasToVideo() {
+	  const stageBox = stage.getBoundingClientRect();
+	  const videoBox = remoteVideo.getBoundingClientRect();
+	  const containerW = Math.round(videoBox.width);
+	  const containerH = Math.round(videoBox.height);
+	  const vidW = remoteVideo.videoWidth || 1;
+	  const vidH = remoteVideo.videoHeight || 1;
+	
+	  // Place the canvas exactly over the <video> element (full element size)
+	  const leftCSS = Math.round(videoBox.left - stageBox.left);
+	  const topCSS  = Math.round(videoBox.top  - stageBox.top);
+	  hud.style.left = (leftCSS + 8) + 'px';
+	  hud.style.top  = (topCSS  + 8) + 'px';
+	
+	  faceCanvas.style.left   = leftCSS + 'px';
+	  faceCanvas.style.top    = topCSS  + 'px';
+	  faceCanvas.style.width  = containerW + 'px';
+	  faceCanvas.style.height = containerH + 'px';
+	
+	  // Backing store in device pixels
+	  const dpr = window.devicePixelRatio || 1;
+	  const needW = Math.max(1, Math.round(containerW * dpr));
+	  const needH = Math.max(1, Math.round(containerH * dpr));
+	  if (faceCanvas.width !== needW || faceCanvas.height !== needH) {
+	    faceCanvas.width  = needW;
+	    faceCanvas.height = needH;
+	  }
+	
+	  // --- cover math: scale up, then crop center ---
+	  const scale   = Math.max(containerW / vidW, containerH / vidH);
+	  const scaledW = vidW * scale;
+	  const scaledH = vidH * scale;
+	  const cropX   = (scaledW - containerW) / 2;  // pixels cut off on the left
+	  const cropY   = (scaledH - containerH) / 2;  // pixels cut off on the top
+	
+	  // Non-uniform scale so landmarks in [0..1] map to scaled video,
+	  // then translate to cancel the crop.
+	  const sx = scaledW / containerW;
+	  const sy = scaledH / containerH;
+	
+	  // Apply in device pixels
+	  faceCtx.setTransform(dpr * sx, 0, 0, dpr * sy, -dpr * cropX, -dpr * cropY);
+	}
 
     let settleRAF = 0, settleUntil = 0;
     function beginViewportSettle(durationMs = 1200) {
@@ -1202,8 +1217,12 @@
     function drawFaceAndHUD(result, opts){
       const { showLM, showOrient, yawDeg, pitchDeg, rollDeg, relPitchDeg, risk, alert, rotMat } = opts;
       faceCtx.save();
-      faceCtx.clearRect(0,0, faceCanvas.width, faceCanvas.height);
-      const utils = new DrawingUtils(faceCtx);
+	  // Clear in identity space so we wipe the whole buffer
+	  faceCtx.setTransform(1,0,0,1,0,0);
+	  faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
+	  faceCtx.restore();
+	  // Now draw using the cover-mapped transform already set by alignCanvasToVideo()
+	  const utils = new DrawingUtils(faceCtx);
 
       if (showLM && result.faceLandmarks?.length) {
         const lm = result.faceLandmarks[0];
