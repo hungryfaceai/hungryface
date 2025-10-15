@@ -4,8 +4,7 @@
   <meta charset="utf-8" />
   <title>Baby Monitor – Receiver (Face Landmarks + Prone Detection)</title>
   <link rel="icon" href="data:,">
-  <meta name="viewport"
-      content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 
   <!-- Shared sidebar stylesheet -->
   <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
@@ -22,19 +21,14 @@
     /* Fullscreen stage so video + canvas scale together */
     #stage {
       position: fixed; inset: 0;
-      width: 100vw; height: 100vh;            /* fallback */
+      width: 100vw; height: 100vh;   /* fallback */
       width: 100dvw; height: 100dvh; /* dynamic viewport */
-	    /* EDIT: JS-updated fallback for iOS 15/older and URL bar changes */
-      width: var(--app-vw, 100vw); height: var(--app-vh, 100vh);
-      width: 100svw; height: 100svh;          /* iOS URL bar safe */
-      width: 100dvw; height: 100dvh;          /* EDIT: dynamic viewport preferred */
+      width: 100svw; height: 100svh; /* iOS URL bar safe */
       z-index: 1; background: #000;
     }
     #stage > video {
       position: absolute; inset: 0;
-	  object-position: center center;
       width: 100%; height: 100%;
-      /* EDIT: fill screen; expect cropping vs. contain */
       object-fit: contain; background: #000;
       z-index: 0; pointer-events: none;
     }
@@ -44,12 +38,6 @@
       pointer-events: none;
     }
 
-	@media (orientation: landscape) {
-	  #stage > video {
-	    object-fit: cover;
-	    object-position: center;
-	  }
-	}	  
     /* Buttons */
     .btn {
       padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
@@ -337,26 +325,6 @@
   </style>
 </head>
 <body>
-  <!-- EDIT: iOS visible-viewport fallback (no module; early in body) -->
-  <script>
-    (function () {
-      function setVUnits() {
-        const vv = window.visualViewport;
-        const w = Math.round((vv ? vv.width  : window.innerWidth)  || 0);
-        const h = Math.round((vv ? vv.height : window.innerHeight) || 0);
-        document.documentElement.style.setProperty('--app-vw', w + 'px');
-        document.documentElement.style.setProperty('--app-vh', h + 'px');
-      }
-      setVUnits();
-      window.addEventListener('resize', setVUnits, { passive: true });
-      window.addEventListener('orientationchange', setVUnits, { passive: true });
-      if (window.visualViewport) {
-        visualViewport.addEventListener('resize', setVUnits, { passive: true });
-        visualViewport.addEventListener('scroll',  setVUnits, { passive: true });
-      }
-      document.addEventListener('visibilitychange', () => { if (!document.hidden) setVUnits(); });
-    })();
-  </script>
   <!-- ⬇️ Shared sidebar -->
   <script type="module">
     (async () => {
@@ -997,67 +965,34 @@
       return { left:x, top:y, width:w, height:h };
     }
 
-	function fitRect(mode, CW, CH, W, H) {
-	  const safeW = Math.max(1, W), safeH = Math.max(1, H);
-	  const s = (mode === 'cover')
-	    ? Math.max(CW / safeW, CH / safeH)
-	    : Math.min(CW / safeW, CH / safeH);
-	  const w = Math.round(safeW * s);
-	  const h = Math.round(safeH * s);
-	  const x = Math.floor((CW - w) / 2);
-	  const y = Math.floor((CH - h) / 2);
-	  return { left: x, top: y, width: w, height: h };
-	}
+    function alignCanvasToVideo() {
+      const stageBox = stage.getBoundingClientRect();
+      const videoBox = remoteVideo.getBoundingClientRect();
+      const containerW = Math.round(videoBox.width);
+      const containerH = Math.round(videoBox.height);
+      const vidW = remoteVideo.videoWidth || 1;
+      const vidH = remoteVideo.videoHeight || 1;
 
-	function alignCanvasToVideo() {
-	  const stageBox = stage.getBoundingClientRect();
-	  const videoBox = remoteVideo.getBoundingClientRect();
-	
-	  const CW = Math.round(videoBox.width);   // container (video CSS box) width
-	  const CH = Math.round(videoBox.height);  // container (video CSS box) height
-	  const W  = remoteVideo.videoWidth  || 1; // source frame
-	  const H  = remoteVideo.videoHeight || 1;
-	
-	  // Put the canvas exactly over the video element’s CSS box
-	  const leftCSS = Math.round(videoBox.left - stageBox.left);
-	  const topCSS  = Math.round(videoBox.top  - stageBox.top);
-	  faceCanvas.style.left   = leftCSS + 'px';
-	  faceCanvas.style.top    = topCSS + 'px';
-	  faceCanvas.style.width  = CW + 'px';
-	  faceCanvas.style.height = CH + 'px';
-	
-	  // Backing store in device pixels
-	  const dpr = window.devicePixelRatio || 1;
-	  const needW = Math.max(1, Math.round(CW * dpr));
-	  const needH = Math.max(1, Math.round(CH * dpr));
-	  if (faceCanvas.width !== needW || faceCanvas.height !== needH) {
-	    faceCanvas.width = needW;
-	    faceCanvas.height = needH;
-	  }
-	
-	  // Compute object-fit scale + offsets for current mode
-	  const fitMode = (getComputedStyle(remoteVideo).objectFit || 'contain').trim();
-	  const sContain = Math.min(CW / W, CH / H);
-	  const sCover   = Math.max(CW / W, CH / H);
-	  const s   = (fitMode === 'cover') ? sCover : sContain;
-	  const offX = (CW - W * s) * 0.5;   // crop/letterbox offset INSIDE the video box
-	  const offY = (CH - H * s) * 0.5;
-	
-	  // Map from “what your code draws” (norm*canvas.width/height) to the visible video
-	  // Your code draws at (nx * CW, ny * CH) in canvas units.
-	  // We need that to become (off + nx*W*s, off + ny*H*s).
-	  const sx = (s * W) / CW;
-	  const sy = (s * H) / CH;
-	  faceCtx.setTransform(
-	    sx * dpr, 0,
-	    0, sy * dpr,
-	    offX * dpr, offY * dpr
-	  );
-	
-	  // HUD lives inside the visible video area
-	  hud.style.left = (leftCSS + 8 + Math.max(0, Math.round(offX))) + 'px';
-	  hud.style.top  = (topCSS  + 8 + Math.max(0, Math.round(offY))) + 'px';
-	}
+      const fit = containRect(containerW, containerH, vidW, vidH);
+      const leftCSS = Math.round((videoBox.left - stageBox.left) + fit.left);
+      const topCSS = Math.round((videoBox.top - stageBox.top) + fit.top);
+      hud.style.left = (leftCSS + 8) + 'px';
+      hud.style.top  = (topCSS  + 8) + 'px';
+
+      faceCanvas.style.left = leftCSS + 'px';
+      faceCanvas.style.top = topCSS + 'px';
+      faceCanvas.style.width = fit.width + 'px';
+      faceCanvas.style.height = fit.height + 'px';
+
+      const dpr = window.devicePixelRatio || 1;
+      const needW = Math.max(1, Math.round(fit.width * dpr));
+      const needH = Math.max(1, Math.round(fit.height * dpr));
+      if (faceCanvas.width !== needW || faceCanvas.height !== needH) {
+        faceCanvas.width = needW;
+        faceCanvas.height = needH;
+      }
+      faceCtx.setTransform(1,0,0,1,0,0);
+    }
 
     let settleRAF = 0, settleUntil = 0;
     function beginViewportSettle(durationMs = 1200) {
