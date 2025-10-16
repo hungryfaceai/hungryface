@@ -3,152 +3,352 @@
 <head>
   <meta charset="utf-8" />
   <title>Naptio — Demo (video + screenshots)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="description" content="Watch a quick Naptio demo and browse screenshots of Camera and Viewer features." />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Watch a quick Naptio demo and browse screenshots of Camera and Viewer features.">
   <style>
     :root { color-scheme: dark; }
-    *,*::before,*::after { box-sizing: border-box; }
-    :root{
-      --basePad: 16px;
-      --safeL: env(safe-area-inset-left, 0px);
-      --safeR: env(safe-area-inset-right, 0px);
-      --padStart: max(var(--basePad), var(--safeL));
-      --padEnd:   max(var(--basePad), var(--safeR));
+
+    html, body {
+      height: 100%;
+      margin: 0; background: #000; color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
     }
-    html, body { height: 100%; margin: 0; background:#000; color:#fff;
-      font-family:-apple-system,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
-    a { color:#fff; text-decoration:none; opacity:.9; }
-    a:hover, a:focus { text-decoration:underline; opacity:1; }
-    .page { min-height:100dvh; display:flex; flex-direction:column; }
+
+    a { color: #fff; text-decoration: none; opacity: 0.9; }
+    a:hover, a:focus { text-decoration: underline; opacity: 1; }
+
+    /* Don't underline specific links on hover/focus */
+    .no-underline,
+    .no-underline:hover,
+    .no-underline:focus,
+    .btn-pill,
+    .btn-pill:hover,
+    .btn-pill:focus { text-decoration: none; }
+
+    /* Visually hidden but accessible text */
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    }
+
+    /* Utility: hide but keep in DOM for later */
+    .is-hidden { display: none !important; }
+
+    .page { min-height: 100%; display: flex; flex-direction: column; }
 
     header {
-      display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:12px;
-      padding-block:14px; padding-inline:var(--padStart) var(--padEnd);
+      display: grid;
+      grid-template-columns: 1fr auto 1fr; /* left | center | right (wide screens) */
+      align-items: center; padding: 14px 20px; gap: 12px;
+      /* Safe-area insets on the sides */
+      padding-left: max(20px, env(safe-area-inset-left));
+      padding-right: max(20px, env(safe-area-inset-right));
     }
-    .nav-left,.nav-center,.nav-right { display:flex; gap:18px; align-items:center; white-space:nowrap; }
-    .nav-left{justify-self:start} .nav-center{justify-self:center} .nav-right{justify-self:end}
-    .icon{width:24px;height:24px;display:block} .icon-home{width:26px;height:26px}
-    .btn-pill{ color:#fff;background:#000;border:1px solid #fff;border-radius:9999px;font-weight:600;
-      font-size:clamp(.78rem,2.6vw,.95rem); padding:8px 14px; }
 
-    main { flex:1; display:grid; gap:20px; padding-inline:var(--padStart) var(--padEnd); }
-    .hero { max-width: 1000px; margin: 0 auto; width:100%; }
-
-    /* Video at top: responsive, tall on phones */
-    .player-wrap { position:relative; width:100%; border-radius:16px; overflow:hidden; background:#0f0f0f; }
-    .player-16x9 { aspect-ratio: 16 / 9; }
-    @supports not (aspect-ratio: 16 / 9) {
-      .player-16x9::before { content:""; display:block; padding-top:56.25%; }
-      .player-16x9 > iframe, .player-16x9 > .player-fill { position:absolute; inset:0; }
+    .nav-left, .nav-center, .nav-right {
+      display: flex; gap: 18px; align-items: center;
+      font-size: 0.95rem; white-space: nowrap;
     }
-    .player-controls { display:flex; gap:8px; align-items:center; justify-content:flex-end;
-      padding:10px 8px 0 0; }
-    .btn-ghost { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.25);
-      border-radius:10px; padding:8px 12px; font-weight:600; }
+    .nav-left  { justify-self: start; }
+    .nav-center{ justify-self: center; gap: 12px; flex-wrap: nowrap; min-width: 0; }
+    .nav-right { justify-self: end; display:flex; gap:12px; flex-wrap: nowrap; }
 
-    /* Shots: reuse your deck layout */
-    .shots { width:100%; display:grid; justify-items:center; margin-top:8px; }
-    .shots-wrap { width:100%; max-width:1100px; margin-inline:auto; }
-    .shots-track { position:relative; display:flex; overflow-x:auto; overscroll-behavior-x:contain;
-      scroll-snap-type:x mandatory; scroll-behavior:smooth; gap:0; padding-bottom:10px;
-      -webkit-overflow-scrolling:touch; cursor:grab; scroll-padding-inline:var(--padStart) var(--padEnd); }
-    .shots-track.dragging { scroll-snap-type:none; cursor:grabbing; }
-    .slide { flex:0 0 100%; display:grid; place-items:center; scroll-snap-align:center; padding:8px 0; }
-    @media (max-width:560px){ .slide{ place-items:start } }
-    .device-card { display:grid; justify-items:center; gap:10px; background:#0c0c0c; border:1px solid #1b1b1b;
-      border-radius:16px; padding:14px; box-shadow:0 8px 24px rgba(0,0,0,.35); }
-    .device-card img { width:clamp(280px,54vw,600px); height:auto; border-radius:10px; -webkit-user-drag:none; user-select:none; pointer-events:none; }
-    .caption { font-size:.9rem; color:#d7d7d7; opacity:.9; }
-    .shots-dots { margin-top:10px; display:flex; gap:8px; justify-content:center; }
-    .shots-dots[role="tablist"] button { width:9px; height:9px; border-radius:50%; background:#3a3a3a; border:0; }
-    .shots-dots [aria-selected="true"] { background:#fff; }
-    .shots-foot { margin-top:8px; font-size:.78rem; color:#bbb; opacity:.95; text-align:center; }
-    .med-note { margin-top:10px; font-size:.8rem; opacity:.8; text-align:center; }
+    /* Home icon link (uses shared sprite) */
+    .home-link { display: inline-flex; align-items: center; line-height: 1; }
+    .home-link:hover, .home-link:focus { text-decoration: none; }
 
-    footer { display:flex; justify-content:space-between; align-items:center; padding:16px var(--padStart);
-      padding-inline:var(--padStart) var(--padEnd); font-size:.9rem; opacity:.85; }
-    .footer-note{ font-size:.75rem; color:#fff; opacity:.85; text-decoration:none; }
+    /* Reusable icon sizing */
+    .icon { width: var(--icon-size, 24px); height: var(--icon-size, 24px); display: block; }
+    .icon-home { --icon-size: 26px; } /* Bigger Home icon */
+
+    /* Center buttons (modes) */
+    .nav-center a {
+      color: #000; background: #fff; border-radius: 9999px; border: 1px solid #fff;
+      opacity: 1; font-weight: 600; line-height: 1; display: inline-block; white-space: nowrap;
+      font-size: clamp(0.78rem, 2.6vw, 0.95rem);
+      padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
+    }
+    .nav-center a:hover { background: #eaeaea; }
+    .nav-center a:hover, .nav-center a:focus { text-decoration: none; }
+    .nav-center a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+    /* Right-side pill buttons (pair/share) */
+    .btn-pill {
+      color: #fff; background: #000; border: 1px solid #fff; border-radius: 9999px;
+      font-weight: 600; line-height: 1; display: inline-block; opacity: 1; white-space: nowrap;
+      font-size: clamp(0.78rem, 2.6vw, 0.95rem);
+      padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
+      transition: background-color .15s ease, box-shadow .15s ease;
+    }
+    .btn-pill:hover, .btn-pill:focus {
+      background: #141414;
+      border-color: #e6e6e6;
+      box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16);
+    }
+    .btn-pill:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+    main {
+      flex: 1;
+      display: grid;
+      gap: 22px;
+      padding: 24px;
+      text-align: center;
+    }
+
+    /* --- Demo video at top (responsive 16:9) --- */
+    .player-wrap {
+      width: min(1100px, 100%);
+      margin: 0 auto;
+      border-radius: 16px; overflow: hidden;
+      background: #0f0f0f; border: 1px solid #1b1b1b;
+      padding: 12px;
+    }
+    .player {
+      position: relative; width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #000; border-radius: 8px; overflow: hidden;
+    }
+    .player iframe { width: 100%; height: 100%; border: 0; display: block; }
+
+    /* ============ Screenshots carousel ============ */
+    .shots {
+      width: 100%; display: grid; justify-items: center;
+      padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right));
+    }
+    .shots-wrap { width: 100%; max-width: 1100px; margin-inline: auto; }
+    .shots-track {
+      position: relative; display: flex; overflow-x: auto; overscroll-behavior-x: contain;
+      scroll-snap-type: x mandatory; scroll-behavior: smooth; gap: 0; padding-bottom: 10px;
+      -webkit-overflow-scrolling: touch; cursor: grab;
+      scroll-padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right));
+    }
+    .shots-track.dragging { scroll-snap-type: none; cursor: grabbing; }
+    .slide {
+      flex: 0 0 100%;
+      display: grid; place-items: center;
+      scroll-snap-align: center;
+      padding: 8px 0;
+    }
     @media (max-width:560px){
-      header{ grid-template-columns:1fr 1fr; row-gap:10px; }
-      .nav-left{grid-column:1} .nav-right{grid-column:2; justify-self:end; gap:10px}
-      .nav-center{grid-column:1/-1; justify-content:center}
+      .slide { place-items: start; }
     }
-    @media (prefers-reduced-motion: reduce){ html:focus-within{ scroll-behavior:auto } *{ animation:none !important; transition:none !important } }
+    .device-card {
+      display: grid; justify-items: center; gap: 10px;
+      background: #0c0c0c; border: 1px solid #1b1b1b; border-radius: 16px;
+      padding: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    }
+    .device-card img {
+      width: clamp(280px, 54vw, 600px);
+      height: auto; display: block;
+      border-radius: 10px;
+      -webkit-user-drag: none; user-select: none; pointer-events: none;
+    }
+    .caption { font-size: .9rem; color:#d7d7d7; opacity: .9; }
+
+    .shots-dots {
+      margin-top: 10px; display: flex; gap: 8px; justify-content: center; align-items: center;
+    }
+    .shots-dots[role="tablist"] button[role="tab"] {
+      width: 9px; height: 9px; border-radius: 50%;
+      background:#3a3a3a; border:0; padding:0; cursor:pointer;
+    }
+    .shots-dots [aria-selected="true"] { background:#fff; }
+
+    .shots-foot { margin-top: 8px; font-size: 0.78rem; color:#bbb; opacity:.95; text-align:center; }
+    .med-note  { margin-top: 10px; font-size: 0.8rem; opacity: 0.8; text-align:center; }
+
+    /* Footer */
+    footer {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 16px 20px; font-size: 0.9rem; opacity: 0.85;
+      /* Safe-area insets on the sides */
+      padding-left: max(16px, env(safe-area-inset-left));
+      padding-right: max(16px, env(safe-area-inset-right));
+    }
+    .footer-note {
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      font-size: 0.75rem; color: #fff; opacity: 0.85; text-decoration: none;
+    }
+    .footer-note:hover, .footer-note:focus { text-decoration: none; opacity: 0.85; }
+
+    /* ---------------- Small screens: 2-row header ---------------- */
+    @media (max-width: 560px) {
+      header {
+        grid-template-columns: 1fr 1fr;
+        grid-auto-rows: minmax(0, auto);
+        row-gap: 10px;
+      }
+      .nav-left  { grid-column: 1; grid-row: 1; justify-self: start; }
+      .nav-right { grid-column: 2; grid-row: 1; justify-self: end; gap: 10px; }
+      .nav-center{
+        grid-column: 1 / -1; grid-row: 2; justify-content: center; gap: 12px; width: 100%;
+      }
+      .nav-center a {
+        font-size: clamp(0.92rem, 3.8vw, 1.12rem);
+        padding: clamp(8px, 2.2vw, 12px) clamp(14px, 4.5vw, 18px);
+      }
+      .btn-pill {
+        font-size: clamp(0.78rem, 3.0vw, 0.92rem);
+        padding: clamp(6px, 1.8vw, 8px) clamp(10px, 3.0vw, 14px);
+      }
+    }
+
+    /* Invite modal */
+    .invite-modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+      display: none; align-items: center; justify-content: center; z-index: 1000;
+    }
+    .invite-modal.visible { display: flex; }
+    .invite-card {
+      position: relative; width: min(92vw, 480px);
+      background: #0b0b0b; border: 1px solid #141414; border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4); padding: 18px 18px 20px;
+    }
+    .invite-header { display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
+    .invite-title { font-size: 1rem; font-weight: 700; margin: 0; }
+    .invite-close {
+      position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; border-radius: 9999px;
+      display: grid; place-items: center; background: #0d0d0d; border: 1px solid #2a2a2a;
+      color: #fff; font-size: 22px; line-height: 1; cursor: pointer;
+    }
+    .invite-close:hover { background: #111; }
+    .invite-close:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+    .invite-body { display: grid; gap: 12px; justify-items: center; }
+    .invite-qr { width: 220px; height: 220px; background: #111; border: 1px solid #222; border-radius: 12px; display: grid; place-items: center; overflow: hidden; }
+    .invite-url { width: 100%; background: #090909; border: 1px solid #1a1a1a; color: #fff; border-radius: 10px; padding: 10px 12px; box-sizing: border-box; font-size: 0.9rem; }
+    .invite-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+    .invite-actions .btn-pill { border-color: #444; }
+
+    /* Toast */
+    .invite-toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(12px);
+      background: #111; border: 1px solid #222; color: #fff; padding: 10px 14px; border-radius: 9999px;
+      opacity: 0; transition: opacity .2s ease, transform .2s ease; z-index: 1100; font-size: 0.9rem;
+    }
+    .invite-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    @media (max-width: 900px) and (orientation: landscape) {
+      header {
+        grid-template-columns: 1fr 1fr;
+        grid-auto-rows: minmax(0, auto);
+        row-gap: 10px;
+      }
+      .nav-left  { grid-column: 1; grid-row: 1; justify-self: start; }
+      .nav-right { grid-column: 2; grid-row: 1; justify-self: end; gap: 10px; }
+      .nav-center{ grid-column: 1 / -1; grid-row: 2; justify-content: center; gap: 12px; width: 100%; }
+      .nav-center a {
+        font-size: clamp(0.92rem, 2.2vw, 1.12rem);
+        padding: clamp(8px, 1.8vw, 12px) clamp(14px, 3.2vw, 18px);
+      }
+      .btn-pill {
+        font-size: clamp(0.78rem, 1.8vw, 0.92rem);
+        padding: clamp(6px, 1.2vw, 8px) clamp(10px, 2.2vw, 14px);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce){
+      .btn-pill, .invite-toast { transition: none !important; animation: none !important; }
+      html:focus-within { scroll-behavior: auto; }
+    }
   </style>
 </head>
 <body>
   <div class="page">
     <header>
       <nav class="nav-left" aria-label="Primary">
-        <a href="https://hungryfaceai.github.io/hungryface/home" class="home-link" aria-label="Home">
-          <svg class="icon icon-home"><use href="/hungryface/assets/icons.svg#icon-cradle-ai"></use></svg>
+        <a href="https://hungryfaceai.github.io/hungryface/home" class="home-link" aria-label="Home" title="Home">
+          <svg class="icon icon-home" aria-hidden="true" focusable="false">
+            <use href="/hungryface/assets/icons.svg#icon-cradle-ai" xlink:href="/hungryface/assets/icons.svg#icon-cradle-ai"></use>
+          </svg>
           <span class="sr-only">Home</span>
         </a>
         <a class="no-underline" href="https://hungryfaceai.github.io/hungryface/about">About</a>
       </nav>
+
       <nav class="nav-center" aria-label="Modes">
-        <a href="https://hungryfaceai.github.io/hungryface/webrtc/sender/secure/">Camera (Baby)</a>
-        <a href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/shared/alerts/dashboard/">Viewer (Parent)</a>
+        <a href="https://hungryfaceai.github.io/hungryface/webrtc/sender/secure/" aria-label="Camera (Baby) — sender">
+          Camera (Baby)
+        </a>
+        <a href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/shared/alerts/dashboard/" aria-label="Viewer (Parent) — receiver">
+          Viewer (Parent)
+        </a>
       </nav>
+
       <nav class="nav-right" aria-label="Quick actions">
-        <a class="btn-pill" href="https://hungryfaceai.github.io/hungryface/webrtc/pairpsk/">Pair devices</a>
+        <a class="is-hidden" href="https://hungryfaceai.github.io/hungryface/login">Log in</a>
+        <a class="is-hidden" href="https://hungryfaceai.github.io/hungryface/signup">Sign up</a>
+
+        <!-- Always visible Pair + Share on demo page -->
+        <a class="btn-pill" href="https://hungryfaceai.github.io/hungryface/webrtc/pairpsk/" aria-label="Pair devices — quick pairing">
+          Pair devices
+        </a>
+        <a id="menu-invite" class="btn-pill" href="#" aria-label="Share Naptio — show QR and share options" role="button">
+          Share
+        </a>
       </nav>
     </header>
 
     <main>
-      <section class="hero" aria-labelledby="demo-title">
-        <h1 id="demo-title" class="brand" style="margin:0 0 8px;font-size:clamp(1.8rem,4.8vw,3rem);letter-spacing:-.012em;">Naptio demo</h1>
-        <p class="tagline" style="margin:0 0 12px;opacity:.95">Watch a quick video, then swipe through the UI.</p>
-
-        <div class="player-wrap player-16x9" id="playerWrap" aria-live="polite">
-          <div class="player-controls">
-            <button class="btn-ghost" type="button" id="goFS" aria-label="Enter full screen">⤢ Full screen</button>
+      <!-- Embedded demo video -->
+      <section aria-label="Demo video">
+        <div class="player-wrap">
+          <div class="player">
+            <iframe
+              src="https://www.youtube-nocookie.com/embed/HvIA_OH9to8?rel=0&modestbranding=1&playsinline=1"
+              title="Naptio demo video"
+              allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+              allowfullscreen
+            ></iframe>
           </div>
-          <iframe
-            id="yt"
-            src="https://www.youtube-nocookie.com/embed/HvIA_OH9to8?autoplay=1&mute=1&rel=0&modestbranding=1&playsinline=1"
-            title="Naptio demo video"
-            allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-            allowfullscreen
-            style="width:100%;height:100%;border:0;display:block"
-          ></iframe>
         </div>
       </section>
 
-      <!-- Screenshots (same images as home) -->
+      <!-- Screenshots carousel -->
       <section class="shots" aria-label="App screenshots">
         <div class="shots-wrap">
-          <div id="shotsTrack" class="shots-track" tabindex="0" role="region" aria-roledescription="carousel" aria-label="Feature screenshots" aria-live="polite">
+          <div id="shotsTrack"
+               class="shots-track"
+               tabindex="0"
+               role="region"
+               aria-roledescription="carousel"
+               aria-label="Feature screenshots"
+               aria-live="polite">
+            <!-- Slide 1 -->
             <div class="slide" id="slide-1" role="group" aria-label="Slide 1 of 6: Prone detection">
               <figure class="device-card">
                 <img src="/hungryface/home/snapshots/prone.jpg" alt="Prone detection screen" loading="lazy" draggable="false">
                 <figcaption class="caption">Prone detection</figcaption>
               </figure>
             </div>
+            <!-- Slide 2 -->
             <div class="slide" id="slide-2" role="group" aria-label="Slide 2 of 6: Motion detection">
               <figure class="device-card">
                 <img src="/hungryface/home/snapshots/motion.jpg" alt="Motion detection screen" loading="lazy" draggable="false">
                 <figcaption class="caption">Motion detection</figcaption>
               </figure>
             </div>
+            <!-- Slide 3 -->
             <div class="slide" id="slide-3" role="group" aria-label="Slide 3 of 6: Audio alerts">
               <figure class="device-card">
                 <img src="/hungryface/home/snapshots/audio.jpg" alt="Audio alerts screen" loading="lazy" draggable="false">
                 <figcaption class="caption">Audio alerts</figcaption>
               </figure>
             </div>
+            <!-- Slide 4 -->
             <div class="slide" id="slide-4" role="group" aria-label="Slide 4 of 6: Audio training">
               <figure class="device-card">
                 <img src="/hungryface/home/snapshots/training.jpg" alt="Audio training screen" loading="lazy" draggable="false">
                 <figcaption class="caption">Audio training</figcaption>
               </figure>
             </div>
+            <!-- Slide 5 -->
             <div class="slide" id="slide-5" role="group" aria-label="Slide 5 of 6: Live dashboard">
               <figure class="device-card">
                 <img src="/hungryface/home/snapshots/dashboard.jpg" alt="Live dashboard screen" loading="lazy" draggable="false">
                 <figcaption class="caption">Live dashboard</figcaption>
               </figure>
             </div>
+            <!-- Slide 6 (sender.jpg) -->
             <div class="slide" id="slide-6" role="group" aria-label="Slide 6 of 6: Camera sender">
               <figure class="device-card">
                 <img src="/hungryface/home/snapshots/sender.jpg" alt="Camera sender screen" loading="lazy" draggable="false">
@@ -156,49 +356,169 @@
               </figure>
             </div>
           </div>
+
+          <!-- Dots pagination -->
           <div id="shotsDots" class="shots-dots" role="tablist" aria-label="Choose screenshot"></div>
+
+          <!-- Footnotes under images -->
           <p class="shots-foot">Images and video are AI-generated for privacy and do not feature a real baby.</p>
-          <p class="med-note">Naptio provides informational insights and is not a medical device. Always supervise your baby.</p>
+          <p class="med-note">
+            Naptio provides informational insights and is not a medical device. Always supervise your baby.
+          </p>
         </div>
       </section>
     </main>
 
     <footer role="contentinfo">
-      <span class="footer-note">© 2025 Naptio</span>
-      <a class="footer-note" href="https://hungryfaceai.github.io/hungryface/legal">Legal</a>
+      <span class="footer-left footer-note">© 2025 Naptio</span>
+      <a class="footer-right footer-note" href="https://hungryfaceai.github.io/hungryface/legal">Legal</a>
     </footer>
   </div>
 
+  <!-- Invite Modal (with focus trap) -->
+  <div id="invite-modal" class="invite-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="invite-title">
+    <div class="invite-card">
+      <button type="button" class="invite-close" aria-label="Close">&times;</button>
+      <div class="invite-header">
+        <h2 id="invite-title" class="invite-title">Share Naptio</h2>
+      </div>
+      <div class="invite-body">
+        <div class="invite-qr">
+          <img id="invite-qr" src="" alt="QR code" width="220" height="220" loading="lazy" />
+        </div>
+        <input id="invite-url" class="invite-url" type="text" readonly value="" aria-label="Shareable link" />
+        <div class="invite-actions">
+          <a id="invite-open" class="btn-pill" href="#" target="_blank" rel="noopener">Open</a>
+          <button id="invite-copy" class="btn-pill" type="button">Copy</button>
+          <button id="invite-share" class="btn-pill" type="button">Share</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Share / Invite logic -->
   <script>
-  // Fullscreen helper
-  (function(){
-    const wrap = document.getElementById('playerWrap');
-    document.getElementById('goFS')?.addEventListener('click', async () => {
+  (() => {
+    const trigger = document.getElementById('menu-invite');
+    const modal = document.getElementById('invite-modal');
+    const qrImg = document.getElementById('invite-qr');
+    const urlInput = document.getElementById('invite-url');
+    const btnCopy = document.getElementById('invite-copy');
+    const btnOpen = document.getElementById('invite-open');
+    const btnShare = document.getElementById('invite-share');
+    const btnClose = modal?.querySelector('.invite-close');
+    if (!trigger || !modal) return;
+
+    const INVITE_URL = window.HF_INVITE_URL || location.href;
+    const QR_ENDPOINT = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&format=svg&data=';
+
+    function toast(msg) {
+      const el = document.createElement('div');
+      el.className = 'invite-toast';
+      el.textContent = msg;
+      document.body.appendChild(el);
+      requestAnimationFrame(() => el.classList.add('show'));
+      setTimeout(() => {
+        el.classList.remove('show');
+        el.addEventListener('transitionend', () => el.remove(), { once: true });
+      }, 1400);
+    }
+
+    let lastFocused = null, trapHandler = null;
+    function enableTrap() {
+      const focusables = modal.querySelectorAll('a[href], button, input, textarea, select, [tabindex]:not([tabindex="-1"])');
+      const list = Array.from(focusables).filter(el => !el.hasAttribute('disabled') && el.tabIndex !== -1);
+      if (!list.length) return;
+      const first = list[0], last = list[list.length - 1];
+      trapHandler = (e) => {
+        if (e.key !== 'Tab') return;
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      };
+      modal.addEventListener('keydown', trapHandler);
+      (btnClose || first || modal).focus();
+    }
+    function disableTrap() { if (trapHandler) { modal.removeEventListener('keydown', trapHandler); trapHandler = null; } }
+
+    function openInvite() {
+      lastFocused = document.activeElement;
+      const url = INVITE_URL;
+      if (qrImg) { qrImg.src = QR_ENDPOINT + encodeURIComponent(url); qrImg.alt = 'QR code for ' + url; }
+      if (urlInput) {
+        urlInput.value = url;
+        setTimeout(() => {
+          try { urlInput.focus({ preventScroll: true }); urlInput.setSelectionRange(url.length, url.length); } catch {}
+          urlInput.scrollLeft = urlInput.scrollWidth;
+        }, 0);
+      }
+      if (btnOpen) btnOpen.href = url;
+      modal.classList.add('visible');
+      modal.setAttribute('aria-hidden', 'false');
+      document.addEventListener('keydown', onEsc, { once: true });
+      enableTrap();
+    }
+    function closeInvite() {
+      modal.classList.remove('visible');
+      modal.setAttribute('aria-hidden', 'true');
+      disableTrap();
+      lastFocused?.focus?.();
+    }
+    function onEsc(e) { if (e.key === 'Escape') closeInvite(); }
+
+    trigger.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openInvite(); });
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeInvite(); });
+    btnClose?.addEventListener('click', closeInvite);
+
+    btnCopy?.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(urlInput.value); toast('Link copied'); }
+      catch { urlInput?.select?.(); toast('Copy failed — select and copy'); }
+    });
+
+    if (!(typeof navigator !== 'undefined' && 'share' in navigator)) btnShare.style.display = 'none';
+    btnShare?.addEventListener('click', async () => {
+      const url = urlInput?.value || INVITE_URL;
       try {
-        if (document.fullscreenElement) return;
-        if (wrap.requestFullscreen) await wrap.requestFullscreen();
-        else if (wrap.webkitRequestFullscreen) await wrap.webkitRequestFullscreen();
-      } catch {}
+        if (navigator.canShare && !navigator.canShare({ url })) throw new Error('URL sharing not supported');
+        await navigator.share({ title: 'Naptio', text: 'Share Naptio with a friend:', url });
+      } catch (err) {
+        if (err && err.name === 'AbortError') return;
+        try { await navigator.clipboard.writeText(url); toast('Link copied'); }
+        catch { urlInput?.select?.(); toast('Share failed — link selected to copy'); }
+      }
     });
   })();
   </script>
 
-  <!-- Reuse your carousel logic from home verbatim -->
+  <!-- Set aria-current on About when that page is active -->
+  <script>
+    (() => {
+      const aboutLink = document.querySelector('nav.nav-left a[href*="/about"]');
+      if (!aboutLink) return;
+      try {
+        const loc = location.pathname.replace(/\/+$/, '');
+        if (loc.endsWith('/about')) aboutLink.setAttribute('aria-current','page');
+      } catch {}
+    })();
+  </script>
+
+  <!-- Screenshots carousel logic -->
   <script>
     (function(){
       const track = document.getElementById('shotsTrack');
       const dotsWrap = document.getElementById('shotsDots');
       if (!track || !dotsWrap) return;
+
       const slides = Array.from(track.querySelectorAll('.slide'));
       const total = slides.length;
       let current = 0;
 
+      // Build dots
       slides.forEach((slide, i) => {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.setAttribute('role','tab');
+        btn.setAttribute('role', 'tab');
         btn.setAttribute('aria-controls', slide.id);
-        btn.setAttribute('aria-selected', i===0?'true':'false');
+        btn.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
         btn.title = `Go to slide ${i+1}`;
         btn.addEventListener('click', () => goTo(i));
         dotsWrap.appendChild(btn);
@@ -206,46 +526,114 @@
 
       function updateAria(index){
         const tabs = dotsWrap.querySelectorAll('[role="tab"]');
-        tabs.forEach((t,i)=>t.setAttribute('aria-selected', i===index?'true':'false'));
-        slides.forEach((s,i)=>s.setAttribute('aria-label', `Slide ${i+1} of ${total}: ${s.querySelector('.caption')?.textContent||''}`));
+        tabs.forEach((t, i) => t.setAttribute('aria-selected', i === index ? 'true' : 'false'));
+        slides.forEach((s, i) => {
+          s.setAttribute('aria-label',
+            `Slide ${i+1} of ${total}: ${s.querySelector('.caption')?.textContent || ''}`);
+        });
       }
+
       function goTo(index){
-        index = Math.max(0, Math.min(total-1, index));
+        index = Math.max(0, Math.min(total - 1, index));
         current = index;
         const target = slides[index];
-        track.scrollTo({ left: target.offsetLeft, behavior:'smooth' });
+        if (!target) return;
+        track.scrollTo({ left: target.offsetLeft, behavior: 'smooth' });
         updateAria(index);
       }
+
+      // Keep dots in sync with scroll
       let raf = null;
       track.addEventListener('scroll', () => {
         if (raf) return;
         raf = requestAnimationFrame(() => {
           const w = track.clientWidth || 1;
           const idx = Math.round(track.scrollLeft / w);
-          if (idx !== current){ current = Math.max(0, Math.min(total-1, idx)); updateAria(current); }
+          if (idx !== current) {
+            current = Math.max(0, Math.min(total - 1, idx));
+            updateAria(current);
+          }
           raf = null;
         });
       });
+
+      // Keyboard nav
+      track.addEventListener('keydown', (e) => {
+        if (['ArrowLeft','ArrowRight','PageUp','PageDown'].includes(e.key)) e.preventDefault();
+        if (e.key === 'ArrowRight' || e.key === 'PageDown') goTo(current + 1);
+        if (e.key === 'ArrowLeft'  || e.key === 'PageUp')   goTo(current - 1);
+      });
+
+      // Laptop wheel = advance slides (higher sensitivity)
       track.addEventListener('wheel', (e) => {
         const intent = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
         if (Math.abs(intent) < 8) return;
         e.preventDefault();
-        goTo(intent > 0 ? current + 1 : current - 1);
-      }, { passive:false });
+        if (intent > 0) goTo(current + 1);
+        else goTo(current - 1);
+      }, { passive: false });
 
-      let dragging=false,startX=0,startScroll=0,pointerId=null;
-      track.addEventListener('pointerdown',(e)=>{ if(e.pointerType!=='mouse'||e.button!==0) return;
-        pointerId=e.pointerId; track.setPointerCapture(pointerId); dragging=true; startX=e.clientX; startScroll=track.scrollLeft; track.classList.add('dragging'); });
-      track.addEventListener('pointermove',(e)=>{ if(!dragging) return; e.preventDefault(); track.scrollLeft = startScroll - (e.clientX - startX); });
-      function endDrag(){ if(!dragging) return; dragging=false; track.classList.remove('dragging'); pointerId&&track.releasePointerCapture(pointerId); pointerId=null;
-        const dx = track.scrollLeft - startScroll; const w = track.clientWidth || 1; const SWIPE=40;
-        if (dx > SWIPE) return goTo(current+1); if (dx < -SWIPE) return goTo(current-1); goTo(Math.round(track.scrollLeft / w)); }
-      track.addEventListener('pointerup', endDrag); track.addEventListener('pointercancel', endDrag); track.addEventListener('pointerleave', endDrag);
+      // Desktop drag with flick
+      let dragging = false, startX = 0, startScroll = 0, pointerId = null;
+
+      track.addEventListener('pointerdown', (e) => {
+        if (e.pointerType !== 'mouse' || e.button !== 0) return;
+        pointerId = e.pointerId;
+        track.setPointerCapture(pointerId);
+        dragging = true;
+        startX = e.clientX;
+        startScroll = track.scrollLeft;
+        track.classList.add('dragging');
+      });
+
+      track.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        e.preventDefault();
+        const dx = e.clientX - startX;
+        track.scrollLeft = startScroll - dx;
+      });
+
+      function endDrag(){
+        if (!dragging) return;
+        dragging = false;
+        track.classList.remove('dragging');
+        pointerId && track.releasePointerCapture(pointerId);
+        pointerId = null;
+
+        const dxTotal = track.scrollLeft - startScroll;
+        const w = track.clientWidth || 1;
+        const SWIPE_PX = 40;
+
+        if (dxTotal > SWIPE_PX) { goTo(current + 1); return; }
+        if (dxTotal < -SWIPE_PX) { goTo(current - 1); return; }
+
+        const idx = Math.round(track.scrollLeft / w);
+        goTo(idx);
+      }
+
+      track.addEventListener('pointerup', endDrag);
+      track.addEventListener('pointercancel', endDrag);
+      track.addEventListener('pointerleave', endDrag);
+
+      // Prevent native image drag
       track.querySelectorAll('img').forEach(img => img.addEventListener('dragstart', e => e.preventDefault()));
+
+      // Init ARIA
       updateAria(0);
     })();
   </script>
 
+  <!-- Optional: pair gate to steer non-paired users -->
+  <script type="module">
+    import { installLandingPairGate } from '/hungryface/home/landing-pair-gate.js';
+    installLandingPairGate({
+      cameraSelector: 'nav.nav-center a[href*="/webrtc/sender/secure/"]',
+      viewerSelector: 'nav.nav-center a[href*="/webrtc/receiver/shared/alerts/dashboard/"]',
+      pairRoute: '/hungryface/webrtc/pairpsk/',
+    });
+  </script>
+
+  <!-- analytics -->
   <script type="module">
     import { installAnalytics } from '/hungryface/shared/analytics.js';
     window.analytics = installAnalytics({ feature: 'naptio-demo' });
