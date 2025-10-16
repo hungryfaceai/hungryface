@@ -302,27 +302,59 @@
       if (e.key === 'ArrowLeft'  || e.key === 'PageUp'){   e.preventDefault(); goTo((active-1+TOTAL)%TOTAL, { behavior:'auto' }); }
     }, { passive:false });
 
-    // Desktop drag
-    let dragging=false, startX=0, startScroll=0, pointerId=null;
-    track.addEventListener('pointerdown', (e)=>{
-      if (e.pointerType !== 'mouse' || e.button !== 0) return;
-      pointerId = e.pointerId; track.setPointerCapture(pointerId);
-      dragging=true; startX=e.clientX; startScroll=track.scrollLeft;
-      track.classList.add('dragging');
+    // --- Desktop drag: light threshold + flick to advance quickly
+    let dragging = false, startX = 0, startScroll = 0, pointerId = null, dragStart = 0;
+    const SWIPE_PX  = 50;  // pixels to commit a slide (low effort)
+    const FLICK_MS  = 220; // if drag ends quicker than this...
+    const FLICK_PX  = 12;  // ...and moved at least this much, treat as flick
+
+    track.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'mouse' || e.button !== 0) return; // desktop only
+      pointerId = e.pointerId;
+      track.setPointerCapture(pointerId);
+      dragging   = true;
+      startX     = e.clientX;
+      startScroll= track.scrollLeft;
+      dragStart  = performance.now();
+      track.classList.add('dragging'); // disables snap while dragging
     });
-    track.addEventListener('pointermove', (e)=>{
-      if (!dragging) return; e.preventDefault();
+
+    track.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      e.preventDefault();
       const dx = e.clientX - startX;
-      track.scrollLeft = startScroll - dx;
+      track.scrollLeft = startScroll - dx; // follow cursor
     });
+
     function endDrag(){
       if (!dragging) return;
-      dragging=false; track.classList.remove('dragging');
-      pointerId && track.releasePointerCapture(pointerId); pointerId=null;
-      const idxAll = indexFromCenter();
-      const real = normalizedIndex(slides[idxAll]);
-      goTo(real, { behavior:'smooth' });
+      dragging = false;
+      track.classList.remove('dragging');
+      if (pointerId) track.releasePointerCapture(pointerId);
+      pointerId = null;
+
+      const elapsed = performance.now() - dragStart;
+      const movedPX = startScroll - track.scrollLeft; // <0 = left swipe (next), >0 = right swipe (prev)
+      const isFlick = elapsed < FLICK_MS && Math.abs(movedPX) > FLICK_PX;
+      const passed  = Math.abs(movedPX) > SWIPE_PX;
+
+      if (isFlick || passed) {
+        if (movedPX < 0) {
+          // left swipe → next image
+          goTo((active + 1) % TOTAL, { behavior: 'smooth' });
+        } else {
+          // right swipe → previous image
+          goTo((active - 1 + TOTAL) % TOTAL, { behavior: 'smooth' });
+        }
+        return;
+      }
+
+      // Otherwise, snap to the closest slide
+      const idxInAll = indexFromCenter();
+      const real = normalizedIndex(slides[idxInAll]);
+      goTo(real, { behavior: 'smooth' });
     }
+
     track.addEventListener('pointerup', endDrag);
     track.addEventListener('pointercancel', endDrag);
     track.addEventListener('pointerleave', endDrag);
