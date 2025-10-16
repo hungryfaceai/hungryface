@@ -63,7 +63,7 @@
       scroll-padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right));
     }
     .shots-track.dragging{ scroll-snap-type:none; cursor:grabbing }
-    /* NEW: temporarily disable smooth/snap during wrap jump (iOS flicker fix) */
+    /* Temporarily disable smooth/snap during wrap jump (iOS flicker fix) */
     .shots-track.no-smooth{ scroll-behavior: auto; }
     .shots-track.no-snap{ scroll-snap-type: none; }
 
@@ -77,7 +77,7 @@
     .device-card{ display:grid; justify-items:center; gap:10px; background:#0c0c0c; border:1px solid #1b1b1b;
       border-radius:16px; padding:14px; box-shadow:0 8px 24px rgba(0,0,0,.35) }
     .device-card img{ width:clamp(280px, 54vw, 600px); height:auto; display:block; border-radius:10px;
-      -webkit-user-drag:none; user-select:none; pointer-events:none }
+      -webkit-user-drag:none; user-select:none; /* allow clicks for full-screen */ pointer-events:auto; }
     .caption{ font-size:.9rem; color:#d7d7d7; opacity:.9 }
 
     .shots-dots{ margin-top:10px; display:flex; gap:8px; justify-content:center; align-items:center }
@@ -127,6 +127,23 @@
     .invite-toast{ position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(12px); background:#111; border:1px solid #222; color:#fff;
       padding:10px 14px; border-radius:9999px; opacity:0; transition:opacity .2s, transform .2s; z-index:1100; font-size:.9rem }
     .invite-toast.show{ opacity:1; transform:translateX(-50%) translateY(0) }
+
+    /* ===== Fullscreen image modal (mobile) ===== */
+    .img-modal{ position:fixed; inset:0; background:#000; display:none; align-items:center; justify-content:center; z-index:1100; }
+    .img-modal.visible{ display:flex; }
+    .img-wrap{ width:100svw; height:100svh; display:grid; place-items:center;
+      padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+               max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); }
+    .img-modal img{ max-width:100%; max-height:100%; display:block; border-radius:10px; }
+    .img-close{
+      position:fixed; top:max(10px, env(safe-area-inset-top)); right:max(10px, env(safe-area-inset-right));
+      border:1px solid #2a2a2a; background:#0d0d0d; color:#fff; border-radius:9999px; padding:8px 12px; cursor:pointer; font-size:16px;
+    }
+    .img-caption{
+      position:fixed; bottom:max(12px, env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%);
+      font-size:.9rem; color:#d7d7d7; opacity:.9; text-align:center; padding:4px 10px; background:rgba(0,0,0,.35); border-radius:9999px;
+    }
+    .no-scroll{ overflow:hidden; }
   </style>
 </head>
 <body>
@@ -155,49 +172,49 @@
     </header>
 
     <main>
-      <!-- Screenshots (moved ABOVE the video) -->
+      <!-- Screenshots (above the video) -->
       <section class="shots" aria-label="App screenshots">
         <div class="shots-wrap">
           <div id="shotsTrack" class="shots-track" tabindex="0" role="region" aria-roledescription="carousel" aria-label="Feature screenshots" aria-live="polite">
             <!-- 1 Camera sender (FIRST / default) -->
             <div class="slide" role="group">
               <figure class="device-card">
-                <img src="/hungryface/home/snapshots/sender.jpg" alt="Camera sender screen" loading="lazy" draggable="false">
+                <img src="/hungryface/home/snapshots/sender.jpg" alt="Camera sender screen" loading="lazy">
                 <figcaption class="caption">Camera (sender)</figcaption>
               </figure>
             </div>
             <!-- 2 Prone -->
             <div class="slide" role="group">
               <figure class="device-card">
-                <img src="/hungryface/home/snapshots/prone.jpg" alt="Prone detection screen" loading="lazy" draggable="false">
+                <img src="/hungryface/home/snapshots/prone.jpg" alt="Prone detection screen" loading="lazy">
                 <figcaption class="caption">Prone detection</figcaption>
               </figure>
             </div>
             <!-- 3 Motion -->
             <div class="slide" role="group">
               <figure class="device-card">
-                <img src="/hungryface/home/snapshots/motion.jpg" alt="Motion detection screen" loading="lazy" draggable="false">
+                <img src="/hungryface/home/snapshots/motion.jpg" alt="Motion detection screen" loading="lazy">
                 <figcaption class="caption">Motion detection</figcaption>
               </figure>
             </div>
             <!-- 4 Audio alerts -->
             <div class="slide" role="group">
               <figure class="device-card">
-                <img src="/hungryface/home/snapshots/audio.jpg" alt="Audio alerts screen" loading="lazy" draggable="false">
+                <img src="/hungryface/home/snapshots/audio.jpg" alt="Audio alerts screen" loading="lazy">
                 <figcaption class="caption">Audio alerts</figcaption>
               </figure>
             </div>
             <!-- 5 Training -->
             <div class="slide" role="group">
               <figure class="device-card">
-                <img src="/hungryface/home/snapshots/training.jpg" alt="Audio training screen" loading="lazy" draggable="false">
+                <img src="/hungryface/home/snapshots/training.jpg" alt="Audio training screen" loading="lazy">
                 <figcaption class="caption">Audio training</figcaption>
               </figure>
             </div>
             <!-- 6 Dashboard -->
             <div class="slide" role="group">
               <figure class="device-card">
-                <img src="/hungryface/home/snapshots/dashboard.jpg" alt="Live dashboard screen" loading="lazy" draggable="false">
+                <img src="/hungryface/home/snapshots/dashboard.jpg" alt="Live dashboard screen" loading="lazy">
                 <figcaption class="caption">Live dashboard</figcaption>
               </figure>
             </div>
@@ -210,13 +227,10 @@
           <div class="shots-scrubber">
             <input id="shotsScrubber" type="range" min="0" step="1" value="0" aria-label="Jump between screenshots">
           </div>
-
-          <p class="shots-foot">Images and video are AI-generated for privacy and do not feature a real baby.</p>
-          <p class="med-note">Naptio provides informational insights and is not a medical device. Always supervise your baby.</p>
         </div>
       </section>
 
-      <!-- Demo video (now below the carousel) -->
+      <!-- Demo video (below the carousel) -->
       <section aria-label="Demo video">
         <div class="player-wrap">
           <div class="player" id="playerWrap">
@@ -229,6 +243,12 @@
             ></iframe>
           </div>
         </div>
+      </section>
+
+      <!-- Notices at the very bottom -->
+      <section aria-label="Privacy notice">
+        <p class="shots-foot">Images and video are AI-generated for privacy and do not feature a real baby.</p>
+        <p class="med-note">Naptio provides informational insights and is not a medical device. Always supervise your baby.</p>
       </section>
     </main>
 
@@ -253,6 +273,15 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Fullscreen image modal -->
+  <div id="img-modal" class="img-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Screenshot preview">
+    <button class="img-close" type="button" aria-label="Close">✕</button>
+    <div class="img-wrap">
+      <img id="img-modal-img" alt="">
+    </div>
+    <div id="img-modal-cap" class="img-caption"></div>
   </div>
 
   <!-- Fullscreen on video tap -->
@@ -333,7 +362,7 @@
   })();
   </script>
 
-  <!-- Carousel: desktop-fit, multi-skip with scrubber, easy drag, infinite wrap with iOS-friendly jump -->
+  <!-- Carousel: desktop arrows = one-press, mobile image full-screen, infinite wrap with iOS-friendly jump -->
   <script>
   (function(){
     const track = document.getElementById('shotsTrack');
@@ -374,6 +403,7 @@
 
     // Track current active index for reliable arrow key navigation
     let active = 0;
+    let programmatic = false;
 
     // --- Helpers
     function setActive(idx){
@@ -383,8 +413,11 @@
     }
 
     function centerOn(el, behavior='smooth'){
+      programmatic = true;
       const left = el.offsetLeft - (track.clientWidth - el.clientWidth)/2;
       track.scrollTo({ left, behavior });
+      // unset after a tick so scroll handler can ignore this one
+      requestAnimationFrame(() => { programmatic = false; });
     }
 
     function indexFromCenter(){
@@ -416,10 +449,8 @@
     function jumpToOriginal(real){
       const dest = getOriginalByIndex(real);
       if (!dest) return;
-      // temporarily disable scroll-snap and smooth behavior
       track.classList.add('no-snap','no-smooth');
       centerOn(dest, 'auto');
-      // allow layout to settle, then restore
       requestAnimationFrame(() => {
         track.classList.remove('no-snap');
         requestAnimationFrame(() => track.classList.remove('no-smooth'));
@@ -430,7 +461,6 @@
     // --- Initialize scrubber (desktop-only CSS shows it)
     if (scrub){
       scrub.min = '0'; scrub.max = String(TOTAL-1); scrub.step = '1'; scrub.value = '0';
-      // Fit width to current image width
       const fitScrubber = () => {
         const img = track.querySelector('.slide:not([data-clone]) img');
         if (!img) return;
@@ -442,10 +472,9 @@
       fitScrubber();
 
       // Dragging the scrubber can skip multiple images at once
-      scrub.addEventListener('input', (e) => {
-        const i = parseInt(e.currentTarget.value, 10) || 0;
-        goTo(i, { behavior: 'auto' });
-      });
+      const onScrub = (val) => { goTo(parseInt(val,10)||0, { behavior: 'auto' }); };
+      scrub.addEventListener('input', (e) => onScrub(e.currentTarget.value));
+      scrub.addEventListener('change', (e) => onScrub(e.currentTarget.value));
     }
 
     // --- Keep dots/scrub synced with scroll; handle wrap jumps
@@ -467,14 +496,22 @@
       });
     });
 
-    // --- Keyboard navigation (uses active index; instant jump so no extra presses)
-    track.addEventListener('keydown', (e) => {
-      if (['ArrowLeft','ArrowRight','PageUp','PageDown'].includes(e.key)) e.preventDefault();
-      if (e.key === 'ArrowRight' || e.key === 'PageDown') goTo((active + 1) % TOTAL, { behavior: 'auto' });
-      if (e.key === 'ArrowLeft'  || e.key === 'PageUp')   goTo((active - 1 + TOTAL) % TOTAL, { behavior: 'auto' });
-    });
+    // --- Keyboard navigation: one press = one slide (works even if track isn't focused)
+    let carouselOnScreen = true;
+    const observer = new IntersectionObserver((entries) => {
+      carouselOnScreen = entries.some(e => e.isIntersecting);
+    }, { threshold: 0.35 });
+    observer.observe(track);
 
-    // --- Mouse wheel: free scroll (can skip multiple) — no handler needed.
+    document.addEventListener('keydown', (e) => {
+      if (!carouselOnScreen) return;
+      if (e.defaultPrevented) return;
+      if (e.key === 'ArrowRight' || e.key === 'PageDown'){
+        e.preventDefault(); goTo((active + 1) % TOTAL, { behavior: 'auto' });
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp'){
+        e.preventDefault(); goTo((active - 1 + TOTAL) % TOTAL, { behavior: 'auto' });
+      }
+    }, { passive:false });
 
     // --- Desktop drag with low threshold; snap to closest (may skip multiple)
     let dragging=false, startX=0, startScroll=0, pointerId=null;
@@ -495,7 +532,6 @@
       if (!dragging) return;
       dragging = false; track.classList.remove('dragging');
       pointerId && track.releasePointerCapture(pointerId); pointerId = null;
-      // Snap to closest centered slide (can be multiple away)
       const idxInAll = indexFromCenter();
       const real = normalizedIndex(slides[idxInAll]);
       goTo(real, { behavior: 'smooth' });
@@ -506,6 +542,45 @@
 
     // Prevent native image drag ghost
     track.querySelectorAll('img').forEach(img => img.addEventListener('dragstart', e => e.preventDefault()));
+
+    // --- Mobile: tap image -> full screen viewer
+    const imgModal = document.getElementById('img-modal');
+    const modalImg = document.getElementById('img-modal-img');
+    const modalCap = document.getElementById('img-modal-cap');
+    const btnClose = imgModal.querySelector('.img-close');
+    const smallScreen = () => window.matchMedia('(max-width: 560px)').matches;
+
+    function openImg(src, caption){
+      if (!smallScreen()) return; // only on iPhone/small screens
+      modalImg.src = src;
+      modalImg.alt = caption || '';
+      modalCap.textContent = caption || '';
+      imgModal.classList.add('visible');
+      imgModal.setAttribute('aria-hidden', 'false');
+      document.documentElement.classList.add('no-scroll');
+    }
+    function closeImg(){
+      imgModal.classList.remove('visible');
+      imgModal.setAttribute('aria-hidden', 'true');
+      document.documentElement.classList.remove('no-scroll');
+      // Give Safari a tick before clearing src to avoid flash
+      setTimeout(() => { modalImg.src = ''; }, 50);
+    }
+
+    track.addEventListener('click', (e) => {
+      const img = e.target && e.target.tagName === 'IMG' ? e.target : null;
+      if (!img) return;
+      const caption = img.closest('.device-card')?.querySelector('.caption')?.textContent || img.alt || '';
+      openImg(img.currentSrc || img.src, caption);
+    });
+
+    imgModal.addEventListener('click', (e) => {
+      if (e.target === imgModal) closeImg();
+    });
+    btnClose.addEventListener('click', closeImg);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && imgModal.classList.contains('visible')) closeImg();
+    });
 
     // --- Initial position: first original (Camera sender)
     window.addEventListener('load', () => {
