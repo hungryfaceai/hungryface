@@ -77,7 +77,7 @@
     .device-card{ display:grid; justify-items:center; gap:10px; background:#0c0c0c; border:1px solid #1b1b1b;
       border-radius:16px; padding:14px; box-shadow:0 8px 24px rgba(0,0,0,.35) }
     .device-card img{ width:clamp(280px, 54vw, 600px); height:auto; display:block; border-radius:10px;
-      -webkit-user-drag:none; user-select:none; /* allow clicks for full-screen */ pointer-events:auto; }
+      -webkit-user-drag:none; user-select:none; pointer-events:auto; }
     .caption{ font-size:.9rem; color:#d7d7d7; opacity:.9 }
 
     .shots-dots{ margin-top:10px; display:flex; gap:8px; justify-content:center; align-items:center }
@@ -121,23 +121,33 @@
     .invite-close:hover{ background:#111 } .invite-close:focus-visible{ outline:2px solid #fff; outline-offset:2px }
     .invite-body{ display:grid; gap:12px; justify-items:center }
     .invite-qr{ width:220px; height:220px; background:#111; border:1px solid #222; border-radius:12px; display:grid; place-items:center; overflow:hidden }
-    .invite-url{ width:100%; background:#090909; border:1px solid #1a1a1a; color:#fff; border-radius:10px; padding:10px 12px; box-sizing:border-box; font-size:.9rem }
+    .invite-url{ width:100%; background:#090909; border:1px solid #1b1b1a; color:#fff; border-radius:10px; padding:10px 12px; box-sizing:border-box; font-size:.9rem }
     .invite-actions{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center }
     .invite-actions .btn-pill{ border-color:#444 }
     .invite-toast{ position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(12px); background:#111; border:1px solid #222; color:#fff;
       padding:10px 14px; border-radius:9999px; opacity:0; transition:opacity .2s, transform .2s; z-index:1100; font-size:.9rem }
     .invite-toast.show{ opacity:1; transform:translateX(-50%) translateY(0) }
 
-    /* ===== Fullscreen image modal (mobile) ===== */
+    /* ===== Fullscreen image modal (mobile/touch) ===== */
     .img-modal{ position:fixed; inset:0; background:#000; display:none; align-items:center; justify-content:center; z-index:1100; }
     .img-modal.visible{ display:flex; }
-    .img-wrap{ width:100svw; height:100svh; display:grid; place-items:center;
+    .img-wrap{
+      width:100svw; height:100svh; display:grid; place-items:center;
       padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
-               max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); }
-    .img-modal img{ max-width:100%; max-height:100%; display:block; border-radius:10px; }
+               max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    }
+    /* Fullscreen mode: truly edge-to-edge */
+    .img-modal.fullscreen .img-wrap{ padding:0; }
+    .img-modal img{
+      max-width:100%; max-height:100%; display:block; border-radius:10px; object-fit:contain;
+    }
+    .img-modal.fullscreen img{
+      width:100svw; height:100svh; max-width:none; max-height:none; border-radius:0;
+    }
     .img-close{
       position:fixed; top:max(10px, env(safe-area-inset-top)); right:max(10px, env(safe-area-inset-right));
       border:1px solid #2a2a2a; background:#0d0d0d; color:#fff; border-radius:9999px; padding:8px 12px; cursor:pointer; font-size:16px;
+      z-index:1200;
     }
     .img-caption{
       position:fixed; bottom:max(12px, env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%);
@@ -362,7 +372,7 @@
   })();
   </script>
 
-  <!-- Carousel: desktop arrows = one-press, mobile image full-screen, infinite wrap with iOS-friendly jump -->
+  <!-- Carousel + mobile full-screen viewer with swipe -->
   <script>
   (function(){
     const track = document.getElementById('shotsTrack');
@@ -401,9 +411,8 @@
     }
     const dots = Array.from(dotsWrap.querySelectorAll('[role="tab"]'));
 
-    // Track current active index for reliable arrow key navigation
+    // Track current active index for reliable nav
     let active = 0;
-    let programmatic = false;
 
     // --- Helpers
     function setActive(idx){
@@ -413,11 +422,8 @@
     }
 
     function centerOn(el, behavior='smooth'){
-      programmatic = true;
       const left = el.offsetLeft - (track.clientWidth - el.clientWidth)/2;
       track.scrollTo({ left, behavior });
-      // unset after a tick so scroll handler can ignore this one
-      requestAnimationFrame(() => { programmatic = false; });
     }
 
     function indexFromCenter(){
@@ -471,7 +477,6 @@
       new ResizeObserver(fitScrubber).observe(track);
       fitScrubber();
 
-      // Dragging the scrubber can skip multiple images at once
       const onScrub = (val) => { goTo(parseInt(val,10)||0, { behavior: 'auto' }); };
       scrub.addEventListener('input', (e) => onScrub(e.currentTarget.value));
       scrub.addEventListener('change', (e) => onScrub(e.currentTarget.value));
@@ -487,16 +492,12 @@
         if (!el) { raf = null; return; }
         const real = normalizedIndex(el);
         setActive(real);
-
-        // If centered on a CLONE at head/tail, teleport to matching ORIGINAL instantly (no flicker)
-        if (el.dataset.clone === '1'){
-          jumpToOriginal(real);
-        }
+        if (el.dataset.clone === '1'){ jumpToOriginal(real); }
         raf = null;
       });
     });
 
-    // --- Keyboard navigation: one press = one slide (works even if track isn't focused)
+    // --- Keyboard navigation: one press = one slide (when carousel visible)
     let carouselOnScreen = true;
     const observer = new IntersectionObserver((entries) => {
       carouselOnScreen = entries.some(e => e.isIntersecting);
@@ -526,7 +527,7 @@
     track.addEventListener('pointermove', (e) => {
       if (!dragging) return; e.preventDefault();
       const dx = e.clientX - startX;
-      track.scrollLeft = startScroll - dx; // direct follow
+      track.scrollLeft = startScroll - dx;
     });
     function endDrag(){
       if (!dragging) return;
@@ -543,44 +544,115 @@
     // Prevent native image drag ghost
     track.querySelectorAll('img').forEach(img => img.addEventListener('dragstart', e => e.preventDefault()));
 
-    // --- Mobile: tap image -> full screen viewer
+    // ===== Mobile full-screen viewer =====
     const imgModal = document.getElementById('img-modal');
     const modalImg = document.getElementById('img-modal-img');
     const modalCap = document.getElementById('img-modal-cap');
     const btnClose = imgModal.querySelector('.img-close');
-    const smallScreen = () => window.matchMedia('(max-width: 560px)').matches;
 
-    function openImg(src, caption){
-      if (!smallScreen()) return; // only on iPhone/small screens
-      modalImg.src = src;
-      modalImg.alt = caption || '';
-      modalCap.textContent = caption || '';
+    const isTouchDevice = () => {
+      try { return window.matchMedia('(pointer: coarse)').matches; } catch { return 'ontouchstart' in window; }
+    };
+    const requestFS = async (el) => {
+      try {
+        if (document.fullscreenElement) return true;
+        if (el.requestFullscreen) { await el.requestFullscreen(); return true; }
+        if (el.webkitRequestFullscreen) { el.webkitRequestFullscreen(); return true; }
+      } catch {}
+      return false;
+    };
+    const exitFS = async () => {
+      try {
+        if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
+      } catch {}
+    };
+
+    function showInModal(index){
+      const slide = originals[index];
+      const img = slide?.querySelector('img');
+      const cap = slide?.querySelector('.caption')?.textContent || img?.alt || '';
+      if (!img) return;
+      modalImg.src = img.currentSrc || img.src;
+      modalImg.alt = cap;
+      modalCap.textContent = cap;
+      active = index;
+      setActive(index);
+    }
+
+    async function openImgAt(index){
+      if (!isTouchDevice()) return; // only for mobile/touch
+      showInModal(index);
       imgModal.classList.add('visible');
       imgModal.setAttribute('aria-hidden', 'false');
       document.documentElement.classList.add('no-scroll');
+      const ok = await requestFS(imgModal);
+      if (ok) {
+        imgModal.classList.add('fullscreen');
+      } else {
+        // fallback still uses 100svh/svw; ensure FS class for edge-to-edge tweaks
+        imgModal.classList.add('fullscreen');
+      }
     }
-    function closeImg(){
-      imgModal.classList.remove('visible');
+
+    async function closeImg(){
+      imgModal.classList.remove('visible','fullscreen');
       imgModal.setAttribute('aria-hidden', 'true');
       document.documentElement.classList.remove('no-scroll');
-      // Give Safari a tick before clearing src to avoid flash
+      await exitFS();
+      // Clear source shortly after to avoid flash on iOS
       setTimeout(() => { modalImg.src = ''; }, 50);
+      // Sync underlying carousel to the image user last saw in modal
+      goTo(active, { behavior: 'auto' });
     }
 
+    // Open on tap (mobile)
     track.addEventListener('click', (e) => {
-      const img = e.target && e.target.tagName === 'IMG' ? e.target : null;
-      if (!img) return;
-      const caption = img.closest('.device-card')?.querySelector('.caption')?.textContent || img.alt || '';
-      openImg(img.currentSrc || img.src, caption);
+      const el = e.target;
+      if (!(el && el.tagName === 'IMG')) return;
+      // find real index even if user tapped a clone
+      const slide = el.closest('.slide');
+      const real = Number(slide?.dataset.index ?? 0) % TOTAL;
+      openImgAt(((real % TOTAL)+TOTAL)%TOTAL);
     });
 
+    // Close interactions
     imgModal.addEventListener('click', (e) => {
       if (e.target === imgModal) closeImg();
     });
     btnClose.addEventListener('click', closeImg);
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && imgModal.classList.contains('visible')) closeImg();
+      if (!imgModal.classList.contains('visible')) return;
+      if (e.key === 'Escape') closeImg();
+      if (e.key === 'ArrowRight') showInModal((active + 1) % TOTAL);
+      if (e.key === 'ArrowLeft')  showInModal((active - 1 + TOTAL) % TOTAL);
     });
+
+    // Swipe to navigate / swipe down to close (mobile)
+    let tStartX=0, tStartY=0, tActive=false;
+    const SWIPE_X = 40, SWIPE_Y = 80;
+
+    imgModal.addEventListener('touchstart', (e) => {
+      if (!imgModal.classList.contains('visible')) return;
+      const t = e.touches[0];
+      tStartX = t.clientX; tStartY = t.clientY; tActive = true;
+    }, { passive:true });
+
+    imgModal.addEventListener('touchmove', (e) => {
+      // We don't preventDefault to keep it smooth; just detect on end
+    }, { passive:true });
+
+    imgModal.addEventListener('touchend', (e) => {
+      if (!tActive) return; tActive = false;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - tStartX;
+      const dy = t.clientY - tStartY;
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > SWIPE_X){
+        if (dx < 0) showInModal((active + 1) % TOTAL);
+        else        showInModal((active - 1 + TOTAL) % TOTAL);
+      } else if (Math.abs(dy) > SWIPE_Y){
+        closeImg();
+      }
+    }, { passive:true });
 
     // --- Initial position: first original (Camera sender)
     window.addEventListener('load', () => {
