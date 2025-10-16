@@ -63,6 +63,9 @@
       scroll-padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right));
     }
     .shots-track.dragging{ scroll-snap-type:none; cursor:grabbing }
+    /* NEW: temporarily disable smooth/snap during wrap jump (iOS flicker fix) */
+    .shots-track.no-smooth{ scroll-behavior: auto; }
+    .shots-track.no-snap{ scroll-snap-type: none; }
 
     /* Mobile: each slide fills viewport width (centered) */
     .slide{ flex:0 0 100%; display:grid; place-items:center; scroll-snap-align:center; padding:8px 0; }
@@ -152,26 +155,11 @@
     </header>
 
     <main>
-      <!-- Demo video (tap toggles fullscreen on iOS) -->
-      <section aria-label="Demo video">
-        <div class="player-wrap">
-          <div class="player" id="playerWrap">
-            <iframe
-              id="yt"
-              src="https://www.youtube-nocookie.com/embed/HvIA_OH9to8?rel=0&modestbranding=1&playsinline=1"
-              title="Naptio demo video"
-              allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-              allowfullscreen
-            ></iframe>
-          </div>
-        </div>
-      </section>
-
-      <!-- Screenshots -->
+      <!-- Screenshots (moved ABOVE the video) -->
       <section class="shots" aria-label="App screenshots">
         <div class="shots-wrap">
           <div id="shotsTrack" class="shots-track" tabindex="0" role="region" aria-roledescription="carousel" aria-label="Feature screenshots" aria-live="polite">
-            <!-- 1 Camera sender (FIRST) -->
+            <!-- 1 Camera sender (FIRST / default) -->
             <div class="slide" role="group">
               <figure class="device-card">
                 <img src="/hungryface/home/snapshots/sender.jpg" alt="Camera sender screen" loading="lazy" draggable="false">
@@ -225,6 +213,21 @@
 
           <p class="shots-foot">Images and video are AI-generated for privacy and do not feature a real baby.</p>
           <p class="med-note">Naptio provides informational insights and is not a medical device. Always supervise your baby.</p>
+        </div>
+      </section>
+
+      <!-- Demo video (now below the carousel) -->
+      <section aria-label="Demo video">
+        <div class="player-wrap">
+          <div class="player" id="playerWrap">
+            <iframe
+              id="yt"
+              src="https://www.youtube-nocookie.com/embed/HvIA_OH9to8?rel=0&modestbranding=1&playsinline=1"
+              title="Naptio demo video"
+              allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+              allowfullscreen
+            ></iframe>
+          </div>
         </div>
       </section>
     </main>
@@ -330,7 +333,7 @@
   })();
   </script>
 
-  <!-- Carousel: desktop-fit, multi-skip with scrubber, easy drag, infinite wrap -->
+  <!-- Carousel: desktop-fit, multi-skip with scrubber, easy drag, infinite wrap with iOS-friendly jump -->
   <script>
   (function(){
     const track = document.getElementById('shotsTrack');
@@ -369,8 +372,12 @@
     }
     const dots = Array.from(dotsWrap.querySelectorAll('[role="tab"]'));
 
+    // Track current active index for reliable arrow key navigation
+    let active = 0;
+
     // --- Helpers
     function setActive(idx){
+      active = idx;
       dots.forEach((d,i)=>d.setAttribute('aria-selected', i===idx?'true':'false'));
       if (scrub) scrub.value = String(idx);
     }
@@ -398,10 +405,26 @@
     }
 
     function goTo(realIndex, opts={}){
-      const target = getOriginalByIndex(((realIndex % TOTAL)+TOTAL)%TOTAL);
+      const n = ((realIndex % TOTAL)+TOTAL)%TOTAL;
+      const target = getOriginalByIndex(n);
       if (!target) return;
       centerOn(target, opts.behavior || 'smooth');
-      setActive(((realIndex % TOTAL)+TOTAL)%TOTAL);
+      setActive(n);
+    }
+
+    // Instant, no-flicker jump from clone to original (iOS momentum-safe)
+    function jumpToOriginal(real){
+      const dest = getOriginalByIndex(real);
+      if (!dest) return;
+      // temporarily disable scroll-snap and smooth behavior
+      track.classList.add('no-snap','no-smooth');
+      centerOn(dest, 'auto');
+      // allow layout to settle, then restore
+      requestAnimationFrame(() => {
+        track.classList.remove('no-snap');
+        requestAnimationFrame(() => track.classList.remove('no-smooth'));
+      });
+      setActive(real);
     }
 
     // --- Initialize scrubber (desktop-only CSS shows it)
@@ -436,23 +459,22 @@
         const real = normalizedIndex(el);
         setActive(real);
 
-        // If centered on a CLONE at head/tail, teleport to matching ORIGINAL (seamless wrap)
+        // If centered on a CLONE at head/tail, teleport to matching ORIGINAL instantly (no flicker)
         if (el.dataset.clone === '1'){
-          const dest = getOriginalByIndex(real);
-          if (dest) centerOn(dest, 'auto');
+          jumpToOriginal(real);
         }
         raf = null;
       });
     });
 
-    // --- Keyboard navigation (wrap)
+    // --- Keyboard navigation (uses active index; instant jump so no extra presses)
     track.addEventListener('keydown', (e) => {
       if (['ArrowLeft','ArrowRight','PageUp','PageDown'].includes(e.key)) e.preventDefault();
-      if (e.key === 'ArrowRight' || e.key === 'PageDown') goTo((Number(scrub?.value||0) + 1) % TOTAL);
-      if (e.key === 'ArrowLeft'  || e.key === 'PageUp')   goTo((Number(scrub?.value||0) - 1 + TOTAL) % TOTAL);
+      if (e.key === 'ArrowRight' || e.key === 'PageDown') goTo((active + 1) % TOTAL, { behavior: 'auto' });
+      if (e.key === 'ArrowLeft'  || e.key === 'PageUp')   goTo((active - 1 + TOTAL) % TOTAL, { behavior: 'auto' });
     });
 
-    // --- Mouse wheel: allow free scroll (can skip multiple) — no handler needed.
+    // --- Mouse wheel: free scroll (can skip multiple) — no handler needed.
 
     // --- Desktop drag with low threshold; snap to closest (may skip multiple)
     let dragging=false, startX=0, startScroll=0, pointerId=null;
@@ -485,7 +507,7 @@
     // Prevent native image drag ghost
     track.querySelectorAll('img').forEach(img => img.addEventListener('dragstart', e => e.preventDefault()));
 
-    // --- Initial position: first original
+    // --- Initial position: first original (Camera sender)
     window.addEventListener('load', () => {
       goTo(0, { behavior: 'auto' });
     });
