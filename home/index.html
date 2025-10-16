@@ -255,51 +255,6 @@
     }
     .invite-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-    /* Force two-row header in iPhone landscape (and other narrow landscapes) */
-    @media (max-width: 900px) and (orientation: landscape) {
-      header {
-        grid-template-columns: 1fr 1fr;
-        grid-auto-rows: minmax(0, auto);
-        row-gap: 10px;
-      }
-      .nav-left  { grid-column: 1; grid-row: 1; justify-self: start; }
-      .nav-right { grid-column: 2; grid-row: 1; justify-self: end; gap: 10px; }
-
-      /* Modes go on their own row, full width, centered */
-      .nav-center{
-        grid-column: 1 / -1;
-        grid-row: 2;
-        justify-content: center;
-        gap: 12px;
-        width: 100%;
-      }
-
-      /* Make mode buttons a bit bigger than Pair/Share */
-      .nav-center a {
-        font-size: clamp(0.92rem, 2.2vw, 1.12rem);
-        padding: clamp(8px, 1.8vw, 12px) clamp(14px, 3.2vw, 18px);
-      }
-
-      /* Keep right-side pills compact so they never collide */
-      .btn-pill {
-        font-size: clamp(0.78rem, 1.8vw, 0.92rem);
-        padding: clamp(6px, 1.2vw, 8px) clamp(10px, 2.2vw, 14px);
-      }
-    }
-
-    /* ---------- YouTube modal styles ---------- */
-    .yt-modal { border: none; padding: 0; background: #000; color: #fff; width: min(100vw, 920px); max-height: 90vh; }
-    .yt-modal::backdrop { background: rgba(0,0,0,.6); }
-    .yt-bar { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; background:#111; position:sticky; top:0; z-index:2; }
-    .yt-title { font-weight: 600; }
-    .yt-close { border:0; background:transparent; color:#fff; font-size:18px; cursor:pointer; }
-    .yt-body { padding: 12px; display: grid; gap: 12px; }
-    .yt-player-wrap { border-radius: 16px; background:#0f0f0f; padding:12px; }
-    .yt-player { position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:8px; overflow:hidden; display:grid; place-items:center; }
-    .yt-player iframe { width:100%; height:100%; border:0; display:block; }
-    .yt-fallback { font-size:13px; color:#aaa; margin:8px 2px 0; }
-    .yt-fallback a { color:#ddd; text-decoration: underline; }
-
     /* ---- Scroll-aware header Pair CTA ---- */
     .header-pair { display: none; }
     .header-pair.is-sticky { display: inline-block; }
@@ -367,9 +322,9 @@
         <!-- HERO CTAs -->
         <div class="hero-ctas" role="group" aria-label="Get started">
           <a class="btn btn-primary" href="https://hungryfaceai.github.io/hungryface/webrtc/pairpsk/">Pair devices</a>
-          <button id="hero-watch" class="btn btn-ghost" type="button" aria-haspopup="dialog" aria-controls="ytDialog">
+          <a class="btn btn-ghost" href="/hungryface/home/demo/" aria-label="Watch demo">
             ▶ Watch demo
-          </button>
+          </a>
         </div>
 
         <!-- Helper text under CTAs -->
@@ -412,21 +367,6 @@
       </div>
     </div>
   </div>
-
-  <!-- YouTube Modal (single video, click-to-load) -->
-  <dialog class="yt-modal" id="ytDialog" aria-label="Naptio video demo">
-    <form method="dialog" class="yt-bar">
-      <span class="yt-title">Watch a quick demo</span>
-      <button class="yt-close" aria-label="Close">✕</button>
-    </form>
-
-    <div class="yt-body">
-      <div class="yt-player-wrap">
-        <div class="yt-player" id="ytPlayer" aria-live="polite"></div>
-        <p class="yt-fallback">Prefer YouTube? <a id="ytLink" href="#" target="_blank" rel="noopener">Open on YouTube</a></p>
-      </div>
-    </div>
-  </dialog>
 
   <script>
   // Standalone Invite Modal (existing) + focus trap
@@ -569,49 +509,6 @@
       });
     }
   })();
-  </script>
-
-  <!-- YouTube modal logic (single video, click-to-load, zero 3P until opened) -->
-  <script>
-    (function() {
-      const YT_ID = 'xZeZnS3wTbs'; // your single video
-      const heroWatch = document.getElementById('hero-watch');
-      const dialog = document.getElementById('ytDialog');
-      const player = document.getElementById('ytPlayer');
-      const ytLink = document.getElementById('ytLink');
-
-      function track(name, data={}) {
-        try {
-          window.analytics?.event ? window.analytics.event(name, data)
-            : window.dispatchEvent(new CustomEvent('analytics', { detail: { name, data } }));
-        } catch {}
-      }
-
-      function loadYouTube(id) {
-        player.replaceChildren();
-        const iframe = document.createElement('iframe');
-        iframe.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&modestbranding=1&playsinline=1`;
-        iframe.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
-        iframe.allowFullscreen = true;
-        player.appendChild(iframe);
-        ytLink.href = `https://youtu.be/${id}`;
-        track('demo_play', { provider: 'youtube', id });
-      }
-
-      heroWatch?.addEventListener('click', () => {
-        track('demo_open', { location: 'hero' });
-        if (window.HTMLDialogElement && dialog?.showModal) {
-          dialog.showModal();
-          loadYouTube(YT_ID); // load immediately on open
-        } else {
-          window.open(`https://youtu.be/${YT_ID}`, '_blank', 'noopener');
-        }
-      });
-
-      dialog?.addEventListener('close', () => {
-        player.replaceChildren(); // stop playback + free memory
-      });
-    })();
   </script>
 
   <!-- Scroll-aware header Pair CTA (hide over hero, show after scroll) -->
