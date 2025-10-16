@@ -33,23 +33,35 @@
       overscroll-behavior-x: contain;
       scroll-snap-type: x mandatory;
       scroll-behavior: smooth;
-      gap: 0; /* no peek of adjacent slides */
+      gap: 0; /* no peek of adjacent slides by default (mobile) */
       padding: 0 0 10px;
       -webkit-overflow-scrolling: touch;
       cursor: grab;
       scroll-padding-inline: var(--padStart) var(--padEnd);
+      /* thinner horizontal scrollbar */
+      scrollbar-width: thin;
+      scrollbar-color: #555 transparent;
     }
+    .shots-track::-webkit-scrollbar { height: 6px; }
+    .shots-track::-webkit-scrollbar-track { background: transparent; }
+    .shots-track::-webkit-scrollbar-thumb { background: #555; border-radius: 9999px; }
     .shots-track.dragging{ scroll-snap-type: none; cursor: grabbing; }
     .shots-track.no-smooth{ scroll-behavior: auto; }
     .shots-track.no-snap{ scroll-snap-type: none; }
 
-    /* Always 1-up: each slide fills the viewport width */
+    /* Mobile: 1-up (each slide fills the viewport width) */
     .slide{
       flex: 0 0 100%;
       display: grid;
       place-items: center;
       scroll-snap-align: center;
       padding: 8px 0;
+    }
+
+    /* Desktop: show flowing images close together */
+    @media (min-width:700px){
+      .shots-track{ gap: 6px; }
+      .slide{ flex: 0 0 auto; padding: 0; }
     }
 
     .device-card{
@@ -87,7 +99,24 @@
     .shots-scrubber{ display: none; margin-top: 8px; justify-content: center; }
     @media (min-width:700px){
       .shots-scrubber{ display: flex; }
-      .shots-scrubber input[type="range"]{ width: 600px; max-width: 100%; }
+      .shots-scrubber input[type="range"]{
+        width: 600px; max-width: 100%;
+        /* make much more narrow */
+        -webkit-appearance: none; appearance: none; background: transparent; height: 16px;
+      }
+      .shots-scrubber input[type="range"]::-webkit-slider-runnable-track{
+        height: 4px; background: #3a3a3a; border-radius: 9999px;
+      }
+      .shots-scrubber input[type="range"]::-webkit-slider-thumb{
+        -webkit-appearance: none; appearance: none;
+        width: 12px; height: 12px; border-radius: 50%; background: #fff; margin-top: -4px;
+      }
+      .shots-scrubber input[type="range"]::-moz-range-track{
+        height: 4px; background: #3a3a3a; border-radius: 9999px;
+      }
+      .shots-scrubber input[type="range"]::-moz-range-thumb{
+        width: 12px; height: 12px; border-radius: 50%; background: #fff; border: none;
+      }
     }
 
     /* ===== Fullscreen image viewer ===== */
@@ -449,6 +478,18 @@
       } else if (Math.abs(dy)>SWIPE_Y){ closeImg(); }
     }, {passive:true});
 
+    // ---------- Ensure first image (Camera sender) shows on load ----------
+    function initialCenterImmediate(){
+      // Jump to the first ORIGINAL slide without waiting for images (slides are width-defined)
+      track.classList.add('no-snap','no-smooth');
+      track.scrollLeft = originals[0].offsetLeft;
+      setActive(0);
+      requestAnimationFrame(()=>{
+        track.classList.remove('no-snap');
+        requestAnimationFrame(()=> track.classList.remove('no-smooth'));
+      });
+    }
+
     // Initial center (fix iOS offset) + re-center on resize
     function imagesReady(){
       const imgs = Array.from(track.querySelectorAll('img'));
@@ -461,7 +502,11 @@
       await imagesReady();
       requestAnimationFrame(()=> requestAnimationFrame(()=> { jumpToOriginal(0); }));
     }
+
+    // Run immediate jump, then refine after images settle
+    initialCenterImmediate();
     initialCenter();
+
     window.addEventListener('resize', () => { jumpToOriginal(active); }, { passive:true });
   })();
   </script>
