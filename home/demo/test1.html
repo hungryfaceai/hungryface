@@ -70,6 +70,10 @@
       height: auto; display: block; border-radius: 10px;
       -webkit-user-drag: none; user-select: none; pointer-events: auto;
     }
+    /* Make desktop images ~25% smaller (600px → 450px max) */
+    @media (min-width:700px){
+      .device-card img{ width: clamp(280px, 36vw, 450px); } /* 450px cap; 36vw keeps it responsive */
+    }
     /* Edge-to-edge look on very small phones */
     @media (max-width:560px){
       .device-card{ background: transparent; border: 0; box-shadow: none; padding: 0; }
@@ -365,10 +369,9 @@
     function showInModal(index){
       const slide = originals[index];
       const img = slide?.querySelector('img');
-      const cap = slide?.querySelector('.caption')?.textContent || img?.alt || '';
       if (!img) return;
       modalImg.src = img.currentSrc || img.src;
-      modalImg.alt = cap;
+      modalImg.alt = img.alt || '';
       active = index;
       setActive(index);
     }
@@ -426,8 +429,26 @@
       } else if (Math.abs(dy)>SWIPE_Y){ closeImg(); }
     }, {passive:true});
 
-    // Start at first (Camera sender)
-    window.addEventListener('load', ()=>{ goTo(0, { behavior:'auto' }); });
+    // ---------- Initial center on first original (fix "pushed right" on iPhone) ----------
+    function imagesReady(){
+      const imgs = Array.from(track.querySelectorAll('img'));
+      return Promise.all(imgs.map(img => (img.complete && img.naturalWidth)
+        ? Promise.resolve()
+        : new Promise(res => img.addEventListener('load', res, { once:true }))
+      ));
+    }
+    async function initialCenter(){
+      await imagesReady();
+      // Double-rAF to ensure layout metrics are final on iOS
+      requestAnimationFrame(()=> requestAnimationFrame(()=> {
+        jumpToOriginal(0); // center without snap/smooth; avoids flicker + wrong offset
+      }));
+    }
+    initialCenter();
+
+    // Re-center on resize/orientation changes
+    window.addEventListener('resize', () => { jumpToOriginal(active); }, { passive:true });
+
   })();
   </script>
 </body>
