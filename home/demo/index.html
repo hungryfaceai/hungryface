@@ -343,16 +343,15 @@
     originals.forEach((s,i) => { s.dataset.index = String(i); });
     const TOTAL = originals.length;
 
-    // --- Build clones for infinite wrap
-    const CLONE = 2; // head/tail buffer
+    // --- Build clones for infinite wrap (ONE per side)
     const mkClone = (el) => {
       const c = el.cloneNode(true);
       c.dataset.clone = '1';
       c.dataset.index = el.dataset.index; // real index preserved
       return c;
     };
-    const head = originals.slice(-CLONE).map(mkClone);
-    const tail = originals.slice(0, CLONE).map(mkClone);
+    const head = [ mkClone(originals[TOTAL - 1]) ]; // last -> head
+    const tail = [ mkClone(originals[0]) ];         // first -> tail
     head.forEach(c => track.insertBefore(c, track.firstChild));
     tail.forEach(c => track.appendChild(c));
 
