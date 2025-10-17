@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Naptio — Cards Deck Only</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --basePad: 16px;
+      --safeL: env(safe-area-inset-left, 0px);
+      --safeR: env(safe-area-inset-right, 0px);
+      --padStart: max(var(--basePad), var(--safeL));
+      --padEnd:   max(var(--basePad), var(--safeR));
+    }
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: #000;
+      color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    /* ============ Desktop deck (unchanged) ============ */
+    main { min-height: 100dvh; display: grid; place-items: center; padding: 0; }
+    .shots { width: 100%; display: grid; justify-items: center; }
+    .shots-wrap { width: 100%; max-width: 1100px; margin-inline: auto; }
+
+    .shots-track{
+      position: relative;
+      display: flex;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      scroll-snap-type: x mandatory;
+      scroll-behavior: smooth;
+      gap: 0;
+      padding: 0 0 10px;
+      -webkit-overflow-scrolling: touch;
+      cursor: grab;
+      scroll-padding-inline: var(--padStart) var(--padEnd);
+      scrollbar-width: thin;
+      scrollbar-color: #555 transparent;
+    }
+    .shots-track::-webkit-scrollbar { height: 6px; }
+    .shots-track::-webkit-scrollbar-track { background: transparent; }
+    .shots-track::-webkit-scrollbar-thumb { background: #555; border-radius: 9999px; }
+    .shots-track.dragging{ scroll-snap-type: none; cursor: grabbing; }
+    .shots-track.no-smooth{ scroll-behavior: auto; }
+    .shots-track.no-snap{ scroll-snap-type: none; }
+
+    .slide{
+      flex: 0 0 100%;
+      display: grid;
+      place-items: center;
+      scroll-snap-align: center;
+      padding: 8px 0;
+    }
+    @media (min-width:700px){
+      .shots-track{ gap: 6px; }
+      .slide{ flex: 0 0 auto; padding: 0; }
+    }
+
+    .device-card{
+      display: grid; justify-items: center; gap: 10px;
+      background: #0c0c0c; border: 1px solid #1b1b1b;
+      border-radius: 16px; padding: 14px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    }
+    .device-card img{
+      width: clamp(280px, 96svw, 600px);
+      height: auto; display: block; border-radius: 10px;
+      -webkit-user-drag: none; user-select: none; pointer-events: auto;
+    }
+    @media (min-width:700px){
+      .device-card img{ width: clamp(168px, 21.6vw, 270px); }
+    }
+    @media (max-width:560px){
+      .device-card{ background: transparent; border: 0; box-shadow: none; padding: 0; }
+      .device-card img{ width: 100svw; border-radius: 0; }
+      .slide{ flex: 0 0 100svw; }
+      .shots-track{ scroll-padding-inline: 0 !important; }
+    }
+
+    .caption{ font-size: .9rem; color:#d7d7d7; opacity:.9; }
+
+    .shots-dots{
+      margin-top: 10px; display: flex; gap: 8px; justify-content: center; align-items: center;
+      padding-inline: var(--padStart) var(--padEnd);
+    }
+    .shots-dots [role="tab"]{
+      width: 9px; height: 9px; border-radius: 50%; background:#3a3a3a; border:0; padding:0; cursor:pointer; transition:transform .12s;
+    }
+    .shots-dots [role="tab"][aria-selected="true"]{ background:#fff; transform: scale(1.15); }
+
+    .shots-scrubber{ display: none; margin-top: 8px; justify-content: center; }
+    @media (min-width:700px){
+      .shots-scrubber{ display: flex; }
+      .shots-scrubber input[type="range"]{
+        width: 600px; max-width: 100%;
+        -webkit-appearance: none; appearance: none; background: transparent; height: 16px;
+      }
+      .shots-scrubber input[type="range"]::-webkit-slider-runnable-track{
+        height: 4px; background: #3a3a3a; border-radius: 9999px;
+      }
+      .shots-scrubber input[type="range"]::-webkit-slider-thumb{
+        -webkit-appearance: none; appearance: none;
+        width: 12px; height: 12px; border-radius: 50%; background: #fff; margin-top: -4px;
+      }
+      .shots-scrubber input[type="range"]::-moz-range-track{
+        height: 4px; background: #3a3a3a; border-radius: 9999px;
+      }
+      .shots-scrubber input[type="range"]::-moz-range-thumb{
+        width: 12px; height: 12px; border-radius: 50%; background: #fff; border: none;
+      }
+    }
+
+    /* ===== Fullscreen image viewer ===== */
+    .img-modal{ position:fixed; inset:0; background:#000; display:none; align-items:center; justify-content:center; z-index:1100; }
+    .img-modal.visible{ display:flex; }
+    .img-wrap{
+      width:100svw; height:100svh; display:grid; place-items:center;
+      padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+               max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    }
+    .img-modal.fullscreen .img-wrap{ padding:0; }
+    .img-modal img{ max-width:100%; max-height:100%; display:block; border-radius:10px; object-fit:contain; }
+    .img-modal.fullscreen img{ width:100svw; height:100svh; max-width:none; max-height:none; border-radius:0; }
+    #img-modal:fullscreen, #img-modal:-webkit-full-screen { inset:0; width:100vw; height:100vh; background:#000; display:flex; }
+    #img-modal:fullscreen .img-wrap, #img-modal:-webkit-full-screen .img-wrap { width:100vw; height:100vh; padding:0; }
+    #img-modal:fullscreen img, #img-modal:-webkit-full-screen img { width:100vw; height:100vh; max-width:none; max-height:none; border-radius:0; object-fit:contain; }
+    .img-close{
+      position:fixed; top:max(10px, env(safe-area-inset-top)); right:max(10px, env(safe-area-inset-right));
+      border:1px solid #2a2a2a; background:#0d0d0d; color:#fff; border-radius:9999px; padding:8px 12px; cursor:pointer; font-size:16px;
+      z-index:1200;
+    }
+    .no-scroll{ overflow:hidden; }
+
+    /* ============ Mobile-only slider (new) ============ */
+    .m-slider { display: none; width: 100%; }
+    @media (max-width:699.98px){
+      .shots { display: none; }
+      .m-slider { display: grid; place-items: center; }
+    }
+    .m-stage{
+      position: relative;
+      width: 100svw;
+      overflow: hidden;
+      touch-action: pan-y; /* allow vertical page scroll; we handle horizontal swipes */
+      contain: layout paint size; isolation: isolate;
+    }
+    .m-track{
+      display: flex;
+      will-change: transform;
+      transform: translate3d(calc(-1 * var(--idx, 0) * 100%), 0, 0);
+      transition: transform .28s ease;
+    }
+    @media (prefers-reduced-motion: reduce){ .m-track{ transition: none; } }
+    .m-slide{
+      min-width: 100svw;
+      display: grid; place-items: center;
+      padding: 0;
+    }
+    .m-slide img{ width: 100svw; height: auto; display: block; -webkit-user-drag: none; user-select: none; }
+    .m-caption{ margin-top: 8px; font-size: .9rem; color: #d7d7d7; opacity: .9; text-align: center; }
+
+    .m-nav{ margin-top: 10px; display: flex; gap: 8px; justify-content: center; align-items: center; }
+    .m-dot{ width: 9px; height: 9px; border-radius: 50%; background:#3a3a3a; border:0; padding:0; }
+    .m-dot[aria-selected="true"]{ background:#fff; transform: scale(1.15); }
+
+    .m-ctr{
+      position: absolute; inset: 0;
+      display: flex; justify-content: space-between; align-items: center;
+      pointer-events: none;
+    }
+    .m-ctr button{
+      pointer-events: auto;
+      border: 1px solid #2a2a2a; background: rgba(0,0,0,.35); color: #fff;
+      border-radius: 9999px; padding: 10px 12px; font-size: 16px;
+      margin: 0 6px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <!-- ===== Desktop deck (as before) ===== -->
+    <section class="shots" aria-label="App screenshots (desktop)">
+      <div class="shots-wrap">
+        <div id="shotsTrack" class="shots-track" tabindex="0" role="region" aria-roledescription="carousel" aria-label="Feature screenshots" aria-live="polite">
+          <div class="slide" role="group" aria-label="Camera (sender)">
+            <figure class="device-card">
+              <img src="/hungryface/home/snapshots/sender.jpg" alt="Camera sender screen" loading="lazy">
+              <figcaption class="caption">Camera (sender)</figcaption>
+            </figure>
+          </div>
+          <div class="slide" role="group" aria-label="Prone detection">
+            <figure class="device-card">
+              <img src="/hungryface/home/snapshots/prone.jpg" alt="Prone detection screen" loading="lazy">
+              <figcaption class="caption">Prone detection</figcaption>
+            </figure>
+          </div>
+          <div class="slide" role="group" aria-label="Motion detection">
+            <figure class="device-card">
+              <img src="/hungryface/home/snapshots/motion.jpg" alt="Motion detection screen" loading="lazy">
+              <figcaption class="caption">Motion detection</figcaption>
+            </figure>
+          </div>
+          <div class="slide" role="group" aria-label="Audio alerts">
+            <figure class="device-card">
+              <img src="/hungryface/home/snapshots/audio.jpg" alt="Audio alerts screen" loading="lazy">
+              <figcaption class="caption">Audio alerts</figcaption>
+            </figure>
+          </div>
+          <div class="slide" role="group" aria-label="Audio training">
+            <figure class="device-card">
+              <img src="/hungryface/home/snapshots/training.jpg" alt="Audio training screen" loading="lazy">
+              <figcaption class="caption">Audio training</figcaption>
+            </figure>
+          </div>
+          <div class="slide" role="group" aria-label="Live dashboard">
+            <figure class="device-card">
+              <img src="/hungryface/home/snapshots/dashboard.jpg" alt="Live dashboard screen" loading="lazy">
+              <figcaption class="caption">Live dashboard</figcaption>
+            </figure>
+          </div>
+        </div>
+        <div id="shotsDots" class="shots-dots" role="tablist" aria-label="Choose screenshot"></div>
+        <div class="shots-scrubber">
+          <input id="shotsScrubber" type="range" min="0" step="1" value="0" aria-label="Jump between screenshots">
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Mobile-only slider (new) ===== -->
+    <section class="m-slider" aria-label="App screenshots (mobile)">
+      <div class="m-stage">
+        <div id="mTrack" class="m-track" style="--idx:0">
+          <figure class="m-slide"><img src="/hungryface/home/snapshots/sender.jpg" alt="Camera (sender)"></figure>
+          <figure class="m-slide"><img src="/hungryface/home/snapshots/prone.jpg" alt="Prone detection"></figure>
+          <figure class="m-slide"><img src="/hungryface/home/snapshots/motion.jpg" alt="Motion detection"></figure>
+          <figure class="m-slide"><img src="/hungryface/home/snapshots/audio.jpg" alt="Audio alerts"></figure>
+          <figure class="m-slide"><img src="/hungryface/home/snapshots/training.jpg" alt="Audio training"></figure>
+          <figure class="m-slide"><img src="/hungryface/home/snapshots/dashboard.jpg" alt="Live dashboard"></figure>
+        </div>
+        <!-- optional on-screen arrows -->
+        <div class="m-ctr" aria-hidden="true">
+          <button type="button" id="mPrev" aria-label="Previous">‹</button>
+          <button type="button" id="mNext" aria-label="Next">›</button>
+        </div>
+      </div>
+      <div id="mDots" class="m-nav" role="tablist" aria-label="Choose screenshot (mobile)"></div>
+      <p class="m-caption" id="mCap" aria-live="polite">Camera (sender)</p>
+    </section>
+  </main>
+
+  <!-- Fullscreen image modal (reused by both) -->
+  <div id="img-modal" class="img-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Screenshot preview">
+    <button class="img-close" type="button" aria-label="Close">✕</button>
+    <div class="img-wrap"><img id="img-modal-img" alt=""></div>
+  </div>
+
+  <script>
+  (function(){
+    const isDesktop = () => window.matchMedia('(min-width:700px)').matches;
+
+    // ---------- Fullscreen modal (shared) ----------
+    const imgModal = document.getElementById('img-modal');
+    const modalImg = document.getElementById('img-modal-img');
+    const btnClose = imgModal.querySelector('.img-close');
+    const fsSupported = !!(Element.prototype.requestFullscreen || Element.prototype.webkitRequestFullscreen);
+    const requestFS = async (el) => {
+      try{
+        if (document.fullscreenElement) return true;
+        if (el.requestFullscreen){ await el.requestFullscreen(); return true; }
+        if (el.webkitRequestFullscreen){ el.webkitRequestFullscreen(); return true; }
+      }catch{}
+      return false;
+    };
+    const exitFS = async () => {
+      try{
+        if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
+        if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+      }catch{}
+    };
+    const openModalSrc = (src, alt) => {
+      modalImg.src = src; modalImg.alt = alt || '';
+      imgModal.classList.add('visible'); imgModal.setAttribute('aria-hidden','false');
+      document.documentElement.classList.add('no-scroll');
+      requestFS(imgModal).then(ok => { if (!ok) imgModal.classList.add('fullscreen'); });
+    };
+    const closeModal = async () => {
+      imgModal.classList.remove('visible','fullscreen'); imgModal.setAttribute('aria-hidden','true');
+      document.documentElement.classList.remove('no-scroll');
+      await exitFS(); setTimeout(()=>{ modalImg.src=''; }, 50);
+    };
+    imgModal.addEventListener('click', (e)=>{ if (e.target === imgModal) closeModal(); });
+    btnClose.addEventListener('click', closeModal);
+    document.addEventListener('keydown', (e)=>{ if (e.key==='Escape' && imgModal.classList.contains('visible')) closeModal(); });
+
+    // ---------- Desktop deck init (unchanged behavior) ----------
+    function initDesktop(){
+      const track = document.getElementById('shotsTrack');
+      const dotsWrap = document.getElementById('shotsDots');
+      const scrub = document.getElementById('shotsScrubber');
+      if (!track || !dotsWrap) return;
+
+      let originals = Array.from(track.querySelectorAll('.slide'));
+      originals.forEach((s,i)=>{ s.dataset.index = String(i); });
+      const TOTAL = originals.length;
+
+      // clones for wrap
+      const mkClone = (el) => { const c = el.cloneNode(true); c.dataset.clone='1'; c.dataset.index = el.dataset.index; return c; };
+      track.insertBefore(mkClone(originals[TOTAL-1]), track.firstChild);
+      track.appendChild(mkClone(originals[0]));
+      let slides = Array.from(track.querySelectorAll('.slide'));
+
+      // dots
+      for (let i=0;i<TOTAL;i++){
+        const b = document.createElement('button');
+        b.type='button'; b.setAttribute('role','tab');
+        b.setAttribute('aria-selected', i===0?'true':'false');
+        b.title = `Go to slide ${i+1}`;
+        b.addEventListener('click', () => goTo(i));
+        dotsWrap.appendChild(b);
+      }
+      const dots = Array.from(dotsWrap.querySelectorAll('[role="tab"]'));
+      let active = 0;
+
+      function setActive(idx){ active = idx; dots.forEach((d,i)=>d.setAttribute('aria-selected', i===idx?'true':'false')); if (scrub) scrub.value = String(idx); }
+      function getOriginalByIndex(i){ return originals[i]; }
+      function normalizedIndex(slideEl){ return Number(slideEl.dataset.index)%TOTAL; }
+      function centerOn(el, behavior='smooth'){
+        const left = Math.round(el.offsetLeft + el.offsetWidth / 2 - track.clientWidth / 2);
+        track.scrollTo({ left, behavior });
+      }
+      function goTo(realIndex, opts={}){
+        const n = ((realIndex%TOTAL)+TOTAL)%TOTAL;
+        const target = getOriginalByIndex(n); if (!target) return;
+        centerOn(target, opts.behavior || 'smooth'); setActive(n);
+      }
+      function jumpToOriginal(real){
+        const dest = getOriginalByIndex(real); if (!dest) return;
+        track.classList.add('no-snap','no-smooth'); centerOn(dest,'auto');
+        requestAnimationFrame(()=>{ track.classList.remove('no-snap'); requestAnimationFrame(()=> track.classList.remove('no-smooth')); });
+        setActive(real);
+      }
+      function indexFromCenter(){
+        const rect = track.getBoundingClientRect(); const cx = rect.left + rect.width/2;
+        let best=0, dist=Infinity;
+        slides.forEach((s,i)=>{ const r=s.getBoundingClientRect(); const mid=r.left+r.width/2; const d=Math.abs(mid-cx); if(d<dist){dist=d;best=i;} });
+        return best;
+      }
+
+      // scrubber fit
+      if (scrub){
+        scrub.min='0'; scrub.max=String(TOTAL-1); scrub.step='1'; scrub.value='0';
+        const fitScrubber = () => {
+          const img = track.querySelector('.slide:not([data-clone]) img'); if (!img) return;
+          const w = Math.round(img.getBoundingClientRect().width); scrub.style.width = w ? (w+'px') : '';
+        };
+        window.addEventListener('resize', fitScrubber, { passive:true });
+        new ResizeObserver(fitScrubber).observe(track); fitScrubber();
+        const onScrub = v => goTo(parseInt(v,10)||0, { behavior:'auto' });
+        scrub.addEventListener('input', e => onScrub(e.currentTarget.value));
+        scrub.addEventListener('change', e => onScrub(e.currentTarget.value));
+      }
+
+      // scroll sync + guarded wrap
+      let raf=null;
+      track.addEventListener('scroll', ()=>{
+        if (raf) return;
+        raf = requestAnimationFrame(()=>{
+          const idxAll = indexFromCenter();
+          const el = slides[idxAll]; if (!el){ raf=null; return; }
+          const real = normalizedIndex(el);
+          setActive(real);
+          if (el.dataset.clone === '1') {
+            const isFirstCloneCentered = (idxAll === 0) && (real === TOTAL - 1);
+            const isLastCloneCentered  = (idxAll === slides.length - 1) && (real === 0);
+            if (isFirstCloneCentered || isLastCloneCentered) jumpToOriginal(real);
+          }
+          raf=null;
+        });
+      });
+
+      // desktop drag
+      let dragging=false,startX=0,startScroll=0,pointerId=null,dragStart=0;
+      const SWIPE_PX=50, FLICK_MS=220, FLICK_PX=12;
+      track.addEventListener('pointerdown',(e)=>{ if(e.pointerType!=='mouse'||e.button!==0) return;
+        pointerId=e.pointerId; track.setPointerCapture(pointerId);
+        dragging=true; startX=e.clientX; startScroll=track.scrollLeft; dragStart=performance.now();
+        track.classList.add('dragging');
+      });
+      track.addEventListener('pointermove',(e)=>{ if(!dragging) return; e.preventDefault(); const dx=e.clientX-startX; track.scrollLeft=startScroll-dx; });
+      function endDrag(){ if(!dragging) return; dragging=false; track.classList.remove('dragging'); if(pointerId) track.releasePointerCapture(pointerId); pointerId=null;
+        const elapsed=performance.now()-dragStart; const movedPX=startScroll-track.scrollLeft;
+        const isFlick=elapsed<FLICK_MS&&Math.abs(movedPX)>FLICK_PX; const passed=Math.abs(movedPX)>SWIPE_PX;
+        if(isFlick||passed){ goTo((active + (movedPX<0?1:-1) + TOTAL)%TOTAL, {behavior:'smooth'}); return; }
+        const idxInAll=indexFromCenter(); const real=normalizedIndex(slides[idxInAll]); goTo(real,{behavior:'smooth'});
+      }
+      track.addEventListener('pointerup',endDrag);
+      track.addEventListener('pointercancel',endDrag);
+      track.addEventListener('pointerleave',endDrag);
+
+      // open modal on click (desktop)
+      track.addEventListener('click', (e)=>{
+        const img = e.target && e.target.tagName==='IMG' ? e.target : null; if (!img) return;
+        openModalSrc(img.currentSrc || img.src, img.alt || '');
+      });
+
+      // initial center
+      function imagesReady(){
+        const imgs = Array.from(track.querySelectorAll('img'));
+        return Promise.all(imgs.map(img => (img.complete && img.naturalWidth) ? Promise.resolve() : new Promise(res => img.addEventListener('load', res, { once:true }))));
+      }
+      (async function(){
+        // immediate
+        track.classList.add('no-snap','no-smooth'); goTo(0,{behavior:'auto'});
+        requestAnimationFrame(()=>{ track.classList.remove('no-snap'); requestAnimationFrame(()=> track.classList.remove('no-smooth')); });
+        // refine
+        await imagesReady(); requestAnimationFrame(()=> requestAnimationFrame(()=> { jumpToOriginal(0); }));
+      })();
+    }
+
+    // ---------- Mobile slider init (transform-based) ----------
+    function initMobile(){
+      const track = document.getElementById('mTrack');
+      const slides = Array.from(track.querySelectorAll('.m-slide'));
+      const imgs = slides.map(s => s.querySelector('img'));
+      const captions = [
+        'Camera (sender)','Prone detection','Motion detection','Audio alerts','Audio training','Live dashboard'
+      ];
+      const mDots = document.getElementById('mDots');
+      const cap = document.getElementById('mCap');
+      const btnPrev = document.getElementById('mPrev');
+      const btnNext = document.getElementById('mNext');
+      const TOTAL = slides.length;
+      let idx = 0;
+
+      // dots
+      for (let i=0;i<TOTAL;i++){
+        const b = document.createElement('button');
+        b.type='button'; b.className='m-dot'; b.setAttribute('role','tab');
+        b.setAttribute('aria-selected', i===0?'true':'false');
+        b.addEventListener('click', ()=> setIndex(i,true));
+        mDots.appendChild(b);
+      }
+      const dots = Array.from(mDots.querySelectorAll('.m-dot'));
+
+      function render(){
+        track.style.setProperty('--idx', String(idx));
+        dots.forEach((d,i)=> d.setAttribute('aria-selected', i===idx ? 'true' : 'false'));
+        cap.textContent = captions[idx] || '';
+      }
+      function setIndex(n, animate){
+        idx = (n % TOTAL + TOTAL) % TOTAL;
+        if (animate === false) track.style.transition = 'none';
+        else track.style.transition = '';
+        render();
+        if (animate === false) requestAnimationFrame(()=> track.style.transition = '');
+      }
+      btnPrev.addEventListener('click', ()=> setIndex(idx-1,true));
+      btnNext.addEventListener('click', ()=> setIndex(idx+1,true));
+
+      // swipe (pointer events)
+      let startX=0, startY=0, dragging=false, base=0, lastX=0, lastT=0, vx=0;
+      const width = () => track.getBoundingClientRect().width;
+      const THRESH = 0.18;  // 18% swipe
+      const VEL = 0.35;     // velocity px/ms
+
+      track.addEventListener('pointerdown', (e)=>{
+        if (e.pointerType === 'mouse') return; // mobile touch only
+        dragging = true; startX = lastX = e.clientX; startY = e.clientY; lastT = performance.now();
+        base = -idx * width();
+        track.setPointerCapture(e.pointerId);
+        track.style.transition = 'none';
+      }, { passive: true });
+
+      track.addEventListener('pointermove', (e)=>{
+        if (!dragging) return;
+        const dx = e.clientX - startX; const dy = e.clientY - startY;
+        // only capture when horizontal intent is clear
+        if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) e.preventDefault();
+        const now = performance.now(); vx = (e.clientX - lastX) / (now - lastT); lastX = e.clientX; lastT = now;
+        const x = base + dx;
+        track.style.transform = `translate3d(${x}px,0,0)`; // live-drag
+      }, { passive: false });
+
+      function endSwipe(e){
+        if (!dragging) return; dragging = false;
+        track.releasePointerCapture(e.pointerId);
+        const dx = e.clientX - startX; const w = width();
+        const passed = Math.abs(dx) > w * THRESH || Math.abs(vx) > VEL;
+        if (passed){
+          setIndex(idx + (dx < 0 ? 1 : -1), true);
+        } else {
+          // snap back
+          setIndex(idx, true);
+        }
+      }
+      track.addEventListener('pointerup', endSwipe, { passive: true });
+      track.addEventListener('pointercancel', ()=> setIndex(idx,true), { passive: true });
+
+      // tap to open fullscreen
+      imgs.forEach((img,i)=> img.addEventListener('click', ()=> openModalSrc(img.currentSrc || img.src, img.alt || '')));
+
+      // initial
+      setIndex(0,false);
+
+      // keep centered on rotate/resize
+      window.addEventListener('resize', ()=> setIndex(idx,false), { passive:true });
+    }
+
+    // boot per layout
+    function boot(){
+      if (isDesktop()) initDesktop(); else initMobile();
+    }
+    boot();
+    // re-init on breakpoint change
+    window.matchMedia('(min-width:700px)').addEventListener('change', () => location.reload());
+  })();
+  </script>
+</body>
+</html>
