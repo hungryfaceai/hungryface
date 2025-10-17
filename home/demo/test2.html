@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Naptio — Cards Deck Only</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --basePad: 16px;
+      --safeL: env(safe-area-inset-left, 0px);
+      --safeR: env(safe-area-inset-right, 0px);
+      --padStart: max(var(--basePad), var(--safeL));
+      --padEnd:   max(var(--basePad), var(--safeR));
+    }
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: #000;
+      color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    /* ============ Deck layout ============ */
+    main { min-height: 100dvh; display: grid; place-items: center; padding: 0; }
+    .shots { width: 100%; display: grid; justify-items: center; }
+    .shots-wrap { width: 100%; max-width: 1100px; margin-inline: auto; }
+
+    .shots-track{
+      position: relative;
+      display: flex;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      scroll-snap-type: x mandatory;
+      scroll-behavior: smooth;
+      gap: 0; /* no peek of adjacent slides by default (mobile) */
+      padding: 0 0 10px;
+      -webkit-overflow-scrolling: touch;
+      cursor: grab;
+      scroll-padding-inline: var(--padStart) var(--padEnd);
+      /* thinner horizontal scrollbar */
+      scrollbar-width: thin;
+      scrollbar-color: #555 transparent;
+    }
+    .shots-track::-webkit-scrollbar { height: 6px; }
+    .shots-track::-webkit-scrollbar-track { background: transparent; }
+    .shots-track::-webkit-scrollbar-thumb { background: #555; border-radius: 9999px; }
+    .shots-track.dragging{ scroll-snap-type: none; cursor: grabbing; }
+    .shots-track.no-smooth{ scroll-behavior: auto; }
+    .shots-track.no-snap{ scroll-snap-type: none; }
+
+    /* Mobile: 1-up (each slide fills the viewport width) */
+    .slide{
+      flex: 0 0 100%;
+      display: grid;
+      place-items: center;
+      scroll-snap-align: center;
+      padding: 8px 0;
+    }
+
+    /* Desktop: show flowing images close together */
+    @media (min-width:700px){
+      .shots-track{ gap: 6px; }
+      .slide{ flex: 0 0 auto; padding: 0; }
+    }
+
+    .device-card{
+      display: grid; justify-items: center; gap: 10px;
+      background: #0c0c0c; border: 1px solid #1b1b1b;
+      border-radius: 16px; padding: 14px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    }
+    .device-card img{
+      width: clamp(280px, 96svw, 600px); /* mobile default */
+      height: auto; display: block; border-radius: 10px;
+      -webkit-user-drag: none; user-select: none; pointer-events: auto;
+    }
+    /* Desktop: 40% smaller (600→270 max; 36vw→21.6vw; 280→168 min) */
+    @media (min-width:700px){
+      .device-card img{ width: clamp(168px, 21.6vw, 270px); }
+    }
+    /* Edge-to-edge look on very small phones */
+    @media (max-width:560px){
+      .device-card{ background: transparent; border: 0; box-shadow: none; padding: 0; }
+      .device-card img{ width: 100svw; border-radius: 0; }
+
+      /* NEW: ensure the *slide* matches the image width on iPhone */
+      .slide{ flex: 0 0 100svw; }
+
+      /* NEW: avoid a snap offset on tiny screens */
+      .shots-track{ scroll-padding-inline: 0 !important; }
+    }
+
+    .caption{ font-size: .9rem; color:#d7d7d7; opacity:.9; }
+
+    .shots-dots{
+      margin-top: 10px; display: flex; gap: 8px; justify-content: center; align-items: center;
+      padding-inline: var(--padStart) var(--padEnd);
+    }
+    .shots-dots [role="tab"]{
+      width: 9px; height: 9px; border-radius: 50%; background:#3a3a3a; border:0; padding:0; cursor:pointer; transition:transform .12s;
+    }
+    .shots-dots [role="tab"][aria-selected="true"]{ background:#fff; transform: scale(1.15); }
+
+    .shots-scrubber{ display: none; margin-top: 8px; justify-content: center; }
+    @media (min-width:700px){
+      .shots-scrubber{ display: flex; }
+      .shots-scrubber input[type="range"]{
+        width: 600px; max-width: 100%;
+        /* make much more narrow */
+        -webkit-appearance: none; appearance: none; background: transparent; height: 16px;
+      }
+      .shots-scrubber input[type="range"]::-webkit-slider-runnable-track{
+        height: 4px; background: #3a3a3a; border-radius: 9999px;
+      }
+      .shots-scrubber input[type="range"]::-webkit-slider-thumb{
+        -webkit-appearance: none; appearance: none;
+        width: 12px; height: 12px; border-radius: 50%; background: #fff; margin-top: -4px;
+      }
+      .shots-scrubber input[type="range"]::-moz-range-track{
+        height: 4px; background: #3a3a3a; border-radius: 9999px;
+      }
+      .shots-scrubber input[type="range"]::-moz-range-thumb{
+        width: 12px; height: 12px; border-radius: 50%; background: #fff; border: none;
+      }
+    }
+
+    /* ===== Fullscreen image viewer ===== */
+    .img-modal{ position:fixed; inset:0; background:#000; display:none; align-items:center; justify-content:center; z-index:1100; }
+    .img-modal.visible{ display:flex; }
+    .img-wrap{
+      width:100svw; height:100svh; display:grid; place-items:center;
+      padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+               max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    }
+    .img-modal.fullscreen .img-wrap{ padding:0; }
+    .img-modal img{ max-width:100%; max-height:100%; display:block; border-radius:10px; object-fit:contain; }
+    .img-modal.fullscreen img{ width:100svw; height:100svh; max-width:none; max-height:none; border-radius:0; }
+
+    #img-modal:fullscreen,
+    #img-modal:-webkit-full-screen { inset:0; width:100vw; height:100vh; background:#000; display:flex; }
+    #img-modal:fullscreen .img-wrap,
+    #img-modal:-webkit-full-screen .img-wrap { width:100vw; height:100vh; padding:0; }
+    #img-modal:fullscreen img,
+    #img-modal:-webkit-full-screen img { width:100vw; height:100vh; max-width:none; max-height:none; border-radius:0; object-fit:contain; }
+
+    .img-close{
+      position:fixed; top:max(10px, env(safe-area-inset-top)); right:max(10px, env(safe-area-inset-right));
+      border:1px solid #2a2a2a; background:#0d0d0d; color:#fff; border-radius:9999px; padding:8px 12px; cursor:pointer; font-size:16px;
+      z-index:1200;
+    }
+
+    .no-scroll{ overflow:hidden; }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="shots" aria-label="App screenshots">
+      <div class="shots-wrap">
+        <div id="shotsTrack" class="shots-track" tabindex="0" role="region" aria-roledescription="carousel" aria-label="Feature screenshots" aria-live="polite">
+          <!-- 1 Camera (sender) — default -->
+          <div class="slide" role="group" aria-label="Camera (sender)">
+            <figure class="device-card">
+              <img src="/hungryface/home/snapshots/sender.jpg" alt="Camera sender screen" loading="lazy">
+              <figcaption class="caption">Camera (sender)</figcaption>
+            </figure>
+          </div>
+          <!-- 2 Prone -->
+          <div class="slide" role="group" aria-label="Prone detection">
+            <figure class="device-card">
+              <img src="/hungryface/home/snapshots/prone.jpg" alt="Prone detection screen" loading="lazy">
+              <figcaption class="caption">Prone detection</figcaption>
+            </figure>
+          </div>
+          <!-- 3 Motion -->
+          <div class="slide" role="group" aria-label="Motion detection">
+            <figure class="device-card">
+              <img src="/hungryface/home/snapshots/motion.jpg" alt="Motion detection screen" loading="lazy">
+              <figcaption class="caption">Motion detection</figcaption>
+            </figure>
+          </div>
+          <!-- 4 Audio alerts -->
+          <div class="slide" role="group" aria-label="Audio alerts">
+            <figure class="device-card">
+              <img src="/hungryface/home/snapshots/audio.jpg" alt="Audio alerts screen" loading="lazy">
+              <figcaption class="caption">Audio alerts</figcaption>
+            </figure>
+          </div>
+          <!-- 5 Training -->
+          <div class="slide" role="group" aria-label="Audio training">
+            <figure class="device-card">
+              <img src="/hungryface/home/snapshots/training.jpg" alt="Audio training screen" loading="lazy">
+              <figcaption class="caption">Audio training</figcaption>
+            </figure>
+          </div>
+          <!-- 6 Dashboard -->
+          <div class="slide" role="group" aria-label="Live dashboard">
+            <figure class="device-card">
+              <img src="/hungryface/home/snapshots/dashboard.jpg" alt="Live dashboard screen" loading="lazy">
+              <figcaption class="caption">Live dashboard</figcaption>
+            </figure>
+          </div>
+        </div>
+
+        <!-- Dots -->
+        <div id="shotsDots" class="shots-dots" role="tablist" aria-label="Choose screenshot"></div>
+
+        <!-- Desktop scrubber -->
+        <div class="shots-scrubber">
+          <input id="shotsScrubber" type="range" min="0" step="1" value="0" aria-label="Jump between screenshots">
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Fullscreen image modal -->
+  <div id="img-modal" class="img-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Screenshot preview">
+    <button class="img-close" type="button" aria-label="Close">✕</button>
+    <div class="img-wrap">
+      <img id="img-modal-img" alt="">
+    </div>
+  </div>
+
+  <script>
+  (function(){
+    const track = document.getElementById('shotsTrack');
+    const dotsWrap = document.getElementById('shotsDots');
+    const scrub = document.getElementById('shotsScrubber');
+    if (!track || !dotsWrap) return;
+
+    // Originals
+    let originals = Array.from(track.querySelectorAll('.slide'));
+    originals.forEach((s,i)=>{ s.dataset.index = String(i); });
+    const TOTAL = originals.length;
+
+    // Clone head/tail once (seamless wrap)
+    const mkClone = (el) => { const c = el.cloneNode(true); c.dataset.clone='1'; c.dataset.index = el.dataset.index; return c; };
+    track.insertBefore(mkClone(originals[TOTAL-1]), track.firstChild);
+    track.appendChild(mkClone(originals[0]));
+    let slides = Array.from(track.querySelectorAll('.slide'));
+
+    // Dots
+    for (let i=0;i<TOTAL;i++){
+      const b = document.createElement('button');
+      b.type='button'; b.setAttribute('role','tab');
+      b.setAttribute('aria-selected', i===0?'true':'false');
+      b.title = `Go to slide ${i+1}`;
+      b.addEventListener('click', () => goTo(i));
+      dotsWrap.appendChild(b);
+    }
+    const dots = Array.from(dotsWrap.querySelectorAll('[role="tab"]'));
+
+    // State
+    let active = 0;
+
+    // Helpers
+    function setActive(idx){
+      active = idx;
+      dots.forEach((d,i)=>d.setAttribute('aria-selected', i===idx?'true':'false'));
+      if (scrub) scrub.value = String(idx);
+    }
+    function centerOn(el, behavior='smooth'){
+      const tRect = track.getBoundingClientRect();
+      const eRect = el.getBoundingClientRect();
+      const left = track.scrollLeft + (eRect.left - tRect.left) - (track.clientWidth - el.clientWidth)/2;
+      track.scrollTo({ left, behavior });
+    }
+    function getOriginalByIndex(i){ return originals[i]; }
+    function normalizedIndex(slideEl){ return Number(slideEl.dataset.index)%TOTAL; }
+    function indexFromCenter(){
+      const rect = track.getBoundingClientRect();
+      const cx = rect.left + rect.width/2;
+      let best=0, dist=Infinity;
+      slides.forEach((s,i)=>{
+        const r = s.getBoundingClientRect();
+        const mid = r.left + r.width/2;
+        const d = Math.abs(mid - cx);
+        if (d < dist){ dist = d; best = i; }
+      });
+      return best;
+    }
+    function goTo(realIndex, opts={}){
+      const n = ((realIndex%TOTAL)+TOTAL)%TOTAL;
+      const target = getOriginalByIndex(n);
+      if (!target) return;
+      centerOn(target, opts.behavior || 'smooth');
+      setActive(n);
+    }
+    function jumpToOriginal(real){
+      const dest = getOriginalByIndex(real);
+      if (!dest) return;
+      track.classList.add('no-snap','no-smooth');
+      centerOn(dest, 'auto');
+      requestAnimationFrame(()=>{
+        track.classList.remove('no-snap');
+        requestAnimationFrame(()=> track.classList.remove('no-smooth'));
+      });
+      setActive(real);
+    }
+
+    // Scrubber (fits current image width)
+    if (scrub){
+      scrub.min='0'; scrub.max=String(TOTAL-1); scrub.step='1'; scrub.value='0';
+      const fitScrubber = () => {
+        const img = track.querySelector('.slide:not([data-clone]) img');
+        if (!img) return;
+        const w = Math.round(img.getBoundingClientRect().width);
+        scrub.style.width = w ? (w+'px') : '';
+      };
+      window.addEventListener('resize', fitScrubber, { passive:true });
+      new ResizeObserver(fitScrubber).observe(track);
+      fitScrubber();
+      const onScrub = v => goTo(parseInt(v,10)||0, { behavior:'auto' });
+      scrub.addEventListener('input', e => onScrub(e.currentTarget.value));
+      scrub.addEventListener('change', e => onScrub(e.currentTarget.value));
+    }
+
+    // Sync with scroll + wrap
+    let raf=null;
+    track.addEventListener('scroll', ()=>{
+      if (raf) return;
+      raf = requestAnimationFrame(()=>{
+        const idxAll = indexFromCenter();
+        const el = slides[idxAll];
+        if (!el){ raf=null; return; }
+        const real = normalizedIndex(el);
+        setActive(real);
+        if (el.dataset.clone === '1'){ jumpToOriginal(real); }
+        raf=null;
+      });
+    });
+
+    // Keyboard arrows when deck is visible
+    let onScreen = true;
+    new IntersectionObserver((entries)=>{ onScreen = entries.some(e=>e.isIntersecting); }, { threshold:0.35 }).observe(track);
+    document.addEventListener('keydown', (e)=>{
+      if (!onScreen) return;
+      if (e.key === 'ArrowRight' || e.key === 'PageDown'){ e.preventDefault(); goTo((active+1)%TOTAL, { behavior:'auto' }); }
+      if (e.key === 'ArrowLeft'  || e.key === 'PageUp'){   e.preventDefault(); goTo((active-1+TOTAL)%TOTAL, { behavior:'auto' }); }
+    }, { passive:false });
+
+    // --- Desktop drag: light threshold + flick to advance quickly
+    let dragging = false, startX = 0, startScroll = 0, pointerId = null, dragStart = 0;
+    const SWIPE_PX  = 50;  // pixels to commit a slide (low effort)
+    const FLICK_MS  = 220; // if drag ends quicker than this...
+    const FLICK_PX  = 12;  // ...and moved at least this much, treat as flick
+
+    track.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'mouse' || e.button !== 0) return; // desktop only
+      pointerId = e.pointerId;
+      track.setPointerCapture(pointerId);
+      dragging   = true;
+      startX     = e.clientX;
+      startScroll= track.scrollLeft;
+      dragStart  = performance.now();
+      track.classList.add('dragging'); // disables snap while dragging
+    });
+
+    track.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      e.preventDefault();
+      const dx = e.clientX - startX;
+      track.scrollLeft = startScroll - dx; // follow cursor
+    });
+
+    function endDrag(){
+      if (!dragging) return;
+      dragging = false;
+      track.classList.remove('dragging');
+      if (pointerId) track.releasePointerCapture(pointerId);
+      pointerId = null;
+
+      const elapsed = performance.now() - dragStart;
+      const movedPX = startScroll - track.scrollLeft; // <0 = left swipe (next), >0 = right swipe (prev)
+      const isFlick = elapsed < FLICK_MS && Math.abs(movedPX) > FLICK_PX;
+      const passed  = Math.abs(movedPX) > SWIPE_PX;
+
+      if (isFlick || passed) {
+        if (movedPX < 0) {
+          // left swipe → next image
+          goTo((active + 1) % TOTAL, { behavior: 'smooth' });
+        } else {
+          // right swipe → previous image
+          goTo((active - 1 + TOTAL) % TOTAL, { behavior: 'smooth' });
+        }
+        return;
+      }
+
+      // Otherwise, snap to the closest slide
+      const idxInAll = indexFromCenter();
+      const real = normalizedIndex(slides[idxInAll]);
+      goTo(real, { behavior: 'smooth' });
+    }
+
+    track.addEventListener('pointerup', endDrag);
+    track.addEventListener('pointercancel', endDrag);
+    track.addEventListener('pointerleave', endDrag);
+
+    // Prevent native image-drag ghost
+    track.querySelectorAll('img').forEach(img => img.addEventListener('dragstart', e => e.preventDefault()));
+
+    // ===== Mobile full-screen image =====
+    const imgModal = document.getElementById('img-modal');
+    const modalImg = document.getElementById('img-modal-img');
+    const btnClose = imgModal.querySelector('.img-close');
+
+    const isTouch = () => {
+      try { return window.matchMedia('(pointer: coarse)').matches; }
+      catch { return 'ontouchstart' in window; }
+    };
+    const fsSupported = !!(Element.prototype.requestFullscreen || Element.prototype.webkitRequestFullscreen);
+    const isFSActive = () => (document.fullscreenElement === imgModal) || (document.webkitFullscreenElement === imgModal);
+
+    async function requestFS(el){
+      try{
+        if (document.fullscreenElement) return true;
+        if (el.requestFullscreen){ await el.requestFullscreen(); return true; }
+        if (el.webkitRequestFullscreen){ el.webkitRequestFullscreen(); return true; }
+      }catch{}
+      return false;
+    }
+    async function exitFS(){
+      try{
+        if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
+        if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+      }catch{}
+    }
+
+    function showInModal(index){
+      const slide = originals[index];
+      const img = slide?.querySelector('img');
+      if (!img) return;
+      modalImg.src = img.currentSrc || img.src;
+      modalImg.alt = img.alt || '';
+      active = index;
+      setActive(index);
+    }
+
+    async function openImgAt(index){
+      if (!isTouch()) return; // only on mobile/touch
+      showInModal(index);
+      imgModal.classList.add('visible');
+      imgModal.setAttribute('aria-hidden','false');
+      document.documentElement.classList.add('no-scroll');
+      const ok = fsSupported ? await requestFS(imgModal) : false;
+      if (!ok) imgModal.classList.add('fullscreen');
+    }
+    async function closeImg(){
+      imgModal.classList.remove('visible','fullscreen');
+      imgModal.setAttribute('aria-hidden','true');
+      document.documentElement.classList.remove('no-scroll');
+      await exitFS();
+      setTimeout(()=>{ modalImg.src=''; }, 50);
+      goTo(active, { behavior:'auto' });
+    }
+
+    function syncFSClass(){ if (isFSActive()) imgModal.classList.add('fullscreen'); else imgModal.classList.remove('fullscreen'); }
+    document.addEventListener('fullscreenchange', syncFSClass);
+    document.addEventListener('webkitfullscreenchange', syncFSClass);
+
+    track.addEventListener('click', (e)=>{
+      const el = e.target;
+      if (!(el && el.tagName === 'IMG')) return;
+      const real = Number(el.closest('.slide')?.dataset.index ?? 0) % TOTAL;
+      openImgAt(((real%TOTAL)+TOTAL)%TOTAL);
+    });
+
+    imgModal.addEventListener('click', (e)=>{ if (e.target === imgModal) closeImg(); });
+    btnClose.addEventListener('click', closeImg);
+    document.addEventListener('keydown', (e)=>{
+      if (!imgModal.classList.contains('visible')) return;
+      if (e.key === 'Escape') closeImg();
+      if (e.key === 'ArrowRight') showInModal((active+1)%TOTAL);
+      if (e.key === 'ArrowLeft')  showInModal((active-1+TOTAL)%TOTAL);
+    });
+
+    // Swipe in FS
+    let tX=0, tY=0, tActive=false;
+    const SWIPE_X=40, SWIPE_Y=80;
+    imgModal.addEventListener('touchstart', (e)=>{ if (!imgModal.classList.contains('visible')) return; const t=e.touches[0]; tX=t.clientX; tY=t.clientY; tActive=true; }, {passive:true});
+    imgModal.addEventListener('touchend', (e)=>{
+      if (!tActive) return; tActive=false;
+      const t=e.changedTouches[0]; const dx=t.clientX - tX; const dy=t.clientY - tY;
+      if (Math.abs(dx)>Math.abs(dy) && Math.abs(dx)>SWIPE_X){
+        if (dx<0) showInModal((active+1)%TOTAL); else showInModal((active-1+TOTAL)%TOTAL);
+      } else if (Math.abs(dy)>SWIPE_Y){ closeImg(); }
+    }, {passive:true});
+
+    // ---------- Ensure first image (Camera sender) shows on load ----------
+    function imagesReady(){
+      const imgs = Array.from(track.querySelectorAll('img'));
+      return Promise.all(imgs.map(img => (img.complete && img.naturalWidth)
+        ? Promise.resolve()
+        : new Promise(res => img.addEventListener('load', res, { once:true }))
+      ));
+    }
+
+    // --- Robust first paint centering for iOS
+    function centerImmediate(i){
+      const el = originals[i];
+      if (!el) return;
+      track.classList.add('no-snap','no-smooth');
+      centerOn(el, 'auto');                     // use rect-based centering
+      requestAnimationFrame(()=>{
+        track.classList.remove('no-snap');
+        requestAnimationFrame(()=> track.classList.remove('no-smooth'));
+      });
+      setActive(i);
+    }
+
+    async function centerAfterImages(i){
+      await imagesReady();
+      requestAnimationFrame(()=> requestAnimationFrame(()=> { jumpToOriginal(i); }));
+    }
+
+    // Run immediate jump, then refine after images settle
+    centerImmediate(0);
+    centerAfterImages(0);
+
+    window.addEventListener('resize', () => { jumpToOriginal(active); }, { passive:true });
+  })();
+  </script>
+</body>
+</html>
