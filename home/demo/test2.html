@@ -33,12 +33,11 @@
       overscroll-behavior-x: contain;
       scroll-snap-type: x mandatory;
       scroll-behavior: smooth;
-      gap: 0; /* no peek of adjacent slides by default (mobile) */
+      gap: 0;
       padding: 0 0 10px;
       -webkit-overflow-scrolling: touch;
       cursor: grab;
       scroll-padding-inline: var(--padStart) var(--padEnd);
-      /* thinner horizontal scrollbar */
       scrollbar-width: thin;
       scrollbar-color: #555 transparent;
     }
@@ -55,6 +54,7 @@
       display: grid;
       place-items: center;
       scroll-snap-align: center;
+      scroll-snap-stop: always; /* ensure perfect centering on iOS */
       padding: 8px 0;
     }
 
@@ -71,11 +71,10 @@
       box-shadow: 0 8px 24px rgba(0,0,0,.35);
     }
     .device-card img{
-      width: clamp(280px, 96svw, 600px); /* mobile default */
+      width: clamp(280px, 96svw, 600px);
       height: auto; display: block; border-radius: 10px;
       -webkit-user-drag: none; user-select: none; pointer-events: auto;
     }
-    /* Desktop: 40% smaller (600→270 max; 36vw→21.6vw; 280→168 min) */
     @media (min-width:700px){
       .device-card img{ width: clamp(168px, 21.6vw, 270px); }
     }
@@ -84,10 +83,10 @@
       .device-card{ background: transparent; border: 0; box-shadow: none; padding: 0; }
       .device-card img{ width: 100svw; border-radius: 0; }
 
-      /* ensure the *slide* matches the image width on iPhone */
+      /* match slide to image width on iPhone */
       .slide{ flex: 0 0 100svw; }
 
-      /* avoid a snap offset on tiny screens */
+      /* no snap offset on tiny screens */
       .shots-track{ scroll-padding-inline: 0 !important; }
     }
 
@@ -107,7 +106,6 @@
       .shots-scrubber{ display: flex; }
       .shots-scrubber input[type="range"]{
         width: 600px; max-width: 100%;
-        /* make much more narrow */
         -webkit-appearance: none; appearance: none; background: transparent; height: 16px;
       }
       .shots-scrubber input[type="range"]::-webkit-slider-runnable-track{
@@ -260,10 +258,23 @@
       if (scrub) scrub.value = String(idx);
     }
 
-    // ✅ precise centering using offsets (fixes "center is at right edge")
+    // Center with micro-correction (fixes "n+1 center on right edge")
     function centerOn(el, behavior='smooth'){
-      const left = Math.round(el.offsetLeft + el.offsetWidth / 2 - track.clientWidth / 2);
-      track.scrollTo({ left, behavior });
+      const base = Math.round(el.offsetLeft + el.offsetWidth / 2 - track.clientWidth / 2);
+      track.scrollTo({ left: base, behavior });
+
+      // micro-correct after layout settles (works on iOS)
+      const correct = () => {
+        const t = track.getBoundingClientRect();
+        const r = el.getBoundingClientRect();
+        const delta = (r.left + r.width/2) - (t.left + t.width/2);
+        if (Math.abs(delta) > 0.5) track.scrollLeft += delta;
+      };
+      if (behavior === 'auto') {
+        requestAnimationFrame(()=>requestAnimationFrame(correct));
+      } else {
+        setTimeout(correct, 220); // approximate smooth duration
+      }
     }
 
     function getOriginalByIndex(i){ return originals[i]; }
@@ -316,7 +327,7 @@
       scrub.addEventListener('change', e => onScrub(e.currentTarget.value));
     }
 
-    // Sync with scroll + guarded wrap at true edges
+    // Sync with scroll + wrap only at true ends (fixes early jump after 4th)
     let raf=null;
     track.addEventListener('scroll', ()=>{
       if (raf) return;
@@ -327,13 +338,10 @@
         const real = normalizedIndex(el);
         setActive(real);
 
-        // Only wrap when the centered slide is an edge clone AND you're actually near that edge
         if (el.dataset.clone === '1') {
-          const firstChild = track.firstElementChild;
-          const lastChild  = track.lastElementChild;
-          const nearStart = (el === firstChild) && (track.scrollLeft <= el.offsetWidth * 0.5);
-          const nearEnd   = (el === lastChild)  && (track.scrollLeft >= track.scrollWidth - track.clientWidth - el.offsetWidth * 0.5);
-          if (nearStart || nearEnd) jumpToOriginal(real);
+          const isFirstCloneCentered = (idxAll === 0) && (real === TOTAL - 1);
+          const isLastCloneCentered  = (idxAll === slides.length - 1) && (real === 0);
+          if (isFirstCloneCentered || isLastCloneCentered) jumpToOriginal(real);
         }
 
         raf=null;
@@ -349,28 +357,28 @@
       if (e.key === 'ArrowLeft'  || e.key === 'PageUp'){   e.preventDefault(); goTo((active-1+TOTAL)%TOTAL, { behavior:'auto' }); }
     }, { passive:false });
 
-    // --- Desktop drag: light threshold + flick to advance quickly
+    // --- Desktop drag
     let dragging = false, startX = 0, startScroll = 0, pointerId = null, dragStart = 0;
-    const SWIPE_PX  = 50;  // pixels to commit a slide (low effort)
-    const FLICK_MS  = 220; // if drag ends quicker than this...
-    const FLICK_PX  = 12;  // ...and moved at least this much, treat as flick
+    const SWIPE_PX  = 50;
+    const FLICK_MS  = 220;
+    const FLICK_PX  = 12;
 
     track.addEventListener('pointerdown', (e) => {
-      if (e.pointerType !== 'mouse' || e.button !== 0) return; // desktop only
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
       pointerId = e.pointerId;
       track.setPointerCapture(pointerId);
       dragging   = true;
       startX     = e.clientX;
       startScroll= track.scrollLeft;
       dragStart  = performance.now();
-      track.classList.add('dragging'); // disables snap while dragging
+      track.classList.add('dragging');
     });
 
     track.addEventListener('pointermove', (e) => {
       if (!dragging) return;
       e.preventDefault();
       const dx = e.clientX - startX;
-      track.scrollLeft = startScroll - dx; // follow cursor
+      track.scrollLeft = startScroll - dx;
     });
 
     function endDrag(){
@@ -381,22 +389,19 @@
       pointerId = null;
 
       const elapsed = performance.now() - dragStart;
-      const movedPX = startScroll - track.scrollLeft; // <0 = left swipe (next), >0 = right swipe (prev)
+      const movedPX = startScroll - track.scrollLeft;
       const isFlick = elapsed < FLICK_MS && Math.abs(movedPX) > FLICK_PX;
       const passed  = Math.abs(movedPX) > SWIPE_PX;
 
       if (isFlick || passed) {
         if (movedPX < 0) {
-          // left swipe → next image
           goTo((active + 1) % TOTAL, { behavior: 'smooth' });
         } else {
-          // right swipe → previous image
           goTo((active - 1 + TOTAL) % TOTAL, { behavior: 'smooth' });
         }
         return;
       }
 
-      // Otherwise, snap to the closest slide
       const idxInAll = indexFromCenter();
       const real = normalizedIndex(slides[idxInAll]);
       goTo(real, { behavior: 'smooth' });
@@ -505,7 +510,6 @@
       ));
     }
 
-    // Robust first paint centering for iOS
     function centerImmediate(i){
       const el = originals[i];
       if (!el) return;
