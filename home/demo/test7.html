@@ -17,7 +17,7 @@
     html, body{ height:100%; margin:0; background:#000; color:#fff;
       font-family:-apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
 
-    /* ===== Header: logo only (same style/position as your mobile version) ===== */
+    /* ===== Header: logo only ===== */
     header{
       display:grid; grid-template-columns:1fr auto 1fr; align-items:center;
       padding:14px 20px; gap:12px;
@@ -31,9 +31,14 @@
     .home-link{ display:inline-flex; align-items:center; line-height:1; color:#fff; text-decoration:none; }
     .icon{ width:26px; height:26px; display:block; }
 
-    /* ---------- MOBILE VIEW (your code) ---------- */
-    /* Stage is only visible on mobile */
-    @media (min-width:700px){ .stage { display:none !important; } }
+    /* ---------- MOBILE VIEW (your stage) ---------- */
+    /* Hide the desktop deck completely on mobile to avoid any overlap */
+    @media (max-width:699.98px){
+      main{ display:none !important; }
+    }
+    @media (min-width:700px){
+      .stage{ display:none !important; }
+    }
 
     .stage{
       position:fixed; left:0; right:0; top:var(--headH); bottom:0;
@@ -68,7 +73,6 @@
     .stage.is-fullscreen .fs-bar{ display:inline-block; }
 
     /* ---------- DESKTOP VIEW (cards deck) ---------- */
-    @media (max-width:699.98px){ .shots { display:none; } }
     main{ min-height:100dvh; display:grid; place-items:start center; padding:0 0 24px; }
     .shots{ width:100%; display:grid; justify-items:center; }
     .shots-wrap{ width:100%; max-width:1100px; margin-inline:auto; }
@@ -90,8 +94,6 @@
       border-radius:16px; padding:14px; box-shadow:0 8px 24px rgba(0,0,0,.35); }
     .device-card img{ width:clamp(280px,96svw,600px); height:auto; display:block; border-radius:10px; -webkit-user-drag:none; user-select:none; pointer-events:auto; }
     @media (min-width:700px){ .device-card img{ width:clamp(168px,21.6vw,270px); } }
-    @media (max-width:560px){ .device-card{ background:transparent; border:0; box-shadow:none; padding:0; }
-      .device-card img{ width:100svw; border-radius:0; } .slide{ flex:0 0 100svw; } .shots-track{ scroll-padding-inline:0 !important; } }
     .caption{ font-size:.9rem; color:#d7d7d7; opacity:.9; }
     .shots-dots{ margin-top:10px; display:flex; gap:8px; justify-content:center; align-items:center; padding-inline:var(--padStart) var(--padEnd); }
     .shots-dots [role="tab"]{ width:9px; height:9px; border-radius:50%; background:#3a3a3a; border:0; padding:0; cursor:pointer; transition:transform .12s; }
@@ -106,7 +108,7 @@
       .shots-scrubber input[type="range"]::-moz-range-thumb{ width:12px; height:12px; border-radius:50%; background:#fff; border:none; }
     }
 
-    /* Fullscreen modal (desktop) */
+    /* Desktop fullscreen modal */
     .img-modal{ position:fixed; inset:0; background:#000; display:none; align-items:center; justify-content:center; z-index:1100; }
     .img-modal.visible{ display:flex; }
     .img-wrap{ width:100svw; height:100svh; display:grid; place-items:center;
@@ -138,7 +140,7 @@
     <div class="nav-right" aria-hidden="true"></div>
   </header>
 
-  <!-- MOBILE STAGE (visible only on mobile) -->
+  <!-- MOBILE STAGE -->
   <section class="stage" role="region" aria-label="Naptio demo screenshots" id="stage">
     <button class="fs-close" id="fsClose" aria-label="Close fullscreen" title="Close">×</button>
     <button class="fs-bar" id="fsBar" aria-label="Close fullscreen">Close</button>
@@ -146,7 +148,7 @@
     <div class="dots" id="dots" role="tablist" aria-label="Slides"></div>
   </section>
 
-  <!-- DESKTOP DECK (hidden on mobile) -->
+  <!-- DESKTOP DECK -->
   <main>
     <section class="shots" aria-label="App screenshots (desktop)">
       <div class="shots-wrap">
@@ -204,9 +206,8 @@
 
   <script>
   (function(){
-    /* ---------- MOBILE: your code exactly (wrapped) ---------- */
-    function initMobileProvided(){
-      // Order requested
+    /* ---------- MOBILE (exact behavior, now guarded) ---------- */
+    function initMobile(){
       const BASE = '/hungryface/home/snapshots/';
       const IMAGES = ['sender.jpg','prone.jpg','motion.jpg','audio.jpg','training.jpg','dashboard.jpg'];
 
@@ -216,6 +217,12 @@
       const header = document.querySelector('header');
       const fsClose= document.getElementById('fsClose');
       const fsBar  = document.getElementById('fsBar');
+
+      // ✅ Prevent double-building if this runs more than once
+      if (track.dataset.built === '1') return;
+      track.dataset.built = '1';
+      track.textContent = '';
+      dotsEl.textContent = '';
 
       let index = 0, width = 0;
       let dragging = false, startX = 0, startY = 0, currentX = 0, currentY = 0, deltaX = 0, deltaY = 0, startTransform = 0;
@@ -227,7 +234,6 @@
         translateTo(index, false);
       }
 
-      // Build slides + dots
       IMAGES.forEach((name, i) => {
         const slide = document.createElement('section');
         slide.className = 'slide'; slide.setAttribute('role', 'tabpanel');
@@ -245,7 +251,6 @@
         dot.addEventListener('click', () => goTo(i));
         dotsEl.appendChild(dot);
 
-        // Tap/click image to enter fullscreen on mobile
         img.addEventListener('click', maybeEnterFullscreen, { passive: true });
       });
 
@@ -255,8 +260,7 @@
         const noMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         track.style.transition = withAnim && !noMotion ? 'transform 320ms ease' : 'none';
         track.style.transform  = `translateX(${-index * width}px)`;
-        preload(index - 1); preload(index + 1);
-        updateDots();
+        preload(index - 1); preload(index + 1); updateDots();
       }
       function preload(i){
         if (i < 0 || i >= IMAGES.length) return;
@@ -267,16 +271,14 @@
       function next(){ translateTo(index + 1, true); }
       function prev(){ translateTo(index - 1, true); }
 
-      // Drag/swipe + swipe-down-to-close (only in fullscreen)
       const startDrag = (x, y) => { dragging = true; startX = x; startY = y; currentX = x; currentY = y; deltaX = 0; deltaY = 0;
         startTransform = -index * width; track.style.transition = 'none'; };
       const moveDrag  = (x, y) => {
         if (!dragging) return;
         currentX = x; currentY = y; deltaX = currentX - startX; deltaY = currentY - startY;
-
         if (stage.classList.contains('is-fullscreen')) {
           const mostlyVertical = Math.abs(deltaY) > Math.abs(deltaX) * 1.35;
-          if (mostlyVertical && deltaY > 90) { exitFullscreen(); dragging = false; return; } // swipe down
+          if (mostlyVertical && deltaY > 90) { exitFullscreen(); dragging = false; return; }
         }
         const resistance = (index === 0 && deltaX > 0) || (index === IMAGES.length - 1 && deltaX < 0) ? 0.35 : 1;
         track.style.transform = `translateX(${startTransform + deltaX * resistance}px)`;
@@ -289,72 +291,53 @@
         else translateTo(index, true);
       };
 
-      stage.addEventListener('mousedown', (e) => { if (e.button === 0) startDrag(e.clientX, e.clientY); });
-      window.addEventListener('mousemove', (e) => moveDrag(e.clientX, e.clientY));
-      window.addEventListener('mouseup', endDrag);
-
       stage.addEventListener('touchstart', (e) => startDrag(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
       stage.addEventListener('touchmove',  (e) => moveDrag(e.touches[0].clientX,  e.touches[0].clientY),  { passive: true });
       stage.addEventListener('touchend', endDrag);
-
       stage.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') startDrag(e.clientX, e.clientY); });
       stage.addEventListener('pointermove', (e) => moveDrag(e.clientX, e.clientY));
       stage.addEventListener('pointerup', endDrag);
       stage.addEventListener('pointercancel', endDrag);
 
-      // Keyboard (desktop)
-      window.addEventListener('keydown', (e) => {
-        if (e.key === 'ArrowRight') next();
-        else if (e.key === 'ArrowLeft')  prev();
-        else if (e.key === 'Escape')     exitFullscreen();
-      });
+      window.addEventListener('keydown', (e) => { if (e.key === 'Escape') exitFullscreen(); });
 
-      // ===== Fullscreen logic =====
       const isMobileLike = () => window.matchMedia('(pointer: coarse), (max-width: 780px)').matches;
-
       async function maybeEnterFullscreen() {
         if (!isMobileLike()) return;
         try { if (stage.requestFullscreen) { await stage.requestFullscreen(); } } catch {}
-        stage.classList.add('is-fullscreen');   // always add class as visual fullscreen
-        measure();
+        stage.classList.add('is-fullscreen'); measure();
       }
       function exitFullscreen() {
         if (document.fullscreenElement) { document.exitFullscreen().catch(()=>{}); }
-        stage.classList.remove('is-fullscreen');
-        measure();
+        stage.classList.remove('is-fullscreen'); measure();
       }
 
-      // Close controls
-      fsClose.addEventListener('click', exitFullscreen);
-      fsBar.addEventListener('click', exitFullscreen);
+      document.getElementById('fsClose').addEventListener('click', exitFullscreen);
+      document.getElementById('fsBar').addEventListener('click', exitFullscreen);
 
-      // Exit on background tap (not on img or controls)
       stage.addEventListener('click', (e) => {
         if (!stage.classList.contains('is-fullscreen')) return;
         if (e.target.closest('.fs-close, .fs-bar, .dot, .slide > img')) return;
         exitFullscreen();
       });
-
       document.addEventListener('fullscreenchange', () => {
         if (document.fullscreenElement === stage) stage.classList.add('is-fullscreen');
         else stage.classList.remove('is-fullscreen');
         measure();
       });
 
-      // Measure / sync
       window.addEventListener('load', measure);
       window.addEventListener('resize', measure);
       window.addEventListener('orientationchange', measure);
       new ResizeObserver(measure).observe(header);
     }
 
-    /* ---------- DESKTOP: deck + modal ---------- */
-    function initDesktopDeck(){
+    /* ---------- DESKTOP (cards deck + modal) ---------- */
+    function initDesktop(){
       const track = document.getElementById('shotsTrack');
       const dotsWrap = document.getElementById('shotsDots');
       const scrub = document.getElementById('shotsScrubber');
 
-      // Modal (shared)
       const imgModal = document.getElementById('img-modal');
       const modalImg = document.getElementById('img-modal-img');
       const btnClose = imgModal.querySelector('.img-close');
@@ -466,15 +449,12 @@
 
     // Boot per layout
     function boot(){
-      if (window.matchMedia('(max-width:699.98px)').matches) {
-        initMobileProvided();
-      } else {
-        initDesktopDeck();
-      }
+      if (window.matchMedia('(max-width:699.98px)').matches) initMobile();
+      else initDesktop();
     }
     boot();
 
-    // Re-init on breakpoint change (simplest/robust)
+    // Re-init on breakpoint change
     window.matchMedia('(min-width:700px)').addEventListener('change', () => location.reload());
   })();
   </script>
