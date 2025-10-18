@@ -12,7 +12,7 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
     }
 
-    /* ===== Header: same logo position, no "Home" text ===== */
+    /* ===== Header: logo only (same spot as home), no "Home" label shown ===== */
     header {
       display: grid;
       grid-template-columns: 1fr auto 1fr;
@@ -37,7 +37,7 @@
       background: #000; overflow: hidden; isolation: isolate; z-index: 1;
       touch-action: pan-y pinch-zoom;
     }
-    /* Fullscreen (fallback class) */
+    /* Fullscreen (class fallback + Fullscreen API) */
     .stage.is-fullscreen {
       top: 0; bottom: 0; left: 0; right: 0;
       width: 100svw; height: 100svh; z-index: 9999;
@@ -60,12 +60,13 @@
       width: auto; height: auto;
       object-fit: contain; object-position: center;
       display: block; user-select: none; -webkit-user-drag: none; -webkit-touch-callout: none;
+      cursor: zoom-in;
     }
 
     /* •••• Circular dots indicator */
     .dots {
       position: absolute; left: 0; right: 0;
-      bottom: clamp(10px, 2vh, 18px);
+      bottom: calc(max(10px, 2vh) + env(safe-area-inset-bottom));
       display: flex; justify-content: center; gap: 8px;
       pointer-events: auto;
     }
@@ -77,12 +78,16 @@
     }
     .dot.active { background: #fff; }
 
-    /* Close button only visible in fullscreen */
+    /* Close button (visible only in fullscreen) */
     .fs-close {
-      position: absolute; top: calc(env(safe-area-inset-top) + 10px); right: calc(env(safe-area-inset-right) + 10px);
-      width: 36px; height: 36px; border-radius: 999px; border: 1px solid rgba(255,255,255,.25);
+      position: absolute;
+      top: calc(env(safe-area-inset-top) + 10px);
+      right: calc(env(safe-area-inset-right) + 10px);
+      width: 44px; height: 44px; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.25);
       display: none; align-items: center; justify-content: center;
-      background: rgba(0,0,0,.5); color: #fff; font-size: 22px; line-height: 1;
+      background: rgba(0,0,0,.55); color: #fff; font-size: 24px; line-height: 1;
+      cursor: pointer;
     }
     .stage.is-fullscreen .fs-close { display: flex; }
   </style>
@@ -103,16 +108,23 @@
 
   <!-- Screenshot stage -->
   <section class="stage" role="region" aria-label="Naptio demo screenshots" id="stage">
-    <button class="fs-close" id="fsClose" aria-label="Close fullscreen">×</button>
+    <button class="fs-close" id="fsClose" aria-label="Close fullscreen" title="Close">×</button>
     <div class="track" id="track" aria-live="polite"></div>
     <div class="dots" id="dots" role="tablist" aria-label="Slides"></div>
   </section>
 
   <script>
-    // ---- Your screenshots ----
+    // ---- Required order ----
     const BASE = '/hungryface/home/snapshots/';
-    const IMAGES = ['audio.jpg','dashboard.jpg','motion.jpg','prone.jpg','sender.jpg','training.jpg'];
-    // --------------------------
+    const IMAGES = [
+      'sender.jpg',
+      'prone.jpg',
+      'motion.jpg',
+      'audio.jpg',
+      'training.jpg',
+      'dashboard.jpg',
+    ];
+    // ------------------------
 
     const stage  = document.getElementById('stage');
     const track  = document.getElementById('track');
@@ -122,7 +134,7 @@
 
     let index = 0;
     let width = 0;
-    let dragging = false, startX = 0, currentX = 0, deltaX = 0, startTransform = 0;
+    let dragging = false, startX = 0, startY = 0, currentX = 0, currentY = 0, deltaX = 0, deltaY = 0, startTransform = 0;
 
     function setCSSVar(name, px){ document.documentElement.style.setProperty(name, `${Math.max(0, px|0)}px`); }
     function measureStage(){
@@ -175,11 +187,21 @@
     function next(){ translateTo(index + 1, true); }
     function prev(){ translateTo(index - 1, true); }
 
-    // Drag/swipe
-    const startDrag = (x) => { dragging = true; startX = x; currentX = x; deltaX = 0; startTransform = -index * width; track.style.transition = 'none'; };
-    const moveDrag  = (x) => {
+    // Drag/swipe + swipe-down-to-close (in fullscreen)
+    const startDrag = (x, y) => {
+      dragging = true; startX = x; startY = y; currentX = x; currentY = y; deltaX = 0; deltaY = 0;
+      startTransform = -index * width; track.style.transition = 'none';
+    };
+    const moveDrag  = (x, y) => {
       if (!dragging) return;
-      currentX = x; deltaX = currentX - startX;
+      currentX = x; currentY = y; deltaX = currentX - startX; deltaY = currentY - startY;
+
+      // If in fullscreen and gesture is mostly vertical and large → exit
+      if (stage.classList.contains('is-fullscreen')) {
+        const mostlyVertical = Math.abs(deltaY) > Math.abs(deltaX) * 1.35;
+        if (mostlyVertical && Math.abs(deltaY) > 90) { exitFullscreen(); dragging = false; return; }
+      }
+
       const resistance = (index === 0 && deltaX > 0) || (index === IMAGES.length - 1 && deltaX < 0) ? 0.35 : 1;
       track.style.transform = `translateX(${startTransform + deltaX * resistance}px)`;
     };
@@ -191,16 +213,16 @@
       else translateTo(index, true);
     };
 
-    stage.addEventListener('mousedown', (e) => { if (e.button === 0) startDrag(e.clientX); });
-    window.addEventListener('mousemove', (e) => moveDrag(e.clientX));
+    stage.addEventListener('mousedown', (e) => { if (e.button === 0) startDrag(e.clientX, e.clientY); });
+    window.addEventListener('mousemove', (e) => moveDrag(e.clientX, e.clientY));
     window.addEventListener('mouseup', endDrag);
 
-    stage.addEventListener('touchstart', (e) => startDrag(e.touches[0].clientX), { passive: true });
-    stage.addEventListener('touchmove',  (e) => moveDrag(e.touches[0].clientX),  { passive: true });
+    stage.addEventListener('touchstart', (e) => startDrag(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
+    stage.addEventListener('touchmove',  (e) => moveDrag(e.touches[0].clientX,  e.touches[0].clientY),  { passive: true });
     stage.addEventListener('touchend', endDrag);
 
-    stage.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') startDrag(e.clientX); });
-    stage.addEventListener('pointermove', (e) => moveDrag(e.clientX));
+    stage.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') startDrag(e.clientX, e.clientY); });
+    stage.addEventListener('pointermove', (e) => moveDrag(e.clientX, e.clientY));
     stage.addEventListener('pointerup', endDrag);
     stage.addEventListener('pointercancel', endDrag);
 
@@ -211,18 +233,15 @@
       else if (e.key === 'Escape')     exitFullscreen();
     });
 
-    // ===== Fullscreen logic (mobile-first) =====
+    // ===== Fullscreen logic =====
     const isMobileLike = () => window.matchMedia('(pointer: coarse), (max-width: 780px)').matches;
 
     async function maybeEnterFullscreen() {
       if (!isMobileLike()) return;
-      // Try the Fullscreen API first
       try {
         if (stage.requestFullscreen) {
-          await stage.requestFullscreen();
-          // class toggled in fullscreenchange
+          await stage.requestFullscreen(); // will trigger fullscreenchange
         } else {
-          // Fallback: class-driven fullscreen
           stage.classList.add('is-fullscreen');
           measureStage();
         }
