@@ -139,6 +139,28 @@
       border-radius:9999px; padding:8px 12px; cursor:pointer; font-size:18px; z-index:2100;
     }
 
+    /* Fullscreen controls for the mobile image stage */
+    .fs-close{
+      position: absolute;
+      top: calc(env(safe-area-inset-top) + 10px);
+      right: calc(env(safe-area-inset-right) + 10px);
+      width: 44px; height: 44px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.25);
+      background: rgba(0,0,0,.65);
+      color: #fff; font-size: 24px; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; z-index: 6;
+    }
+    .fs-bar{
+      position: absolute; left: 50%; transform: translateX(-50%);
+      bottom: calc(env(safe-area-inset-bottom) + 16px);
+      padding: 10px 16px; border-radius: 9999px;
+      border: 1px solid rgba(255,255,255,.25);
+      background: rgba(0,0,0,.55); color: #fff; font-weight: 600;
+      cursor: pointer; z-index: 6;
+    }
+
     /* Hide close buttons unless overlay/modal is visible */
     .img-modal .img-close,
     .video-overlay .video-close,
@@ -175,6 +197,8 @@
 
   <!-- MOBILE STAGE -->
   <section class="stage" role="region" aria-label="Naptio demo screenshots" id="stage">
+    <button class="fs-close" id="fsClose" aria-label="Close fullscreen" title="Close">×</button>
+    <button class="fs-bar" id="fsBar" aria-label="Close fullscreen">Close</button>
     <div class="track" id="track" aria-live="polite"></div>
     <div class="dots" id="dots" role="tablist" aria-label="Slides"></div>
   </section>
@@ -367,6 +391,16 @@
         if (document.fullscreenElement) { document.exitFullscreen().catch(()=>{}); }
         stage.classList.remove('is-fullscreen'); measure();
       }
+
+      const fsClose = document.getElementById('fsClose');
+      const fsBar   = document.getElementById('fsBar');
+      fsClose?.addEventListener('click', exitFullscreen);
+      fsBar  ?.addEventListener('click', exitFullscreen);
+      stage.addEventListener('click', (e) => {
+        if (!stage.classList.contains('is-fullscreen')) return;
+        if (e.target.closest('.slide > img, .dot, #fsClose, #fsBar')) return;
+        exitFullscreen();
+      });
 
       window.addEventListener('load', measure);
       window.addEventListener('resize', measure);
