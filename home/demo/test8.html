@@ -31,19 +31,18 @@
     .home-link{ display:inline-flex; align-items:center; line-height:1; color:#fff; text-decoration:none; }
     .icon{ width:26px; height:26px; display:block; }
 
-    /* ---------- MOBILE VIEW (your stage) ---------- */
-    /* Hide the desktop deck completely on mobile to avoid any overlap */
-    @media (max-width:699.98px){
-      main{ display:none !important; }
-    }
-    @media (min-width:700px){
-      .stage{ display:none !important; }
-    }
+    /* ---------- MOBILE VIEW (stage) ---------- */
+    @media (max-width:699.98px){ main{ display:none !important; } }
+    @media (min-width:700px){ .stage{ display:none !important; } }
 
     .stage{
       position:fixed; left:0; right:0; top:var(--headH); bottom:0;
       background:#000; overflow:hidden; isolation:isolate; z-index:1;
       touch-action: pan-y pinch-zoom;
+    }
+    /* parked = release fixed positioning so you can scroll to content below */
+    .stage.is-parked{
+      position:static; inset:auto; height:min(80svh, 720px);
     }
     .stage.is-fullscreen{ top:0; bottom:0; left:0; right:0; width:100svw; height:100svh; z-index:9999; }
     .track{ display:flex; height:100%; will-change:transform; transition:transform 320ms ease; }
@@ -71,6 +70,16 @@
       background:rgba(0,0,0,.55); color:#fff; font-weight:600; cursor:pointer; display:none; z-index:6;
     }
     .stage.is-fullscreen .fs-bar{ display:inline-block; }
+
+    /* Mobile: watch video pill (shows when not fullscreen) */
+    .watch-video{
+      position:absolute; left:50%; transform:translateX(-50%);
+      bottom:calc(env(safe-area-inset-bottom) + 56px);
+      border:1px solid rgba(255,255,255,.25);
+      background:rgba(0,0,0,.55); color:#fff; border-radius:9999px;
+      padding:8px 12px; font-weight:600; cursor:pointer; z-index:6;
+    }
+    .stage.is-fullscreen .watch-video{ display:none; }
 
     /* ---------- DESKTOP VIEW (cards deck) ---------- */
     main{ min-height:100dvh; display:grid; place-items:start center; padding:0 0 24px; }
@@ -108,7 +117,22 @@
       .shots-scrubber input[type="range"]::-moz-range-thumb{ width:12px; height:12px; border-radius:50%; background:#fff; border:none; }
     }
 
-    /* Desktop fullscreen modal */
+    /* ---------- Video section (below images) ---------- */
+    .video-section{
+      width:100%; display:grid; place-items:center;
+      padding:24px 20px 48px;
+    }
+    .video-wrap{ width:100%; max-width:1100px; margin-inline:auto; }
+    .video-aspect{
+      position:relative; width:100%;
+      padding-top:56.25%; /* 16:9 */
+      background:#000; border:1px solid #1b1b1b; border-radius:12px; overflow:hidden;
+    }
+    .video-aspect iframe{
+      position:absolute; inset:0; width:100%; height:100%; border:0; display:block;
+    }
+
+    /* Desktop fullscreen modal (unchanged) */
     .img-modal{ position:fixed; inset:0; background:#000; display:none; align-items:center; justify-content:center; z-index:1100; }
     .img-modal.visible{ display:flex; }
     .img-wrap{ width:100svw; height:100svh; display:grid; place-items:center;
@@ -144,6 +168,7 @@
   <section class="stage" role="region" aria-label="Naptio demo screenshots" id="stage">
     <button class="fs-close" id="fsClose" aria-label="Close fullscreen" title="Close">×</button>
     <button class="fs-bar" id="fsBar" aria-label="Close fullscreen">Close</button>
+    <button class="watch-video" id="watchVideo" type="button" aria-label="Watch demo video">▶ Watch demo video</button>
     <div class="track" id="track" aria-live="polite"></div>
     <div class="dots" id="dots" role="tablist" aria-label="Slides"></div>
   </section>
@@ -198,6 +223,22 @@
     </section>
   </main>
 
+  <!-- VIDEO (below images on both desktop & mobile) -->
+  <section class="video-section" id="demo-video" aria-label="Demo video">
+    <div class="video-wrap">
+      <div class="video-aspect">
+        <iframe
+          src="https://www.youtube-nocookie.com/embed/HvIA_OH9to8?rel=0&modestbranding=1&playsinline=1"
+          title="Naptio — demo video"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowfullscreen
+          loading="lazy"
+          referrerpolicy="strict-origin-when-cross-origin">
+        </iframe>
+      </div>
+    </div>
+  </section>
+
   <!-- Desktop fullscreen modal -->
   <div id="img-modal" class="img-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Screenshot preview">
     <button class="img-close" type="button" aria-label="Close">✕</button>
@@ -206,7 +247,7 @@
 
   <script>
   (function(){
-    /* ---------- MOBILE (exact behavior, now guarded) ---------- */
+    /* ---------- MOBILE (exact behavior, plus watch-video) ---------- */
     function initMobile(){
       const BASE = '/hungryface/home/snapshots/';
       const IMAGES = ['sender.jpg','prone.jpg','motion.jpg','audio.jpg','training.jpg','dashboard.jpg'];
@@ -217,21 +258,21 @@
       const header = document.querySelector('header');
       const fsClose= document.getElementById('fsClose');
       const fsBar  = document.getElementById('fsBar');
+      const watch  = document.getElementById('watchVideo');
+      const video  = document.getElementById('demo-video');
 
-      // ✅ Prevent double-building if this runs more than once
+      // build once
       if (track.dataset.built === '1') return;
       track.dataset.built = '1';
-      track.textContent = '';
-      dotsEl.textContent = '';
+      track.textContent = ''; dotsEl.textContent = '';
 
       let index = 0, width = 0;
       let dragging = false, startX = 0, startY = 0, currentX = 0, currentY = 0, deltaX = 0, deltaY = 0, startTransform = 0;
 
-      function setVar(name, px){ document.documentElement.style.setProperty(name, `${Math.max(0, px|0)}px`); }
-      function measure() {
+      const setVar = (name, px)=> document.documentElement.style.setProperty(name, `${Math.max(0, px|0)}px`);
+      function measure(){
         setVar('--headH', stage.classList.contains('is-fullscreen') ? 0 : (header?.offsetHeight ?? 0));
-        width = stage.clientWidth;
-        translateTo(index, false);
+        width = stage.clientWidth; translateTo(index, false);
       }
 
       IMAGES.forEach((name, i) => {
@@ -242,8 +283,7 @@
         const img = document.createElement('img');
         img.src = BASE + name; img.alt = `App screenshot ${i+1}`;
         img.decoding = 'async'; img.loading = i === 0 ? 'eager' : 'lazy';
-        slide.appendChild(img);
-        track.appendChild(slide);
+        slide.appendChild(img); track.appendChild(slide);
 
         const dot = document.createElement('button');
         dot.className = 'dot' + (i === 0 ? ' active' : '');
@@ -254,7 +294,7 @@
         img.addEventListener('click', maybeEnterFullscreen, { passive: true });
       });
 
-      function updateDots(){ [...dotsEl.children].forEach((d, i) => d.classList.toggle('active', i === index)); }
+      const updateDots = ()=> [...dotsEl.children].forEach((d, i) => d.classList.toggle('active', i === index));
       function translateTo(i, withAnim = true){
         index = Math.max(0, Math.min(IMAGES.length - 1, i));
         const noMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -267,9 +307,9 @@
         const img = track.children[i]?.querySelector('img');
         if (img && img.loading === 'lazy') img.loading = 'eager';
       }
-      function goTo(i){ translateTo(i, true); }
-      function next(){ translateTo(index + 1, true); }
-      function prev(){ translateTo(index - 1, true); }
+      const goTo = (i)=> translateTo(i, true);
+      const next = ()=> translateTo(index + 1, true);
+      const prev = ()=> translateTo(index - 1, true);
 
       const startDrag = (x, y) => { dragging = true; startX = x; startY = y; currentX = x; currentY = y; deltaX = 0; deltaY = 0;
         startTransform = -index * width; track.style.transition = 'none'; };
@@ -314,6 +354,12 @@
 
       document.getElementById('fsClose').addEventListener('click', exitFullscreen);
       document.getElementById('fsBar').addEventListener('click', exitFullscreen);
+
+      // Watch video: park slider and scroll to video section
+      watch.addEventListener('click', ()=> {
+        stage.classList.add('is-parked');
+        requestAnimationFrame(()=> video.scrollIntoView({ behavior:'smooth', block:'start' }));
+      });
 
       stage.addEventListener('click', (e) => {
         if (!stage.classList.contains('is-fullscreen')) return;
