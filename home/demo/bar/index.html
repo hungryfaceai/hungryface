@@ -82,6 +82,7 @@
       cursor: pointer;
     }
     .pill:hover { background: rgba(255,255,255,0.12); }
+
     button.pill {
       font-family: inherit;
       -webkit-appearance: none;
@@ -314,6 +315,81 @@
       margin-bottom: 6px;
     }
 
+    /* ===== QR Overlay ===== */
+    .qr-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      padding: 24px;
+      z-index: 9999;
+    }
+    .qr-overlay.show {
+      display: flex;
+    }
+
+    .qr-card {
+      background: var(--panel);
+      border-radius: var(--radius-card);
+      border: 1px solid var(--border);
+      width: 100%;
+      max-width: 320px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.8);
+      padding: 20px;
+      color: var(--fg);
+    }
+
+    .qr-card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 16px;
+      font-size: 14px;
+      line-height: 1.4;
+      color: var(--fg-muted);
+    }
+
+    .qr-close-btn {
+      background: none;
+      border: 0;
+      color: var(--fg-dim);
+      font-size: 16px;
+      line-height: 1;
+      font-family: inherit;
+      padding: 4px 8px;
+      border-radius: var(--radius-pill);
+      cursor: pointer;
+    }
+    .qr-close-btn:hover {
+      color: var(--fg);
+      background: rgba(255,255,255,0.07);
+    }
+
+    .qr-img-wrap {
+      background: #fff;
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .qr-img-wrap img {
+      width: 200px;
+      height: 200px;
+      display: block;
+    }
+
+    .qr-url {
+      font-size: 12px;
+      color: var(--fg-dim);
+      text-align: center;
+      margin-top: 12px;
+      word-break: break-all;
+      line-height: 1.4;
+    }
+
     /* ===== Footer with candle-like glow ===== */
     footer {
       border-top: 1px solid var(--border);
@@ -370,6 +446,15 @@
         Play song
       </button>
 
+      <button
+        class="pill qr-toggle"
+        id="qrToggle"
+        type="button"
+        data-i18n="show_qr_label"
+        aria-pressed="false">
+        Show QR
+      </button>
+
       <select id="langPicker" class="lang-picker" aria-label="Language">
         <option value="en">English</option>
         <option value="ru">Русский</option>
@@ -384,7 +469,7 @@
     <h1 data-i18n="title">Naptio’s Signature Menu</h1>
     <p class="intro" data-i18n="intro">
       Calmly curated creations inspired by care, clarity, and the quiet hours.
-      Crafted with <strong>CleanCo Clean T</strong> — agave warmth, olive depth, and a peppery finish.
+      Prepared with <strong>CleanCo Clean T</strong> — agave warmth, olive depth, and a peppery finish.
     </p>
 
     <div class="menu-wrapper">
@@ -566,6 +651,30 @@
     <div class="footer-line" data-i18n="footer_line2">All drinks 0.0% ABV</div>
   </footer>
 
+  <!-- QR overlay -->
+  <div class="qr-overlay" id="qrOverlay" aria-hidden="true">
+    <div class="qr-card" role="dialog" aria-modal="true" aria-labelledby="qrHeaderText">
+      <div class="qr-card-head">
+        <div class="qr-head-left" id="qrHeaderText" data-i18n="qr_scan_header">
+          Scan to open this menu
+        </div>
+        <button
+          class="qr-close-btn"
+          id="qrCloseBtn"
+          type="button"
+          aria-label="Close">
+          ✕
+        </button>
+      </div>
+
+      <div class="qr-img-wrap">
+        <img id="qrImg" alt="QR code" />
+      </div>
+
+      <div class="qr-url" id="qrUrlText"></div>
+    </div>
+  </div>
+
   <audio id="bgAudio" src="/home/snapshots/song/naptio.mp3" preload="auto"></audio>
 
   <script>
@@ -577,6 +686,11 @@
           back: "← Back to Naptio",
           play_label: "Play song",
           mute_label: "Mute",
+          show_qr_label: "Show QR",
+          hide_qr_label: "Hide QR",
+          qr_scan_header: "Scan to open this menu",
+          qr_close_label: "Close",
+
           ribbon: "All cocktails · 0.0% ABV",
           title: "Naptio’s Signature Menu",
           intro:
@@ -635,6 +749,11 @@
           back: "← Назад в Naptio",
           play_label: "Включить музыку",
           mute_label: "Выключить звук",
+          show_qr_label: "Показать QR",
+          hide_qr_label: "Скрыть QR",
+          qr_scan_header: "Сканируйте, чтобы открыть меню",
+          qr_close_label: "Закрыть",
+
           ribbon: "Все коктейли · 0.0% алкоголя",
           title: "Фирменное меню Naptio",
           intro:
@@ -693,6 +812,11 @@
           back: "← Retour à Naptio",
           play_label: "Lire la chanson",
           mute_label: "Couper le son",
+          show_qr_label: "Afficher le QR",
+          hide_qr_label: "Masquer le QR",
+          qr_scan_header: "Scannez pour ouvrir ce menu",
+          qr_close_label: "Fermer",
+
           ribbon: "Tous les cocktails · 0,0 % vol",
           title: "Carte signature Naptio",
           intro:
@@ -751,6 +875,11 @@
           back: "← Volver a Naptio",
           play_label: "Reproducir canción",
           mute_label: "Silenciar",
+          show_qr_label: "Mostrar QR",
+          hide_qr_label: "Ocultar QR",
+          qr_scan_header: "Escanea para abrir este menú",
+          qr_close_label: "Cerrar",
+
           ribbon: "Todos los cócteles · 0,0 % alcohol",
           title: "Carta exclusiva de Naptio",
           intro:
@@ -1440,16 +1569,31 @@
       let currentLang = 'en';
       let currentRecipeId = null;
       let isPlaying = false;
+      let qrVisible = false;
 
       const picker = document.getElementById('langPicker');
       const audioEl = document.getElementById('bgAudio');
       const audioToggle = document.getElementById('audioToggle');
+      const qrToggle = document.getElementById('qrToggle');
+      const qrOverlay = document.getElementById('qrOverlay');
+      const qrCloseBtn = document.getElementById('qrCloseBtn');
+      const qrHeaderText = document.getElementById('qrHeaderText');
+      const qrImg = document.getElementById('qrImg');
+      const qrUrlText = document.getElementById('qrUrlText');
+
       const recipeTitleEl = document.getElementById('recipeTitle');
       const recipeBodyEl = document.getElementById('recipeBody');
 
+      function getRecipeLabels(lang) {
+        return recipeLabels[lang] || recipeLabels.en;
+      }
+      function getLangRecipes(lang) {
+        return recipes[lang] || recipes.en;
+      }
+
       function renderRecipe(recipeId) {
-        const langRecipes = recipes[currentLang] || recipes.en;
-        const langLabels = recipeLabels[currentLang] || recipeLabels.en;
+        const langRecipes = getLangRecipes(currentLang);
+        const langLabels = getRecipeLabels(currentLang);
         const r = langRecipes[recipeId];
         if (!r) return;
 
@@ -1480,11 +1624,49 @@
         audioToggle.textContent = isPlaying ? dict.mute_label : dict.play_label;
       }
 
+      function updateQrLabel() {
+        const dict = translations[currentLang] || translations.en;
+        qrToggle.textContent = qrVisible ? dict.hide_qr_label : dict.show_qr_label;
+      }
+
+      function ensureQrLoaded() {
+        // Generate a QR by pointing an <img> to a QR API with the current URL.
+        // This allows guests to scan and open the same page.
+        const pageUrl = window.location.href;
+        if (!qrImg.getAttribute('src')) {
+          const encoded = encodeURIComponent(pageUrl);
+          // Using a public QR code generator service. If offline/local, replace with a local QR library.
+          qrImg.setAttribute(
+            'src',
+            "https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=" + encoded
+          );
+        }
+        qrUrlText.textContent = pageUrl;
+      }
+
+      function openQr() {
+        qrVisible = true;
+        qrOverlay.classList.add('show');
+        qrOverlay.setAttribute('aria-hidden', 'false');
+        qrToggle.setAttribute('aria-pressed', 'true');
+        ensureQrLoaded();
+        updateQrLabel();
+      }
+
+      function closeQr() {
+        qrVisible = false;
+        qrOverlay.classList.remove('show');
+        qrOverlay.setAttribute('aria-hidden', 'true');
+        qrToggle.setAttribute('aria-pressed', 'false');
+        updateQrLabel();
+      }
+
       function applyLang(lang) {
         currentLang = lang;
         const dict = translations[lang] || translations.en;
         document.documentElement.lang = lang;
 
+        // Generic i18n text update
         Object.keys(dict).forEach(function (key) {
           const nodes = document.querySelectorAll('[data-i18n="' + key + '"]');
           nodes.forEach(function (node) {
@@ -1492,8 +1674,14 @@
           });
         });
 
-        updateAudioLabel();
+        // aria-label for close
+        qrCloseBtn.setAttribute('aria-label', dict.qr_close_label || "Close");
 
+        // dynamic buttons that depend on state
+        updateAudioLabel();
+        updateQrLabel();
+
+        // if there's already a selected recipe, re-render in this language
         if (currentRecipeId) {
           renderRecipe(currentRecipeId);
         }
@@ -1503,9 +1691,10 @@
         applyLang(this.value);
       });
 
+      // Play song / Mute pill
       audioToggle.addEventListener('click', function () {
         if (!isPlaying) {
-          audioEl.play().catch(function () { /* autoplay block is fine */ });
+          audioEl.play().catch(function () { /* mobile autoplay restrictions are fine */ });
           isPlaying = true;
           audioToggle.setAttribute('aria-pressed', 'true');
         } else {
@@ -1517,6 +1706,28 @@
         updateAudioLabel();
       });
 
+      // Show QR / Hide QR pill
+      qrToggle.addEventListener('click', function () {
+        if (!qrVisible) {
+          openQr();
+        } else {
+          closeQr();
+        }
+      });
+
+      // Close QR via X
+      qrCloseBtn.addEventListener('click', function () {
+        closeQr();
+      });
+
+      // Close QR by tapping outside card
+      qrOverlay.addEventListener('click', function (e) {
+        if (e.target === qrOverlay) {
+          closeQr();
+        }
+      });
+
+      // Cocktail name click -> show recipe
       document.querySelectorAll('.name').forEach(function (el) {
         el.addEventListener('click', function () {
           const rid = el.getAttribute('data-recipe');
@@ -1531,8 +1742,10 @@
         });
       });
 
+      // initial setup
       applyLang(picker.value || 'en');
       updateAudioLabel();
+      updateQrLabel();
     })();
   </script>
 
