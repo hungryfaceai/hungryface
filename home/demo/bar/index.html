@@ -45,19 +45,20 @@
       gap: 12px;
     }
 
-    .brand {
-      font-size: 18px;
-      font-weight: 600;
-      color: var(--fg);
-      letter-spacing: 0.03em;
+    .header-left,
+    .header-right {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 8px;
     }
 
-    .subtitle {
-      font-size: 13px;
-      color: var(--fg-dim);
-      margin-top: 4px;
+    .header-right {
+      margin-left: auto;
+      justify-content: flex-end;
     }
 
+    /* keep .nav-actions for backwards compatibility / shared styles */
     .nav-actions {
       display: flex;
       flex-wrap: wrap;
@@ -80,6 +81,7 @@
       transition: background 0.2s ease;
       line-height: 1.2;
       cursor: pointer;
+      white-space: nowrap;
     }
     .pill:hover { background: rgba(255,255,255,0.12); }
 
@@ -90,6 +92,23 @@
       border: 1px solid var(--border);
       background: rgba(255,255,255,0.05);
       color: var(--fg);
+    }
+
+    /* inline icon inside pills */
+    .pill-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 0;
+      margin-right: 0.5em;
+    }
+    .pill-icon svg {
+      width: 1em;
+      height: 1em;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
 
     /* language picker styled like a pill, dark bg / white text */
@@ -429,14 +448,13 @@
 <body>
 
   <header>
-    <div>
-      <div class="brand" data-i18n="brand">Naptio’s Bar</div>
-      <div class="subtitle" data-i18n="subtitle">Elegant 0.0% cocktails crafted with Clean T</div>
+    <!-- Left: primary nav (Back) -->
+    <div class="header-left">
+      <a href="/hungryface/home/" class="pill pill-back" data-i18n="back">← Back to Naptio</a>
     </div>
 
-    <nav class="nav-actions">
-      <a href="/hungryface/home/" class="pill" data-i18n="back">← Back to Naptio</a>
-
+    <!-- Right: actions (audio, qr, language) -->
+    <div class="header-right nav-actions">
       <button
         class="pill audio-toggle"
         id="audioToggle"
@@ -461,7 +479,7 @@
         <option value="fr">Français</option>
         <option value="es">Español</option>
       </select>
-    </nav>
+    </div>
   </header>
 
   <main>
@@ -854,7 +872,7 @@
           lullabysmash_notes: "Une touche herbacée fraîche.",
 
           goldenhour_name: "Golden Hour",
-          goldenhour_desc: "Clean T · Jus d’orange · Grenadine — les couches du lever et du coucher du soleil.",
+          goldenhour_desc: "Clean T · Jus d’orange · Grenadine — les couches du lever et du coucher de soleil.",
           goldenhour_notes: "Un lent moment au début ou à la fin de la journée.",
 
           light_header: "Léger & Facile",
@@ -1584,6 +1602,23 @@
       const recipeTitleEl = document.getElementById('recipeTitle');
       const recipeBodyEl = document.getElementById('recipeBody');
 
+      // inline SVG icons for the audio button
+      const ICON_SPEAKER =
+        '<span class="pill-icon" aria-hidden="true">' +
+          '<svg viewBox="0 0 24 24" fill="none">' +
+            '<path d="M11 5.5 6.75 9H4v6h2.75L11 18.5v-13z"/>' +
+            '<path d="M15.5 9.5a3 3 0 010 5m2-7a5 5 0 010 9" fill="none"/>' +
+          '</svg>' +
+        '</span>';
+
+      const ICON_MUTE =
+        '<span class="pill-icon" aria-hidden="true">' +
+          '<svg viewBox="0 0 24 24" fill="none">' +
+            '<path d="M11 5.5 6.75 9H4v6h2.75L11 18.5v-13z"/>' +
+            '<path d="M18 10l-4 4m0-4 4 4" fill="none"/>' +
+          '</svg>' +
+        '</span>';
+
       function getRecipeLabels(lang) {
         return recipeLabels[lang] || recipeLabels.en;
       }
@@ -1621,7 +1656,11 @@
 
       function updateAudioLabel() {
         const dict = translations[currentLang] || translations.en;
-        audioToggle.textContent = isPlaying ? dict.mute_label : dict.play_label;
+        if (isPlaying) {
+          audioToggle.innerHTML = ICON_MUTE + dict.mute_label;
+        } else {
+          audioToggle.innerHTML = ICON_SPEAKER + dict.play_label;
+        }
       }
 
       function updateQrLabel() {
@@ -1630,12 +1669,10 @@
       }
 
       function ensureQrLoaded() {
-        // Generate a QR by pointing an <img> to a QR API with the current URL.
-        // This allows guests to scan and open the same page.
+        // Generate a QR code URL for the current page
         const pageUrl = window.location.href;
         if (!qrImg.getAttribute('src')) {
           const encoded = encodeURIComponent(pageUrl);
-          // Using a public QR code generator service. If offline/local, replace with a local QR library.
           qrImg.setAttribute(
             'src',
             "https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=" + encoded
@@ -1666,7 +1703,7 @@
         const dict = translations[lang] || translations.en;
         document.documentElement.lang = lang;
 
-        // Generic i18n text update
+        // Update all static text nodes with data-i18n
         Object.keys(dict).forEach(function (key) {
           const nodes = document.querySelectorAll('[data-i18n="' + key + '"]');
           nodes.forEach(function (node) {
@@ -1681,7 +1718,7 @@
         updateAudioLabel();
         updateQrLabel();
 
-        // if there's already a selected recipe, re-render in this language
+        // re-render recipe panel in new lang if one is selected
         if (currentRecipeId) {
           renderRecipe(currentRecipeId);
         }
@@ -1691,7 +1728,7 @@
         applyLang(this.value);
       });
 
-      // Play song / Mute pill
+      // Play / Mute pill
       audioToggle.addEventListener('click', function () {
         if (!isPlaying) {
           audioEl.play().catch(function () { /* mobile autoplay restrictions are fine */ });
@@ -1706,7 +1743,7 @@
         updateAudioLabel();
       });
 
-      // Show QR / Hide QR pill
+      // Show / Hide QR pill
       qrToggle.addEventListener('click', function () {
         if (!qrVisible) {
           openQr();
