@@ -1,0 +1,1829 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Naptio’s Bar — 0.0% Cocktails</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="Naptio’s Bar — elegant 0.0% cocktails inspired by calm, care, and design. Crafted with Clean T." />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0b0b;
+      --panel: #121212;
+      --fg: #f6f4ee;
+      --fg-muted: rgba(246,244,238,0.75);
+      --fg-dim: rgba(246,244,238,0.55);
+      --accent: #d6b77a;
+      --border: rgba(255,255,255,0.08);
+      --safeL: env(safe-area-inset-left, 0px);
+      --safeR: env(safe-area-inset-right, 0px);
+      --safeT: env(safe-area-inset-top, 0px);
+      --safeB: env(safe-area-inset-bottom, 0px);
+      --padX: max(24px, var(--safeL));
+      --padY: max(24px, var(--safeT));
+      --radius-card: 16px;
+      --radius-pill: 999px;
+      font-family: -apple-system, system-ui, "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    }
+
+    html, body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.6;
+      font-size: 16px;
+      letter-spacing: 0.01em;
+    }
+
+    /* ===== Header ===== */
+    header {
+      padding: calc(var(--padY) + 8px) var(--padX) 0 var(--padX);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .header-left,
+    .header-right {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .header-right {
+      margin-left: auto;
+      justify-content: flex-end;
+    }
+
+    /* keep .nav-actions for backwards compatibility / shared styles */
+    .nav-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 18px;
+      font-size: 14px;
+      border-radius: var(--radius-pill);
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.05);
+      color: var(--fg);
+      text-decoration: none;
+      transition: background 0.2s ease;
+      line-height: 1.2;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .pill:hover { background: rgba(255,255,255,0.12); }
+
+    button.pill {
+      font-family: inherit;
+      -webkit-appearance: none;
+      appearance: none;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.05);
+      color: var(--fg);
+    }
+
+    /* inline icon inside pills */
+    .pill-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 0;
+      margin-right: 0.5em;
+    }
+    .pill-icon svg {
+      width: 1em;
+      height: 1em;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* language picker styled like a pill, dark bg / white text */
+    .lang-picker {
+      -webkit-appearance: none;
+      appearance: none;
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-pill);
+      padding: 10px 32px 10px 14px; /* room for native arrow */
+      font-size: 14px;
+      color: #fff;
+      font-family: inherit;
+      line-height: 1.2;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    .lang-picker:hover {
+      background: rgba(0,0,0,0.7);
+    }
+    .lang-picker:focus {
+      outline: 0;
+      box-shadow: 0 0 0 2px rgba(214,183,122,0.4);
+    }
+
+    /* ===== Naptio logo link (from landing page) ===== */
+    .home-link {
+      display: inline-flex;
+      align-items: center;
+      line-height: 1;
+      text-decoration: none;
+      color: var(--fg);
+    }
+    .home-link:hover,
+    .home-link:focus {
+      text-decoration: none;
+    }
+
+    .icon {
+      width: var(--icon-size, 24px);
+      height: var(--icon-size, 24px);
+      display: block;
+    }
+    .icon-home { --icon-size: 26px; }
+
+    /* Visually hidden but accessible text */
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0,0,0,0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    /* ===== Main ===== */
+    main {
+      padding: 48px var(--padX) 64px var(--padX);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* --- animated gold shimmer behind title --- */
+    main::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 220px;
+      background: linear-gradient(115deg,
+        rgba(214,183,122,0.05),
+        rgba(214,183,122,0.12),
+        rgba(214,183,122,0.05));
+      background-size: 200% 200%;
+      animation: shimmer 15s ease-in-out infinite alternate;
+      filter: blur(60px);
+      z-index: 0;
+    }
+
+    @keyframes shimmer {
+      0% { background-position: 0% 50%; }
+      100% { background-position: 100% 50%; }
+    }
+
+    h1 {
+      font-weight: 600;
+      font-size: clamp(28px, 3vw, 36px);
+      margin: 0 0 8px 0;
+      letter-spacing: 0.02em;
+      text-align: center;
+      position: relative;
+      z-index: 1;
+    }
+
+    .ribbon {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--accent);
+      margin-bottom: 8px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .intro {
+      max-width: 640px;
+      text-align: center;
+      margin-bottom: 48px;
+      color: var(--fg-muted);
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ===== Menu + Recipe Layout ===== */
+    .menu-wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      width: 100%;
+      max-width: 1200px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ===== Menu ===== */
+    .menu {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 28px;
+      width: 100%;
+      max-width: 900px;
+      position: relative;
+      z-index: 1;
+    }
+    @media (min-width: 760px) {
+      .menu { grid-template-columns: 1fr 1fr; gap: 32px; }
+    }
+
+    @media (min-width: 1024px) {
+      .menu-wrapper {
+        flex-direction: row;
+        align-items: flex-start;
+      }
+      .menu {
+        flex: 2;
+      }
+    }
+
+    section {
+      background: var(--panel);
+      border-radius: var(--radius-card);
+      border: 1px solid var(--border);
+      padding: 24px 24px 20px 24px;
+    }
+
+    h2 {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+      color: var(--accent);
+      margin: 0 0 16px 0;
+    }
+
+    .drink { margin-bottom: 18px; }
+    .drink:last-child { margin-bottom: 0; }
+
+    .name {
+      font-weight: 500;
+      font-size: 15px;
+      color: var(--fg);
+      line-height: 1.4;
+      cursor: pointer;
+      display: inline-block;
+      outline: 0;
+    }
+    .name:hover,
+    .name:focus {
+      color: var(--accent);
+    }
+
+    .desc {
+      font-size: 14px;
+      color: var(--fg-muted);
+      margin-top: 4px;
+      line-height: 1.5;
+    }
+
+    .notes {
+      font-size: 12.5px;
+      color: var(--fg-dim);
+      font-style: italic;
+      margin-top: 3px;
+    }
+
+    /* ===== Recipe panel ===== */
+    .recipe-panel {
+      background: var(--panel);
+      border-radius: var(--radius-card);
+      border: 1px solid var(--border);
+      padding: 24px;
+      color: var(--fg);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    @media (min-width: 1024px) {
+      .recipe-panel {
+        flex: 1;
+        max-width: 360px;
+        position: sticky;
+        top: calc(var(--padY) + 24px);
+      }
+    }
+
+    .recipe-header {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--accent);
+      margin: 0 0 8px 0;
+      letter-spacing: 0.03em;
+    }
+
+    .recipe-body {
+      font-size: 14px;
+      color: var(--fg-muted);
+    }
+
+    .recipe-body p {
+      margin-top: 0;
+      margin-bottom: 12px;
+      color: var(--fg-muted);
+    }
+
+    .recipe-body h3 {
+      margin: 16px 0 8px 0;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .recipe-body ul,
+    .recipe-body ol {
+      margin: 0 0 12px 0;
+      padding-left: 20px;
+    }
+
+    .recipe-body li {
+      margin-bottom: 6px;
+    }
+
+    /* ===== QR Overlay ===== */
+    .qr-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      padding: 24px;
+      z-index: 9999;
+    }
+    .qr-overlay.show {
+      display: flex;
+    }
+
+    .qr-card {
+      background: var(--panel);
+      border-radius: var(--radius-card);
+      border: 1px solid var(--border);
+      width: 100%;
+      max-width: 320px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.8);
+      padding: 20px;
+      color: var(--fg);
+    }
+
+    .qr-card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 16px;
+      font-size: 14px;
+      line-height: 1.4;
+      color: var(--fg-muted);
+    }
+
+    .qr-close-btn {
+      background: none;
+      border: 0;
+      color: var(--fg-dim);
+      font-size: 16px;
+      line-height: 1;
+      font-family: inherit;
+      padding: 4px 8px;
+      border-radius: var(--radius-pill);
+      cursor: pointer;
+    }
+    .qr-close-btn:hover {
+      color: var(--fg);
+      background: rgba(255,255,255,0.07);
+    }
+
+    .qr-img-wrap {
+      background: #fff;
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .qr-img-wrap img {
+      width: 200px;
+      height: 200px;
+      display: block;
+    }
+
+    .qr-url {
+      font-size: 12px;
+      color: var(--fg-dim);
+      text-align: center;
+      margin-top: 12px;
+      word-break: break-all;
+      line-height: 1.4;
+    }
+
+    /* ===== Footer with candle-like glow ===== */
+    footer {
+      border-top: 1px solid var(--border);
+      color: var(--fg-dim);
+      font-size: 12.5px;
+      text-align: center;
+      padding: 48px var(--padX) calc(48px + var(--safeB)) var(--padX);
+      line-height: 1.5;
+      position: relative;
+      overflow: hidden;
+    }
+
+    footer::before {
+      content: "";
+      position: absolute;
+      bottom: -50px;
+      left: 50%;
+      width: 300px;
+      height: 300px;
+      background: radial-gradient(circle, rgba(214,183,122,0.12), transparent 70%);
+      transform: translateX(-50%);
+      animation: glow 10s ease-in-out infinite alternate;
+      z-index: 0;
+    }
+
+    @keyframes glow {
+      0% { opacity: 0.4; transform: translateX(-50%) scale(1); }
+      100% { opacity: 0.8; transform: translateX(-50%) scale(1.1); }
+    }
+
+    footer .footer-line {
+      position: relative;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <!-- Left: Naptio logo (replaces back pill) -->
+    <div class="header-left">
+      <a href="/hungryface/home/" class="home-link" aria-label="Home" title="Home">
+        <svg class="icon icon-home" aria-hidden="true" focusable="false">
+          <use href="/hungryface/assets/icons.svg#icon-cradle-ai"
+               xlink:href="/hungryface/assets/icons.svg#icon-cradle-ai"></use>
+        </svg>
+        <span class="sr-only">Home</span>
+      </a>
+    </div>
+
+    <!-- Right: actions (audio, qr, language) -->
+    <div class="header-right nav-actions">
+      <button
+        class="pill audio-toggle"
+        id="audioToggle"
+        type="button"
+        data-i18n="play_label"
+        aria-pressed="false">
+        Play song
+      </button>
+
+      <button
+        class="pill qr-toggle"
+        id="qrToggle"
+        type="button"
+        data-i18n="show_qr_label"
+        aria-pressed="false">
+        Show QR
+      </button>
+
+      <select id="langPicker" class="lang-picker" aria-label="Language">
+        <option value="en">English</option>
+        <option value="ru">Русский</option>
+        <option value="fr">Français</option>
+        <option value="es">Español</option>
+      </select>
+    </div>
+  </header>
+
+  <main>
+    <div class="ribbon" data-i18n="ribbon">All cocktails · 0.0% ABV</div>
+    <h1 data-i18n="title">Naptio’s Signature Menu</h1>
+    <p class="intro" data-i18n="intro">
+      Calmly curated creations inspired by care, clarity, and the quiet hours.
+      Prepared with <strong>CleanCo Clean T</strong> — agave warmth, olive depth, and a peppery finish.
+    </p>
+
+    <div class="menu-wrapper">
+      <div class="menu">
+
+        <section>
+          <h2 data-i18n="classics_header">Classics</h2>
+
+          <div class="drink">
+            <div class="name"
+              data-i18n="napgarita_name"
+              data-recipe="napgarita"
+              tabindex="0"
+              role="button">
+              Napgarita
+            </div>
+            <div class="desc" data-i18n="napgarita_desc">
+              Clean T · Lime · Agave — a timeless balance of citrus and calm.
+            </div>
+            <div class="notes" data-i18n="napgarita_notes">
+              Pure, composed, unmistakably Naptio.
+            </div>
+          </div>
+
+          <div class="drink">
+            <div class="name"
+              data-i18n="dreamfreeze_name"
+              data-recipe="dreamfreeze"
+              tabindex="0"
+              role="button">
+              Dream Freeze
+            </div>
+            <div class="desc" data-i18n="dreamfreeze_desc">
+              Clean T · Lime · Agave · Crushed Ice — smooth and cooling.
+            </div>
+            <div class="notes" data-i18n="dreamfreeze_notes">
+              A serene pause in frozen form.
+            </div>
+          </div>
+
+          <div class="drink">
+            <div class="name"
+              data-i18n="smokemonitor_name"
+              data-recipe="smokemonitor"
+              tabindex="0"
+              role="button">
+              Smoke Monitor
+            </div>
+            <div class="desc" data-i18n="smokemonitor_desc">
+              Clean T · Lime · Agave · Hint of Smoke — delicate and earthy.
+            </div>
+            <div class="notes" data-i18n="smokemonitor_notes">
+              The evening’s soft exhale.
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 data-i18n="spiced_header">Spiced &amp; Savoury</h2>
+
+          <div class="drink">
+            <div class="name"
+              data-i18n="parentmode_name"
+              data-recipe="parentmode"
+              tabindex="0"
+              role="button">
+              Parent Mode
+            </div>
+            <div class="desc" data-i18n="parentmode_desc">
+              Clean T · Lime · Agave · Chili · Coriander — vibrant and confident.
+            </div>
+            <div class="notes" data-i18n="parentmode_notes">
+              A spark beneath composed stillness.
+            </div>
+          </div>
+
+          <div class="drink">
+            <div class="name"
+              data-i18n="crysignal_name"
+              data-recipe="crysignal"
+              tabindex="0"
+              role="button">
+              Cry Signal
+            </div>
+            <div class="desc" data-i18n="crysignal_desc">
+              Clean T · Lime · Agave · Chili Infusion — gentle fire, steady rhythm.
+            </div>
+            <div class="notes" data-i18n="crysignal_notes">
+              A spirited take on focus and warmth.
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 data-i18n="fruity_header">Fruity &amp; Fresh</h2>
+
+          <div class="drink">
+            <div class="name"
+              data-i18n="nurserybreeze_name"
+              data-recipe="nurserybreeze"
+              tabindex="0"
+              role="button">
+              Nursery Breeze
+            </div>
+            <div class="desc" data-i18n="nurserybreeze_desc">
+              Clean T · Watermelon · Lime · Syrup — light, lifted, refreshing.
+            </div>
+            <div class="notes" data-i18n="nurserybreeze_notes">
+              As soft as morning air.
+            </div>
+          </div>
+
+          <div class="drink">
+            <div class="name"
+              data-i18n="lullabysmash_name"
+              data-recipe="lullabysmash"
+              tabindex="0"
+              role="button">
+              Lullaby Smash
+            </div>
+            <div class="desc" data-i18n="lullabysmash_desc">
+              Clean T · Strawberry · Basil · Lemon · Syrup — graceful sweetness.
+            </div>
+            <div class="notes" data-i18n="lullabysmash_notes">
+              Fresh herbal touch.
+            </div>
+          </div>
+
+          <div class="drink">
+            <div class="name"
+              data-i18n="goldenhour_name"
+              data-recipe="goldenhour"
+              tabindex="0"
+              role="button">
+              Golden Hour
+            </div>
+            <div class="desc" data-i18n="goldenhour_desc">
+              Clean T · Orange Juice · Grenadine — layered hues of dawn and dusk.
+            </div>
+            <div class="notes" data-i18n="goldenhour_notes">
+              A slow sip to start or end the day.
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 data-i18n="light_header">Light &amp; Easy</h2>
+
+          <div class="drink">
+            <div class="name"
+              data-i18n="quietmode_name"
+              data-recipe="quietmode"
+              tabindex="0"
+              role="button">
+              Quiet Mode
+            </div>
+            <div class="desc" data-i18n="quietmode_desc">
+              Clean T · Tonic · Lime — crisp, poised, and still.
+            </div>
+            <div class="notes" data-i18n="quietmode_notes">
+              Serenity in highball form.
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+      <aside class="recipe-panel" id="recipePanel" aria-live="polite">
+        <div class="recipe-header" id="recipeTitle" data-i18n="recipe_empty_title">Recipe</div>
+        <div class="recipe-body" id="recipeBody" data-i18n="recipe_empty_hint">
+          Tap a cocktail name to see the full recipe here.
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-line" data-i18n="footer_line1">© 2025 Naptio · Crafted for calm evenings.</div>
+    <div class="footer-line" data-i18n="footer_line2">All drinks 0.0% ABV</div>
+  </footer>
+
+  <!-- QR overlay -->
+  <div class="qr-overlay" id="qrOverlay" aria-hidden="true">
+    <div class="qr-card" role="dialog" aria-modal="true" aria-labelledby="qrHeaderText">
+      <div class="qr-card-head">
+        <div class="qr-head-left" id="qrHeaderText" data-i18n="qr_scan_header">
+          Scan to open this menu
+        </div>
+        <button
+          class="qr-close-btn"
+          id="qrCloseBtn"
+          type="button"
+          aria-label="Close">
+          ✕
+        </button>
+      </div>
+
+      <div class="qr-img-wrap">
+        <img id="qrImg" alt="QR code" />
+      </div>
+
+      <div class="qr-url" id="qrUrlText"></div>
+    </div>
+  </div>
+
+  <audio id="bgAudio" src="/hungryface/home/snapshots/song/naptio.mp3" preload="auto"></audio>
+
+  <script>
+    (function () {
+      const translations = {
+        en: {
+          brand: "Naptio’s Bar",
+          subtitle: "Elegant 0.0% cocktails crafted with Clean T",
+          back: "← Back to Naptio",
+          play_label: "Play song",
+          mute_label: "Mute song",
+          show_qr_label: "Show QR",
+          hide_qr_label: "Hide QR",
+          qr_scan_header: "Scan to open this menu",
+          qr_close_label: "Close",
+
+          ribbon: "All cocktails · 0.0% ABV",
+          title: "Naptio’s Signature Menu",
+          intro:
+            "Calmly curated creations inspired by care, clarity, and the quiet hours. Prepared with <strong>CleanCo Clean T</strong> — agave warmth, olive depth, and a peppery finish.",
+
+          classics_header: "Classics",
+          napgarita_name: "Napgarita",
+          napgarita_desc: "Clean T · Lime · Agave — a timeless balance of citrus and calm.",
+          napgarita_notes: "Pure, composed, unmistakably Naptio.",
+
+          dreamfreeze_name: "Dream Freeze",
+          dreamfreeze_desc: "Clean T · Lime · Agave · Crushed Ice — smooth and cooling.",
+          dreamfreeze_notes: "A serene pause in frozen form.",
+
+          smokemonitor_name: "Smoke Monitor",
+          smokemonitor_desc: "Clean T · Lime · Agave · Hint of Smoke — delicate and earthy.",
+          smokemonitor_notes: "The evening’s soft exhale.",
+
+          spiced_header: "Spiced & Savoury",
+          parentmode_name: "Parent Mode",
+          parentmode_desc: "Clean T · Lime · Agave · Chili · Coriander — vibrant and confident.",
+          parentmode_notes: "A spark beneath composed stillness.",
+
+          crysignal_name: "Cry Signal",
+          crysignal_desc: "Clean T · Lime · Agave · Chili Infusion — gentle fire, steady rhythm.",
+          crysignal_notes: "A spirited take on focus and warmth.",
+
+          fruity_header: "Fruity & Fresh",
+          nurserybreeze_name: "Nursery Breeze",
+          nurserybreeze_desc: "Clean T · Watermelon · Lime · Syrup — light, lifted, refreshing.",
+          nurserybreeze_notes: "As soft as morning air.",
+
+          lullabysmash_name: "Lullaby Smash",
+          lullabysmash_desc: "Clean T · Strawberry · Basil · Lemon · Syrup — graceful sweetness.",
+          lullabysmash_notes: "Fresh herbal touch.",
+
+          goldenhour_name: "Golden Hour",
+          goldenhour_desc: "Clean T · Orange Juice · Grenadine — layered hues of dawn and dusk.",
+          goldenhour_notes: "A slow sip to start or end the day.",
+
+          light_header: "Light & Easy",
+          quietmode_name: "Quiet Mode",
+          quietmode_desc: "Clean T · Tonic · Lime — crisp, poised, and still.",
+          quietmode_notes: "Serenity in highball form.",
+
+          footer_line1: "© 2025 Naptio · Crafted for calm evenings.",
+          footer_line2: "All drinks 0.0% ABV",
+
+          recipe_empty_title: "Recipe",
+          recipe_empty_hint: "Tap a cocktail name to see the full recipe here."
+        },
+
+        ru: {
+          brand: "Бар Naptio",
+          subtitle: "Изысканные коктейли 0.0% на основе Clean T",
+          back: "← Назад в Naptio",
+          play_label: "Включить музыку",
+          mute_label: "Выключить звук",
+          show_qr_label: "Показать QR",
+          hide_qr_label: "Скрыть QR",
+          qr_scan_header: "Сканируйте, чтобы открыть меню",
+          qr_close_label: "Закрыть",
+
+          ribbon: "Все коктейли · 0.0% алкоголя",
+          title: "Фирменное меню Naptio",
+          intro:
+            "Спокойная подборка вкусов, вдохновлённая заботой, ясностью и тихими часами. Приготовлено с <strong>CleanCo Clean T</strong> — тёплая агава, оливковая глубина и лёгкая перечная нота.",
+
+          classics_header: "Классика",
+          napgarita_name: "Napgarita",
+          napgarita_desc: "Clean T · лайм · агава — вечный баланс цитруса и спокойствия.",
+          napgarita_notes: "Чисто, сдержанно, фирменный стиль Naptio.",
+
+          dreamfreeze_name: "Dream Freeze",
+          dreamfreeze_desc: "Clean T · лайм · агава · дроблёный лёд — мягко и охлаждающе.",
+          dreamfreeze_notes: "Тихая пауза во льду.",
+
+          smokemonitor_name: "Smoke Monitor",
+          smokemonitor_desc: "Clean T · лайм · агава · лёгкая дымка — деликатно и землисто.",
+          smokemonitor_notes: "Мягкий выдох вечера.",
+
+          spiced_header: "Пряные и пикантные",
+          parentmode_name: "Parent Mode",
+          parentmode_desc: "Clean T · лайм · агава · чили · кинза — ярко и уверенно.",
+          parentmode_notes: "Искра под внешним спокойствием.",
+
+          crysignal_name: "Cry Signal",
+          crysignal_desc: "Clean T · лайм · агава · настой чили — мягкий огонь, устойчивый ритм.",
+          crysignal_notes: "Тёплый фокус в стакане.",
+
+          fruity_header: "Фруктовые и свежие",
+          nurserybreeze_name: "Nursery Breeze",
+          nurserybreeze_desc: "Clean T · арбуз · лайм · сироп — лёгко, воздушно, освежающе.",
+          nurserybreeze_notes: "Нежно, как утренний воздух.",
+
+          lullabysmash_name: "Lullaby Smash",
+          lullabysmash_desc: "Clean T · клубника · базилик · лимон · сироп — изящная сладость.",
+          lullabysmash_notes: "Свежая травяная нота.",
+
+          goldenhour_name: "Golden Hour",
+          goldenhour_desc: "Clean T · апельсиновый сок · гренадин — слои рассвета и заката.",
+          goldenhour_notes: "Медленный глоток для начала или завершения дня.",
+
+          light_header: "Лёгкие и освежающие",
+          quietmode_name: "Quiet Mode",
+          quietmode_desc: "Clean T · тоник · лайм — чётко, собрано, спокойно.",
+          quietmode_notes: "Безмятежность в хайболе.",
+
+          footer_line1: "© 2025 Naptio · Создано для спокойных вечеров.",
+          footer_line2: "Все напитки без алкоголя (0.0%).",
+
+          recipe_empty_title: "Рецепт",
+          recipe_empty_hint: "Нажмите на название коктейля, чтобы увидеть рецепт здесь."
+        },
+
+        fr: {
+          brand: "Bar Naptio",
+          subtitle: "Cocktails 0,0 % élégants préparés avec Clean T",
+          back: "← Retour à Naptio",
+          play_label: "Lire la chanson",
+          mute_label: "Couper le son",
+          show_qr_label: "Afficher le QR",
+          hide_qr_label: "Masquer le QR",
+          qr_scan_header: "Scannez pour ouvrir ce menu",
+          qr_close_label: "Fermer",
+
+          ribbon: "Tous les cocktails · 0,0 % vol",
+          title: "Carte signature Naptio",
+          intro:
+            "Créations composées avec calme, inspirées par la douceur, la clarté et les heures silencieuses. Préparé avec <strong>CleanCo Clean T</strong> — chaleur d’agave, profondeur olive, finale poivrée.",
+
+          classics_header: "Classiques",
+          napgarita_name: "Napgarita",
+          napgarita_desc: "Clean T · Citron vert · Sirop d’agave — l’équilibre intemporel entre acidité et calme.",
+          napgarita_notes: "Pur, posé, signature Naptio.",
+
+          dreamfreeze_name: "Dream Freeze",
+          dreamfreeze_desc: "Clean T · Citron vert · Agave · Glace pilée — doux et rafraîchissant.",
+          dreamfreeze_notes: "Une pause givrée, tranquille.",
+
+          smokemonitor_name: "Smoke Monitor",
+          smokemonitor_desc: "Clean T · Citron vert · Agave · Note fumée — délicat et terreux.",
+          smokemonitor_notes: "L’expiration douce du soir.",
+
+          spiced_header: "Épicé & Salé",
+          parentmode_name: "Parent Mode",
+          parentmode_desc: "Clean T · Citron vert · Agave · Piment · Coriandre — vif et assuré.",
+          parentmode_notes: "Une étincelle sous le calme.",
+
+          crysignal_name: "Cry Signal",
+          crysignal_desc: "Clean T · Citron vert · Agave · Infusion de piment — feu doux, rythme posé.",
+          crysignal_notes: "Concentration et chaleur dans un verre.",
+
+          fruity_header: "Fruité & Frais",
+          nurserybreeze_name: "Nursery Breeze",
+          nurserybreeze_desc: "Clean T · Pastèque · Citron vert · Sirop — léger, aérien, rafraîchissant.",
+          nurserybreeze_notes: "Aussi doux que l’air du matin.",
+
+          lullabysmash_name: "Lullaby Smash",
+          lullabysmash_desc: "Clean T · Fraise · Basilic · Citron · Sirop — douceur végétale.",
+          lullabysmash_notes: "Une touche herbacée fraîche.",
+
+          goldenhour_name: "Golden Hour",
+          goldenhour_desc: "Clean T · Jus d’orange · Grenadine — les couches du lever et du coucher de soleil.",
+          goldenhour_notes: "Un lent moment au début ou à la fin de la journée.",
+
+          light_header: "Léger & Facile",
+          quietmode_name: "Quiet Mode",
+          quietmode_desc: "Clean T · Tonic · Citron vert — net, posé, silencieux.",
+          quietmode_notes: "Sérénité dans un highball.",
+
+          footer_line1: "© 2025 Naptio · Pensé pour les soirées calmes.",
+          footer_line2: "Tous les cocktails à 0,0 %.",
+
+          recipe_empty_title: "Recette",
+          recipe_empty_hint: "Touchez un cocktail pour voir la recette ici."
+        },
+
+        es: {
+          brand: "Bar Naptio",
+          subtitle: "Cócteles elegantes 0,0 % preparados con Clean T",
+          back: "← Volver a Naptio",
+          play_label: "Reproducir canción",
+          mute_label: "Silenciar",
+          show_qr_label: "Mostrar QR",
+          hide_qr_label: "Ocultar QR",
+          qr_scan_header: "Escanea para abrir este menú",
+          qr_close_label: "Cerrar",
+
+          ribbon: "Todos los cócteles · 0,0 % alcohol",
+          title: "Carta exclusiva de Naptio",
+          intro:
+            "Creaciones seleccionadas con calma, inspiradas en el cuidado, la claridad y las horas silenciosas. Preparado con <strong>CleanCo Clean T</strong> — calidez de agave, fondo de oliva y un final picante.",
+
+          classics_header: "Clásicos",
+          napgarita_name: "Napgarita",
+          napgarita_desc: "Clean T · Lima · Agave — equilibrio eterno de cítrico y calma.",
+          napgarita_notes: "Puro, sereno, claramente Naptio.",
+
+          dreamfreeze_name: "Dream Freeze",
+          dreamfreeze_desc: "Clean T · Lima · Agave · Hielo picado — suave y refrescante.",
+          dreamfreeze_notes: "Una pausa helada y tranquila.",
+
+          smokemonitor_name: "Smoke Monitor",
+          smokemonitor_desc: "Clean T · Lima · Agave · Toque ahumado — delicado y terroso.",
+          smokemonitor_notes: "El suspiro suave de la noche.",
+
+          spiced_header: "Picantes & Salados",
+          parentmode_name: "Parent Mode",
+          parentmode_desc: "Clean T · Lima · Agave · Chili · Cilantro — vivo y seguro.",
+          parentmode_notes: "Una chispa bajo la calma.",
+
+          crysignal_name: "Cry Signal",
+          crysignal_desc: "Clean T · Lima · Agave · Infusión de chili — fuego suave, ritmo estable.",
+          crysignal_notes: "Calor y enfoque en el vaso.",
+
+          fruity_header: "Frutales & Frescos",
+          nurserybreeze_name: "Nursery Breeze",
+          nurserybreeze_desc: "Clean T · Sandía · Lima · Almíbar — ligero, elevado, refrescante.",
+          nurserybreeze_notes: "Tan suave como el aire de la mañana.",
+
+          lullabysmash_name: "Lullaby Smash",
+          lullabysmash_desc: "Clean T · Fresa · Albahaca · Limón · Almíbar — dulzor elegante.",
+          lullabysmash_notes: "Un toque herbal fresco.",
+
+          goldenhour_name: "Golden Hour",
+          goldenhour_desc: "Clean T · Zumo de naranja · Granadina — capas de amanecer y atardecer.",
+          goldenhour_notes: "Un sorbo lento para empezar o cerrar el día.",
+
+          light_header: "Ligero & Fácil",
+          quietmode_name: "Quiet Mode",
+          quietmode_desc: "Clean T · Tónica · Lima — nítido, sereno, estable.",
+          quietmode_notes: "Serenidad en vaso alto.",
+
+          footer_line1: "© 2025 Naptio · Hecho para noches tranquilas.",
+          footer_line2: "Todas las bebidas 0,0 % alcohol.",
+
+          recipe_empty_title: "Receta",
+          recipe_empty_hint: "Toca un cóctel para ver la receta aquí."
+        }
+      };
+
+      const recipeLabels = {
+        en: {
+          tastesLike: "Tastes like",
+          ingredients: "You’ll need",
+          method: "Method"
+        },
+        ru: {
+          tastesLike: "Вкус",
+          ingredients: "Вам нужно",
+          method: "Способ"
+        },
+        fr: {
+          tastesLike: "Goût attendu",
+          ingredients: "Ingrédients",
+          method: "Méthode"
+        },
+        es: {
+          tastesLike: "Sabor parecido a",
+          ingredients: "Necesitas",
+          method: "Preparación"
+        }
+      };
+
+      const recipes = {
+        en: {
+          napgarita: {
+            title: "Napgarita",
+            taste: "Classic margarita: bright lime, agave, calm and balanced.",
+            ingredients: [
+              "60 ml Clean T",
+              "30 ml fresh lime juice",
+              "20 ml agave syrup (or 1:1 honey syrup)",
+              "Ice cubes",
+              "Optional: salt + lime wedge for the rim"
+            ],
+            method: [
+              "Rub a lime wedge on the rim of the glass, dip in salt (optional).",
+              "Shake Clean T, lime, and agave with ice (or blend with ice for slushy style).",
+              "Pour over fresh ice, garnish with a lime wheel."
+            ]
+          },
+          dreamfreeze: {
+            title: "Dream Freeze",
+            taste: "Frozen bar-style margarita: smooth, cold, slushy.",
+            ingredients: [
+              "60 ml Clean T",
+              "30 ml fresh lime juice",
+              "20 ml agave syrup",
+              "Handful of crushed ice / ice cubes",
+              "Optional: 10 ml alcohol-free orange liqueur or orange juice",
+              "Salt + lime wedge for the rim (optional)"
+            ],
+            method: [
+              "Rim the glass with salt if you like.",
+              "Blend everything until smooth and slushy.",
+              "Pour and serve immediately with a straw or short garnish."
+            ]
+          },
+          smokemonitor: {
+            title: "Smoke Monitor",
+            taste: "Smoky Tommy’s-style margarita: earthy, rounded, subtle smoke.",
+            ingredients: [
+              "50 ml Clean T",
+              "25 ml fresh lime juice",
+              "15 ml agave syrup",
+              "1 drop liquid smoke OR a pinch of smoked paprika",
+              "Ice"
+            ],
+            method: [
+              "Shake with ice.",
+              "Strain into a rocks glass over ice.",
+              "Garnish with a lime wedge."
+            ]
+          },
+          parentmode: {
+            title: "Parent Mode",
+            taste: "Spicy house picante: chili heat, coriander, alert-but-composed energy.",
+            ingredients: [
+              "50 ml Clean T",
+              "25 ml fresh lime juice",
+              "20 ml agave syrup",
+              "2 slices fresh chili (jalapeño or red chili)",
+              "A few coriander / cilantro leaves",
+              "Ice"
+            ],
+            method: [
+              "Muddle chili and coriander in the shaker.",
+              "Add Clean T, lime, agave, then fill with ice.",
+              "Shake hard, strain into a rocks glass with ice.",
+              "Garnish with a chili slice or coriander leaf."
+            ]
+          },
+          crysignal: {
+            title: "Cry Signal",
+            taste: "Focused spicy sip: gentle fire, steady rhythm.",
+            ingredients: [
+              "50 ml Clean T (you can pre-infuse with chili)",
+              "25 ml fresh lime juice",
+              "20 ml agave syrup",
+              "Ice"
+            ],
+            method: [
+              "For heat: slice chili and let it sit in Clean T for a few minutes (longer = spicier).",
+              "Shake Clean T, lime, and agave with ice.",
+              "Strain into a rocks glass with ice.",
+              "Serve clean — no garnish needed."
+            ]
+          },
+          nurserybreeze: {
+            title: "Nursery Breeze",
+            taste: "Watermelon cooler: light, fruity, summer-soft.",
+            ingredients: [
+              "60 ml Clean T",
+              "90 ml fresh watermelon juice",
+              "15 ml fresh lime juice",
+              "10 ml simple syrup",
+              "Ice"
+            ],
+            method: [
+              "Shake all ingredients with ice.",
+              "Strain into a tall glass over fresh ice.",
+              "Garnish with mint or a watermelon cube."
+            ]
+          },
+          lullabysmash: {
+            title: "Lullaby Smash",
+            taste: "Strawberry basil smash: fresh, herbal, slightly sweet.",
+            ingredients: [
+              "50 ml Clean T",
+              "3 strawberries",
+              "3 basil leaves",
+              "20 ml fresh lemon juice",
+              "15 ml simple syrup",
+              "Ice"
+            ],
+            method: [
+              "Muddle strawberries and basil in the shaker.",
+              "Add Clean T, lemon, syrup, and ice.",
+              "Shake, then strain into a glass over ice.",
+              "Optional: garnish with a basil leaf."
+            ]
+          },
+          goldenhour: {
+            title: "Golden Hour",
+            taste: "Tequila Sunrise vibe: orange + grenadine layers like sunrise/sunset.",
+            ingredients: [
+              "50 ml Clean T",
+              "100 ml orange juice",
+              "10 ml grenadine syrup",
+              "Ice"
+            ],
+            method: [
+              "Fill a tall glass with ice.",
+              "Add Clean T and orange juice.",
+              "Slowly pour grenadine so it sinks and creates the red-to-gold gradient.",
+              "Garnish with an orange slice or cherry."
+            ]
+          },
+          quietmode: {
+            title: "Quiet Mode",
+            taste: "Simple highball: crisp tonic, fresh lime, super drinkable.",
+            ingredients: [
+              "50 ml Clean T",
+              "Top with chilled tonic water",
+              "Fresh lime wedge / squeeze",
+              "Ice"
+            ],
+            method: [
+              "Fill a highball with ice.",
+              "Add Clean T.",
+              "Top with tonic water.",
+              "Squeeze in lime and drop the wedge in."
+            ]
+          }
+        },
+
+        ru: {
+          napgarita: {
+            title: "Napgarita",
+            taste: "Классическая маргарита: яркий лайм, агава, спокойно и сбалансированно.",
+            ingredients: [
+              "60 мл Clean T",
+              "30 мл свежего сока лайма",
+              "20 мл сиропа агавы (или медовый сироп 1:1)",
+              "Лёд",
+              "Опционально: соль и долька лайма для края бокала"
+            ],
+            method: [
+              "Проведите долькой лайма по кромке бокала и обмакните в соль (по желанию).",
+              "В шейкере со льдом встряхните Clean T, сок лайма и сироп агавы (или взбейте в блендере со льдом для версии фрозе).",
+              "Перелейте в бокал со свежим льдом. Украсьте кружком лайма."
+            ]
+          },
+          dreamfreeze: {
+            title: "Dream Freeze",
+            taste: "Замороженная маргарита барного стиля: гладкая, холодная, как гранита.",
+            ingredients: [
+              "60 мл Clean T",
+              "30 мл свежего сока лайма",
+              "20 мл сиропа агавы",
+              "Горсть дроблёного льда / кубиков льда",
+              "Опционально: 10 мл безалкогольного апельсинового ликёра или апельсинового сока",
+              "Соль и долька лайма для края бокала (по желанию)"
+            ],
+            method: [
+              "При желании украсьте край бокала солью.",
+              "Взбейте всё в блендере до состояния мягкого снежного льда.",
+              "Перелейте и подавайте сразу, можно со стаканной трубочкой."
+            ]
+          },
+          smokemonitor: {
+            title: "Smoke Monitor",
+            taste: "Дымный вариант Tommy’s Margarita: землистый, мягкий, с лёгким дымком.",
+            ingredients: [
+              "50 мл Clean T",
+              "25 мл свежего сока лайма",
+              "15 мл сиропа агавы",
+              "Капля жидкого дыма или щепотка копчёной паприки",
+              "Лёд"
+            ],
+            method: [
+              "Хорошо встряхните со льдом.",
+              "Процедите в олд-фэшн стакан со льдом.",
+              "Украсьте долькой лайма."
+            ]
+          },
+          parentmode: {
+            title: "Parent Mode",
+            taste: "Пряный пикантный коктейль: острота чили, кинза, бодрящая энергия.",
+            ingredients: [
+              "50 мл Clean T",
+              "25 мл свежего сока лайма",
+              "20 мл сиропа агавы",
+              "2 колечка свежего чили (халапеньо или красный чили)",
+              "Пару листиков кинзы",
+              "Лёд"
+            ],
+            method: [
+              "Разомните чили и кинзу в шейкере мадлером.",
+              "Добавьте Clean T, лайм, сироп агавы и лёд.",
+              "Энергично встряхните, процедите в стакан со льдом.",
+              "Украсьте ломтиком чили или листиком кинзы."
+            ]
+          },
+          crysignal: {
+            title: "Cry Signal",
+            taste: "Острая сфокусированная версия: мягкий огонь, устойчивый ритм.",
+            ingredients: [
+              "50 мл Clean T (можно настоять на чили)",
+              "25 мл свежего сока лайма",
+              "20 мл сиропа агавы",
+              "Лёд"
+            ],
+            method: [
+              "Для остроты: нарежьте чили и дайте ему немного настояться в Clean T.",
+              "Встряхните Clean T, лайм и сироп агавы со льдом.",
+              "Процедите в стакан со льдом.",
+              "Подавайте без лишнего декора — вся суть во вкусе."
+            ]
+          },
+          nurserybreeze: {
+            title: "Nursery Breeze",
+            taste: "Арбузный кулер: лёгкий, фруктовый, летний.",
+            ingredients: [
+              "60 мл Clean T",
+              "90 мл свежего арбузного сока",
+              "15 мл свежего сока лайма",
+              "10 мл сахарного сиропа",
+              "Лёд"
+            ],
+            method: [
+              "Встряхните все ингредиенты со льдом.",
+              "Процедите в высокий стакан со свежим льдом.",
+              "Украсьте мятой или кубиком арбуза."
+            ]
+          },
+          lullabysmash: {
+            title: "Lullaby Smash",
+            taste: "Клубнично-базиликовый смэш: свежие ягоды, трава, лёгкая сладость.",
+            ingredients: [
+              "50 мл Clean T",
+              "3 клубники",
+              "3 листика базилика",
+              "20 мл свежего лимонного сока",
+              "15 мл сахарного сиропа",
+              "Лёд"
+            ],
+            method: [
+              "Разомните клубнику и базилик в шейкере.",
+              "Добавьте Clean T, лимон, сироп и лёд.",
+              "Встряхните и процедите в стакан со льдом.",
+              "При желании украсьте листиком базилика."
+            ]
+          },
+          goldenhour: {
+            title: "Golden Hour",
+            taste: "Безалкогольный стиль Tequila Sunrise: апельсин + гренадин, цвета рассвета и заката.",
+            ingredients: [
+              "50 мл Clean T",
+              "100 мл апельсинового сока",
+              "10 мл гренадина",
+              "Лёд"
+            ],
+            method: [
+              "Наполните высокий стакан льдом.",
+              "Добавьте Clean T и апельсиновый сок.",
+              "Медленно влейте гренадин, чтобы он опустился вниз и дал градиент.",
+              "Украсьте долькой апельсина или вишенкой."
+            ]
+          },
+          quietmode: {
+            title: "Quiet Mode",
+            taste: "Простой хайбол: тоник, лайм, чисто и освежающе.",
+            ingredients: [
+              "50 мл Clean T",
+              "Охлаждённая тоник-вода до верха",
+              "Долька свежего лайма",
+              "Лёд"
+            ],
+            method: [
+              "Заполните хайбол льдом.",
+              "Налейте Clean T.",
+              "Долейте тоником.",
+              "Отожмите дольку лайма и опустите её в стакан."
+            ]
+          }
+        },
+
+        fr: {
+          napgarita: {
+            title: "Napgarita",
+            taste: "Margarita classique : citron vert vif, agave, calme et équilibre.",
+            ingredients: [
+              "60 ml Clean T",
+              "30 ml jus de citron vert frais",
+              "20 ml sirop d’agave (ou sirop miel 1:1)",
+              "Glaçons",
+              "Optionnel : sel + quartier de citron vert pour givrer le bord"
+            ],
+            method: [
+              "Frottez le bord du verre avec du citron vert puis trempez dans le sel (facultatif).",
+              "Secouez Clean T, citron vert et agave avec de la glace (ou mixez avec de la glace pour une version frozen).",
+              "Versez sur de nouveaux glaçons, garnissez d’une rondelle de citron vert."
+            ]
+          },
+          dreamfreeze: {
+            title: "Dream Freeze",
+            taste: "Frozen margarita bar-style : glacée, lisse, ultra fraîche.",
+            ingredients: [
+              "60 ml Clean T",
+              "30 ml jus de citron vert frais",
+              "20 ml sirop d’agave",
+              "Une poignée de glace pilée / glaçons",
+              "Optionnel : 10 ml liqueur d’orange sans alcool ou jus d’orange",
+              "Sel + quartier de citron vert pour le bord (optionnel)"
+            ],
+            method: [
+              "Si vous voulez le bord salé, givrez le verre.",
+              "Mixez tous les ingrédients jusqu’à texture granité.",
+              "Servez aussitôt avec une paille courte."
+            ]
+          },
+          smokemonitor: {
+            title: "Smoke Monitor",
+            taste: "Version fumée du Tommy’s Margarita : terreux, rond, léger fumé.",
+            ingredients: [
+              "50 ml Clean T",
+              "25 ml jus de citron vert frais",
+              "15 ml sirop d’agave",
+              "1 goutte d’arôme fumé ou une pincée de paprika fumé",
+              "Glaçons"
+            ],
+            method: [
+              "Secouez vigoureusement avec de la glace.",
+              "Filtrez dans un verre old fashioned rempli de glace.",
+              "Garnissez d’un quartier de citron vert."
+            ]
+          },
+          parentmode: {
+            title: "Parent Mode",
+            taste: "Picante maison épicé : piment, coriandre, énergie alerte mais posée.",
+            ingredients: [
+              "50 ml Clean T",
+              "25 ml jus de citron vert frais",
+              "20 ml sirop d’agave",
+              "2 rondelles de piment frais (jalapeño ou rouge)",
+              "Quelques feuilles de coriandre",
+              "Glaçons"
+            ],
+            method: [
+              "Écrasez piment et coriandre dans le shaker.",
+              "Ajoutez Clean T, citron vert, agave et de la glace.",
+              "Secouez fort, filtrez dans un verre rempli de glace.",
+              "Décorez avec une rondelle de piment ou une feuille de coriandre."
+            ]
+          },
+          crysignal: {
+            title: "Cry Signal",
+            taste: "Gorgée épicée ciblée : feu doux, rythme stable.",
+            ingredients: [
+              "50 ml Clean T (vous pouvez l’infuser au piment)",
+              "25 ml jus de citron vert frais",
+              "20 ml sirop d’agave",
+              "Glaçons"
+            ],
+            method: [
+              "Pour le piquant : laissez infuser quelques rondelles de piment dans le Clean T quelques minutes.",
+              "Secouez Clean T, citron vert et agave avec de la glace.",
+              "Filtrez dans un verre avec de la glace.",
+              "Servez pur — sans déco, tout est dans la concentration."
+            ]
+          },
+          nurserybreeze: {
+            title: "Nursery Breeze",
+            taste: "Refresher pastèque : léger, fruité, douceur d’été.",
+            ingredients: [
+              "60 ml Clean T",
+              "90 ml jus de pastèque frais",
+              "15 ml jus de citron vert frais",
+              "10 ml sirop simple",
+              "Glaçons"
+            ],
+            method: [
+              "Secouez tous les ingrédients avec de la glace.",
+              "Filtrez dans un grand verre rempli de glace fraîche.",
+              "Décorez avec de la menthe ou un cube de pastèque."
+            ]
+          },
+          lullabysmash: {
+            title: "Lullaby Smash",
+            taste: "Smash fraise-basilic : frais, herbacé, légèrement sucré.",
+            ingredients: [
+              "50 ml Clean T",
+              "3 fraises",
+              "3 feuilles de basilic",
+              "20 ml jus de citron",
+              "15 ml sirop simple",
+              "Glaçons"
+            ],
+            method: [
+              "Écrasez fraises et basilic dans le shaker.",
+              "Ajoutez Clean T, citron, sirop et de la glace.",
+              "Secouez, filtrez dans un verre avec de la glace.",
+              "Optionnel : décorez avec une feuille de basilic."
+            ]
+          },
+          goldenhour: {
+            title: "Golden Hour",
+            taste: "Ambiance Tequila Sunrise : couches orange + grenadine façon lever/coucher de soleil.",
+            ingredients: [
+              "50 ml Clean T",
+              "100 ml jus d’orange",
+              "10 ml grenadine",
+              "Glaçons"
+            ],
+            method: [
+              "Remplissez un grand verre de glace.",
+              "Ajoutez Clean T et le jus d’orange.",
+              "Versez lentement la grenadine pour qu’elle tombe au fond et crée un dégradé rouge-or.",
+              "Garnissez avec une tranche d’orange ou une cerise."
+            ]
+          },
+          quietmode: {
+            title: "Quiet Mode",
+            taste: "Highball simple : tonic frais, citron vert, hyper buvable.",
+            ingredients: [
+              "50 ml Clean T",
+              "Allonger avec du tonic bien frais",
+              "Quartier de citron vert pressé",
+              "Glaçons"
+            ],
+            method: [
+              "Remplissez un highball de glace.",
+              "Ajoutez Clean T.",
+              "Complétez avec du tonic.",
+              "Pressez un quartier de citron vert et laissez-le dans le verre."
+            ]
+          }
+        },
+
+        es: {
+          napgarita: {
+            title: "Napgarita",
+            taste: "Margarita clásica: lima brillante, agave, calma equilibrada.",
+            ingredients: [
+              "60 ml Clean T",
+              "30 ml zumo de lima fresco",
+              "20 ml sirope de agave (o sirope de miel 1:1)",
+              "Hielo",
+              "Opcional: sal + gajo de lima para el borde del vaso"
+            ],
+            method: [
+              "Frota el borde del vaso con lima y pásalo por sal (opcional).",
+              "Agita Clean T, lima y agave con hielo (o licúa con hielo para estilo frozen).",
+              "Cuela sobre hielo fresco y decora con una rodaja de lima."
+            ]
+          },
+          dreamfreeze: {
+            title: "Dream Freeze",
+            taste: "Margarita frozen de coctelería: fría, suave, granizada.",
+            ingredients: [
+              "60 ml Clean T",
+              "30 ml zumo de lima fresco",
+              "20 ml sirope de agave",
+              "Un puñado de hielo picado / cubitos",
+              "Opcional: 10 ml licor de naranja sin alcohol o zumo de naranja",
+              "Sal + gajo de lima para el borde (opcional)"
+            ],
+            method: [
+              "Si quieres borde salado, prepáralo primero.",
+              "Licúa todo hasta que quede textura granizada.",
+              "Sirve al momento con pajita corta."
+            ]
+          },
+          smokemonitor: {
+            title: "Smoke Monitor",
+            taste: "Versión ahumada tipo Tommy’s Margarita: terrosa, redonda, con humo suave.",
+            ingredients: [
+              "50 ml Clean T",
+              "25 ml zumo de lima fresco",
+              "15 ml sirope de agave",
+              "1 gota de humo líquido o una pizca de pimentón ahumado",
+              "Hielo"
+            ],
+            method: [
+              "Agita con hielo.",
+              "Cuela en vaso bajo con hielo.",
+              "Decora con una rodaja de lima."
+            ]
+          },
+          parentmode: {
+            title: "Parent Mode",
+            taste: "Picante estilo casa: chili, cilantro, energía atenta pero tranquila.",
+            ingredients: [
+              "50 ml Clean T",
+              "25 ml zumo de lima fresco",
+              "20 ml sirope de agave",
+              "2 rodajas de chili fresco (jalapeño o rojo)",
+              "Unas hojas de cilantro",
+              "Hielo"
+            ],
+            method: [
+              "Maja el chili y el cilantro en la coctelera.",
+              "Añade Clean T, lima, agave y hielo.",
+              "Agita fuerte, cuela en vaso bajo con hielo.",
+              "Decora con una rodaja de chili o una hoja de cilantro."
+            ]
+          },
+          crysignal: {
+            title: "Cry Signal",
+            taste: "Trago picante enfocado: fuego suave, ritmo estable.",
+            ingredients: [
+              "50 ml Clean T (puedes infusionarlo con chili)",
+              "25 ml zumo de lima fresco",
+              "20 ml sirope de agave",
+              "Hielo"
+            ],
+            method: [
+              "Para más picante: deja reposar unas rodajas de chili en el Clean T unos minutos.",
+              "Agita Clean T, lima y agave con hielo.",
+              "Cuela en vaso bajo con hielo.",
+              "Sírvelo limpio: sin decoración, sólo sabor."
+            ]
+          },
+          nurserybreeze: {
+            title: "Nursery Breeze",
+            taste: "Refresco de sandía: ligero, afrutado, muy veraniego.",
+            ingredients: [
+              "60 ml Clean T",
+              "90 ml zumo de sandía fresco",
+              "15 ml zumo de lima fresco",
+              "10 ml sirope simple",
+              "Hielo"
+            ],
+            method: [
+              "Agita todos los ingredientes con hielo.",
+              "Cuela en vaso alto con hielo fresco.",
+              "Decora con menta o un cubito de sandía."
+            ]
+          },
+          lullabysmash: {
+            title: "Lullaby Smash",
+            taste: "Smash de fresa y albahaca: fresco, herbal, ligeramente dulce.",
+            ingredients: [
+              "50 ml Clean T",
+              "3 fresas",
+              "3 hojas de albahaca",
+              "20 ml zumo de limón fresco",
+              "15 ml sirope simple",
+              "Hielo"
+            ],
+            method: [
+              "Maja las fresas y la albahaca en la coctelera.",
+              "Añade Clean T, limón, sirope y hielo.",
+              "Agita y cuela en un vaso con hielo.",
+              "Opcional: decora con una hoja de albahaca."
+            ]
+          },
+          goldenhour: {
+            title: "Golden Hour",
+            taste: "Estilo Tequila Sunrise sin alcohol: capas de naranja y granadina como amanecer/atardecer.",
+            ingredients: [
+              "50 ml Clean T",
+              "100 ml zumo de naranja",
+              "10 ml granadina",
+              "Hielo"
+            ],
+            method: [
+              "Llena un vaso alto con hielo.",
+              "Añade Clean T y el zumo de naranja.",
+              "Vierte lentamente la granadina para que baje y forme el degradado rojo-dorado.",
+              "Decora con una rodaja de naranja o una cereza."
+            ]
+          },
+          quietmode: {
+            title: "Quiet Mode",
+            taste: "Highball sencillo: tónica fría, lima fresca, súper bebible.",
+            ingredients: [
+              "50 ml Clean T",
+              "Completar con tónica fría",
+              "Gajo de lima exprimido",
+              "Hielo"
+            ],
+            method: [
+              "Llena un vaso alto con hielo.",
+              "Añade Clean T.",
+              "Rellena con tónica.",
+              "Exprime un gajo de lima y déjalo dentro."
+            ]
+          }
+        }
+      };
+
+      let currentLang = 'en';
+      let currentRecipeId = null;
+      let isPlaying = false;
+      let qrVisible = false;
+
+      const picker = document.getElementById('langPicker');
+      const audioEl = document.getElementById('bgAudio');
+      const audioToggle = document.getElementById('audioToggle');
+      const qrToggle = document.getElementById('qrToggle');
+      const qrOverlay = document.getElementById('qrOverlay');
+      const qrCloseBtn = document.getElementById('qrCloseBtn');
+      const qrHeaderText = document.getElementById('qrHeaderText');
+      const qrImg = document.getElementById('qrImg');
+      const qrUrlText = document.getElementById('qrUrlText');
+
+      const recipeTitleEl = document.getElementById('recipeTitle');
+      const recipeBodyEl = document.getElementById('recipeBody');
+
+      // inline SVG icons for the audio button
+      const ICON_SPEAKER =
+        '<span class="pill-icon" aria-hidden="true">' +
+          '<svg viewBox="0 0 24 24" fill="none">' +
+            '<path d="M11 5.5 6.75 9H4v6h2.75L11 18.5v-13z"/>' +
+            '<path d="M15.5 9.5a3 3 0 010 5m2-7a5 5 0 010 9" fill="none"/>' +
+          '</svg>' +
+        '</span>';
+
+      const ICON_MUTE =
+        '<span class="pill-icon" aria-hidden="true">' +
+          '<svg viewBox="0 0 24 24" fill="none">' +
+            '<path d="M11 5.5 6.75 9H4v6h2.75L11 18.5v-13z"/>' +
+            '<path d="M18 10l-4 4m0-4 4 4" fill="none"/>' +
+          '</svg>' +
+        '</span>';
+
+      function getRecipeLabels(lang) {
+        return recipeLabels[lang] || recipeLabels.en;
+      }
+      function getLangRecipes(lang) {
+        return recipes[lang] || recipes.en;
+      }
+
+      function renderRecipe(recipeId) {
+        const langRecipes = getLangRecipes(currentLang);
+        const langLabels = getRecipeLabels(currentLang);
+        const r = langRecipes[recipeId];
+        if (!r) return;
+
+        currentRecipeId = recipeId;
+
+        recipeTitleEl.textContent = r.title;
+
+        let html = "";
+        html += "<p><strong>" + langLabels.tastesLike + ":</strong> " + r.taste + "</p>";
+
+        html += "<h3>" + langLabels.ingredients + "</h3><ul>";
+        r.ingredients.forEach(function (item) {
+          html += "<li>" + item + "</li>";
+        });
+        html += "</ul>";
+
+        html += "<h3>" + langLabels.method + "</h3><ol>";
+        r.method.forEach(function (step) {
+          html += "<li>" + step + "</li>";
+        });
+        html += "</ol>";
+
+        recipeBodyEl.innerHTML = html;
+      }
+
+      function updateAudioLabel() {
+        const dict = translations[currentLang] || translations.en;
+        if (isPlaying) {
+          audioToggle.innerHTML = ICON_MUTE + dict.mute_label;
+        } else {
+          audioToggle.innerHTML = ICON_SPEAKER + dict.play_label;
+        }
+      }
+
+      function updateQrLabel() {
+        const dict = translations[currentLang] || translations.en;
+        qrToggle.textContent = qrVisible ? dict.hide_qr_label : dict.show_qr_label;
+      }
+
+      function ensureQrLoaded() {
+        // Generate a QR code URL for the current page
+        const pageUrl = window.location.href;
+        if (!qrImg.getAttribute('src')) {
+          const encoded = encodeURIComponent(pageUrl);
+          qrImg.setAttribute(
+            'src',
+            "https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=" + encoded
+          );
+        }
+        qrUrlText.textContent = pageUrl;
+      }
+
+      function openQr() {
+        qrVisible = true;
+        qrOverlay.classList.add('show');
+        qrOverlay.setAttribute('aria-hidden', 'false');
+        qrToggle.setAttribute('aria-pressed', 'true');
+        ensureQrLoaded();
+        updateQrLabel();
+      }
+
+      function closeQr() {
+        qrVisible = false;
+        qrOverlay.classList.remove('show');
+        qrOverlay.setAttribute('aria-hidden', 'true');
+        qrToggle.setAttribute('aria-pressed', 'false');
+        updateQrLabel();
+      }
+
+      function applyLang(lang) {
+        currentLang = lang;
+        const dict = translations[lang] || translations.en;
+        document.documentElement.lang = lang;
+
+        // Update all static text nodes with data-i18n
+        Object.keys(dict).forEach(function (key) {
+          const nodes = document.querySelectorAll('[data-i18n="' + key + '"]');
+          nodes.forEach(function (node) {
+            node.innerHTML = dict[key];
+          });
+        });
+
+        // aria-label for close
+        qrCloseBtn.setAttribute('aria-label', dict.qr_close_label || "Close");
+
+        // dynamic buttons that depend on state
+        updateAudioLabel();
+        updateQrLabel();
+
+        // re-render recipe panel in new lang if one is selected
+        if (currentRecipeId) {
+          renderRecipe(currentRecipeId);
+        }
+      }
+
+      picker.addEventListener('change', function () {
+        applyLang(this.value);
+      });
+
+      // Play / Mute pill
+      audioToggle.addEventListener('click', function () {
+        if (!isPlaying) {
+          audioEl.play().catch(function () { /* mobile autoplay restrictions are fine */ });
+          isPlaying = true;
+          audioToggle.setAttribute('aria-pressed', 'true');
+        } else {
+          audioEl.pause();
+          audioEl.currentTime = 0;
+          isPlaying = false;
+          audioToggle.setAttribute('aria-pressed', 'false');
+        }
+        updateAudioLabel();
+      });
+
+      // Show / Hide QR pill
+      qrToggle.addEventListener('click', function () {
+        if (!qrVisible) {
+          openQr();
+        } else {
+          closeQr();
+        }
+      });
+
+      // Close QR via X
+      qrCloseBtn.addEventListener('click', function () {
+        closeQr();
+      });
+
+      // Close QR by tapping outside card
+      qrOverlay.addEventListener('click', function (e) {
+        if (e.target === qrOverlay) {
+          closeQr();
+        }
+      });
+
+      // Cocktail name click -> show recipe
+      document.querySelectorAll('.name').forEach(function (el) {
+        el.addEventListener('click', function () {
+          const rid = el.getAttribute('data-recipe');
+          renderRecipe(rid);
+        });
+        el.addEventListener('keypress', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            const rid = el.getAttribute('data-recipe');
+            renderRecipe(rid);
+          }
+        });
+      });
+
+      // initial setup
+      applyLang(picker.value || 'en');
+      updateAudioLabel();
+      updateQrLabel();
+    })();
+  </script>
+
+</body>
+</html>
