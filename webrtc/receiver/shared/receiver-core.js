@@ -163,7 +163,7 @@ export class ReceiverCore {
         const grace = this.iceDisconnectGraceMs;
         setTimeout(() => {
           if (this.iceDisconnectedSince && Date.now() - this.iceDisconnectedSince >= grace) {
-            this.#status(`ICE: disconnected >${Math.round(grace/1000)}s (renegotiating)`);
+            //this.#status(`ICE: disconnected >${Math.round(grace/1000)}s (renegotiating)`);
             this.#ensurePC(true);
             this.#negotiate().catch(()=>{});
           }
