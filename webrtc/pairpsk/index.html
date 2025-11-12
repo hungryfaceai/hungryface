@@ -114,6 +114,27 @@
       .nav-left, .nav-right { gap: 10px; } .nav-center { gap: 10px; }
       header { padding: 12px 14px; }
     }
+
+    /* === QR scanner (safe-area aware) === */
+    #qr-shell{ position:fixed; inset:0; background:#000; z-index:2000; }
+    #qr-shell[hidden]{ display:none !important; }
+    #qr-video{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+    #qr-overlay{
+      position:absolute; inset:0;
+      padding: max(12px, env(safe-area-inset-top))
+               max(12px, env(safe-area-inset-right))
+               max(20px, env(safe-area-inset-bottom))
+               max(12px, env(safe-area-inset-left));
+      display:flex; flex-direction:column; justify-content:space-between;
+      pointer-events:none;
+    }
+    #qr-overlay .guide{
+      margin:auto; width:min(70vmin,80%); height:min(70vmin,80%);
+      outline:3px solid rgba(255,255,255,.85); border-radius:16px;
+      box-shadow:0 0 0 9999px rgba(0,0,0,.35);
+    }
+    #qr-overlay .qr-actions{ display:flex; justify-content:space-between; pointer-events:auto; }
+    #qr-overlay .btn-pill{ background:rgba(255,255,255,.92); color:#000; border-color:#fff; }
   </style>
 </head>
 <body>
@@ -153,6 +174,7 @@
           <div class="row">
             <button id="regen" class="btn-pill" type="button">Rotate secret</button>
             <button id="forget" class="btn-pill" type="button" style="border-color:#444">Forget on this device</button>
+            <button id="scanQR" class="btn-pill" type="button" aria-label="Scan QR to import key">Scan QR</button>
           </div>
 
           <!-- PSK chip (masked). Click/focus to reveal, blur to hide -->
@@ -179,6 +201,19 @@
   </div>
 
   <div id="toast" class="invite-toast" aria-live="polite"></div>
+
+  <!-- QR Scanner overlay (hidden by default) -->
+  <section id="qr-shell" hidden aria-hidden="true">
+    <video id="qr-video" playsinline muted autoplay></video>
+    <canvas id="qr-canvas" hidden></canvas>
+    <div id="qr-overlay">
+      <div class="guide" aria-hidden="true"></div>
+      <div class="qr-actions">
+        <button id="qr-torch" class="btn-pill" hidden>Flash</button>
+        <button id="qr-close" class="btn-pill">Close</button>
+      </div>
+    </div>
+  </section>
 
   <script type="module">
     import { ensureTermsAccepted } from '/hungryface/legal/require-terms.js';
@@ -257,7 +292,7 @@
       const words = String(text).split(' '); let line = '';
       for (let n=0;n<words.length;n++){
         const test = line + words[n] + ' ';
-        if (ctx.measureText(test).width > w && n>0){ ctx.fillText(line, x, y); line = words[n] + ' '; y += lh; }
+               if (ctx.measureText(test).width > w && n>0){ ctx.fillText(line, x, y); line = words[n] + ' '; y += lh; }
         else line = test;
       } ctx.fillText(line, x, y);
     }
@@ -367,6 +402,153 @@
     });
 
     await refresh();
+
+    // ===== Cross-platform in-app QR scanner (imports external key) =====
+    const scanBtn = document.getElementById('scanQR');
+    const qrShell  = document.getElementById('qr-shell');
+    const qrVideo  = document.getElementById('qr-video');
+    const qrCanvas = document.getElementById('qr-canvas');
+    const qrTorch  = document.getElementById('qr-torch');
+    const qrClose  = document.getElementById('qr-close');
+
+    let qrStream, qrTrack, qrDetector, qrRAF, qrActive = false;
+
+    async function ensureJsQR(){
+      if (window.jsQR) return window.jsQR;
+      await new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = '/hungryface/lib/jsqr.min.js';  // self-hosted fallback decoder
+        s.onload = res; s.onerror = rej; document.head.appendChild(s);
+      });
+      return window.jsQR;
+    }
+
+    function showScannerUI(show){
+      if (show) { qrShell.hidden = false; qrShell.setAttribute('aria-hidden','false'); }
+      else      { qrShell.hidden = true;  qrShell.setAttribute('aria-hidden','true'); }
+    }
+
+    async function startQRScanner(onResult){
+      showScannerUI(true);
+      qrActive = true;
+
+      qrStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode:{ ideal:'environment' }, width:{ ideal:1280 }, height:{ ideal:720 } },
+        audio: false
+      });
+      qrVideo.srcObject = qrStream;
+      qrTrack = qrStream.getVideoTracks()[0];
+
+      // Torch (supported on some browsers/devices)
+      try {
+        const caps = qrTrack.getCapabilities?.();
+        if (caps?.torch) {
+          qrTorch.hidden = false;
+          qrTorch.onclick = async () => {
+            const on = !qrTrack.getSettings?.().torch;
+            await qrTrack.applyConstraints({ advanced:[{ torch:on }] });
+            qrTorch.textContent = on ? 'Flash On' : 'Flash';
+          };
+        } else qrTorch.hidden = true;
+      } catch { qrTorch.hidden = true; }
+
+      if ('BarcodeDetector' in window) {
+        qrDetector = new window.BarcodeDetector({ formats: ['qr_code','aztec','pdf417','data_matrix'] });
+        readNative(onResult);
+      } else {
+        const jsQR = await ensureJsQR();
+        readCanvas(onResult, jsQR);
+      }
+    }
+
+    function stopQRScanner(){
+      qrActive = false;
+      if (qrRAF) cancelAnimationFrame(qrRAF);
+      try { qrStream?.getTracks().forEach(t => t.stop()); } catch {}
+      qrVideo.srcObject = null;
+      showScannerUI(false);
+    }
+
+    async function readNative(onResult){
+      const step = async () => {
+        if (!qrActive) return;
+        try {
+          const codes = await qrDetector.detect(qrVideo);
+          if (codes?.length) {
+            navigator.vibrate?.(8);
+            onResult(codes[0].rawValue || codes[0].rawValueText || '');
+            stopQRScanner();
+            return;
+          }
+        } catch {}
+        qrRAF = requestAnimationFrame(step);
+      };
+      qrRAF = requestAnimationFrame(step);
+    }
+
+    function readCanvas(onResult, jsQR){
+      const ctx = qrCanvas.getContext('2d', { willReadFrequently:true });
+      const step = () => {
+        if (!qrActive) return;
+        const vw = qrVideo.videoWidth, vh = qrVideo.videoHeight;
+        if (vw && vh) {
+          qrCanvas.width = vw; qrCanvas.height = vh;
+          ctx.drawImage(qrVideo, 0, 0, vw, vh);
+          const img = ctx.getImageData(0, 0, vw, vh);
+          const code = jsQR(img.data, vw, vh, { inversionAttempts:'dontInvert' });
+          if (code?.data) {
+            navigator.vibrate?.(8);
+            onResult(code.data);
+            stopQRScanner();
+            return;
+          }
+        }
+        qrRAF = requestAnimationFrame(step);
+      };
+      qrRAF = requestAnimationFrame(step);
+    }
+
+    function parseScanned(text){
+      try {
+        const u = new URL(text);
+        const qs = u.searchParams;
+        const hs = new URLSearchParams(u.hash?.startsWith('#') ? u.hash.slice(1) : '');
+        const get = (k) => hs.get(k) || qs.get(k) || '';
+        const room = (get('room') || '').trim();
+        const psk  = (get('psk')  || '').trim();
+        if (room || psk) return { room, psk };
+      } catch { /* not a URL */ }
+      return { room:'', psk:(text||'').trim() };
+    }
+
+    function looksBase64Url(s){ return !!s && /^[A-Za-z0-9\-_]+$/.test(s); }
+
+    document.getElementById('scanQR')?.addEventListener('click', async () => {
+      try {
+        await startQRScanner((scanned) => {
+          const { room, psk } = parseScanned(scanned);
+          const targetRoom = (room || currentRoom()).trim();
+
+          if (!looksBase64Url(psk)) {
+            showToast('No key found');
+            return;
+          }
+
+          try {
+            const payload = { tokenB64u: psk, installedFrom: 'qr', ts: new Date().toISOString() };
+            localStorage.setItem('psk:' + targetRoom, JSON.stringify(payload));
+          } catch {}
+
+          roomEl.value = targetRoom;
+          (async () => { await refresh(); })();
+          showToast('Key imported');
+        });
+      } catch (err) {
+        showToast('Camera error');
+      }
+    });
+
+    document.getElementById('qr-close').addEventListener('click', stopQRScanner);
   </script>
 </body>
 </html>
