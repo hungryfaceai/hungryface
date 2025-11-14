@@ -5,6 +5,9 @@
   <title>Naptio’s Bar — 0.0% Cocktails</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="Naptio’s Bar — elegant 0.0% cocktails inspired by calm, care, and design. Crafted with Clean T." />
+  <!-- ⬇️ Add shared sidebar stylesheet -->
+  <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
+  
   <style>
     :root {
       color-scheme: dark;
@@ -478,8 +481,30 @@
     }
   </style>
 </head>
+  
 <body>
+  <!-- ⬇️ Inject shared sidebar markup and behavior (kept separate from the code) -->
+  <script type="module">
+    (async () => {
+      try {
+        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
+        const html = await res.text();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html.trim();
+        document.body.prepend(...wrap.childNodes);
 
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      } catch (err) {
+        console.error('[Sidebar] failed to load shared assets:', err);
+      }
+    })();
+  </script>
   <header>
     <!-- Left: Naptio logo (replaces back pill) -->
     <div class="header-left">
