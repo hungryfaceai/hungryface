@@ -450,41 +450,67 @@
   <div id="alertBannerHost"></div>
   <div id="alertsModalHost"></div>
 
-  <!-- ⬇️ PSK bootstrap (viewer); resolves room from query/Settings and installs shim -->
+  <!-- ⬇️ PSK bootstrap (viewer); resolves room using the same logic as Settings and installs shim -->
   <script type="module">
     import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
-    import { requirePskOrRedirect } from '/hungryface/webrtc/shared/psk/require-psk.js';
-
+    import { requirePskOrRedirect, listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
+  
     const qs = new URLSearchParams(location.search);
-    const qsRoom   = (qs.get('room') || '').trim();
-    const stored   = (localStorage.getItem('bm_receiver_room') || '').trim();
-    const lastRoom = (localStorage.getItem('naptio:lastRoom') || '').trim();
-
-    const preferRoom = qsRoom || stored || lastRoom || '';
-
+    const qsRoom = (qs.get('room') || '').trim();
+  
+    // Ensure we have a PSK; if not, redirect to pairing
     const env = await requirePskOrRedirect({
       intent: 'viewer',
       pairRoute: '/hungryface/webrtc/pairpsk/',
-      preferRoom,
+      preferRoom: qsRoom,
       fallbackRoom: 'Baby',
     });
-
-    // Expose env + safe re-install hook (same API shape as sender)
-    window.__pskEnv = env;
-    window.__installPskForRoom = (room) => {
-      try { window.__pskUndo?.(); } catch {}
-      window.__pskUndo = installPskShim({ room });
-      console.log('[PSK][receiver-fence] shim installed for room:', room);
-      try {
-        localStorage.setItem('bm_receiver_room', room);
-        localStorage.setItem('naptio:lastRoom', room);
-      } catch {}
-    };
-
-    if (!env.redirected) {
-      const resolvedRoom = qsRoom || stored || lastRoom || env.room || 'Baby';
-      window.__installPskForRoom(resolvedRoom);
+  
+    if (env.redirected) {
+      console.log('[PSK][receiver-fence] redirecting to Pair Devices…');
+    } else {
+      const rooms     = listValidPskRooms();
+      const lastRoom  = (localStorage.getItem('naptio:lastRoom') || '').trim();
+      const persisted = (localStorage.getItem('bm_receiver_room') || '').trim();
+      const envRoom   = (env.room || '').trim();
+  
+      const uniq = new Set(rooms);
+      if (envRoom) uniq.add(envRoom);
+  
+      // Same priority chain as Settings:
+      // ?room → lastRoom → bm_receiver_room → env.room → first available
+      const resolvedRoom = uniq.size
+        ? (
+            (qsRoom    && uniq.has(qsRoom)    && qsRoom)    ||
+            (lastRoom  && uniq.has(lastRoom)  && lastRoom)  ||
+            (persisted && uniq.has(persisted) && persisted) ||
+            envRoom ||
+            Array.from(uniq)[0]
+          )
+        // Defensive fallback if list is empty
+        : (envRoom || qsRoom || 'Baby');
+  
+      // Persist for future pages (Settings / other receivers)
+      try { localStorage.setItem('bm_receiver_room', resolvedRoom); } catch {}
+      try { localStorage.setItem('naptio:lastRoom',  resolvedRoom); } catch {}
+  
+      // Install PSK shim for that same room
+      const undo = installPskShim({ room: resolvedRoom });
+      console.log('[PSK][receiver-fence] using PSK for room:', resolvedRoom);
+  
+      // Expose env + helpers in case other code (e.g. mini-dashboard) wants them
+      window.__pskEnv  = env;
       window.__pskRoom = resolvedRoom;
+      window.__pskUndo = undo;
+      window.__installPskForRoom = (room) => {
+        try { window.__pskUndo?.(); } catch {}
+        window.__pskUndo = installPskShim({ room });
+        console.log('[PSK][receiver-fence] shim re-installed for room:', room);
+        try {
+          localStorage.setItem('bm_receiver_room', room);
+          localStorage.setItem('naptio:lastRoom',  room);
+        } catch {}
+      };
     }
   </script>
   
