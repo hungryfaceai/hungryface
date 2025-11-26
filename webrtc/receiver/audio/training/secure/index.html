@@ -468,7 +468,9 @@
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
 
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
-    const room = window.__pskRoom || "Baby";
+	function getRoom() {
+	  return window.__pskRoom || "Baby";
+	}
 
     // WebRTC holder
     const wrtc = {
@@ -1633,7 +1635,7 @@
         const where = (localStorage.getItem('cryInferWhere') || 'sender') === 'receiver'
           ? 'receiver (from streamed audio)'
           : 'sender (scores via data channel)';
-        els.trainInfo.textContent = `WebRTC source (Sender). Inference @ ${where}. Room “${room}”.`;
+        els.trainInfo.textContent = `WebRTC source (Sender). Inference @ ${where}. Room “${getRoom()}”.`;
         ensureCoreStarted();
       }
     }
@@ -1885,7 +1887,7 @@
     
       wrtc.core = new ReceiverCore({
         wsEndpoint: WS_ENDPOINT,
-        room,
+        room: getRoom(),
         onStatus: (msg) => { log('info', `[RTC] ${msg}`); },
         onStream: (stream) => {
           if (EL('remote').srcObject !== stream) {
