@@ -179,8 +179,8 @@
 
           <!-- Room above action pills -->
           <div class="row" style="gap:12px">
-            <label for="room" class="label">Room</label>
-            <input id="room" class="input mono" value="Baby" spellcheck="false" style="min-width:160px"/>
+            <label for="roomSel" class="label">Room</label>
+            <select id="roomSel" class="input mono" style="min-width:160px"></select>
           </div>
 
           <div class="row">
@@ -234,7 +234,7 @@
     await ensureTermsAccepted({ role: 'pair' });
 
     // ---- Elements
-    const roomEl = document.getElementById('room');
+    const roomSel  = document.getElementById('roomSel');
     const regenBtn = document.getElementById('regen');
     const forgetBtn = document.getElementById('forget');
 
@@ -249,9 +249,14 @@
     const qrMain = document.getElementById('qrMain');
     const toastEl = document.getElementById('toast');
 
-    const INSTALLER_URL = './pair-install.html'; // target page on the other device
+    const INSTALLER_URL   = './pair-install.html'; // target page on the other device
+    const PSK_PREFIX      = 'psk:';
+    const ADD_ROOM_SENTINEL = '__add_new_room__';
+    const LS_LAST_ROOM    = 'naptio:lastRoom';
+    const LS_SENDER_ROOM  = 'bm_sender_room';
 
     let AUTO_CREATE = true;
+    let everHadRooms = false; // becomes true once we detect any PSK-backed rooms
 
     // Helpers
     function showToast(msg, ms = 1600, variant = '') {
@@ -268,9 +273,55 @@
     function fingerprint(b64u) { return b64u ? b64u.slice(-6) : '—'; }
     function maskToken(b64u) { return b64u ? ('•••• (…' + fingerprint(b64u) + ')') : '—'; }
 
-    function currentRoom() { return (roomEl.value || 'Baby').trim(); }
+    function hasOption(sel, value) {
+      return !!Array.from(sel?.options || []).find(o => o.value === value);
+    }
+
+    // Enumerate PSK-backed rooms from localStorage
+    function listPskRooms() {
+      const rooms = new Set();
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith(PSK_PREFIX)) {
+            const room = key.slice(PSK_PREFIX.length).trim();
+            if (room) rooms.add(room);
+          }
+        }
+      } catch {}
+      const arr = Array.from(rooms).sort((a, b) => a.localeCompare(b));
+      if (arr.length) everHadRooms = true;
+      return arr;
+    }
+
+    function rememberRoom(room) {
+      if (!room) return;
+      try {
+        localStorage.setItem(LS_LAST_ROOM, room);
+        localStorage.setItem(LS_SENDER_ROOM, room);
+      } catch {}
+    }
+
+    function pickPreferredRoom(rooms) {
+      if (!rooms || !rooms.length) return '';
+      const roomSet = new Set(rooms);
+      const last = (localStorage.getItem(LS_LAST_ROOM) || '').trim();
+      const sender = (localStorage.getItem(LS_SENDER_ROOM) || '').trim();
+      if (last && roomSet.has(last)) return last;
+      if (sender && roomSet.has(sender)) return sender;
+      return rooms[0];
+    }
+
+    function currentRoom() {
+      const val = roomSel.value;
+      if (!val || val === ADD_ROOM_SENTINEL) return '';
+      return val.trim();
+    }
+
     function getCurrentToken() {
-      const { tokenB64u = '' } = getPsk(currentRoom()) || {};
+      const room = currentRoom();
+      if (!room) return '';
+      const { tokenB64u = '' } = getPsk(room) || {};
       return tokenB64u;
     }
 
@@ -287,6 +338,46 @@
           a.tabIndex = -1; // remove from tab order
         }
       });
+    }
+
+    // Build / rebuild the room <select> based on current PSKs
+    function rebuildRoomSelect({ initial = false } = {}) {
+      const rooms = listPskRooms();
+      roomSel.innerHTML = '';
+
+      let selected = '';
+
+      if (rooms.length > 0) {
+        selected = pickPreferredRoom(rooms) || rooms[0];
+        for (const r of rooms) {
+          const opt = document.createElement('option');
+          opt.value = r;
+          opt.textContent = r;
+          roomSel.appendChild(opt);
+        }
+      } else if (initial && !everHadRooms) {
+        // First-time visit, no PSKs anywhere: default to "Baby"
+        selected = 'Baby';
+        const opt = document.createElement('option');
+        opt.value = 'Baby';
+        opt.textContent = 'Baby';
+        roomSel.appendChild(opt);
+      }
+
+      // "➕ Add new room…" sentinel (always last)
+      const addOpt = document.createElement('option');
+      addOpt.value = ADD_ROOM_SENTINEL;
+      addOpt.textContent = '➕ Add new room…';
+      roomSel.appendChild(addOpt);
+
+      if (selected) {
+        roomSel.value = selected;
+        rememberRoom(selected);
+      } else {
+        roomSel.value = ADD_ROOM_SENTINEL;
+      }
+
+      return selected;
     }
 
     // QR
@@ -310,9 +401,13 @@
       const words = String(text).split(' '); let line = '';
       for (let n=0;n<words.length;n++){
         const test = line + words[n] + ' ';
-               if (ctx.measureText(test).width > w && n>0){ ctx.fillText(line, x, y); line = words[n] + ' '; y += lh; }
-        else line = test;
-      } ctx.fillText(line, x, y);
+        if (ctx.measureText(test).width > w && n>0){
+          ctx.fillText(line, x, y); line = words[n] + ' '; y += lh;
+        } else {
+          line = test;
+        }
+      }
+      ctx.fillText(line, x, y);
     }
 
     function makeInstallUrl(room, tokenB64u) {
@@ -321,8 +416,26 @@
       return url.toString();
     }
 
+    function drawEmptyQr(label = 'No PSK') {
+      const ctx = qrMain.getContext('2d');
+      ctx.clearRect(0,0,qrMain.width,qrMain.height);
+      ctx.fillStyle = '#222'; ctx.fillRect(0,0,qrMain.width,qrMain.height);
+      ctx.fillStyle = '#aaa'; ctx.font = '14px monospace';
+      ctx.fillText(label, 8, 24);
+    }
+
     async function refresh() {
       const room = currentRoom();
+
+      if (!room) {
+        // No real room selected (e.g. after forgetting last PSK)
+        tokenMaskedEl.textContent = '—';
+        setModeLinksEnabled(false);
+        drawEmptyQr('No room');
+        shareBtn.disabled = true;
+        copyBtn.disabled = true;
+        return;
+      }
 
       if (AUTO_CREATE) {
         await ensurePskForRoom(room, 'sender');
@@ -341,10 +454,7 @@
         shareBtn.disabled = false;
         copyBtn.disabled = false;
       } else {
-        const ctx = qrMain.getContext('2d');
-        ctx.clearRect(0,0,qrMain.width,qrMain.height);
-        ctx.fillStyle = '#222'; ctx.fillRect(0,0,qrMain.width,qrMain.height);
-        ctx.fillStyle = '#aaa'; ctx.font = '14px monospace'; ctx.fillText('No PSK', 8, 24);
+        drawEmptyQr('No PSK');
         shareBtn.disabled = true;
         copyBtn.disabled = true;
       }
@@ -375,23 +485,90 @@
 
     // Rotate / Forget
     regenBtn.addEventListener('click', async () => {
-      AUTO_CREATE = true;
       const room = currentRoom();
-      try { localStorage.removeItem('psk:' + room); } catch {}
+      if (!room) {
+        showToast('No room selected');
+        return;
+      }
+      AUTO_CREATE = true;
+      try { localStorage.removeItem(PSK_PREFIX + room); } catch {}
       await ensurePskForRoom(room, 'sender');
       await refresh();
       showToast('Secret rotated');
     });
 
     forgetBtn.addEventListener('click', async () => {
-      AUTO_CREATE = false;
-      try { localStorage.removeItem('psk:' + currentRoom()); } catch {}
+      const room = currentRoom();
+      if (!room) {
+        showToast('No room to forget');
+        return;
+      }
+      AUTO_CREATE = false; // do not auto recreate immediately
+      try { localStorage.removeItem(PSK_PREFIX + room); } catch {}
+
+      // Rebuild dropdown from storage; if this was the last PSK and we had rooms
+      // before, we'll end up with only "➕ Add new room…" selected.
+      rebuildRoomSelect({ initial: false });
       await refresh();
       showToast('Forgot on this device');
     });
 
-    roomEl.addEventListener('change', async () => {
-      AUTO_CREATE = true;
+    // Room selection (including "➕ Add new room…" flow)
+    roomSel.addEventListener('change', async () => {
+      const val = roomSel.value;
+
+      if (val === ADD_ROOM_SENTINEL) {
+        const input = (prompt('New room name') || '').trim();
+        if (!input) {
+          // Restore a sensible selection if possible
+          const rooms = listPskRooms();
+          const fallback = pickPreferredRoom(rooms) || rooms[0] || '';
+          if (fallback && hasOption(roomSel, fallback)) {
+            roomSel.value = fallback;
+            rememberRoom(fallback);
+            await refresh();
+          } else {
+            roomSel.value = ADD_ROOM_SENTINEL;
+            await refresh();
+          }
+          return;
+        }
+
+        const rooms = listPskRooms();
+        const existing = rooms.find(r => r === input);
+        if (existing) {
+          // Room already exists: just select it
+          if (!hasOption(roomSel, existing)) {
+            const opt = document.createElement('option');
+            opt.value = existing;
+            opt.textContent = existing;
+            roomSel.insertBefore(opt, roomSel.querySelector(`option[value="${ADD_ROOM_SENTINEL}"]`));
+          }
+          roomSel.value = existing;
+          rememberRoom(existing);
+          AUTO_CREATE = false;
+          await refresh();
+          showToast('Room already exists – switched', 2000);
+          return;
+        }
+
+        // Truly new room: create PSK and add
+        AUTO_CREATE = true;
+        await ensurePskForRoom(input, 'sender');
+        rememberRoom(input);
+        rebuildRoomSelect({ initial: false });
+        if (hasOption(roomSel, input)) {
+          roomSel.value = input;
+        }
+        await refresh();
+        showToast('Room added', 2000);
+        return;
+      }
+
+      // Switched to a different existing room
+      const room = currentRoom();
+      rememberRoom(room);
+      AUTO_CREATE = true; // safe: ensurePskForRoom is idempotent
       await refresh();
     });
 
@@ -399,7 +576,7 @@
     shareBtn.addEventListener('click', async () => {
       const room = currentRoom();
       const token = getCurrentToken();
-      if (!token) return;
+      if (!room || !token) return;
       const url = makeInstallUrl(room, token);
       try {
         if (navigator.share && (!navigator.canShare || navigator.canShare({ url }))) {
@@ -414,11 +591,13 @@
     copyBtn.addEventListener('click', async () => {
       const room = currentRoom();
       const token = getCurrentToken();
-      if (!token) return;
+      if (!room || !token) return;
       const url = makeInstallUrl(room, token);
       try { await navigator.clipboard.writeText(url); showToast('Link copied'); } catch {}
     });
 
+    // Initial setup
+    rebuildRoomSelect({ initial: true });
     await refresh();
 
     // ===== Cross-platform in-app QR scanner (imports external key) =====
@@ -544,11 +723,17 @@
 
     function looksBase64Url(s){ return !!s && /^[A-Za-z0-9\-_]+$/.test(s); }
 
-    document.getElementById('scanQR')?.addEventListener('click', async () => {
+    scanBtn?.addEventListener('click', async () => {
       try {
         await startQRScanner((scanned) => {
           const { room, psk } = parseScanned(scanned);
-          const targetRoom = (room || currentRoom()).trim();
+          const fallbackRoom = currentRoom() || 'Baby';
+          const targetRoom = (room || fallbackRoom).trim();
+
+          if (!targetRoom) {
+            showToast('No room name in QR');
+            return;
+          }
 
           if (!looksBase64Url(psk)) {
             showToast('No key found');
@@ -557,10 +742,15 @@
 
           try {
             const payload = { tokenB64u: psk, installedFrom: 'qr', ts: new Date().toISOString() };
-            localStorage.setItem('psk:' + targetRoom, JSON.stringify(payload));
+            localStorage.setItem(PSK_PREFIX + targetRoom, JSON.stringify(payload));
           } catch {}
 
-          roomEl.value = targetRoom;
+          rememberRoom(targetRoom);
+          rebuildRoomSelect({ initial: false });
+          if (hasOption(roomSel, targetRoom)) {
+            roomSel.value = targetRoom;
+          }
+          AUTO_CREATE = false; // we already have the imported key
           (async () => { await refresh(); })();
           showToast('Key imported', 3000, 'success');
         });
@@ -569,7 +759,7 @@
       }
     });
 
-    document.getElementById('qr-close').addEventListener('click', stopQRScanner);
+    qrClose.addEventListener('click', stopQRScanner);
   </script>
 </body>
 </html>
