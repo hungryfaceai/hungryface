@@ -77,6 +77,20 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       overflow-y: auto;
     }
+
+    .roster-banner {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 40;
+      background: #b91c1c;
+      color: #fee2e2;
+      padding: 6px 12px;
+      font-size: 12px;
+      text-align: center;
+      display: none;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+    }
+
     .wrap {
       max-width: 1100px; margin: 0 auto; padding: 20px;
       display: grid; grid-template-rows: auto auto 1fr auto; gap: 16px;
@@ -336,6 +350,9 @@
 </head>
 <body>
 
+  <!-- Red roster-change banner -->
+  <div id="roster-banner" class="roster-banner" aria-live="polite"></div>
+
   <!-- ⬇️ Inject shared sidebar markup and behavior (kept separate from your code) -->
   <script type="module">
     (async () => {
@@ -462,6 +479,9 @@
       const logSizeEl      = document.getElementById('log-size');
       const logRowsEl      = document.getElementById('log-rows');
 
+      const rosterBanner   = document.getElementById('roster-banner');
+      let bannerTimer      = null;
+
       let timer = null;
 
       const STORAGE_KEY_LOG          = 'signaling_rooms_roster_log_v1';
@@ -481,6 +501,7 @@
 
       // Canonical snapshot for change detection (persisted across reloads)
       let lastSnapshotCanonical = null;
+      let lastSnapshotNormalized = null;
       // Whether the last fetch succeeded
       let lastFetchOk = null;
 
@@ -501,6 +522,19 @@
         } else {
           setDotState('error');  // red (idle/error/auto off)
         }
+      }
+
+      function showRosterBanner(message) {
+        if (!rosterBanner) return;
+        if (bannerTimer) {
+          clearTimeout(bannerTimer);
+          bannerTimer = null;
+        }
+        rosterBanner.textContent = message;
+        rosterBanner.style.display = 'block';
+        bannerTimer = setTimeout(() => {
+          rosterBanner.style.display = 'none';
+        }, 10000); // 10 seconds
       }
 
       function updateLogSizeLabel() {
@@ -544,12 +578,19 @@
           const rawCanon = localStorage.getItem(STORAGE_KEY_LAST_CANON);
           if (typeof rawCanon === 'string' && rawCanon.length) {
             lastSnapshotCanonical = rawCanon;
+            try {
+              lastSnapshotNormalized = JSON.parse(rawCanon);
+            } catch {
+              lastSnapshotNormalized = null;
+            }
           } else {
             lastSnapshotCanonical = null;
+            lastSnapshotNormalized = null;
           }
         } catch (e) {
           console.warn('[Roster] Failed to load last canonical snapshot:', e);
           lastSnapshotCanonical = null;
+          lastSnapshotNormalized = null;
         }
 
         updateLogSizeLabel();
@@ -607,7 +648,7 @@
         logLimitInput.value = logLimitMb.toString();
       }
 
-      function canonicalizeData(data) {
+      function canonicalizeAndNormalizeData(data) {
         const roomIds = Object.keys(data || {}).sort((a, b) => {
           const na = Number(a), nb = Number(b);
           if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
@@ -629,17 +670,92 @@
             });
           norm[roomId] = sortedMembers;
         }
-        return JSON.stringify(norm);
+        return { canon: JSON.stringify(norm), norm };
+      }
+
+      function describeRosterChange(prevNorm, currNorm, timestamp) {
+        const ts = timestamp || fmtTime();
+
+        if (!currNorm || typeof currNorm !== 'object') {
+          return ts + ' – Roster changed.';
+        }
+
+        if (!prevNorm) {
+          const roomIds = Object.keys(currNorm || {});
+          let participants = 0;
+          for (const r of roomIds) {
+            participants += (currNorm[r] || []).length;
+          }
+          return `${ts} – Initial roster: ${roomIds.length} room${roomIds.length !== 1 ? 's' : ''}, ${participants} participant${participants !== 1 ? 's' : ''}.`;
+        }
+
+        const prevRooms = new Set(Object.keys(prevNorm || {}));
+        const currRooms = new Set(Object.keys(currNorm || {}));
+
+        const newRooms = [];
+        const removedRooms = [];
+
+        currRooms.forEach(r => { if (!prevRooms.has(r)) newRooms.push(r); });
+        prevRooms.forEach(r => { if (!currRooms.has(r)) removedRooms.push(r); });
+
+        const changes = [];
+
+        if (newRooms.length) {
+          const name = newRooms[0];
+          const count = (currNorm[name] || []).length;
+          changes.push(`New room "${name}" (${count} participant${count !== 1 ? 's' : ''})`);
+          if (newRooms.length > 1) {
+            changes.push(`+ ${newRooms.length - 1} more new room${newRooms.length - 1 !== 1 ? 's' : ''}`);
+          }
+        }
+
+        if (removedRooms.length) {
+          const name = removedRooms[0];
+          const count = (prevNorm[name] || []).length;
+          changes.push(`Room "${name}" removed (previously ${count} participant${count !== 1 ? 's' : ''})`);
+          if (removedRooms.length > 1) {
+            changes.push(`+ ${removedRooms.length - 1} more removed room${removedRooms.length - 1 !== 1 ? 's' : ''}`);
+          }
+        }
+
+        const commonRooms = [];
+        prevRooms.forEach(r => { if (currRooms.has(r)) commonRooms.push(r); });
+
+        for (const roomId of commonRooms) {
+          const prevMembers = prevNorm[roomId] || [];
+          const currMembers = currNorm[roomId] || [];
+          const prevSet = new Set(prevMembers.map(m => m.role + '|' + m.id));
+          const currSet = new Set(currMembers.map(m => m.role + '|' + m.id));
+
+          let joins = 0, leaves = 0;
+          currSet.forEach(key => { if (!prevSet.has(key)) joins++; });
+          prevSet.forEach(key => { if (!currSet.has(key)) leaves++; });
+
+          if (joins || leaves) {
+            const part = [];
+            if (joins) part.push(`${joins} joined`);
+            if (leaves) part.push(`${leaves} left`);
+            changes.push(`Room "${roomId}": ${part.join(', ')}`);
+          }
+        }
+
+        if (!changes.length) {
+          return `${ts} – Roster changed.`;
+        }
+
+        const primary = changes[0];
+        if (changes.length === 1) {
+          return `${ts} – ${primary}`;
+        }
+        return `${ts} – ${primary} (+ ${changes.length - 1} more change${changes.length - 1 !== 1 ? 's' : ''})`;
       }
 
       function enforceLogLimitBeforeAppend() {
         try {
           const approxBytes = JSON.stringify({ csvLog, summaryLog }).length;
           if (approxBytes > logLimitBytes) {
-            // Flush old data so the newest snapshot is always kept
             csvLog = [];
             summaryLog = [];
-            // Keep lastSnapshotCanonical so we still know "last seen" roster
             saveLogToStorage();
             console.warn('[Roster] Logs cleared because they exceeded configured size limit.');
           } else {
@@ -658,14 +774,12 @@
           return;
         }
 
-        // Summary: newest first
         const sortedSummary = summaryLog.slice().sort((a, b) => {
           if (a.t < b.t) return 1;
           if (a.t > b.t) return -1;
           return 0;
         });
 
-        // Detail: newest first
         const sortedDetail = csvLog.slice().sort((a, b) => {
           if (a.t < b.t) return 1;
           if (a.t > b.t) return -1;
@@ -674,7 +788,6 @@
 
         let html = '';
 
-        // Summary table
         html += '<h4>Summary (per fetch)</h4>';
         if (sortedSummary.length) {
           html += '<table><thead><tr>' +
@@ -688,7 +801,6 @@
           html += '<p>— No summary entries —</p>';
         }
 
-        // Detail table
         html += '<h4>Detail (per participant)</h4>';
         if (sortedDetail.length) {
           html += '<table><thead><tr>' +
@@ -705,57 +817,71 @@
         logViewerBody.innerHTML = html;
       }
 
-      function appendSnapshotToLog(data) {
+      function appendSnapshotToLog(data, shouldLog) {
         if (!data) return;
 
-        // Only log changes to the previous roster state (persisted across reloads)
-        const canon = canonicalizeData(data);
+        const prevNorm = lastSnapshotNormalized;
+        const { canon, norm } = canonicalizeAndNormalizeData(data);
+
         if (canon === lastSnapshotCanonical) {
           return;
         }
-        lastSnapshotCanonical = canon;
-
-        enforceLogLimitBeforeAppend();
 
         const timestamp = fmtTime();
-        const roomIds = Object.keys(data || {});
-        let totalParticipants = 0;
-        let totalSenders = 0;
-        let totalReceivers = 0;
+        const bannerMsg = describeRosterChange(prevNorm, norm, timestamp);
+        showRosterBanner(bannerMsg);
 
-        // Per-room loop for both per-participant rows + summary counts
-        for (const roomId of roomIds) {
-          const members = Array.isArray(data[roomId]) ? data[roomId] : [];
-          totalParticipants += members.length;
+        if (shouldLog) {
+          enforceLogLimitBeforeAppend();
 
-          for (const m of members) {
-            const role = (m.role || '').toLowerCase();
-            if (role === 'sender') totalSenders++;
-            else totalReceivers++;
+          const roomIds = Object.keys(data || {});
+          let totalParticipants = 0;
+          let totalSenders = 0;
+          let totalReceivers = 0;
 
-            csvLog.push({
-              t: timestamp,
-              room: roomId,
-              id: m.id || '',
-              role
-            });
+          for (const roomId of roomIds) {
+            const members = Array.isArray(data[roomId]) ? data[roomId] : [];
+            totalParticipants += members.length;
+
+            for (const m of members) {
+              const role = (m.role || '').toLowerCase();
+              if (role === 'sender') totalSenders++;
+              else totalReceivers++;
+
+              csvLog.push({
+                t: timestamp,
+                room: roomId,
+                id: m.id || '',
+                role
+              });
+            }
+          }
+
+          summaryLog.push({
+            t: timestamp,
+            rooms: roomIds.length,
+            participants: totalParticipants,
+            senders: totalSenders,
+            receivers: totalReceivers
+          });
+
+          saveLogToStorage();
+
+          if (logViewer.classList.contains('open')) {
+            renderLogModal();
           }
         }
 
-        // Per-fetch summary row
-        summaryLog.push({
-          t: timestamp,
-          rooms: roomIds.length,
-          participants: totalParticipants,
-          senders: totalSenders,
-          receivers: totalReceivers
-        });
-
-        saveLogToStorage();
-
-        // If the log viewer is open, update it immediately
-        if (logViewer.classList.contains('open')) {
-          renderLogModal();
+        lastSnapshotCanonical = canon;
+        lastSnapshotNormalized = norm;
+        try {
+          if (lastSnapshotCanonical) {
+            localStorage.setItem(STORAGE_KEY_LAST_CANON, lastSnapshotCanonical);
+          } else {
+            localStorage.removeItem(STORAGE_KEY_LAST_CANON);
+          }
+        } catch (e) {
+          console.warn('[Roster] Failed to persist canonical snapshot:', e);
         }
       }
 
@@ -775,7 +901,6 @@
       }
 
       function render(data) {
-        // data is expected as { "<roomId>": [ {id, role}, ... ], ... }
         grid.innerHTML = '';
         const roomIds = Object.keys(data || {}).sort((a,b) => {
           const na = Number(a), nb = Number(b);
@@ -821,7 +946,6 @@
               <span class="badge-role" title="${role === 'sender' ? 'Sender' : 'Receiver'}">${role === 'sender' ? 'S' : 'R'}</span>
               <span class="mono" title="${m.id || ''}">${shortId(m.id)}</span>
             `;
-            // Click to copy full ID
             node.addEventListener('click', () => {
               if (!m.id) return;
               navigator.clipboard?.writeText(m.id);
@@ -872,12 +996,11 @@
           console.error(err);
         }
 
-        // Logging only when auto-refresh is on, fetch succeeded, and logging is enabled.
-        if (lastFetchOk && autoToggle.checked && logEnabledCheckbox.checked && data) {
-          appendSnapshotToLog(data);
+        if (lastFetchOk && data) {
+          const shouldLog = autoToggle.checked && logEnabledCheckbox.checked;
+          appendSnapshotToLog(data, shouldLog);
         }
 
-        // After fetch completes, update indicator to green/red based on live/error
         updateLiveDot();
       }
 
@@ -901,7 +1024,6 @@
         if (autoToggle.checked) {
           fetchAndRender();
         } else {
-          // auto off => treat as idle
           lastFetchOk = false;
           updateLiveDot();
         }
@@ -910,7 +1032,7 @@
       autoIntervalInp.addEventListener('change', () => {
         let v = parseInt(autoIntervalInp.value, 10);
         if (isNaN(v) || v <= 0) v = 3;
-        if (v > 3600) v = 3600; // avoid silly 10-hour intervals
+        if (v > 3600) v = 3600;
         autoIntervalSec = v;
         autoIntervalInp.value = autoIntervalSec;
         try {
@@ -991,6 +1113,7 @@
         csvLog = [];
         summaryLog = [];
         lastSnapshotCanonical = null;
+        lastSnapshotNormalized = null;
         try {
           localStorage.removeItem(STORAGE_KEY_LAST_CANON);
         } catch {}
@@ -1026,7 +1149,6 @@
       // ---- Kick off ----
       loadSettings();
       loadLogFromStorage();
-      // initial state: not live yet
       lastFetchOk = false;
       updateLiveDot();
       startAuto();
