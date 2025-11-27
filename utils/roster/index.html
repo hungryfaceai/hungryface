@@ -294,8 +294,31 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 11px;
       overflow: auto;
-      white-space: pre;
+      white-space: normal;
       color: #e5e7ff;
+    }
+    .log-viewer-body h4 {
+      margin: 0 0 6px 0;
+      font-size: 12px;
+      font-weight: 600;
+      color: #cbd5ff;
+    }
+    .log-viewer-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 10px;
+    }
+    .log-viewer-body th,
+    .log-viewer-body td {
+      padding: 4px 6px;
+      border-bottom: 1px solid #2b2e44;
+      text-align: left;
+    }
+    .log-viewer-body th {
+      background: #11131d;
+      position: sticky;
+      top: 0;
+      z-index: 1;
     }
   </style>
 </head>
@@ -369,6 +392,7 @@
       <div class="footer-main">
         <span>Last updated: <span id="last-updated">—</span></span>
         <span>· Endpoint: <span class="mono" id="endpoint-view">—</span></span>
+        <span>· Log size: <span class="mono" id="log-size">0 MB</span></span>
       </div>
       <div class="footer-controls">
         <label>
@@ -381,6 +405,7 @@
           MB
         </label>
         <button id="btn-log-view" type="button">View log</button>
+        <button id="btn-log-clear" type="button">Clear log</button>
         <button id="btn-export" type="button">Export CSV</button>
       </div>
     </div>
@@ -416,20 +441,24 @@
       const logEnabledCheckbox = document.getElementById('log-enabled');
       const logLimitInput      = document.getElementById('log-limit');
       const btnLogView         = document.getElementById('btn-log-view');
+      const btnLogClear        = document.getElementById('btn-log-clear');
 
       const logViewer      = document.getElementById('log-viewer');
       const logViewerBody  = document.getElementById('log-viewer-body');
       const btnLogClose    = document.getElementById('btn-log-close');
+      const logSizeEl      = document.getElementById('log-size');
 
       let timer = null;
 
-      const STORAGE_KEY_LOG      = 'signaling_rooms_roster_log_v1';
-      const STORAGE_KEY_LOG_ON   = 'signaling_rooms_log_enabled_v1';
-      const STORAGE_KEY_LOG_MB   = 'signaling_rooms_log_limit_mb_v1';
-      const STORAGE_KEY_INTERVAL = 'signaling_rooms_auto_interval_s_v1';
+      const STORAGE_KEY_LOG        = 'signaling_rooms_roster_log_v1';
+      const STORAGE_KEY_SUMMARY    = 'signaling_rooms_summary_log_v1';
+      const STORAGE_KEY_LOG_ON     = 'signaling_rooms_log_enabled_v1';
+      const STORAGE_KEY_LOG_MB     = 'signaling_rooms_log_limit_mb_v1';
+      const STORAGE_KEY_INTERVAL   = 'signaling_rooms_auto_interval_s_v1';
 
-      // In-memory CSV log and settings
-      let csvLog = [];
+      // In-memory logs and settings
+      let csvLog = [];       // per-participant rows
+      let summaryLog = [];   // per-fetch summary rows
       const DEFAULT_LOG_LIMIT_MB = 1;
       let logLimitMb    = DEFAULT_LOG_LIMIT_MB;
       let logLimitBytes = DEFAULT_LOG_LIMIT_MB * 1024 * 1024;
@@ -449,6 +478,17 @@
                ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
       }
 
+      function updateLogSizeLabel() {
+        try {
+          const approxBytes = JSON.stringify({ csvLog, summaryLog }).length;
+          const mb = approxBytes / (1024 * 1024);
+          const text = mb < 0.005 ? '0.00 MB' : mb.toFixed(2) + ' MB';
+          logSizeEl.textContent = text;
+        } catch {
+          logSizeEl.textContent = '—';
+        }
+      }
+
       function loadLogFromStorage() {
         try {
           const raw = localStorage.getItem(STORAGE_KEY_LOG);
@@ -459,14 +499,28 @@
         } catch (e) {
           console.warn('[Roster] Failed to load CSV log from storage:', e);
         }
+
+        try {
+          const raw2 = localStorage.getItem(STORAGE_KEY_SUMMARY);
+          if (raw2) {
+            const parsed2 = JSON.parse(raw2);
+            if (Array.isArray(parsed2)) summaryLog = parsed2;
+          }
+        } catch (e) {
+          console.warn('[Roster] Failed to load summary log from storage:', e);
+        }
+
+        updateLogSizeLabel();
       }
 
       function saveLogToStorage() {
         try {
           localStorage.setItem(STORAGE_KEY_LOG, JSON.stringify(csvLog));
+          localStorage.setItem(STORAGE_KEY_SUMMARY, JSON.stringify(summaryLog));
         } catch (e) {
-          console.warn('[Roster] Failed to save CSV log to storage:', e);
+          console.warn('[Roster] Failed to save logs to storage:', e);
         }
+        updateLogSizeLabel();
       }
 
       function loadSettings() {
@@ -533,12 +587,16 @@
 
       function enforceLogLimitBeforeAppend() {
         try {
-          const approxBytes = JSON.stringify(csvLog).length;
+          const approxBytes = JSON.stringify({ csvLog, summaryLog }).length;
           if (approxBytes > logLimitBytes) {
             // Flush old data so the newest snapshot is always kept
             csvLog = [];
+            summaryLog = [];
+            lastSnapshotCanonical = null;
             saveLogToStorage();
-            console.warn('[Roster] Log cleared because it exceeded configured size limit.');
+            console.warn('[Roster] Logs cleared because they exceeded configured size limit.');
+          } else {
+            updateLogSizeLabel();
           }
         } catch (e) {
           console.warn('[Roster] Failed to enforce log size limit:', e);
@@ -547,9 +605,10 @@
 
       function appendSnapshotToLog(data) {
         if (!data) return;
+
+        // Only log changes to the previous roster state
         const canon = canonicalizeData(data);
         if (canon === lastSnapshotCanonical) {
-          // No change since last fetch => do not log
           return;
         }
         lastSnapshotCanonical = canon;
@@ -558,17 +617,38 @@
 
         const timestamp = fmtTime();
         const roomIds = Object.keys(data || {});
+        let totalParticipants = 0;
+        let totalSenders = 0;
+        let totalReceivers = 0;
+
+        // Per-room loop for both per-participant rows + summary counts
         for (const roomId of roomIds) {
           const members = Array.isArray(data[roomId]) ? data[roomId] : [];
+          totalParticipants += members.length;
+
           for (const m of members) {
+            const role = (m.role || '').toLowerCase();
+            if (role === 'sender') totalSenders++;
+            else totalReceivers++;
+
             csvLog.push({
               t: timestamp,
               room: roomId,
               id: m.id || '',
-              role: (m.role || '').toLowerCase()
+              role
             });
           }
         }
+
+        // Per-fetch summary row
+        summaryLog.push({
+          t: timestamp,
+          rooms: roomIds.length,
+          participants: totalParticipants,
+          senders: totalSenders,
+          receivers: totalReceivers
+        });
+
         saveLogToStorage();
       }
 
@@ -747,6 +827,7 @@
         try {
           localStorage.setItem(STORAGE_KEY_LOG_MB, String(logLimitMb));
         } catch {}
+        updateLogSizeLabel();
       });
 
       btnApply.addEventListener('click', () => {
@@ -798,20 +879,65 @@
         URL.revokeObjectURL(url);
       });
 
+      btnLogClear.addEventListener('click', () => {
+        csvLog = [];
+        summaryLog = [];
+        lastSnapshotCanonical = null;
+        saveLogToStorage();
+        statusMsg.textContent = 'Log cleared.';
+      });
+
       btnLogView.addEventListener('click', () => {
-        if (!csvLog.length) {
+        if (!csvLog.length && !summaryLog.length) {
           alert('No log entries yet.\nLeave auto-refresh on with logging enabled to start capturing history.');
           return;
         }
-        const sorted = csvLog.slice().sort((a, b) => {
+
+        // Summary: newest first
+        const sortedSummary = summaryLog.slice().sort((a, b) => {
           if (a.t < b.t) return 1;
           if (a.t > b.t) return -1;
           return 0;
         });
-        const lines = sorted.map(row => {
-          return `${row.t}  room=${row.room}  role=${row.role || '-'}  id=${row.id || '-'}`;
+
+        // Detail: newest first
+        const sortedDetail = csvLog.slice().sort((a, b) => {
+          if (a.t < b.t) return 1;
+          if (a.t > b.t) return -1;
+          return 0;
         });
-        logViewerBody.textContent = lines.join('\n');
+
+        let html = '';
+
+        // Summary table
+        html += '<h4>Summary (per fetch)</h4>';
+        if (sortedSummary.length) {
+          html += '<table><thead><tr>' +
+                  '<th>Timestamp</th><th>Rooms</th><th>Participants</th><th>Senders</th><th>Receivers</th>' +
+                  '</tr></thead><tbody>';
+          for (const row of sortedSummary) {
+            html += `<tr><td>${row.t}</td><td>${row.rooms}</td><td>${row.participants}</td><td>${row.senders}</td><td>${row.receivers}</td></tr>`;
+          }
+          html += '</tbody></table>';
+        } else {
+          html += '<p>— No summary entries —</p>';
+        }
+
+        // Detail table
+        html += '<h4>Detail (per participant)</h4>';
+        if (sortedDetail.length) {
+          html += '<table><thead><tr>' +
+                  '<th>Timestamp</th><th>Room</th><th>Role</th><th>Member ID</th>' +
+                  '</tr></thead><tbody>';
+          for (const row of sortedDetail) {
+            html += `<tr><td>${row.t}</td><td>${row.room}</td><td>${row.role || '-'}</td><td>${row.id || '-'}</td></tr>`;
+          }
+          html += '</tbody></table>';
+        } else {
+          html += '<p>— No detail entries —</p>';
+        }
+
+        logViewerBody.innerHTML = html;
         logViewer.classList.add('open');
         logViewer.setAttribute('aria-hidden', 'false');
       });
