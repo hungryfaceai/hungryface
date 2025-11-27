@@ -603,6 +603,61 @@
         }
       }
 
+      function renderLogModal() {
+        if (!logViewerBody) return;
+
+        if (!csvLog.length && !summaryLog.length) {
+          logViewerBody.innerHTML = '<p>— No log entries —</p>';
+          return;
+        }
+
+        // Summary: newest first
+        const sortedSummary = summaryLog.slice().sort((a, b) => {
+          if (a.t < b.t) return 1;
+          if (a.t > b.t) return -1;
+          return 0;
+        });
+
+        // Detail: newest first
+        const sortedDetail = csvLog.slice().sort((a, b) => {
+          if (a.t < b.t) return 1;
+          if (a.t > b.t) return -1;
+          return 0;
+        });
+
+        let html = '';
+
+        // Summary table
+        html += '<h4>Summary (per fetch)</h4>';
+        if (sortedSummary.length) {
+          html += '<table><thead><tr>' +
+                  '<th>Timestamp</th><th>Rooms</th><th>Participants</th><th>Senders</th><th>Receivers</th>' +
+                  '</tr></thead><tbody>';
+          for (const row of sortedSummary) {
+            html += `<tr><td>${row.t}</td><td>${row.rooms}</td><td>${row.participants}</td><td>${row.senders}</td><td>${row.receivers}</td></tr>`;
+          }
+          html += '</tbody></table>';
+        } else {
+          html += '<p>— No summary entries —</p>';
+        }
+
+        // Detail table
+        html += '<h4>Detail (per participant)</h4>';
+        if (sortedDetail.length) {
+          html += '<table><thead><tr>' +
+                  '<th>Timestamp</th><th>Room</th><th>Role</th><th>Member ID</th>' +
+                  '</tr></thead><tbody>';
+          for (const row of sortedDetail) {
+            html += `<tr><td>${row.t}</td><td>${row.room}</td><td>${row.role || '-'}</td><td>${row.id || '-'}</td></tr>`;
+          }
+          html += '</tbody></table>';
+        } else {
+          html += '<p>— No detail entries —</p>';
+        }
+
+        logViewerBody.innerHTML = html;
+      }
+
       function appendSnapshotToLog(data) {
         if (!data) return;
 
@@ -650,6 +705,11 @@
         });
 
         saveLogToStorage();
+
+        // If the log viewer is open, update it immediately
+        if (logViewer.classList.contains('open')) {
+          renderLogModal();
+        }
       }
 
       function summarizeRoom(list) {
@@ -885,6 +945,9 @@
         lastSnapshotCanonical = null;
         saveLogToStorage();
         statusMsg.textContent = 'Log cleared.';
+        if (logViewer.classList.contains('open')) {
+          renderLogModal();
+        }
       });
 
       btnLogView.addEventListener('click', () => {
@@ -892,52 +955,7 @@
           alert('No log entries yet.\nLeave auto-refresh on with logging enabled to start capturing history.');
           return;
         }
-
-        // Summary: newest first
-        const sortedSummary = summaryLog.slice().sort((a, b) => {
-          if (a.t < b.t) return 1;
-          if (a.t > b.t) return -1;
-          return 0;
-        });
-
-        // Detail: newest first
-        const sortedDetail = csvLog.slice().sort((a, b) => {
-          if (a.t < b.t) return 1;
-          if (a.t > b.t) return -1;
-          return 0;
-        });
-
-        let html = '';
-
-        // Summary table
-        html += '<h4>Summary (per fetch)</h4>';
-        if (sortedSummary.length) {
-          html += '<table><thead><tr>' +
-                  '<th>Timestamp</th><th>Rooms</th><th>Participants</th><th>Senders</th><th>Receivers</th>' +
-                  '</tr></thead><tbody>';
-          for (const row of sortedSummary) {
-            html += `<tr><td>${row.t}</td><td>${row.rooms}</td><td>${row.participants}</td><td>${row.senders}</td><td>${row.receivers}</td></tr>`;
-          }
-          html += '</tbody></table>';
-        } else {
-          html += '<p>— No summary entries —</p>';
-        }
-
-        // Detail table
-        html += '<h4>Detail (per participant)</h4>';
-        if (sortedDetail.length) {
-          html += '<table><thead><tr>' +
-                  '<th>Timestamp</th><th>Room</th><th>Role</th><th>Member ID</th>' +
-                  '</tr></thead><tbody>';
-          for (const row of sortedDetail) {
-            html += `<tr><td>${row.t}</td><td>${row.room}</td><td>${row.role || '-'}</td><td>${row.id || '-'}</td></tr>`;
-          }
-          html += '</tbody></table>';
-        } else {
-          html += '<p>— No detail entries —</p>';
-        }
-
-        logViewerBody.innerHTML = html;
+        renderLogModal();
         logViewer.classList.add('open');
         logViewer.setAttribute('aria-hidden', 'false');
       });
