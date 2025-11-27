@@ -137,10 +137,13 @@
       box-shadow: 0 0 0 2px rgba(0,0,0,0.4);
     }
     .status-dot.live {
-      background: var(--ok);
+      background: var(--ok);      /* green: auto ON + last fetch OK, idle */
     }
     .status-dot.error {
-      background: var(--err);
+      background: var(--err);     /* red: idle/error/auto off */
+    }
+    .status-dot.fetching {
+      background: var(--warn);    /* orange: auto ON, fetch in progress */
     }
 
     .grid {
@@ -494,9 +497,9 @@
       function updateLiveDot() {
         // Green when auto-refresh is ON and last fetch succeeded, else red
         if (autoToggle.checked && lastFetchOk) {
-          setDotState('live');   // green
+          setDotState('live');   // green (live & idle between fetches)
         } else {
-          setDotState('error');  // red (idle / error / auto off)
+          setDotState('error');  // red (idle/error/auto off)
         }
       }
 
@@ -843,6 +846,11 @@
 
         let data = null;
 
+        // When auto-refresh is ON and a fetch actually happens, show orange (fetching)
+        if (autoToggle.checked) {
+          setDotState('fetching');
+        }
+
         try {
           const resp = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store' });
           if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
@@ -869,6 +877,7 @@
           appendSnapshotToLog(data);
         }
 
+        // After fetch completes, update indicator to green/red based on live/error
         updateLiveDot();
       }
 
