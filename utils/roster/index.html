@@ -16,7 +16,7 @@
       font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
       overflow: hidden;
     }
-    /* Fullscreen wrapper so video+canvas scale together */
+    /* Fullscreen wrapper so video+canvas scale together (unused but kept for consistency) */
     #stage {
       position: fixed; inset: 0;
       width: 100vw; height: 100vh;   /* fallback */
@@ -53,13 +53,6 @@
       align-items: center; justify-content: center;
       pointer-events: none; z-index: 5;
     }
-    .status {
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      color: #ddd; font-size: 14px; padding: 10px 14px; border-radius: 12px;
-      text-align: center; white-space: pre-line; max-width: 90vw;
-    }
-    .overlay.hidden { display: none; }
   </style>
 
   <style>
@@ -72,7 +65,7 @@
       --ok: #7dd87d;
       --warn: #ffb84d;
       --err: #ff6b6b;
-      --sender: #ff9f43;   /* orange */
+      --sender: #7dd87d;   /* green for sender */
       --receiver: #6ac4ff; /* cyan   */
       --chip: #242633;
       --ring: #2b2e44;
@@ -175,8 +168,26 @@
     }
 
     .footer {
-      text-align: center; color: var(--muted); font-size: 12px; padding: 8px 0 16px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      text-align: left;
+      color: var(--muted); font-size: 12px; padding: 8px 0 16px;
     }
+    .footer button {
+      background: #1b1d2a;
+      border: 1px solid var(--ring);
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .footer button:hover { background: #202338; }
+
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #cbd5ff; }
   </style>
 </head>
@@ -204,6 +215,7 @@
       }
     })();
   </script>  
+
   <div class="wrap">
     <header>
       <div style="padding-left:3ch" class="title">Signaling Rooms</div>
@@ -216,7 +228,10 @@
     <div class="toolbar">
       <input id="endpoint" type="url" value="https://signaling-server-f5gu.onrender.com/rooms" aria-label="Rooms endpoint">
       <button id="btn-refresh" type="button">Refresh now</button>
-      <label class="btn"><input id="auto" type="checkbox" checked style="accent-color: var(--focus); margin-right:6px;">Auto refresh (3s)</label>
+      <label class="btn">
+        <input id="auto" type="checkbox" checked style="accent-color: var(--focus); margin-right:6px;">
+        Auto refresh (3s)
+      </label>
       <div class="spacer"></div>
       <div class="status">
         <span id="status-badge" class="badge warn">IDLE</span>
@@ -236,7 +251,10 @@
     <div id="grid" class="grid" role="list" aria-label="Rooms"></div>
 
     <div class="footer">
-      Last updated: <span id="last-updated">—</span> · Endpoint: <span class="mono" id="endpoint-view">—</span>
+      <span>
+        Last updated: <span id="last-updated">—</span> · Endpoint: <span class="mono" id="endpoint-view">—</span>
+      </span>
+      <button id="btn-export" type="button">Export CSV</button>
     </div>
   </div>
 
@@ -251,20 +269,62 @@
       const btnRefresh    = document.getElementById('btn-refresh');
       const btnApply      = document.getElementById('btn-apply');
       const btnSample     = document.getElementById('btn-sample');
+      const btnExport     = document.getElementById('btn-export');
       const autoToggle    = document.getElementById('auto');
       const pasteArea     = document.getElementById('paste');
 
       let timer = null;
+
+      const STORAGE_KEY = 'signaling_rooms_roster_log_v1';
+      let csvLog = [];
+
+      function loadLogFromStorage() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) csvLog = parsed;
+          }
+        } catch (e) {
+          console.warn('[Roster] Failed to load CSV log from storage:', e);
+        }
+      }
+
+      function saveLogToStorage() {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(csvLog));
+        } catch (e) {
+          console.warn('[Roster] Failed to save CSV log to storage:', e);
+        }
+      }
 
       function setBadge(kind, text) {
         badge.className = 'badge ' + kind;
         badge.textContent = text;
       }
 
-      function fmtTime(d=new Date()) {
+      function fmtTime(d = new Date()) {
         const pad = n => String(n).padStart(2, '0');
         return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
                ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+      }
+
+      function appendSnapshotToLog(data) {
+        if (!data) return;
+        const timestamp = fmtTime();
+        const roomIds = Object.keys(data || {});
+        for (const roomId of roomIds) {
+          const members = Array.isArray(data[roomId]) ? data[roomId] : [];
+          for (const m of members) {
+            csvLog.push({
+              t: timestamp,
+              room: roomId,
+              id: m.id || '',
+              role: (m.role || '').toLowerCase()
+            });
+          }
+        }
+        saveLogToStorage();
       }
 
       function summarizeRoom(list) {
@@ -345,18 +405,37 @@
         const url = endpointInput.value.trim();
         endpointView.textContent = url || '—';
 
-        if (!url) { setBadge('warn', 'NO URL'); statusMsg.textContent = 'Enter an endpoint to fetch.'; return; }
+        if (!url) {
+          setBadge('warn', 'NO URL');
+          statusMsg.textContent = 'Enter an endpoint to fetch.';
+          return;
+        }
 
-        setBadge('warn', 'FETCHING');
-        statusMsg.textContent = 'Fetching roster…';
+        const auto = autoToggle.checked;
+
+        if (auto) {
+          // Keep LIVE pill stable to avoid blinking; just update the text line.
+          statusMsg.textContent = 'Fetching roster…';
+        } else {
+          setBadge('warn', 'FETCHING');
+          statusMsg.textContent = 'Fetching roster…';
+        }
 
         try {
           const resp = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store' });
           if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
           const data = await resp.json();
           render(data);
-          setBadge('ok', 'LIVE');
-          statusMsg.textContent = 'Updated successfully.';
+
+          if (auto) {
+            appendSnapshotToLog(data);
+            statusMsg.textContent = 'Auto-refresh live. Last update OK.';
+          } else {
+            // Auto is off: emphasise that the stream is paused / potentially out of sync.
+            setBadge('warn', 'PAUSED');
+            statusMsg.textContent = 'Manual refresh completed. Auto refresh is off – data may be out of date.';
+          }
+
           lastUpdated.textContent = fmtTime();
         } catch (err) {
           setBadge('err', 'ERROR');
@@ -369,14 +448,25 @@
       function startAuto() {
         clearInterval(timer);
         if (autoToggle.checked) {
+          setBadge('ok', 'LIVE');
+          statusMsg.textContent = 'Auto refresh every 3s.';
           timer = setInterval(fetchAndRender, 3000);
+        } else {
+          setBadge('warn', 'PAUSED');
+          statusMsg.textContent = 'Auto refresh off – data may be out of date.';
         }
       }
 
       // Wire up UI
       btnRefresh.addEventListener('click', fetchAndRender);
       endpointInput.addEventListener('change', fetchAndRender);
-      autoToggle.addEventListener('change', () => { startAuto(); fetchAndRender(); });
+      autoToggle.addEventListener('change', () => {
+        startAuto();
+        // Only auto-fetch on toggle when we just turned auto ON.
+        if (autoToggle.checked) {
+          fetchAndRender();
+        }
+      });
 
       btnApply.addEventListener('click', () => {
         try {
@@ -402,7 +492,33 @@
         }, null, 2);
       });
 
+      btnExport.addEventListener('click', () => {
+        if (!csvLog.length) {
+          alert('No auto-refresh snapshots captured yet.\nLeave auto-refresh on to start logging.');
+          return;
+        }
+        const header = 'timestamp,room_id,member_id,role\n';
+        const lines = csvLog.map(row => {
+          return [row.t, row.room, row.id, row.role].map(val => {
+            const v = String(val ?? '').replace(/"/g, '""');
+            return '"' + v + '"';
+          }).join(',');
+        });
+        const csv = header + lines.join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const ts = fmtTime().replace(/[^\d]/g, '');
+        a.download = 'signaling-rooms-' + ts + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      });
+
       // Kick off
+      loadLogFromStorage();
       startAuto();
       fetchAndRender();
     })();
