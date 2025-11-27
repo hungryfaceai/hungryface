@@ -71,10 +71,15 @@
       --ring: #2b2e44;
       --focus: #7aa2ff;
     }
-    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif; }
+    html, body {
+      margin: 0; height: 100%;
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+      overflow-y: auto;
+    }
     .wrap {
       max-width: 1100px; margin: 0 auto; padding: 20px;
-      display: grid; grid-template-rows: auto auto 1fr; gap: 16px;
+      display: grid; grid-template-rows: auto auto 1fr auto; gap: 16px;
     }
     header {
       display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -91,16 +96,35 @@
       background: var(--panel); border: 1px solid var(--ring); border-radius: 12px; padding: 10px;
     }
     .toolbar input[type="url"] {
-      flex: 1 1 320px; background: #0f111a; border: 1px solid var(--ring); color: var(--text);
+      flex: 1 1 260px; background: #0f111a; border: 1px solid var(--ring); color: var(--text);
       padding: 10px 12px; border-radius: 10px; outline: none;
     }
     .toolbar input[type="url"]:focus { border-color: var(--focus); }
-    .toolbar button, .toolbar label.btn {
+    .toolbar button, .toolbar label.btn-inline {
       background: #1b1d2a; border: 1px solid var(--ring); color: var(--text);
-      padding: 10px 12px; border-radius: 10px; cursor: pointer; font-weight: 600;
+      padding: 8px 10px; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 12px;
     }
-    .toolbar button:hover, .toolbar label.btn:hover { background: #202338; }
+    .toolbar button:hover, .toolbar label.btn-inline:hover { background: #202338; }
     .toolbar .spacer { flex: 1; }
+
+    .toolbar-inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+    }
+    .toolbar-inline input[type="checkbox"] {
+      accent-color: var(--focus);
+    }
+    .toolbar-inline input[type="number"] {
+      width: 4.5rem;
+      background: #0f111a;
+      border: 1px solid var(--ring);
+      color: var(--text);
+      padding: 4px 6px;
+      border-radius: 6px;
+      font-size: 12px;
+    }
 
     .status {
       display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted);
@@ -176,6 +200,37 @@
       text-align: left;
       color: var(--muted); font-size: 12px; padding: 8px 0 16px;
     }
+    .footer-main {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      align-items: center;
+    }
+    .footer-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      justify-content: flex-end;
+    }
+    .footer-controls label {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+    }
+    .footer-controls input[type="checkbox"] {
+      accent-color: var(--focus);
+    }
+    .footer-controls input[type="number"] {
+      width: 4.5rem;
+      background: #0f111a;
+      border: 1px solid var(--ring);
+      color: var(--text);
+      padding: 4px 6px;
+      border-radius: 6px;
+      font-size: 11px;
+    }
     .footer button {
       background: #1b1d2a;
       border: 1px solid var(--ring);
@@ -189,6 +244,59 @@
     .footer button:hover { background: #202338; }
 
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #cbd5ff; }
+
+    /* Log viewer modal */
+    .log-viewer {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+    }
+    .log-viewer.open {
+      display: flex;
+    }
+    .log-viewer-inner {
+      background: #0f111a;
+      border: 1px solid var(--ring);
+      border-radius: 12px;
+      max-width: 900px;
+      width: 90vw;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .log-viewer-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--ring);
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .log-viewer-header button {
+      background: #1b1d2a;
+      border: 1px solid var(--ring);
+      color: var(--text);
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .log-viewer-header button:hover {
+      background: #202338;
+    }
+    .log-viewer-body {
+      padding: 10px 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      overflow: auto;
+      white-space: pre;
+      color: #e5e7ff;
+    }
   </style>
 </head>
 <body>
@@ -214,7 +322,7 @@
         console.error('[Sidebar] failed to load shared assets:', err);
       }
     })();
-  </script>  
+  </script>
 
   <div class="wrap">
     <header>
@@ -228,10 +336,17 @@
     <div class="toolbar">
       <input id="endpoint" type="url" value="https://signaling-server-f5gu.onrender.com/rooms" aria-label="Rooms endpoint">
       <button id="btn-refresh" type="button">Refresh now</button>
-      <label class="btn">
-        <input id="auto" type="checkbox" checked style="accent-color: var(--focus); margin-right:6px;">
-        Auto refresh (3s)
-      </label>
+
+      <div class="toolbar-inline">
+        <label class="btn-inline">
+          <input id="auto" type="checkbox" checked>
+          Auto
+        </label>
+        <span>every</span>
+        <input id="auto-interval" type="number" min="1" value="3" aria-label="Auto refresh interval (seconds)">
+        <span>s</span>
+      </div>
+
       <div class="spacer"></div>
       <div class="status">
         <span id="status-badge" class="badge warn">IDLE</span>
@@ -251,52 +366,77 @@
     <div id="grid" class="grid" role="list" aria-label="Rooms"></div>
 
     <div class="footer">
-      <span>
-        Last updated: <span id="last-updated">—</span> · Endpoint: <span class="mono" id="endpoint-view">—</span>
-      </span>
-      <button id="btn-export" type="button">Export CSV</button>
+      <div class="footer-main">
+        <span>Last updated: <span id="last-updated">—</span></span>
+        <span>· Endpoint: <span class="mono" id="endpoint-view">—</span></span>
+      </div>
+      <div class="footer-controls">
+        <label>
+          <input id="log-enabled" type="checkbox" checked>
+          Log auto-refresh
+        </label>
+        <label>
+          Max log
+          <input id="log-limit" type="number" min="0.1" step="0.1" value="1">
+          MB
+        </label>
+        <button id="btn-log-view" type="button">View log</button>
+        <button id="btn-export" type="button">Export CSV</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Log viewer modal -->
+  <div id="log-viewer" class="log-viewer" aria-hidden="true">
+    <div class="log-viewer-inner">
+      <div class="log-viewer-header">
+        <span>Fetch / roster log history (newest first)</span>
+        <button id="btn-log-close" type="button">Close</button>
+      </div>
+      <div id="log-viewer-body" class="log-viewer-body"></div>
     </div>
   </div>
 
   <script>
     (() => {
-      const endpointInput = document.getElementById('endpoint');
-      const grid          = document.getElementById('grid');
-      const badge         = document.getElementById('status-badge');
-      const statusMsg     = document.getElementById('status-msg');
-      const lastUpdated   = document.getElementById('last-updated');
-      const endpointView  = document.getElementById('endpoint-view');
-      const btnRefresh    = document.getElementById('btn-refresh');
-      const btnApply      = document.getElementById('btn-apply');
-      const btnSample     = document.getElementById('btn-sample');
-      const btnExport     = document.getElementById('btn-export');
-      const autoToggle    = document.getElementById('auto');
-      const pasteArea     = document.getElementById('paste');
+      const endpointInput   = document.getElementById('endpoint');
+      const grid            = document.getElementById('grid');
+      const badge           = document.getElementById('status-badge');
+      const statusMsg       = document.getElementById('status-msg');
+      const lastUpdated     = document.getElementById('last-updated');
+      const endpointView    = document.getElementById('endpoint-view');
+      const btnRefresh      = document.getElementById('btn-refresh');
+      const btnApply        = document.getElementById('btn-apply');
+      const btnSample       = document.getElementById('btn-sample');
+      const btnExport       = document.getElementById('btn-export');
+      const autoToggle      = document.getElementById('auto');
+      const autoIntervalInp = document.getElementById('auto-interval');
+      const pasteArea       = document.getElementById('paste');
+
+      const logEnabledCheckbox = document.getElementById('log-enabled');
+      const logLimitInput      = document.getElementById('log-limit');
+      const btnLogView         = document.getElementById('btn-log-view');
+
+      const logViewer      = document.getElementById('log-viewer');
+      const logViewerBody  = document.getElementById('log-viewer-body');
+      const btnLogClose    = document.getElementById('btn-log-close');
 
       let timer = null;
 
-      const STORAGE_KEY = 'signaling_rooms_roster_log_v1';
+      const STORAGE_KEY_LOG      = 'signaling_rooms_roster_log_v1';
+      const STORAGE_KEY_LOG_ON   = 'signaling_rooms_log_enabled_v1';
+      const STORAGE_KEY_LOG_MB   = 'signaling_rooms_log_limit_mb_v1';
+      const STORAGE_KEY_INTERVAL = 'signaling_rooms_auto_interval_s_v1';
+
+      // In-memory CSV log and settings
       let csvLog = [];
+      const DEFAULT_LOG_LIMIT_MB = 1;
+      let logLimitMb    = DEFAULT_LOG_LIMIT_MB;
+      let logLimitBytes = DEFAULT_LOG_LIMIT_MB * 1024 * 1024;
+      let autoIntervalSec = 3;
 
-      function loadLogFromStorage() {
-        try {
-          const raw = localStorage.getItem(STORAGE_KEY);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) csvLog = parsed;
-          }
-        } catch (e) {
-          console.warn('[Roster] Failed to load CSV log from storage:', e);
-        }
-      }
-
-      function saveLogToStorage() {
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(csvLog));
-        } catch (e) {
-          console.warn('[Roster] Failed to save CSV log to storage:', e);
-        }
-      }
+      // Canonical snapshot for change detection
+      let lastSnapshotCanonical = null;
 
       function setBadge(kind, text) {
         badge.className = 'badge ' + kind;
@@ -309,8 +449,113 @@
                ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
       }
 
+      function loadLogFromStorage() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY_LOG);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) csvLog = parsed;
+          }
+        } catch (e) {
+          console.warn('[Roster] Failed to load CSV log from storage:', e);
+        }
+      }
+
+      function saveLogToStorage() {
+        try {
+          localStorage.setItem(STORAGE_KEY_LOG, JSON.stringify(csvLog));
+        } catch (e) {
+          console.warn('[Roster] Failed to save CSV log to storage:', e);
+        }
+      }
+
+      function loadSettings() {
+        // Auto interval
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY_INTERVAL);
+          const val = parseInt(raw, 10);
+          if (!isNaN(val) && val > 0 && val <= 3600) {
+            autoIntervalSec = val;
+          }
+        } catch {}
+        autoIntervalSec = autoIntervalSec || 3;
+        autoIntervalInp.value = autoIntervalSec;
+
+        // Log enabled
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY_LOG_ON);
+          if (raw === null) {
+            logEnabledCheckbox.checked = true; // default: on
+          } else {
+            logEnabledCheckbox.checked = raw === '1';
+          }
+        } catch {
+          logEnabledCheckbox.checked = true;
+        }
+
+        // Log limit MB
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY_LOG_MB);
+          const val = parseFloat(raw);
+          if (!isNaN(val) && val >= 0.1 && val <= 50) {
+            logLimitMb = val;
+          }
+        } catch {}
+        logLimitMb = logLimitMb || DEFAULT_LOG_LIMIT_MB;
+        logLimitBytes = logLimitMb * 1024 * 1024;
+        logLimitInput.value = logLimitMb.toString();
+      }
+
+      function canonicalizeData(data) {
+        const roomIds = Object.keys(data || {}).sort((a, b) => {
+          const na = Number(a), nb = Number(b);
+          if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+          return ('' + a).localeCompare('' + b);
+        });
+        const norm = {};
+        for (const roomId of roomIds) {
+          const members = Array.isArray(data[roomId]) ? data[roomId] : [];
+          const sortedMembers = members
+            .slice()
+            .map(m => ({
+              id: m.id || '',
+              role: (m.role || '').toLowerCase()
+            }))
+            .sort((a, b) => {
+              const keyA = a.role + '|' + a.id;
+              const keyB = b.role + '|' + b.id;
+              return keyA.localeCompare(keyB);
+            });
+          norm[roomId] = sortedMembers;
+        }
+        return JSON.stringify(norm);
+      }
+
+      function enforceLogLimitBeforeAppend() {
+        try {
+          const approxBytes = JSON.stringify(csvLog).length;
+          if (approxBytes > logLimitBytes) {
+            // Flush old data so the newest snapshot is always kept
+            csvLog = [];
+            saveLogToStorage();
+            console.warn('[Roster] Log cleared because it exceeded configured size limit.');
+          }
+        } catch (e) {
+          console.warn('[Roster] Failed to enforce log size limit:', e);
+        }
+      }
+
       function appendSnapshotToLog(data) {
         if (!data) return;
+        const canon = canonicalizeData(data);
+        if (canon === lastSnapshotCanonical) {
+          // No change since last fetch => do not log
+          return;
+        }
+        lastSnapshotCanonical = canon;
+
+        enforceLogLimitBeforeAppend();
+
         const timestamp = fmtTime();
         const roomIds = Object.keys(data || {});
         for (const roomId of roomIds) {
@@ -414,7 +659,7 @@
         const auto = autoToggle.checked;
 
         if (auto) {
-          // Keep LIVE pill stable to avoid blinking; just update the text line.
+          // Keep LIVE pill stable; only text indicates fetching.
           statusMsg.textContent = 'Fetching roster…';
         } else {
           setBadge('warn', 'FETCHING');
@@ -428,8 +673,13 @@
           render(data);
 
           if (auto) {
-            appendSnapshotToLog(data);
-            statusMsg.textContent = 'Auto-refresh live. Last update OK.';
+            setBadge('ok', 'LIVE');
+            if (logEnabledCheckbox.checked) {
+              appendSnapshotToLog(data);
+              statusMsg.textContent = 'Auto-refresh live. Changes are being logged.';
+            } else {
+              statusMsg.textContent = 'Auto-refresh live. Logging is disabled.';
+            }
           } else {
             // Auto is off: emphasise that the stream is paused / potentially out of sync.
             setBadge('warn', 'PAUSED');
@@ -440,7 +690,6 @@
         } catch (err) {
           setBadge('err', 'ERROR');
           statusMsg.textContent = (err && err.message) ? err.message : 'Fetch failed.';
-          // Do not clear the grid – user may have pasted JSON
           console.error(err);
         }
       }
@@ -449,23 +698,55 @@
         clearInterval(timer);
         if (autoToggle.checked) {
           setBadge('ok', 'LIVE');
-          statusMsg.textContent = 'Auto refresh every 3s.';
-          timer = setInterval(fetchAndRender, 3000);
+          statusMsg.textContent = 'Auto refresh every ' + autoIntervalSec + 's.';
+          timer = setInterval(fetchAndRender, autoIntervalSec * 1000);
         } else {
           setBadge('warn', 'PAUSED');
           statusMsg.textContent = 'Auto refresh off – data may be out of date.';
         }
       }
 
-      // Wire up UI
+      // ---- UI wiring ----
       btnRefresh.addEventListener('click', fetchAndRender);
       endpointInput.addEventListener('change', fetchAndRender);
+
       autoToggle.addEventListener('change', () => {
         startAuto();
-        // Only auto-fetch on toggle when we just turned auto ON.
         if (autoToggle.checked) {
           fetchAndRender();
         }
+      });
+
+      autoIntervalInp.addEventListener('change', () => {
+        let v = parseInt(autoIntervalInp.value, 10);
+        if (isNaN(v) || v <= 0) v = 3;
+        if (v > 3600) v = 3600; // avoid silly 10-hour intervals
+        autoIntervalSec = v;
+        autoIntervalInp.value = autoIntervalSec;
+        try {
+          localStorage.setItem(STORAGE_KEY_INTERVAL, String(autoIntervalSec));
+        } catch {}
+        if (autoToggle.checked) {
+          startAuto();
+        }
+      });
+
+      logEnabledCheckbox.addEventListener('change', () => {
+        try {
+          localStorage.setItem(STORAGE_KEY_LOG_ON, logEnabledCheckbox.checked ? '1' : '0');
+        } catch {}
+      });
+
+      logLimitInput.addEventListener('change', () => {
+        let v = parseFloat(logLimitInput.value);
+        if (isNaN(v) || v < 0.1) v = 0.1;
+        if (v > 50) v = 50;
+        logLimitMb = v;
+        logLimitBytes = logLimitMb * 1024 * 1024;
+        logLimitInput.value = logLimitMb.toString();
+        try {
+          localStorage.setItem(STORAGE_KEY_LOG_MB, String(logLimitMb));
+        } catch {}
       });
 
       btnApply.addEventListener('click', () => {
@@ -494,7 +775,7 @@
 
       btnExport.addEventListener('click', () => {
         if (!csvLog.length) {
-          alert('No auto-refresh snapshots captured yet.\nLeave auto-refresh on to start logging.');
+          alert('No auto-refresh snapshots captured yet.\nLeave auto-refresh on (and logging enabled) to start logging.');
           return;
         }
         const header = 'timestamp,room_id,member_id,role\n';
@@ -517,7 +798,38 @@
         URL.revokeObjectURL(url);
       });
 
-      // Kick off
+      btnLogView.addEventListener('click', () => {
+        if (!csvLog.length) {
+          alert('No log entries yet.\nLeave auto-refresh on with logging enabled to start capturing history.');
+          return;
+        }
+        const sorted = csvLog.slice().sort((a, b) => {
+          if (a.t < b.t) return 1;
+          if (a.t > b.t) return -1;
+          return 0;
+        });
+        const lines = sorted.map(row => {
+          return `${row.t}  room=${row.room}  role=${row.role || '-'}  id=${row.id || '-'}`;
+        });
+        logViewerBody.textContent = lines.join('\n');
+        logViewer.classList.add('open');
+        logViewer.setAttribute('aria-hidden', 'false');
+      });
+
+      btnLogClose.addEventListener('click', () => {
+        logViewer.classList.remove('open');
+        logViewer.setAttribute('aria-hidden', 'true');
+      });
+
+      logViewer.addEventListener('click', (e) => {
+        if (e.target === logViewer) {
+          logViewer.classList.remove('open');
+          logViewer.setAttribute('aria-hidden', 'true');
+        }
+      });
+
+      // ---- Kick off ----
+      loadSettings();
       loadLogFromStorage();
       startAuto();
       fetchAndRender();
