@@ -93,7 +93,7 @@
 
     .wrap {
       max-width: 1100px; margin: 0 auto; padding: 20px;
-      display: grid; grid-template-rows: auto auto 1fr auto; gap: 16px;
+      display: grid; grid-template-rows: auto auto 1fr auto auto; gap: 16px;
     }
     header {
       display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -210,6 +210,7 @@
 
     details.fallback {
       background: var(--panel); border: 1px dashed var(--ring); border-radius: 12px; padding: 8px 10px;
+      margin-top: 8px;
     }
     details.fallback summary { cursor: pointer; color: var(--muted); }
     textarea {
@@ -224,7 +225,7 @@
       align-items: center;
       gap: 8px;
       text-align: left;
-      color: var(--muted); font-size: 12px; padding: 8px 0 16px;
+      color: var(--muted); font-size: 12px; padding: 8px 0 0;
     }
     .footer-main {
       display: flex;
@@ -319,9 +320,12 @@
       padding: 10px 12px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 11px;
-      overflow: auto;
       white-space: normal;
       color: #e5e7ff;
+      flex: 1 1 auto;
+      min-height: 0;                 /* allow flexbox scrolling on iOS */
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
     }
     .log-viewer-body h4 {
       margin: 0 0 6px 0;
@@ -406,15 +410,6 @@
       </div>
     </div>
 
-    <details class="fallback">
-      <summary>Paste JSON roster manually (useful if CORS blocks fetch)</summary>
-      <textarea id="paste" placeholder='{"5":[{"id":"...","role":"sender"}]}'></textarea>
-      <div style="display:flex; gap:8px; margin-top:8px;">
-        <button id="btn-apply" type="button">Render pasted JSON</button>
-        <button id="btn-sample" type="button">Load sample</button>
-      </div>
-    </details>
-
     <div id="grid" class="grid" role="list" aria-label="Rooms"></div>
 
     <div class="footer">
@@ -439,6 +434,16 @@
         <button id="btn-export" type="button">Export CSV</button>
       </div>
     </div>
+
+    <!-- Moved to bottom of screen -->
+    <details class="fallback">
+      <summary>Paste JSON roster manually (useful if CORS blocks fetch)</summary>
+      <textarea id="paste" placeholder='{"5":[{"id":"...","role":"sender"}]}'></textarea>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button id="btn-apply" type="button">Render pasted JSON</button>
+        <button id="btn-sample" type="button">Load sample</button>
+      </div>
+    </details>
   </div>
 
   <!-- Log viewer modal -->
@@ -516,11 +521,10 @@
       }
 
       function updateLiveDot() {
-        // Green when auto-refresh is ON and last fetch succeeded, else red
         if (autoToggle.checked && lastFetchOk) {
-          setDotState('live');   // green (live & idle between fetches)
+          setDotState('live');   // green
         } else {
-          setDotState('error');  // red (idle/error/auto off)
+          setDotState('error');  // red
         }
       }
 
@@ -534,11 +538,10 @@
         rosterBanner.style.display = 'block';
         bannerTimer = setTimeout(() => {
           rosterBanner.style.display = 'none';
-        }, 10000); // 10 seconds
+        }, 10000); // 10s
       }
 
       function updateLogSizeLabel() {
-        // Number of rows in detail log
         if (logRowsEl) {
           logRowsEl.textContent = String(csvLog.length);
         }
@@ -573,7 +576,6 @@
           console.warn('[Roster] Failed to load summary log from storage:', e);
         }
 
-        // Load last canonical snapshot so duplicates are not logged across reloads
         try {
           const rawCanon = localStorage.getItem(STORAGE_KEY_LAST_CANON);
           if (typeof rawCanon === 'string' && rawCanon.length) {
@@ -612,7 +614,6 @@
       }
 
       function loadSettings() {
-        // Auto interval
         try {
           const raw = localStorage.getItem(STORAGE_KEY_INTERVAL);
           const val = parseInt(raw, 10);
@@ -623,11 +624,10 @@
         autoIntervalSec = autoIntervalSec || 3;
         autoIntervalInp.value = autoIntervalSec;
 
-        // Log enabled
         try {
           const raw = localStorage.getItem(STORAGE_KEY_LOG_ON);
           if (raw === null) {
-            logEnabledCheckbox.checked = true; // default: on
+          logEnabledCheckbox.checked = true;
           } else {
             logEnabledCheckbox.checked = raw === '1';
           }
@@ -635,7 +635,6 @@
           logEnabledCheckbox.checked = true;
         }
 
-        // Log limit MB
         try {
           const raw = localStorage.getItem(STORAGE_KEY_LOG_MB);
           const val = parseFloat(raw);
@@ -970,9 +969,8 @@
 
         let data = null;
 
-        // When auto-refresh is ON and a fetch actually happens, show orange (fetching)
         if (autoToggle.checked) {
-          setDotState('fetching');
+          setDotState('fetching');  // orange while fetch in progress
         }
 
         try {
