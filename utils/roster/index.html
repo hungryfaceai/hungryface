@@ -129,10 +129,19 @@
     .status {
       display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted);
     }
-    .badge { padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: 11px; letter-spacing: .3px; }
-    .badge.ok { background: #0f2a16; color: var(--ok); border: 1px solid #1c4b25; }
-    .badge.warn { background: #2a230f; color: var(--warn); border: 1px solid #4b3c1c; }
-    .badge.err { background: #2a0f12; color: var(--err); border: 1px solid #4b1c23; }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #555; /* default / neutral */
+      box-shadow: 0 0 0 2px rgba(0,0,0,0.4);
+    }
+    .status-dot.live {
+      background: var(--ok);
+    }
+    .status-dot.error {
+      background: var(--err);
+    }
 
     .grid {
       display: grid;
@@ -372,7 +381,7 @@
 
       <div class="spacer"></div>
       <div class="status">
-        <span id="status-badge" class="badge warn">IDLE</span>
+        <span id="status-dot" class="status-dot"></span>
         <span id="status-msg">Waiting…</span>
       </div>
     </div>
@@ -393,6 +402,7 @@
         <span>Last updated: <span id="last-updated">—</span></span>
         <span>· Endpoint: <span class="mono" id="endpoint-view">—</span></span>
         <span>· Log size: <span class="mono" id="log-size">0 MB</span></span>
+        <span>· Rows: <span class="mono" id="log-rows">0</span></span>
       </div>
       <div class="footer-controls">
         <label>
@@ -426,7 +436,7 @@
     (() => {
       const endpointInput   = document.getElementById('endpoint');
       const grid            = document.getElementById('grid');
-      const badge           = document.getElementById('status-badge');
+      const statusDot       = document.getElementById('status-dot');
       const statusMsg       = document.getElementById('status-msg');
       const lastUpdated     = document.getElementById('last-updated');
       const endpointView    = document.getElementById('endpoint-view');
@@ -447,14 +457,16 @@
       const logViewerBody  = document.getElementById('log-viewer-body');
       const btnLogClose    = document.getElementById('btn-log-close');
       const logSizeEl      = document.getElementById('log-size');
+      const logRowsEl      = document.getElementById('log-rows');
 
       let timer = null;
 
-      const STORAGE_KEY_LOG        = 'signaling_rooms_roster_log_v1';
-      const STORAGE_KEY_SUMMARY    = 'signaling_rooms_summary_log_v1';
-      const STORAGE_KEY_LOG_ON     = 'signaling_rooms_log_enabled_v1';
-      const STORAGE_KEY_LOG_MB     = 'signaling_rooms_log_limit_mb_v1';
-      const STORAGE_KEY_INTERVAL   = 'signaling_rooms_auto_interval_s_v1';
+      const STORAGE_KEY_LOG          = 'signaling_rooms_roster_log_v1';
+      const STORAGE_KEY_SUMMARY      = 'signaling_rooms_summary_log_v1';
+      const STORAGE_KEY_LOG_ON       = 'signaling_rooms_log_enabled_v1';
+      const STORAGE_KEY_LOG_MB       = 'signaling_rooms_log_limit_mb_v1';
+      const STORAGE_KEY_INTERVAL     = 'signaling_rooms_auto_interval_s_v1';
+      const STORAGE_KEY_LAST_CANON   = 'signaling_rooms_last_canonical_v1';
 
       // In-memory logs and settings
       let csvLog = [];       // per-participant rows
@@ -464,13 +476,10 @@
       let logLimitBytes = DEFAULT_LOG_LIMIT_MB * 1024 * 1024;
       let autoIntervalSec = 3;
 
-      // Canonical snapshot for change detection
+      // Canonical snapshot for change detection (persisted across reloads)
       let lastSnapshotCanonical = null;
-
-      function setBadge(kind, text) {
-        badge.className = 'badge ' + kind;
-        badge.textContent = text;
-      }
+      // Whether the last fetch succeeded
+      let lastFetchOk = null;
 
       function fmtTime(d = new Date()) {
         const pad = n => String(n).padStart(2, '0');
@@ -478,7 +487,23 @@
                ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
       }
 
+      function setDotState(state) {
+        statusDot.className = 'status-dot' + (state ? ' ' + state : '');
+      }
+
+      function updateLiveDot() {
+        if (autoToggle.checked && lastFetchOk) {
+          setDotState('live');   // green
+        } else {
+          setDotState('error');  // red
+        }
+      }
+
       function updateLogSizeLabel() {
+        // Number of rows in detail log
+        if (logRowsEl) {
+          logRowsEl.textContent = String(csvLog.length);
+        }
         try {
           const approxBytes = JSON.stringify({ csvLog, summaryLog }).length;
           const mb = approxBytes / (1024 * 1024);
@@ -510,6 +535,19 @@
           console.warn('[Roster] Failed to load summary log from storage:', e);
         }
 
+        // Load last canonical snapshot so duplicates are not logged across reloads
+        try {
+          const rawCanon = localStorage.getItem(STORAGE_KEY_LAST_CANON);
+          if (typeof rawCanon === 'string' && rawCanon.length) {
+            lastSnapshotCanonical = rawCanon;
+          } else {
+            lastSnapshotCanonical = null;
+          }
+        } catch (e) {
+          console.warn('[Roster] Failed to load last canonical snapshot:', e);
+          lastSnapshotCanonical = null;
+        }
+
         updateLogSizeLabel();
       }
 
@@ -517,6 +555,11 @@
         try {
           localStorage.setItem(STORAGE_KEY_LOG, JSON.stringify(csvLog));
           localStorage.setItem(STORAGE_KEY_SUMMARY, JSON.stringify(summaryLog));
+          if (lastSnapshotCanonical) {
+            localStorage.setItem(STORAGE_KEY_LAST_CANON, lastSnapshotCanonical);
+          } else {
+            localStorage.removeItem(STORAGE_KEY_LAST_CANON);
+          }
         } catch (e) {
           console.warn('[Roster] Failed to save logs to storage:', e);
         }
@@ -592,7 +635,7 @@
             // Flush old data so the newest snapshot is always kept
             csvLog = [];
             summaryLog = [];
-            lastSnapshotCanonical = null;
+            // Keep lastSnapshotCanonical so we still know "last seen" roster
             saveLogToStorage();
             console.warn('[Roster] Logs cleared because they exceeded configured size limit.');
           } else {
@@ -661,7 +704,7 @@
       function appendSnapshotToLog(data) {
         if (!data) return;
 
-        // Only log changes to the previous roster state
+        // Only log changes to the previous roster state (persisted across reloads)
         const canon = canonicalizeData(data);
         if (canon === lastSnapshotCanonical) {
           return;
@@ -791,59 +834,52 @@
         endpointView.textContent = url || '—';
 
         if (!url) {
-          setBadge('warn', 'NO URL');
+          lastFetchOk = false;
           statusMsg.textContent = 'Enter an endpoint to fetch.';
+          updateLiveDot();
           return;
         }
 
-        const auto = autoToggle.checked;
-
-        if (auto) {
-          // Keep LIVE pill stable; only text indicates fetching.
-          statusMsg.textContent = 'Fetching roster…';
-        } else {
-          setBadge('warn', 'FETCHING');
-          statusMsg.textContent = 'Fetching roster…';
-        }
+        let data = null;
 
         try {
           const resp = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store' });
           if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
-          const data = await resp.json();
+          data = await resp.json();
           render(data);
 
-          if (auto) {
-            setBadge('ok', 'LIVE');
-            if (logEnabledCheckbox.checked) {
-              appendSnapshotToLog(data);
-              statusMsg.textContent = 'Auto-refresh live. Changes are being logged.';
-            } else {
-              statusMsg.textContent = 'Auto-refresh live. Logging is disabled.';
-            }
+          lastFetchOk = true;
+
+          if (autoToggle.checked) {
+            statusMsg.textContent = 'Auto refresh ON (' + autoIntervalSec + 's).';
           } else {
-            // Auto is off: emphasise that the stream is paused / potentially out of sync.
-            setBadge('warn', 'PAUSED');
-            statusMsg.textContent = 'Manual refresh completed. Auto refresh is off – data may be out of date.';
+            statusMsg.textContent = 'Auto refresh OFF – manual updates only.';
           }
 
           lastUpdated.textContent = fmtTime();
         } catch (err) {
-          setBadge('err', 'ERROR');
-          statusMsg.textContent = (err && err.message) ? err.message : 'Fetch failed.';
+          lastFetchOk = false;
+          statusMsg.textContent = 'Last error: ' + ((err && err.message) ? err.message : 'Fetch failed.');
           console.error(err);
         }
+
+        // Logging only when auto-refresh is on, fetch succeeded, and logging is enabled.
+        if (lastFetchOk && autoToggle.checked && logEnabledCheckbox.checked && data) {
+          appendSnapshotToLog(data);
+        }
+
+        updateLiveDot();
       }
 
       function startAuto() {
         clearInterval(timer);
         if (autoToggle.checked) {
-          setBadge('ok', 'LIVE');
-          statusMsg.textContent = 'Auto refresh every ' + autoIntervalSec + 's.';
+          statusMsg.textContent = 'Auto refresh ON (' + autoIntervalSec + 's).';
           timer = setInterval(fetchAndRender, autoIntervalSec * 1000);
         } else {
-          setBadge('warn', 'PAUSED');
-          statusMsg.textContent = 'Auto refresh off – data may be out of date.';
+          statusMsg.textContent = 'Auto refresh OFF – data may be out of date.';
         }
+        updateLiveDot();
       }
 
       // ---- UI wiring ----
@@ -854,6 +890,10 @@
         startAuto();
         if (autoToggle.checked) {
           fetchAndRender();
+        } else {
+          // auto off => not live
+          lastFetchOk = false;
+          updateLiveDot();
         }
       });
 
@@ -894,11 +934,9 @@
         try {
           const json = JSON.parse(pasteArea.value || '{}');
           render(json);
-          setBadge('ok', 'LOCAL');
-          statusMsg.textContent = 'Rendered pasted JSON.';
+          statusMsg.textContent = 'Rendered pasted JSON (local preview).';
           lastUpdated.textContent = fmtTime();
         } catch (e) {
-          setBadge('err', 'BAD JSON');
           statusMsg.textContent = 'Could not parse pasted JSON.';
         }
       });
@@ -943,6 +981,9 @@
         csvLog = [];
         summaryLog = [];
         lastSnapshotCanonical = null;
+        try {
+          localStorage.removeItem(STORAGE_KEY_LAST_CANON);
+        } catch {}
         saveLogToStorage();
         statusMsg.textContent = 'Log cleared.';
         if (logViewer.classList.contains('open')) {
@@ -975,6 +1016,9 @@
       // ---- Kick off ----
       loadSettings();
       loadLogFromStorage();
+      // initial state: not live yet
+      lastFetchOk = false;
+      updateLiveDot();
       startAuto();
       fetchAndRender();
     })();
