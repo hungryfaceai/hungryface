@@ -80,15 +80,19 @@
 
     .roster-banner {
       position: fixed;
-      top: 0; left: 0; right: 0;
-      z-index: 40;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 9999; /* ensure above sidebar and content */
       background: #b91c1c;
       color: #fee2e2;
       padding: 6px 12px;
+      padding-top: calc(6px + env(safe-area-inset-top, 0px)); /* iPhone notch / URL bar */
       font-size: 12px;
       text-align: center;
       display: none;
       box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+      pointer-events: none; /* don't block taps/scroll on iOS */
     }
 
     .wrap {
@@ -157,7 +161,7 @@
       background: var(--err);     /* red: idle/error/auto off */
     }
     .status-dot.fetching {
-      background: var(--warn);    /* orange: auto ON, fetch in progress */
+      background: #ffffff;        /* WHITE while a live fetch is in progress */
     }
 
     .grid {
@@ -435,7 +439,7 @@
       </div>
     </div>
 
-    <!-- Moved to bottom of screen -->
+    <!-- Manual JSON paste at bottom -->
     <details class="fallback">
       <summary>Paste JSON roster manually (useful if CORS blocks fetch)</summary>
       <textarea id="paste" placeholder='{"5":[{"id":"...","role":"sender"}]}'></textarea>
@@ -522,9 +526,9 @@
 
       function updateLiveDot() {
         if (autoToggle.checked && lastFetchOk) {
-          setDotState('live');   // green
+          setDotState('live');   // green idle, last fetch OK
         } else {
-          setDotState('error');  // red
+          setDotState('error');  // red when auto off / last fetch failed / no URL
         }
       }
 
@@ -627,7 +631,7 @@
         try {
           const raw = localStorage.getItem(STORAGE_KEY_LOG_ON);
           if (raw === null) {
-          logEnabledCheckbox.checked = true;
+            logEnabledCheckbox.checked = true;
           } else {
             logEnabledCheckbox.checked = raw === '1';
           }
@@ -970,7 +974,7 @@
         let data = null;
 
         if (autoToggle.checked) {
-          setDotState('fetching');  // orange while fetch in progress
+          setDotState('fetching');  // WHITE while fetch in progress
         }
 
         try {
