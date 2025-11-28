@@ -358,6 +358,24 @@
       top: 0;
       z-index: 1;
     }
+    .log-viewer-body th.sortable {
+      cursor: pointer;
+      user-select: none;
+    }
+    .log-viewer-body tr.log-filter-row th {
+      position: static;
+      background: #0f111a;
+    }
+    .log-viewer-body tr.log-filter-row input {
+      width: 100%;
+      box-sizing: border-box;
+      background: #0b0b12;
+      border: 1px solid #2b2e44;
+      color: #e5e7ff;
+      border-radius: 4px;
+      padding: 2px 4px;
+      font-size: 10px;
+    }
   </style>
 </head>
 <body>
@@ -511,6 +529,12 @@
       let logLimitMb    = DEFAULT_LOG_LIMIT_MB;
       let logLimitBytes = DEFAULT_LOG_LIMIT_MB * 1024 * 1024;
       let autoIntervalSec = 3;
+
+      // Sorting & filtering state for log modal
+      let summarySort = { col: 't', dir: 'desc' };
+      let detailSort  = { col: 't', dir: 'desc' };
+      let summaryFilters = { t: '', rooms: '', participants: '', senders: '', receivers: '' };
+      let detailFilters  = { t: '', room: '', role: '', id: '' };
 
       // Canonical snapshot for change detection (persisted across reloads)
       let lastSnapshotCanonical = null;
@@ -773,6 +797,207 @@
         }
       }
 
+      function applyFilters(rows, filters) {
+        if (!filters) return rows.slice();
+        const activeCols = Object.keys(filters).filter(k => (filters[k] || '').trim() !== '');
+        if (!activeCols.length) return rows.slice();
+        return rows.filter(row => {
+          for (const col of activeCols) {
+            const needle = (filters[col] || '').toLowerCase();
+            const value = (row[col] == null ? '' : String(row[col])).toLowerCase();
+            if (!value.includes(needle)) return false;
+          }
+          return true;
+        });
+      }
+
+      function applySort(rows, sortState, numericCols) {
+        const col = sortState && sortState.col;
+        const dir = sortState && sortState.dir === 'asc' ? 1 : -1;
+        if (!col) return rows.slice();
+        const numericSet = new Set(numericCols || []);
+        return rows.slice().sort((a, b) => {
+          let va = a[col];
+          let vb = b[col];
+          if (numericSet.has(col)) {
+            va = Number(va);
+            vb = Number(vb);
+            if (isNaN(va)) va = 0;
+            if (isNaN(vb)) vb = 0;
+          } else {
+            va = va == null ? '' : String(va);
+            vb = vb == null ? '' : String(vb);
+          }
+          if (va < vb) return -1 * dir;
+          if (va > vb) return 1 * dir;
+          return 0;
+        });
+      }
+
+      function buildSummaryTable() {
+        const container = document.getElementById('log-summary-table');
+        if (!container) return;
+
+        if (!summaryLog.length) {
+          container.innerHTML = '<p>— No summary entries —</p>';
+          return;
+        }
+
+        const columns = [
+          { key: 't',            label: 'Timestamp' },
+          { key: 'rooms',        label: 'Rooms' },
+          { key: 'participants', label: 'Participants' },
+          { key: 'senders',      label: 'Senders' },
+          { key: 'receivers',    label: 'Receivers' }
+        ];
+
+        const filtered = applyFilters(summaryLog, summaryFilters);
+        const sorted = applySort(filtered, summarySort, ['rooms', 'participants', 'senders', 'receivers']);
+
+        const table = document.createElement('table');
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+
+        columns.forEach(col => {
+          const th = document.createElement('th');
+          th.dataset.col = col.key;
+          th.classList.add('sortable');
+          const indicator = summarySort.col === col.key
+            ? (summarySort.dir === 'asc' ? '▲' : '▼')
+            : '';
+          th.textContent = indicator ? (col.label + ' ' + indicator) : col.label;
+          th.addEventListener('click', () => {
+            if (summarySort.col === col.key) {
+              summarySort.dir = summarySort.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+              summarySort.col = col.key;
+              summarySort.dir = col.key === 't' ? 'desc' : 'asc';
+            }
+            buildSummaryTable();
+          });
+          headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+
+        const filterRow = document.createElement('tr');
+        filterRow.className = 'log-filter-row';
+        columns.forEach(col => {
+          const th = document.createElement('th');
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.value = summaryFilters[col.key] || '';
+          input.placeholder = 'Filter';
+          input.addEventListener('input', (e) => {
+            summaryFilters[col.key] = e.target.value || '';
+            buildSummaryTable();
+          });
+          th.appendChild(input);
+          filterRow.appendChild(th);
+        });
+        thead.appendChild(filterRow);
+
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        for (const row of sorted) {
+          const tr = document.createElement('tr');
+          columns.forEach(col => {
+            const td = document.createElement('td');
+            td.textContent = row[col.key];
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+
+        container.innerHTML = '';
+        container.appendChild(table);
+      }
+
+      function buildDetailTable() {
+        const container = document.getElementById('log-detail-table');
+        if (!container) return;
+
+        if (!csvLog.length) {
+          container.innerHTML = '<p>— No detail entries —</p>';
+          return;
+        }
+
+        const columns = [
+          { key: 't',    label: 'Timestamp' },
+          { key: 'room', label: 'Room' },
+          { key: 'role', label: 'Role' },
+          { key: 'id',   label: 'Member ID' }
+        ];
+
+        const filtered = applyFilters(csvLog, detailFilters);
+        const sorted = applySort(filtered, detailSort, []);
+
+        const table = document.createElement('table');
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+
+        columns.forEach(col => {
+          const th = document.createElement('th');
+          th.dataset.col = col.key;
+          th.classList.add('sortable');
+          const indicator = detailSort.col === col.key
+            ? (detailSort.dir === 'asc' ? '▲' : '▼')
+            : '';
+          th.textContent = indicator ? (col.label + ' ' + indicator) : col.label;
+          th.addEventListener('click', () => {
+            if (detailSort.col === col.key) {
+              detailSort.dir = detailSort.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+              detailSort.col = col.key;
+              detailSort.dir = col.key === 't' ? 'desc' : 'asc';
+            }
+            buildDetailTable();
+          });
+          headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+
+        const filterRow = document.createElement('tr');
+        filterRow.className = 'log-filter-row';
+        columns.forEach(col => {
+          const th = document.createElement('th');
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.value = detailFilters[col.key] || '';
+          input.placeholder = 'Filter';
+          input.addEventListener('input', (e) => {
+            detailFilters[col.key] = e.target.value || '';
+            buildDetailTable();
+          });
+          th.appendChild(input);
+          filterRow.appendChild(th);
+        });
+        thead.appendChild(filterRow);
+
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        for (const row of sorted) {
+          const tr = document.createElement('tr');
+          columns.forEach(col => {
+            const td = document.createElement('td');
+            const val = row[col.key];
+            if ((col.key === 'role' || col.key === 'id') && !val) {
+              td.textContent = '-';
+            } else {
+              td.textContent = val != null ? val : '';
+            }
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+
+        container.innerHTML = '';
+        container.appendChild(table);
+      }
+
       function renderLogModal() {
         if (!logViewerBody) return;
 
@@ -781,47 +1006,15 @@
           return;
         }
 
-        const sortedSummary = summaryLog.slice().sort((a, b) => {
-          if (a.t < b.t) return 1;
-          if (a.t > b.t) return -1;
-          return 0;
-        });
-
-        const sortedDetail = csvLog.slice().sort((a, b) => {
-          if (a.t < b.t) return 1;
-          if (a.t > b.t) return -1;
-          return 0;
-        });
-
         let html = '';
-
         html += '<h4>Summary (per fetch)</h4>';
-        if (sortedSummary.length) {
-          html += '<table><thead><tr>' +
-                  '<th>Timestamp</th><th>Rooms</th><th>Participants</th><th>Senders</th><th>Receivers</th>' +
-                  '</tr></thead><tbody>';
-          for (const row of sortedSummary) {
-            html += `<tr><td>${row.t}</td><td>${row.rooms}</td><td>${row.participants}</td><td>${row.senders}</td><td>${row.receivers}</td></tr>`;
-          }
-          html += '</tbody></table>';
-        } else {
-          html += '<p>— No summary entries —</p>';
-        }
-
+        html += '<div id="log-summary-table"></div>';
         html += '<h4>Detail (per participant)</h4>';
-        if (sortedDetail.length) {
-          html += '<table><thead><tr>' +
-                  '<th>Timestamp</th><th>Room</th><th>Role</th><th>Member ID</th>' +
-                  '</tr></thead><tbody>';
-          for (const row of sortedDetail) {
-            html += `<tr><td>${row.t}</td><td>${row.room}</td><td>${row.role || '-'}</td><td>${row.id || '-'}</td></tr>`;
-          }
-          html += '</tbody></table>';
-        } else {
-          html += '<p>— No detail entries —</p>';
-        }
-
+        html += '<div id="log-detail-table"></div>';
         logViewerBody.innerHTML = html;
+
+        buildSummaryTable();
+        buildDetailTable();
       }
 
       function appendSnapshotToLog(data, shouldLog) {
