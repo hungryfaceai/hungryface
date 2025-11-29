@@ -1,43 +1,49 @@
-// webrtc/shared/psk/room-scope.js
+// /hungryface/webrtc/shared/psk/room-scope.js
 
 const NAMESPACE_MSG = new TextEncoder().encode('naptio-room-namespace-v1');
 
-/**
- * Pick the CryptoKey we can use for HMAC from the PSK env.
- * Adjust this if your requirePskOrRedirect(env) exposes it under a different name.
- */
-function pickHmacKey(env) {
-  // Try a few likely names; tweak as needed based on your real env shape.
-  return (
-    env?.roomHmacKey ||   // if you already have a dedicated HMAC key
-    env?.hmacKey     ||   // generic HMAC key
-    env?.pskKey      ||   // PSK key
-    env?.key             // fallback
+/** base64url -> Uint8Array */
+function b64uToBytes(b64u) {
+  const clean = String(b64u).replace(/-/g, '+').replace(/_/g, '/');
+  const pad = (4 - (clean.length % 4)) % 4;
+  const withPad = clean + '===='.slice(0, pad);
+  const bin = atob(withPad);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** Import the PSK token as an HMAC key */
+async function importHmacKeyFromEnv(env) {
+  const token = env?.tokenB64u;
+  if (!token) {
+    throw new Error('[room-scope] env.tokenB64u is missing – did requirePskOrRedirect succeed?');
+  }
+
+  const raw = b64uToBytes(token);
+  return crypto.subtle.importKey(
+    'raw',
+    raw,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
   );
 }
 
-/**
- * Derive a short hex namespace from the PSK (CryptoKey).
- */
+/** Derive a short namespace hex string from the PSK token */
 export async function deriveNamespace(env) {
-  const key = pickHmacKey(env);
-  if (!key) {
-    throw new Error('[room-scope] No HMAC CryptoKey found on env (expected env.roomHmacKey / env.hmacKey / env.pskKey)');
-  }
-
+  const key = await importHmacKeyFromEnv(env);
   const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, NAMESPACE_MSG));
-  // Use first 8 bytes => 16 hex chars; short but collision-safe for our use.
+  // use first 8 bytes => 16 hex chars
   let hex = '';
-  const len = Math.min(8, sig.length);
-  for (let i = 0; i < len; i++) {
+  const n = Math.min(8, sig.length);
+  for (let i = 0; i < n; i++) {
     hex += sig[i].toString(16).padStart(2, '0');
   }
-  return hex; // e.g. "a1b2c3d4e5f6a7b8"
+  return hex;
 }
 
-/**
- * Normalise the user-facing room name into a safe slug.
- */
+/** Normalise UI label into a slug */
 export function slugifyRoom(uiName) {
   const raw = (uiName ?? '').toString().trim();
   if (!raw) return 'room';
@@ -46,27 +52,27 @@ export function slugifyRoom(uiName) {
   return slug || 'room';
 }
 
-/**
- * Build the actual signaling room id from namespace + UI name.
- */
+/** Compose final signaling room id */
 export function scopeRoomId(namespaceHex, uiName) {
   const slug = slugifyRoom(uiName);
   return `${namespaceHex}:${slug}`;
 }
 
 /**
- * Main entry point for pages:
- * - derives namespace from env (PSK)
- * - installs helpers on window:
- *      window.__naptioRoomNamespace
- *      window.__scopeRoom(uiRoomName)
+ * Main entry point:
+ *   - derives namespace from env.tokenB64u
+ *   - exposes window.__naptioRoomNamespace and window.__scopeRoom(uiRoomName)
  */
 export async function installRoomScope(env) {
+  if (env.redirected) {
+    // Page is about to navigate away anyway; nothing to do.
+    return { namespace: null, scope: (x) => x };
+  }
+
   const ns = await deriveNamespace(env);
   const scopeFn = (uiName) =>
     scopeRoomId(ns, uiName || env.room || 'Baby');
 
-  // Expose to other <script type="module"> blocks on the same page
   window.__naptioRoomNamespace = ns;
   window.__scopeRoom = scopeFn;
 
