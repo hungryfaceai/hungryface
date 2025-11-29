@@ -48,10 +48,12 @@ export async function deriveNamespace(env) {
 export function slugifyRoom(uiName) {
   const raw = (uiName ?? '').toString().trim();
   if (!raw) return 'room';
-  const cleaned = raw.toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
+  // ✅ preserve case; only normalise separators
+  const cleaned = raw.replace(/[^A-Za-z0-9_-]+/g, '-');
   const slug = cleaned.replace(/^-+|-+$/g, '');
   return slug || 'room';
 }
+
 
 /** Compose final signaling room id */
 export function scopeRoomId(namespaceHex, uiName) {
