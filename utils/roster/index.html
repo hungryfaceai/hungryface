@@ -376,6 +376,69 @@
       padding: 2px 4px;
       font-size: 10px;
     }
+
+    /* Analytics panel */
+    .analytics-section {
+      margin-bottom: 8px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .analytics-table th,
+    .analytics-table td {
+      font-size: 11px;
+    }
+    .analytics-bars {
+      margin-top: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .analytics-bar-row {
+      display: grid;
+      grid-template-columns: minmax(0, 90px) 1fr auto;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+    }
+    .analytics-bar-label {
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .analytics-bar-track {
+      position: relative;
+      height: 8px;
+      border-radius: 999px;
+      background: #1b1d2a;
+      overflow: hidden;
+    }
+    .analytics-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--receiver);
+      transition: width 0.2s ease-out;
+    }
+    .analytics-bar-fill.active {
+      background: var(--sender);
+    }
+    .analytics-bar-value {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #e5e7ff;
+      white-space: nowrap;
+      font-size: 11px;
+    }
+    .analytics-status-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 6px;
+      border-radius: 999px;
+      font-size: 10px;
+      background: #1b1d2a;
+      color: var(--muted);
+    }
+    .analytics-status-pill.active {
+      background: #14532d;
+      color: #bbf7d0;
+    }
   </style>
 </head>
 <body>
@@ -456,6 +519,7 @@
           MB
         </label>
         <button id="btn-log-view" type="button">View log</button>
+        <button id="btn-analytics" type="button">Analytics</button>
         <button id="btn-log-clear" type="button">Clear log</button>
         <button id="btn-export" type="button">Export CSV</button>
       </div>
@@ -480,6 +544,17 @@
         <button id="btn-log-close" type="button">Close</button>
       </div>
       <div id="log-viewer-body" class="log-viewer-body"></div>
+    </div>
+  </div>
+
+  <!-- Analytics viewer modal -->
+  <div id="analytics-viewer" class="log-viewer" aria-hidden="true">
+    <div class="log-viewer-inner">
+      <div class="log-viewer-header">
+        <span>Room analytics</span>
+        <button id="btn-analytics-close" type="button">Close</button>
+      </div>
+      <div id="analytics-viewer-body" class="log-viewer-body"></div>
     </div>
   </div>
 
@@ -509,6 +584,11 @@
       const btnLogClose    = document.getElementById('btn-log-close');
       const logSizeEl      = document.getElementById('log-size');
       const logRowsEl      = document.getElementById('log-rows');
+
+      const analyticsViewer     = document.getElementById('analytics-viewer');
+      const analyticsViewerBody = document.getElementById('analytics-viewer-body');
+      const btnAnalytics        = document.getElementById('btn-analytics');
+      const btnAnalyticsClose   = document.getElementById('btn-analytics-close');
 
       const rosterBanner   = document.getElementById('roster-banner');
       let bannerTimer      = null;
@@ -546,6 +626,33 @@
         const pad = n => String(n).padStart(2, '0');
         return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
                ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+      }
+
+      function parseTimestampToMs(ts) {
+        if (!ts) return NaN;
+        try {
+          const iso = ts.replace(' ', 'T') + 'Z';
+          const d = new Date(iso);
+          const ms = d.getTime();
+          if (!isNaN(ms)) return ms;
+        } catch {}
+        const m = ts.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
+        if (!m) return NaN;
+        const y = +m[1], mo = +m[2], d = +m[3], h = +m[4], mi = +m[5], s = +m[6];
+        return Date.UTC(y, mo - 1, d, h, mi, s);
+      }
+
+      function formatDuration(ms) {
+        if (!ms || ms <= 0) return '0s';
+        const totalSeconds = Math.floor(ms / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        const parts = [];
+        if (hours) parts.push(hours + 'h');
+        if (minutes) parts.push(minutes + 'm');
+        if (!hours && !minutes) parts.push(seconds + 's');
+        return parts.join(' ');
       }
 
       function setDotState(state) {
@@ -1055,6 +1162,158 @@
         buildDetailTable();
       }
 
+      function computeRoomAnalytics() {
+        if (!csvLog.length) return null;
+
+        const snapshotsByTime = new Map(); // t -> { rooms: Set<roomId> }
+        const roomStatsMap = new Map();    // roomId -> stats
+
+        function ensureRoom(roomId) {
+          if (!roomStatsMap.has(roomId)) {
+            roomStatsMap.set(roomId, {
+              roomId,
+              firstSeen: null,
+              lastSeen: null,
+              activeTimeMs: 0,
+              participants: new Set(),
+              senders: new Set(),
+              receivers: new Set(),
+              currentlyActive: false
+            });
+          }
+          return roomStatsMap.get(roomId);
+        }
+
+        for (const row of csvLog) {
+          const t = row.t;
+          const roomId = row.room;
+          if (!t || !roomId) continue;
+
+          let snapshot = snapshotsByTime.get(t);
+          if (!snapshot) {
+            snapshot = { rooms: new Set() };
+            snapshotsByTime.set(t, snapshot);
+          }
+          snapshot.rooms.add(roomId);
+
+          const stats = ensureRoom(roomId);
+          if (!stats.firstSeen || t < stats.firstSeen) stats.firstSeen = t;
+          if (!stats.lastSeen || t > stats.lastSeen)  stats.lastSeen  = t;
+          if (row.id) stats.participants.add(row.id);
+          const role = (row.role || '').toLowerCase();
+          if (role === 'sender')   stats.senders.add(row.id || '');
+          if (role === 'receiver') stats.receivers.add(row.id || '');
+        }
+
+        const timestamps = Array.from(snapshotsByTime.keys()).sort();
+
+        for (let i = 0; i < timestamps.length - 1; i++) {
+          const t = timestamps[i];
+          const nextT = timestamps[i + 1];
+          const ms = parseTimestampToMs(nextT) - parseTimestampToMs(t);
+          if (!(ms > 0)) continue;
+          const snap = snapshotsByTime.get(t);
+          if (!snap) continue;
+          for (const roomId of snap.rooms) {
+            const stats = ensureRoom(roomId);
+            stats.activeTimeMs += ms;
+          }
+        }
+
+        const currentlyActiveRooms = new Set();
+        if (lastSnapshotNormalized && typeof lastSnapshotNormalized === 'object') {
+          for (const roomId of Object.keys(lastSnapshotNormalized)) {
+            currentlyActiveRooms.add(roomId);
+          }
+        }
+        roomStatsMap.forEach(stats => {
+          stats.currentlyActive = currentlyActiveRooms.has(stats.roomId);
+        });
+
+        const statsArr = Array.from(roomStatsMap.values());
+        statsArr.sort((a, b) => {
+          if (b.activeTimeMs !== a.activeTimeMs) return b.activeTimeMs - a.activeTimeMs;
+          if (a.lastSeen && b.lastSeen && a.lastSeen !== b.lastSeen) {
+            return a.lastSeen < b.lastSeen ? 1 : -1;
+          }
+          const na = Number(a.roomId), nb = Number(b.roomId);
+          if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+          return String(a.roomId).localeCompare(String(b.roomId));
+        });
+
+        const firstLogTime = timestamps[0] || null;
+        const lastLogTime  = timestamps[timestamps.length - 1] || null;
+
+        return { stats: statsArr, firstLogTime, lastLogTime };
+      }
+
+      function renderAnalyticsModal() {
+        if (!analyticsViewerBody) return;
+
+        if (!csvLog.length) {
+          analyticsViewerBody.innerHTML =
+            '<p>— No analytics available yet. Leave auto-refresh on with logging enabled to build history. —</p>';
+          return;
+        }
+
+        const result = computeRoomAnalytics();
+        if (!result || !result.stats.length) {
+          analyticsViewerBody.innerHTML =
+            '<p>— No analytics could be derived from the current log. —</p>';
+          return;
+        }
+
+        const { stats, firstLogTime, lastLogTime } = result;
+
+        let html = '';
+        html += '<div class="analytics-section">';
+        html += '<p style="margin:0 0 8px 0;font-size:11px;color:#8b8ca3;">';
+        html += 'Based on ' + csvLog.length + ' participant log rows from ';
+        html += '<span class="mono">' + (firstLogTime || '—') + '</span> to ';
+        html += '<span class="mono">' + (lastLogTime || '—') + '</span>.';
+        html += '</p></div>';
+
+        html += '<h4>Rooms by active time</h4>';
+        html += '<table class="analytics-table"><thead><tr>';
+        html += '<th>Room</th><th>Total active time</th><th>First seen</th><th>Last seen</th><th>Distinct participants</th><th>Status</th>';
+        html += '</tr></thead><tbody>';
+
+        for (const s of stats) {
+          const participantsCount = s.participants.size;
+          const statusLabel = s.currentlyActive ? 'Active' : 'Inactive';
+          const statusClass = s.currentlyActive ? 'analytics-status-pill active' : 'analytics-status-pill';
+          html += '<tr>';
+          html += '<td>Room ' + String(s.roomId) + '</td>';
+          html += '<td>' + formatDuration(s.activeTimeMs) + '</td>';
+          html += '<td>' + (s.firstSeen || '—') + '</td>';
+          html += '<td>' + (s.lastSeen || '—') + '</td>';
+          html += '<td>' + participantsCount + '</td>';
+          html += '<td><span class="' + statusClass + '">' + statusLabel + '</span></td>';
+          html += '</tr>';
+        }
+        html += '</tbody></table>';
+
+        html += '<h4>Activity bar chart</h4>';
+        html += '<div class="analytics-bars">';
+        const maxActiveMs = stats.reduce((max, s) => Math.max(max, s.activeTimeMs || 0), 0);
+        for (const s of stats) {
+          const widthPct = maxActiveMs > 0
+            ? Math.max(2, Math.round((s.activeTimeMs / maxActiveMs) * 100))
+            : 0;
+          const width = maxActiveMs > 0 ? widthPct + '%' : '0%';
+          html += '<div class="analytics-bar-row">';
+          html += '<span class="analytics-bar-label">Room ' + String(s.roomId) + '</span>';
+          html += '<div class="analytics-bar-track"><div class="analytics-bar-fill' +
+                  (s.currentlyActive ? ' active' : '') +
+                  '" style="width:' + width + ';"></div></div>';
+          html += '<span class="analytics-bar-value">' + formatDuration(s.activeTimeMs) + '</span>';
+          html += '</div>';
+        }
+        html += '</div>';
+
+        analyticsViewerBody.innerHTML = html;
+      }
+
       function appendSnapshotToLog(data, shouldLog) {
         if (!data) return;
 
@@ -1209,7 +1468,7 @@
         let data = null;
 
         if (autoToggle.checked) {
-          setDotState('fetching');  // WHITE while fetch in progress
+          setDotState('fetching');  // BLACK while fetch in progress
         }
 
         try {
@@ -1380,6 +1639,28 @@
         if (e.target === logViewer) {
           logViewer.classList.remove('open');
           logViewer.setAttribute('aria-hidden', 'true');
+        }
+      });
+
+      btnAnalytics.addEventListener('click', () => {
+        if (!csvLog.length) {
+          alert('No analytics available yet.\nLeave auto-refresh on with logging enabled to build history.');
+          return;
+        }
+        renderAnalyticsModal();
+        analyticsViewer.classList.add('open');
+        analyticsViewer.setAttribute('aria-hidden', 'false');
+      });
+
+      btnAnalyticsClose.addEventListener('click', () => {
+        analyticsViewer.classList.remove('open');
+        analyticsViewer.setAttribute('aria-hidden', 'true');
+      });
+
+      analyticsViewer.addEventListener('click', (e) => {
+        if (e.target === analyticsViewer) {
+          analyticsViewer.classList.remove('open');
+          analyticsViewer.setAttribute('aria-hidden', 'true');
         }
       });
 
