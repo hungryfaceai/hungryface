@@ -1,0 +1,1396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Signaling Rooms – Live Roster</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+
+  <!-- ⬇️ Add shared sidebar stylesheet -->
+  <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
+
+  <style>
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; height: 100%;
+      background: #000; color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+      overflow: hidden;
+    }
+    /* Fullscreen wrapper so video+canvas scale together (unused but kept for consistency) */
+    #stage {
+      position: fixed; inset: 0;
+      width: 100vw; height: 100vh;   /* fallback */
+      width: 100dvw; height: 100dvh; /* dynamic viewport */
+      width: 100svw; height: 100svh; /* small viewport (iOS URL bar safe) */
+      z-index: 1; background: #000;
+    }
+    #stage > video {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: contain; background: #000;
+    }
+    #stage > canvas {
+      position: absolute;
+      z-index: 2; pointer-events: none; background: transparent; display: none;
+    }
+
+    .btn {
+      padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
+      background: transparent; color: #fff; font-size: 16px; font-weight: 600;
+      cursor: pointer; box-shadow: none;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+    .btn:active { transform: scale(0.99); }
+
+    #controls {
+      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 12px; z-index: 6;
+    }
+    #enableAudioBtn, #disableAudioBtn { display: none; }
+
+    .overlay {
+      position: fixed; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      pointer-events: none; z-index: 5;
+    }
+  </style>
+
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0b0f;
+      --panel: #15151b;
+      --muted: #8b8ca3;
+      --text: #e9eaf2;
+      --ok: #7dd87d;
+      --warn: #ffb84d;
+      --err: #ff6b6b;
+      --sender: #7dd87d;   /* green for sender */
+      --receiver: #6ac4ff; /* cyan   */
+      --chip: #242633;
+      --ring: #2b2e44;
+      --focus: #7aa2ff;
+    }
+    html, body {
+      margin: 0; height: 100%;
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+      overflow-y: auto;
+    }
+
+    .roster-banner {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 9999; /* ensure above sidebar and content */
+      background: #b91c1c;
+      color: #fee2e2;
+      padding: 6px 12px;
+      padding-top: calc(6px + env(safe-area-inset-top, 0px)); /* iPhone notch / URL bar */
+      font-size: 12px;
+      text-align: center;
+      display: none;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+      pointer-events: none; /* don't block taps/scroll on iOS */
+    }
+
+    .wrap {
+      max-width: 1100px; margin: 0 auto; padding: 20px;
+      display: grid; grid-template-rows: auto auto 1fr auto auto; gap: 16px;
+    }
+    header {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    .title { font-size: 22px; font-weight: 700; letter-spacing: 0.2px; }
+    .legend { margin-left: auto; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+    .pill { display: inline-flex; align-items: center; gap: 8px; background: var(--chip); padding: 6px 10px; border-radius: 999px; font-size: 12px; color: var(--muted); }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+    .dot.sender { background: var(--sender); }
+    .dot.receiver { background: var(--receiver); }
+
+    .toolbar {
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+      background: var(--panel); border: 1px solid var(--ring); border-radius: 12px; padding: 10px;
+    }
+    .toolbar input[type="url"] {
+      flex: 1 1 260px; background: #0f111a; border: 1px solid var(--ring); color: var(--text);
+      padding: 10px 12px; border-radius: 10px; outline: none;
+    }
+    .toolbar input[type="url"]:focus { border-color: var(--focus); }
+    .toolbar button, .toolbar label.btn-inline {
+      background: #1b1d2a; border: 1px solid var(--ring); color: var(--text);
+      padding: 8px 10px; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 12px;
+    }
+    .toolbar button:hover, .toolbar label.btn-inline:hover { background: #202338; }
+    .toolbar .spacer { flex: 1; }
+
+    .toolbar-inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+    }
+    .toolbar-inline input[type="checkbox"] {
+      accent-color: var(--focus);
+    }
+    .toolbar-inline input[type="number"] {
+      width: 4.5rem;
+      background: #0f111a;
+      border: 1px solid var(--ring);
+      color: var(--text);
+      padding: 4px 6px;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    .status {
+      display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted);
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #555; /* default / neutral */
+      box-shadow: 0 0 0 2px rgba(0,0,0,0.4);
+    }
+    .status-dot.live {
+      background: var(--ok);      /* green: auto ON + last fetch OK, idle */
+    }
+    .status-dot.error {
+      background: var(--err);     /* red: idle/error/auto off */
+    }
+    /*.status-dot.fetching {
+      background: var(--warn);         /* amber/orange while a live fetch is in progress */
+    }*/
+    .status-dot.fetching {
+      background: #000000;        /* BLACK while a live fetch is in progress */
+      box-shadow: 0 0 0 2px #ffffff33; /* optional: subtle light ring so it stands out */
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 14px;
+      align-content: start;
+    }
+
+    .room {
+      background: var(--panel);
+      border: 1px solid var(--ring);
+      border-radius: 16px;
+      padding: 12px;
+      display: grid; grid-template-rows: auto auto 1fr; gap: 10px;
+      min-height: 160px;
+    }
+
+    .room-head {
+      display: flex; align-items: center; gap: 8px; justify-content: space-between;
+    }
+    .room-title { font-weight: 700; font-size: 16px; letter-spacing: .2px; }
+    .counts { display: inline-flex; gap: 6px; }
+    .count {
+      font-size: 11px; color: var(--muted);
+      border: 1px dashed var(--ring); padding: 4px 8px; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px;
+    }
+
+    .bubbles {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      padding: 4px; border-radius: 10px; background: #11131d;
+      min-height: 60px;
+    }
+    .node {
+      display: inline-flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 999px;
+      background: #171926; border: 1px solid var(--ring); font-size: 12px; user-select: text;
+    }
+    .node .badge-role {
+      width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center;
+      font-size: 11px; font-weight: 800; color: #081018;
+    }
+    .node.sender .badge-role { background: var(--sender); }
+    .node.receiver .badge-role { background: var(--receiver); }
+
+    .room-foot {
+      display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--muted);
+      font-size: 12px;
+    }
+    .warnline { color: var(--warn); display: inline-flex; align-items: center; gap: 6px; }
+
+    details.fallback {
+      background: var(--panel); border: 1px dashed var(--ring); border-radius: 12px; padding: 8px 10px;
+      margin-top: 8px;
+    }
+    details.fallback summary { cursor: pointer; color: var(--muted); }
+    textarea {
+      width: 100%; min-height: 120px; margin-top: 8px; background: #0f111a; color: var(--text);
+      border: 1px solid var(--ring); border-radius: 8px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .footer {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      text-align: left;
+      color: var(--muted); font-size: 12px; padding: 8px 0 0;
+    }
+    .footer-main {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      align-items: center;
+    }
+    .footer-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      justify-content: flex-end;
+    }
+    .footer-controls label {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+    }
+    .footer-controls input[type="checkbox"] {
+      accent-color: var(--focus);
+    }
+    .footer-controls input[type="number"] {
+      width: 4.5rem;
+      background: #0f111a;
+      border: 1px solid var(--ring);
+      color: var(--text);
+      padding: 4px 6px;
+      border-radius: 6px;
+      font-size: 11px;
+    }
+    .footer button {
+      background: #1b1d2a;
+      border: 1px solid var(--ring);
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .footer button:hover { background: #202338; }
+
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #cbd5ff; }
+
+    /* Log viewer modal */
+    .log-viewer {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+    }
+    .log-viewer.open {
+      display: flex;
+    }
+    .log-viewer-inner {
+      background: #0f111a;
+      border: 1px solid var(--ring);
+      border-radius: 12px;
+      max-width: 900px;
+      width: 90vw;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .log-viewer-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--ring);
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .log-viewer-header button {
+      background: #1b1d2a;
+      border: 1px solid var(--ring);
+      color: var(--text);
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .log-viewer-header button:hover {
+      background: #202338;
+    }
+    .log-viewer-body {
+      padding: 10px 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      white-space: normal;
+      color: #e5e7ff;
+      flex: 1 1 auto;
+      min-height: 0;                 /* allow flexbox scrolling on iOS */
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .log-viewer-body h4 {
+      margin: 0 0 6px 0;
+      font-size: 12px;
+      font-weight: 600;
+      color: #cbd5ff;
+    }
+    .log-viewer-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 10px;
+    }
+    .log-viewer-body th,
+    .log-viewer-body td {
+      padding: 4px 6px;
+      border-bottom: 1px solid #2b2e44;
+      text-align: left;
+    }
+    .log-viewer-body th {
+      background: #11131d;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    .log-viewer-body th.sortable {
+      cursor: pointer;
+      user-select: none;
+    }
+    .log-viewer-body tr.log-filter-row th {
+      position: static;
+      background: #0f111a;
+    }
+    .log-viewer-body tr.log-filter-row input {
+      width: 100%;
+      box-sizing: border-box;
+      background: #0b0b12;
+      border: 1px solid #2b2e44;
+      color: #e5e7ff;
+      border-radius: 4px;
+      padding: 2px 4px;
+      font-size: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Red roster-change banner -->
+  <div id="roster-banner" class="roster-banner" aria-live="polite"></div>
+
+  <!-- ⬇️ Inject shared sidebar markup and behavior (kept separate from your code) -->
+  <script type="module">
+    (async () => {
+      try {
+        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
+        const html = await res.text();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html.trim();
+        document.body.prepend(...wrap.childNodes);
+
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      } catch (err) {
+        console.error('[Sidebar] failed to load shared assets:', err);
+      }
+    })();
+  </script>
+
+  <div class="wrap">
+    <header>
+      <div style="padding-left:3ch" class="title">Signaling Rooms</div>
+      <div class="legend">
+        <span class="pill"><span class="dot sender"></span> Sender</span>
+        <span class="pill"><span class="dot receiver"></span> Receiver</span>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <input id="endpoint" type="url" value="https://signaling-server-f5gu.onrender.com/rooms" aria-label="Rooms endpoint">
+      <button id="btn-refresh" type="button">Refresh now</button>
+
+      <div class="toolbar-inline">
+        <label class="btn-inline">
+          <input id="auto" type="checkbox" checked>
+          Auto
+        </label>
+        <span>every</span>
+        <input id="auto-interval" type="number" min="1" value="3" aria-label="Auto refresh interval (seconds)">
+        <span>s</span>
+      </div>
+
+      <div class="spacer"></div>
+      <div class="status">
+        <span id="status-dot" class="status-dot"></span>
+        <span id="status-msg">Waiting…</span>
+      </div>
+    </div>
+
+    <div id="grid" class="grid" role="list" aria-label="Rooms"></div>
+
+    <div class="footer">
+      <div class="footer-main">
+        <span>Last updated: <span id="last-updated">—</span></span>
+        <span>· Endpoint: <span class="mono" id="endpoint-view">—</span></span>
+        <span>· Log size: <span class="mono" id="log-size">0 MB</span></span>
+        <span>· Rows: <span class="mono" id="log-rows">0</span></span>
+      </div>
+      <div class="footer-controls">
+        <label>
+          <input id="log-enabled" type="checkbox" checked>
+          Log auto-refresh
+        </label>
+        <label>
+          Max log
+          <input id="log-limit" type="number" min="0.1" step="0.1" value="1">
+          MB
+        </label>
+        <button id="btn-log-view" type="button">View log</button>
+        <button id="btn-log-clear" type="button">Clear log</button>
+        <button id="btn-export" type="button">Export CSV</button>
+      </div>
+    </div>
+
+    <!-- Manual JSON paste at bottom -->
+    <details class="fallback">
+      <summary>Paste JSON roster manually</summary>
+      <textarea id="paste" placeholder='{"5":[{"id":"...","role":"sender"}]}'></textarea>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button id="btn-apply" type="button">Render pasted JSON</button>
+        <button id="btn-sample" type="button">Load sample</button>
+      </div>
+    </details>
+  </div>
+
+  <!-- Log viewer modal -->
+  <div id="log-viewer" class="log-viewer" aria-hidden="true">
+    <div class="log-viewer-inner">
+      <div class="log-viewer-header">
+        <span>Fetch / roster log history (newest first)</span>
+        <button id="btn-log-close" type="button">Close</button>
+      </div>
+      <div id="log-viewer-body" class="log-viewer-body"></div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const endpointInput   = document.getElementById('endpoint');
+      const grid            = document.getElementById('grid');
+      const statusDot       = document.getElementById('status-dot');
+      const statusMsg       = document.getElementById('status-msg');
+      const lastUpdated     = document.getElementById('last-updated');
+      const endpointView    = document.getElementById('endpoint-view');
+      const btnRefresh      = document.getElementById('btn-refresh');
+      const btnApply        = document.getElementById('btn-apply');
+      const btnSample       = document.getElementById('btn-sample');
+      const btnExport       = document.getElementById('btn-export');
+      const autoToggle      = document.getElementById('auto');
+      const autoIntervalInp = document.getElementById('auto-interval');
+      const pasteArea       = document.getElementById('paste');
+
+      const logEnabledCheckbox = document.getElementById('log-enabled');
+      const logLimitInput      = document.getElementById('log-limit');
+      const btnLogView         = document.getElementById('btn-log-view');
+      const btnLogClear        = document.getElementById('btn-log-clear');
+
+      const logViewer      = document.getElementById('log-viewer');
+      const logViewerBody  = document.getElementById('log-viewer-body');
+      const btnLogClose    = document.getElementById('btn-log-close');
+      const logSizeEl      = document.getElementById('log-size');
+      const logRowsEl      = document.getElementById('log-rows');
+
+      const rosterBanner   = document.getElementById('roster-banner');
+      let bannerTimer      = null;
+
+      let timer = null;
+
+      const STORAGE_KEY_LOG          = 'signaling_rooms_roster_log_v1';
+      const STORAGE_KEY_SUMMARY      = 'signaling_rooms_summary_log_v1';
+      const STORAGE_KEY_LOG_ON       = 'signaling_rooms_log_enabled_v1';
+      const STORAGE_KEY_LOG_MB       = 'signaling_rooms_log_limit_mb_v1';
+      const STORAGE_KEY_INTERVAL     = 'signaling_rooms_auto_interval_s_v1';
+      const STORAGE_KEY_LAST_CANON   = 'signaling_rooms_last_canonical_v1';
+
+      // In-memory logs and settings
+      let csvLog = [];       // per-participant rows
+      let summaryLog = [];   // per-fetch summary rows
+      const DEFAULT_LOG_LIMIT_MB = 1;
+      let logLimitMb    = DEFAULT_LOG_LIMIT_MB;
+      let logLimitBytes = DEFAULT_LOG_LIMIT_MB * 1024 * 1024;
+      let autoIntervalSec = 3;
+
+      // Sorting & filtering state for log modal
+      let summarySort = { col: 't', dir: 'desc' };
+      let detailSort  = { col: 't', dir: 'desc' };
+      let summaryFilters = { t: '', rooms: '', participants: '', senders: '', receivers: '' };
+      let detailFilters  = { t: '', room: '', role: '', id: '' };
+
+      // Canonical snapshot for change detection (persisted across reloads)
+      let lastSnapshotCanonical = null;
+      let lastSnapshotNormalized = null;
+      // Whether the last fetch succeeded
+      let lastFetchOk = null;
+
+      function fmtTime(d = new Date()) {
+        const pad = n => String(n).padStart(2, '0');
+        return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
+               ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+      }
+
+      function setDotState(state) {
+        statusDot.className = 'status-dot' + (state ? ' ' + state : '');
+      }
+
+      function updateLiveDot() {
+        if (autoToggle.checked && lastFetchOk) {
+          setDotState('live');   // green idle, last fetch OK
+        } else {
+          setDotState('error');  // red when auto off / last fetch failed / no URL
+        }
+      }
+
+      function showRosterBanner(message) {
+        if (!rosterBanner) return;
+        if (bannerTimer) {
+          clearTimeout(bannerTimer);
+          bannerTimer = null;
+        }
+        rosterBanner.textContent = message;
+        rosterBanner.style.display = 'block';
+        bannerTimer = setTimeout(() => {
+          rosterBanner.style.display = 'none';
+        }, 10000); // 10s
+      }
+
+      function updateLogSizeLabel() {
+        if (logRowsEl) {
+          logRowsEl.textContent = String(csvLog.length);
+        }
+        try {
+          const approxBytes = JSON.stringify({ csvLog, summaryLog }).length;
+          const mb = approxBytes / (1024 * 1024);
+          const text = mb < 0.005 ? '0.00 MB' : mb.toFixed(2) + ' MB';
+          logSizeEl.textContent = text;
+        } catch {
+          logSizeEl.textContent = '—';
+        }
+      }
+
+      function loadLogFromStorage() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY_LOG);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) csvLog = parsed;
+          }
+        } catch (e) {
+          console.warn('[Roster] Failed to load CSV log from storage:', e);
+        }
+
+        try {
+          const raw2 = localStorage.getItem(STORAGE_KEY_SUMMARY);
+          if (raw2) {
+            const parsed2 = JSON.parse(raw2);
+            if (Array.isArray(parsed2)) summaryLog = parsed2;
+          }
+        } catch (e) {
+          console.warn('[Roster] Failed to load summary log from storage:', e);
+        }
+
+        try {
+          const rawCanon = localStorage.getItem(STORAGE_KEY_LAST_CANON);
+          if (typeof rawCanon === 'string' && rawCanon.length) {
+            lastSnapshotCanonical = rawCanon;
+            try {
+              lastSnapshotNormalized = JSON.parse(rawCanon);
+            } catch {
+              lastSnapshotNormalized = null;
+            }
+          } else {
+            lastSnapshotCanonical = null;
+            lastSnapshotNormalized = null;
+          }
+        } catch (e) {
+          console.warn('[Roster] Failed to load last canonical snapshot:', e);
+          lastSnapshotCanonical = null;
+          lastSnapshotNormalized = null;
+        }
+
+        updateLogSizeLabel();
+      }
+
+      function saveLogToStorage() {
+        try {
+          localStorage.setItem(STORAGE_KEY_LOG, JSON.stringify(csvLog));
+          localStorage.setItem(STORAGE_KEY_SUMMARY, JSON.stringify(summaryLog));
+          if (lastSnapshotCanonical) {
+            localStorage.setItem(STORAGE_KEY_LAST_CANON, lastSnapshotCanonical);
+          } else {
+            localStorage.removeItem(STORAGE_KEY_LAST_CANON);
+          }
+        } catch (e) {
+          console.warn('[Roster] Failed to save logs to storage:', e);
+        }
+        updateLogSizeLabel();
+      }
+
+      function loadSettings() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY_INTERVAL);
+          const val = parseInt(raw, 10);
+          if (!isNaN(val) && val > 0 && val <= 3600) {
+            autoIntervalSec = val;
+          }
+        } catch {}
+        autoIntervalSec = autoIntervalSec || 3;
+        autoIntervalInp.value = autoIntervalSec;
+
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY_LOG_ON);
+          if (raw === null) {
+            logEnabledCheckbox.checked = true;
+          } else {
+            logEnabledCheckbox.checked = raw === '1';
+          }
+        } catch {
+          logEnabledCheckbox.checked = true;
+        }
+
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY_LOG_MB);
+          const val = parseFloat(raw);
+          if (!isNaN(val) && val >= 0.1 && val <= 50) {
+            logLimitMb = val;
+          }
+        } catch {}
+        logLimitMb = logLimitMb || DEFAULT_LOG_LIMIT_MB;
+        logLimitBytes = logLimitMb * 1024 * 1024;
+        logLimitInput.value = logLimitMb.toString();
+      }
+
+      function canonicalizeAndNormalizeData(data) {
+        const roomIds = Object.keys(data || {}).sort((a, b) => {
+          const na = Number(a), nb = Number(b);
+          if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+          return ('' + a).localeCompare('' + b);
+        });
+        const norm = {};
+        for (const roomId of roomIds) {
+          const members = Array.isArray(data[roomId]) ? data[roomId] : [];
+          const sortedMembers = members
+            .slice()
+            .map(m => ({
+              id: m.id || '',
+              role: (m.role || '').toLowerCase()
+            }))
+            .sort((a, b) => {
+              const keyA = a.role + '|' + a.id;
+              const keyB = b.role + '|' + b.id;
+              return keyA.localeCompare(keyB);
+            });
+          norm[roomId] = sortedMembers;
+        }
+        return { canon: JSON.stringify(norm), norm };
+      }
+
+      function describeRosterChange(prevNorm, currNorm, timestamp) {
+        const ts = timestamp || fmtTime();
+
+        if (!currNorm || typeof currNorm !== 'object') {
+          return ts + ' – Roster changed.';
+        }
+
+        if (!prevNorm) {
+          const roomIds = Object.keys(currNorm || {});
+          let participants = 0;
+          for (const r of roomIds) {
+            participants += (currNorm[r] || []).length;
+          }
+          return `${ts} – Initial roster: ${roomIds.length} room${roomIds.length !== 1 ? 's' : ''}, ${participants} participant${participants !== 1 ? 's' : ''}.`;
+        }
+
+        const prevRooms = new Set(Object.keys(prevNorm || {}));
+        const currRooms = new Set(Object.keys(currNorm || {}));
+
+        const newRooms = [];
+        const removedRooms = [];
+
+        currRooms.forEach(r => { if (!prevRooms.has(r)) newRooms.push(r); });
+        prevRooms.forEach(r => { if (!currRooms.has(r)) removedRooms.push(r); });
+
+        const changes = [];
+
+        if (newRooms.length) {
+          const name = newRooms[0];
+          const count = (currNorm[name] || []).length;
+          changes.push(`New room "${name}" (${count} participant${count !== 1 ? 's' : ''})`);
+          if (newRooms.length > 1) {
+            changes.push(`+ ${newRooms.length - 1} more new room${newRooms.length - 1 !== 1 ? 's' : ''}`);
+          }
+        }
+
+        if (removedRooms.length) {
+          const name = removedRooms[0];
+          const count = (prevNorm[name] || []).length;
+          changes.push(`Room "${name}" removed (previously ${count} participant${count !== 1 ? 's' : ''})`);
+          if (removedRooms.length > 1) {
+            changes.push(`+ ${removedRooms.length - 1} more removed room${removedRooms.length - 1 !== 1 ? 's' : ''}`);
+          }
+        }
+
+        const commonRooms = [];
+        prevRooms.forEach(r => { if (currRooms.has(r)) commonRooms.push(r); });
+
+        for (const roomId of commonRooms) {
+          const prevMembers = prevNorm[roomId] || [];
+          const currMembers = currNorm[roomId] || [];
+          const prevSet = new Set(prevMembers.map(m => m.role + '|' + m.id));
+          const currSet = new Set(currMembers.map(m => m.role + '|' + m.id));
+
+          let joins = 0, leaves = 0;
+          currSet.forEach(key => { if (!prevSet.has(key)) joins++; });
+          prevSet.forEach(key => { if (!currSet.has(key)) leaves++; });
+
+          if (joins || leaves) {
+            const part = [];
+            if (joins) part.push(`${joins} joined`);
+            if (leaves) part.push(`${leaves} left`);
+            changes.push(`Room "${roomId}": ${part.join(', ')}`);
+          }
+        }
+
+        if (!changes.length) {
+          return `${ts} – Roster changed.`;
+        }
+
+        const primary = changes[0];
+        if (changes.length === 1) {
+          return `${ts} – ${primary}`;
+        }
+        return `${ts} – ${primary} (+ ${changes.length - 1} more change${changes.length - 1 !== 1 ? 's' : ''})`;
+      }
+
+      function enforceLogLimitBeforeAppend() {
+        try {
+          const approxBytes = JSON.stringify({ csvLog, summaryLog }).length;
+          if (approxBytes > logLimitBytes) {
+            csvLog = [];
+            summaryLog = [];
+            saveLogToStorage();
+            console.warn('[Roster] Logs cleared because they exceeded configured size limit.');
+          } else {
+            updateLogSizeLabel();
+          }
+        } catch (e) {
+          console.warn('[Roster] Failed to enforce log size limit:', e);
+        }
+      }
+
+      function applyFilters(rows, filters) {
+        if (!filters) return rows.slice();
+        const activeCols = Object.keys(filters).filter(k => (filters[k] || '').trim() !== '');
+        if (!activeCols.length) return rows.slice();
+        return rows.filter(row => {
+          for (const col of activeCols) {
+            const needle = (filters[col] || '').toLowerCase();
+            const value = (row[col] == null ? '' : String(row[col])).toLowerCase();
+            if (!value.includes(needle)) return false;
+          }
+          return true;
+        });
+      }
+
+      function applySort(rows, sortState, numericCols) {
+        const col = sortState && sortState.col;
+        const dir = sortState && sortState.dir === 'asc' ? 1 : -1;
+        if (!col) return rows.slice();
+        const numericSet = new Set(numericCols || []);
+        return rows.slice().sort((a, b) => {
+          let va = a[col];
+          let vb = b[col];
+          if (numericSet.has(col)) {
+            va = Number(va);
+            vb = Number(vb);
+            if (isNaN(va)) va = 0;
+            if (isNaN(vb)) vb = 0;
+          } else {
+            va = va == null ? '' : String(va);
+            vb = vb == null ? '' : String(vb);
+          }
+          if (va < vb) return -1 * dir;
+          if (va > vb) return 1 * dir;
+          return 0;
+        });
+      }
+
+      function buildSummaryTable() {
+        const container = document.getElementById('log-summary-table');
+        if (!container) return;
+
+        if (!summaryLog.length) {
+          container.innerHTML = '<p>— No summary entries —</p>';
+          return;
+        }
+
+        const columns = [
+          { key: 't',            label: 'Timestamp' },
+          { key: 'rooms',        label: 'Rooms' },
+          { key: 'participants', label: 'Participants' },
+          { key: 'senders',      label: 'Senders' },
+          { key: 'receivers',    label: 'Receivers' }
+        ];
+
+        const filtered = applyFilters(summaryLog, summaryFilters);
+        const sorted = applySort(filtered, summarySort, ['rooms', 'participants', 'senders', 'receivers']);
+
+        const table = document.createElement('table');
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+
+        columns.forEach((col) => {
+          const th = document.createElement('th');
+          th.dataset.col = col.key;
+          th.classList.add('sortable');
+          const indicator = summarySort.col === col.key
+            ? (summarySort.dir === 'asc' ? '▲' : '▼')
+            : '';
+          th.textContent = indicator ? (col.label + ' ' + indicator) : col.label;
+          th.addEventListener('click', () => {
+            if (summarySort.col === col.key) {
+              summarySort.dir = summarySort.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+              summarySort.col = col.key;
+              summarySort.dir = col.key === 't' ? 'desc' : 'asc';
+            }
+            buildSummaryTable();
+          });
+          headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+
+        const filterRow = document.createElement('tr');
+        filterRow.className = 'log-filter-row';
+        columns.forEach((col) => {
+          const th = document.createElement('th');
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.value = summaryFilters[col.key] || '';
+          input.placeholder = 'Filter';
+          input.dataset.filterCol = col.key;
+          input.addEventListener('input', (e) => {
+            summaryFilters[col.key] = e.target.value || '';
+            const cursorStart = e.target.selectionStart;
+            const cursorEnd = e.target.selectionEnd;
+            const activeCol = col.key;
+            buildSummaryTable();
+            const container2 = document.getElementById('log-summary-table');
+            if (container2) {
+              const replacement = container2.querySelector(
+                'tr.log-filter-row input[data-filter-col="' + activeCol + '"]'
+              );
+              if (replacement) {
+                replacement.focus();
+                try {
+                  if (cursorStart != null && cursorEnd != null) {
+                    replacement.selectionStart = cursorStart;
+                    replacement.selectionEnd = cursorEnd;
+                  }
+                } catch {}
+              }
+            }
+          });
+          th.appendChild(input);
+          filterRow.appendChild(th);
+        });
+        thead.appendChild(filterRow);
+
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        for (const row of sorted) {
+          const tr = document.createElement('tr');
+          columns.forEach(col => {
+            const td = document.createElement('td');
+            td.textContent = row[col.key];
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+
+        container.innerHTML = '';
+        container.appendChild(table);
+      }
+
+      function buildDetailTable() {
+        const container = document.getElementById('log-detail-table');
+        if (!container) return;
+
+        if (!csvLog.length) {
+          container.innerHTML = '<p>— No detail entries —</p>';
+          return;
+        }
+
+        const columns = [
+          { key: 't',    label: 'Timestamp' },
+          { key: 'room', label: 'Room' },
+          { key: 'role', label: 'Role' },
+          { key: 'id',   label: 'Member ID' }
+        ];
+
+        const filtered = applyFilters(csvLog, detailFilters);
+        const sorted = applySort(filtered, detailSort, []);
+
+        const table = document.createElement('table');
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+
+        columns.forEach((col) => {
+          const th = document.createElement('th');
+          th.dataset.col = col.key;
+          th.classList.add('sortable');
+          const indicator = detailSort.col === col.key
+            ? (detailSort.dir === 'asc' ? '▲' : '▼')
+            : '';
+          th.textContent = indicator ? (col.label + ' ' + indicator) : col.label;
+          th.addEventListener('click', () => {
+            if (detailSort.col === col.key) {
+              detailSort.dir = detailSort.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+              detailSort.col = col.key;
+              detailSort.dir = col.key === 't' ? 'desc' : 'asc';
+            }
+            buildDetailTable();
+          });
+          headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+
+        const filterRow = document.createElement('tr');
+        filterRow.className = 'log-filter-row';
+        columns.forEach((col) => {
+          const th = document.createElement('th');
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.value = detailFilters[col.key] || '';
+          input.placeholder = 'Filter';
+          input.dataset.filterCol = col.key;
+          input.addEventListener('input', (e) => {
+            detailFilters[col.key] = e.target.value || '';
+            const cursorStart = e.target.selectionStart;
+            const cursorEnd = e.target.selectionEnd;
+            const activeCol = col.key;
+            buildDetailTable();
+            const container2 = document.getElementById('log-detail-table');
+            if (container2) {
+              const replacement = container2.querySelector(
+                'tr.log-filter-row input[data-filter-col="' + activeCol + '"]'
+              );
+              if (replacement) {
+                replacement.focus();
+                try {
+                  if (cursorStart != null && cursorEnd != null) {
+                    replacement.selectionStart = cursorStart;
+                    replacement.selectionEnd = cursorEnd;
+                  }
+                } catch {}
+              }
+            }
+          });
+          th.appendChild(input);
+          filterRow.appendChild(th);
+        });
+        thead.appendChild(filterRow);
+
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        for (const row of sorted) {
+          const tr = document.createElement('tr');
+          columns.forEach(col => {
+            const td = document.createElement('td');
+            const val = row[col.key];
+            if ((col.key === 'role' || col.key === 'id') && !val) {
+              td.textContent = '-';
+            } else {
+              td.textContent = val != null ? val : '';
+            }
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+
+        container.innerHTML = '';
+        container.appendChild(table);
+      }
+
+      function renderLogModal() {
+        if (!logViewerBody) return;
+
+        if (!csvLog.length && !summaryLog.length) {
+          logViewerBody.innerHTML = '<p>— No log entries —</p>';
+          return;
+        }
+
+        let html = '';
+        html += '<h4>Summary (per fetch)</h4>';
+        html += '<div id="log-summary-table"></div>';
+        html += '<h4>Detail (per participant)</h4>';
+        html += '<div id="log-detail-table"></div>';
+        logViewerBody.innerHTML = html;
+
+        buildSummaryTable();
+        buildDetailTable();
+      }
+
+      function appendSnapshotToLog(data, shouldLog) {
+        if (!data) return;
+
+        const prevNorm = lastSnapshotNormalized;
+        const { canon, norm } = canonicalizeAndNormalizeData(data);
+
+        if (canon === lastSnapshotCanonical) {
+          return;
+        }
+
+        const timestamp = fmtTime();
+        const bannerMsg = describeRosterChange(prevNorm, norm, timestamp);
+        showRosterBanner(bannerMsg);
+
+        if (shouldLog) {
+          enforceLogLimitBeforeAppend();
+
+          const roomIds = Object.keys(data || {});
+          let totalParticipants = 0;
+          let totalSenders = 0;
+          let totalReceivers = 0;
+
+          for (const roomId of roomIds) {
+            const members = Array.isArray(data[roomId]) ? data[roomId] : [];
+            totalParticipants += members.length;
+
+            for (const m of members) {
+              const role = (m.role || '').toLowerCase();
+              if (role === 'sender') totalSenders++;
+              else totalReceivers++;
+
+              csvLog.push({
+                t: timestamp,
+                room: roomId,
+                id: m.id || '',
+                role
+              });
+            }
+          }
+
+          summaryLog.push({
+            t: timestamp,
+            rooms: roomIds.length,
+            participants: totalParticipants,
+            senders: totalSenders,
+            receivers: totalReceivers
+          });
+
+          saveLogToStorage();
+
+          if (logViewer.classList.contains('open')) {
+            renderLogModal();
+          }
+        }
+
+        lastSnapshotCanonical = canon;
+        lastSnapshotNormalized = norm;
+        try {
+          if (lastSnapshotCanonical) {
+            localStorage.setItem(STORAGE_KEY_LAST_CANON, lastSnapshotCanonical);
+          } else {
+            localStorage.removeItem(STORAGE_KEY_LAST_CANON);
+          }
+        } catch (e) {
+          console.warn('[Roster] Failed to persist canonical snapshot:', e);
+        }
+      }
+
+      function summarizeRoom(list) {
+        let senders=0, receivers=0;
+        for (const m of list) {
+          if ((m.role||'').toLowerCase() === 'sender') senders++;
+          else receivers++;
+        }
+        return { senders, receivers };
+      }
+
+      function shortId(id) {
+        if (!id) return '—';
+        if (id.length <= 14) return id;
+        return id.slice(0, 6) + '…' + id.slice(-6);
+      }
+
+      function render(data) {
+        grid.innerHTML = '';
+        const roomIds = Object.keys(data || {}).sort((a,b) => {
+          const na = Number(a), nb = Number(b);
+          if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+          return (''+a).localeCompare(''+b);
+        });
+
+        if (roomIds.length === 0) {
+          grid.innerHTML = `<div class="room" role="listitem"><div class="room-head">
+            <div class="room-title">No rooms</div>
+          </div><div class="bubbles" style="justify-content:center;color:var(--muted)">Roster is empty.</div></div>`;
+          return;
+        }
+
+        for (const roomId of roomIds) {
+          const members = Array.isArray(data[roomId]) ? data[roomId] : [];
+          const { senders, receivers } = summarizeRoom(members);
+
+          const card = document.createElement('div');
+          card.className = 'room';
+          card.setAttribute('role', 'listitem');
+          card.innerHTML = `
+            <div class="room-head">
+              <div class="room-title">Room ${roomId}</div>
+              <div class="counts">
+                <span class="count"><span class="dot sender" style="width:8px;height:8px;border-radius:50%"></span> ${senders} sender${senders!==1?'s':''}</span>
+                <span class="count"><span class="dot receiver" style="width:8px;height:8px;border-radius:50%"></span> ${receivers} receiver${receivers!==1?'s':''}</span>
+              </div>
+            </div>
+            <div class="bubbles"></div>
+            <div class="room-foot">
+              ${senders === 0 ? `<span class="warnline">⚠ No sender in this room</span>` : `<span></span>`}
+              <span>${members.length} participant${members.length!==1?'s':''}</span>
+            </div>
+          `;
+
+          const bubbles = card.querySelector('.bubbles');
+          for (const m of members) {
+            const role = (m.role || '').toLowerCase() === 'sender' ? 'sender' : 'receiver';
+            const node = document.createElement('div');
+            node.className = `node ${role}`;
+            node.innerHTML = `
+              <span class="badge-role" title="${role === 'sender' ? 'Sender' : 'Receiver'}">${role === 'sender' ? 'S' : 'R'}</span>
+              <span class="mono" title="${m.id || ''}">${shortId(m.id)}</span>
+            `;
+            node.addEventListener('click', () => {
+              if (!m.id) return;
+              navigator.clipboard?.writeText(m.id);
+            }, { passive: true });
+            bubbles.appendChild(node);
+          }
+
+          grid.appendChild(card);
+        }
+      }
+
+      async function fetchAndRender() {
+        const url = endpointInput.value.trim();
+        endpointView.textContent = url || '—';
+
+        if (!url) {
+          lastFetchOk = false;
+          statusMsg.textContent = 'Enter an endpoint to fetch.';
+          updateLiveDot();
+          return;
+        }
+
+        let data = null;
+
+        if (autoToggle.checked) {
+          setDotState('fetching');  // WHITE while fetch in progress
+        }
+
+        try {
+          const resp = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store' });
+          if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
+          data = await resp.json();
+          render(data);
+
+          lastFetchOk = true;
+
+          if (autoToggle.checked) {
+            statusMsg.textContent = 'Auto refresh ON (' + autoIntervalSec + 's).';
+          } else {
+            statusMsg.textContent = 'Auto refresh OFF – manual updates only.';
+          }
+
+          lastUpdated.textContent = fmtTime();
+        } catch (err) {
+          lastFetchOk = false;
+          statusMsg.textContent = 'Last error: ' + ((err && err.message) ? err.message : 'Fetch failed.');
+          console.error(err);
+        }
+
+        if (lastFetchOk && data) {
+          const shouldLog = autoToggle.checked && logEnabledCheckbox.checked;
+          appendSnapshotToLog(data, shouldLog);
+        }
+
+        updateLiveDot();
+      }
+
+      function startAuto() {
+        clearInterval(timer);
+        if (autoToggle.checked) {
+          statusMsg.textContent = 'Auto refresh ON (' + autoIntervalSec + 's).';
+          timer = setInterval(fetchAndRender, autoIntervalSec * 1000);
+        } else {
+          statusMsg.textContent = 'Auto refresh OFF – data may be out of date.';
+        }
+        updateLiveDot();
+      }
+
+      // ---- UI wiring ----
+      btnRefresh.addEventListener('click', fetchAndRender);
+      endpointInput.addEventListener('change', fetchAndRender);
+
+      autoToggle.addEventListener('change', () => {
+        startAuto();
+        if (autoToggle.checked) {
+          fetchAndRender();
+        } else {
+          lastFetchOk = false;
+          updateLiveDot();
+        }
+      });
+
+      autoIntervalInp.addEventListener('change', () => {
+        let v = parseInt(autoIntervalInp.value, 10);
+        if (isNaN(v) || v <= 0) v = 3;
+        if (v > 3600) v = 3600;
+        autoIntervalSec = v;
+        autoIntervalInp.value = autoIntervalSec;
+        try {
+          localStorage.setItem(STORAGE_KEY_INTERVAL, String(autoIntervalSec));
+        } catch {}
+        if (autoToggle.checked) {
+          startAuto();
+        }
+      });
+
+      logEnabledCheckbox.addEventListener('change', () => {
+        try {
+          localStorage.setItem(STORAGE_KEY_LOG_ON, logEnabledCheckbox.checked ? '1' : '0');
+        } catch {}
+      });
+
+      logLimitInput.addEventListener('change', () => {
+        let v = parseFloat(logLimitInput.value);
+        if (isNaN(v) || v < 0.1) v = 0.1;
+        if (v > 50) v = 50;
+        logLimitMb = v;
+        logLimitBytes = logLimitMb * 1024 * 1024;
+        logLimitInput.value = logLimitMb.toString();
+        try {
+          localStorage.setItem(STORAGE_KEY_LOG_MB, String(logLimitMb));
+        } catch {}
+        updateLogSizeLabel();
+      });
+
+      btnApply.addEventListener('click', () => {
+        try {
+          const json = JSON.parse(pasteArea.value || '{}');
+          render(json);
+          statusMsg.textContent = 'Rendered pasted JSON (local preview).';
+          lastUpdated.textContent = fmtTime();
+        } catch (e) {
+          statusMsg.textContent = 'Could not parse pasted JSON.';
+        }
+      });
+
+      btnSample.addEventListener('click', () => {
+        pasteArea.value = JSON.stringify({
+          "5":[
+            {"id":"72be92bf-1ef8-45b8-8a1c-c36a15c51810","role":"sender"},
+            {"id":"65c8b029-e59e-4ea7-b649-f4a1df770bb4","role":"receiver"},
+            {"id":"35bc66fe-0786-42ce-a805-58ad63c62752","role":"receiver"}
+          ],
+          "6":[{"id":"6599ebc7-db0c-4701-bf7a-d80599e8575b","role":"receiver"}]
+        }, null, 2);
+      });
+
+      btnExport.addEventListener('click', () => {
+        if (!csvLog.length) {
+          alert('No auto-refresh snapshots captured yet.\nLeave auto-refresh on (and logging enabled) to start logging.');
+          return;
+        }
+        const header = 'timestamp,room_id,member_id,role\n';
+        const lines = csvLog.map(row => {
+          return [row.t, row.room, row.id, row.role].map(val => {
+            const v = String(val ?? '').replace(/"/g, '""');
+            return '"' + v + '"';
+          }).join(',');
+        });
+        const csv = header + lines.join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const ts = fmtTime().replace(/[^\d]/g, '');
+        a.download = 'signaling-rooms-' + ts + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      });
+
+      btnLogClear.addEventListener('click', () => {
+        csvLog = [];
+        summaryLog = [];
+        lastSnapshotCanonical = null;
+        lastSnapshotNormalized = null;
+        try {
+          localStorage.removeItem(STORAGE_KEY_LAST_CANON);
+        } catch {}
+        saveLogToStorage();
+        statusMsg.textContent = 'Log cleared.';
+        if (logViewer.classList.contains('open')) {
+          renderLogModal();
+        }
+      });
+
+      btnLogView.addEventListener('click', () => {
+        if (!csvLog.length && !summaryLog.length) {
+          alert('No log entries yet.\nLeave auto-refresh on with logging enabled to start capturing history.');
+          return;
+        }
+        renderLogModal();
+        logViewer.classList.add('open');
+        logViewer.setAttribute('aria-hidden', 'false');
+      });
+
+      btnLogClose.addEventListener('click', () => {
+        logViewer.classList.remove('open');
+        logViewer.setAttribute('aria-hidden', 'true');
+      });
+
+      logViewer.addEventListener('click', (e) => {
+        if (e.target === logViewer) {
+          logViewer.classList.remove('open');
+          logViewer.setAttribute('aria-hidden', 'true');
+        }
+      });
+
+      // ---- Kick off ----
+      loadSettings();
+      loadLogFromStorage();
+      lastFetchOk = false;
+      updateLiveDot();
+      startAuto();
+      fetchAndRender();
+    })();
+  </script>
+</body>
+</html>
