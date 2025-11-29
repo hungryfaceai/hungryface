@@ -1,4 +1,5 @@
 // /hungryface/webrtc/shared/psk/room-scope.js
+// Derive a per-PSK namespace so that "Baby" on network A != "Baby" on network B.
 
 const NAMESPACE_MSG = new TextEncoder().encode('naptio-room-namespace-v1');
 
@@ -65,7 +66,7 @@ export function scopeRoomId(namespaceHex, uiName) {
  */
 export async function installRoomScope(env) {
   if (env.redirected) {
-    // Page is about to navigate away anyway; nothing to do.
+    // Page is about to navigate away; nothing to do.
     return { namespace: null, scope: (x) => x };
   }
 
@@ -75,6 +76,8 @@ export async function installRoomScope(env) {
 
   window.__naptioRoomNamespace = ns;
   window.__scopeRoom = scopeFn;
+
+  console.log('[room-scope] namespace =', ns, 'example scoped room =', scopeFn(env.room));
 
   return { namespace: ns, scope: scopeFn };
 }
