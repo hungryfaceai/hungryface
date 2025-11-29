@@ -182,13 +182,29 @@
       padding: 12px;
       display: grid; grid-template-rows: auto auto 1fr; gap: 10px;
       min-height: 160px;
+      min-width: 0;
     }
-
     .room-head {
-      display: flex; align-items: center; gap: 8px; justify-content: space-between;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      justify-content: space-between;
+      flex-wrap: wrap;   /* allow title + counts to wrap to new lines */
+      min-width: 0;      /* allow flex children to shrink properly */
     }
-    .room-title { font-weight: 700; font-size: 16px; letter-spacing: .2px; }
-    .counts { display: inline-flex; gap: 6px; }
+    .room-title {
+      font-weight: 700;
+      font-size: 16px;
+      letter-spacing: .2px;
+      min-width: 0;
+      overflow-wrap: anywhere; /* allow breaking inside long room ids */
+      word-break: break-word;  /* extra safety / older browsers */
+    }
+    .counts {
+      display: inline-flex;
+      gap: 6px;
+      flex-wrap: wrap;   /* counts can wrap instead of pushing out */
+    }
     .count {
       font-size: 11px; color: var(--muted);
       border: 1px dashed var(--ring); padding: 4px 8px; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px;
@@ -1423,17 +1439,22 @@
             <div class="room-head">
               <div class="room-title">Room ${roomId}</div>
               <div class="counts">
-                <span class="count"><span class="dot sender" style="width:8px;height:8px;border-radius:50%"></span> ${senders} sender${senders!==1?'s':''}</span>
-                <span class="count"><span class="dot receiver" style="width:8px;height:8px;border-radius:50%"></span> ${receivers} receiver${receivers!==1?'s':''}</span>
+                <span class="count">
+                  <span class="dot sender" style="width:8px;height:8px;border-radius:50%"></span>
+                  ${senders} sender${senders > 1 ? 's' : ''}
+                </span>
+                <span class="count">
+                  <span class="dot receiver" style="width:8px;height:8px;border-radius:50%"></span>
+                  ${receivers} receiver${receivers > 1 ? 's' : ''}
+                </span>
               </div>
             </div>
             <div class="bubbles"></div>
             <div class="room-foot">
               ${senders === 0 ? `<span class="warnline">⚠ No sender in this room</span>` : `<span></span>`}
-              <span>${members.length} participant${members.length!==1?'s':''}</span>
+              <span>${members.length} participant${members.length > 1 ? 's' : ''}</span>
             </div>
           `;
-
           const bubbles = card.querySelector('.bubbles');
           for (const m of members) {
             const role = (m.role || '').toLowerCase() === 'sender' ? 'sender' : 'receiver';
