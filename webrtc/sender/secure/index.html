@@ -792,8 +792,28 @@
           resolve();
         };
         sock.onmessage = onSignal;
+        /*
         sock.onerror = (e) => { console.warn('[WS error]', e); scheduleWSReconnect();};
         sock.onclose = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); stopWSHeartbeat(); ws = null; scheduleWSReconnect();};
+        */
+        //https://chatgpt.com/c/692a14f5-1a80-832b-b4ba-8fc1fe05fcf9
+        sock.onerror = (e) => {
+          console.warn('[WS error]', e);
+          // Close this socket; onclose will schedule the reconnect.
+          if (ws === sock &&
+              (sock.readyState === WebSocket.OPEN || sock.readyState === WebSocket.CONNECTING)) {
+            try { sock.close(); } catch {}
+          }
+          // ❌ Do NOT call scheduleWSReconnect() here anymore.
+        };
+        
+        sock.onclose = (e) => {
+          console.warn('[WS closed]', e.code, e.reason);
+          setStatus('Signaling: closed');
+          stopWSHeartbeat();
+          if (ws === sock) ws = null;
+          scheduleWSReconnect();
+        };
       });
     }
 
