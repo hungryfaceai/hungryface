@@ -270,6 +270,7 @@
   <script type="module">
     import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
     import { requirePskOrRedirect } from '/hungryface/webrtc/shared/psk/require-psk.js';
+    import { installRoomScope } from '/hungryface/webrtc/shared/psk/room-scope.js';
   
     const qs = new URLSearchParams(location.search);
     const preferRoom = (qs.get('room') || '').trim();
@@ -281,12 +282,17 @@
       fallbackRoom: 'Baby',
     });
   
-    // NEW: expose env + a safe re-install hook
+    // Expose env for other scripts
     window.__pskEnv = env;
-    window.__installPskForRoom = (room) => {
+  
+    // 🔑 Derive namespace + scoped room helper from env.tokenB64u
+    await installRoomScope(env);
+  
+    // PSK shim stays keyed by the *UI room label*, not the scoped id
+    window.__installPskForRoom = (roomLabel) => {
       try { window.__pskUndo?.(); } catch {}
-      window.__pskUndo = installPskShim({ room });
-      console.log('[PSK][sender] shim installed for room:', room);
+      window.__pskUndo = installPskShim({ room: roomLabel });
+      console.log('[PSK][sender] shim installed for room label:', roomLabel);
     };
   
     if (env.redirected) {
@@ -301,7 +307,16 @@
     import { listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
-
+    // UI room = label in dropdown (e.g. "Baby")
+    // Scoped room = namespace:slug, derived from PSK token
+    const currentUiRoom = () =>
+      ((roomSel?.value || roomSel?.options?.[0]?.value || 'Baby') + '').trim();
+    function scopeRoom(uiRoom) {
+      if (typeof window.__scopeRoom === 'function') {
+        return window.__scopeRoom(uiRoom);
+      }
+      return uiRoom;
+    }
     const TASKS_URL  = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     const WASM_DIR   = TASKS_URL + "/wasm";
     const AUDIO_TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0";
@@ -614,7 +629,7 @@
     }
 
     const setStatus = (t) => { statusEl.textContent = t; if (LOG.status) console.log('[STATUS]', t); };
-    const currentRoom = () => ((roomSel?.value || roomSel?.options?.[0]?.value || 'Baby') + '').trim();
+    //const currentRoom = () => ((roomSel?.value || roomSel?.options?.[0]?.value || 'Baby') + '').trim();
     const isFront = () => (cameraSel.value === 'user');
 
     function updateMirrorClass() {
@@ -771,42 +786,45 @@
     });
     cameraSel.addEventListener('change', () => { updateMirrorClass(); beginViewportSettle(); });
 
-    function connectWS(room) {
+    function connectWS(uiRoom) {
       return new Promise((resolve, reject) => {
-        const url = `${WS_ENDPOINT}?room=${encodeURIComponent(room)}`;
+        const signalRoom = scopeRoom(uiRoom);  // <-- derive PSK-scoped id
+    
+        const url = `${WS_ENDPOINT}?room=${encodeURIComponent(signalRoom)}`;
         setStatus('Connecting to signaling…');
         const sock = new WebSocket(url);
         ws = sock;
-
+    
         let opened = false;
         const t = setTimeout(() => {
-          if (!opened) { try { sock.close(); } catch{}; setStatus('Signaling: timeout'); reject(new Error('WS timeout')); }
+          if (!opened) {
+            try { sock.close(); } catch {}
+            setStatus('Signaling: timeout');
+            reject(new Error('WS timeout'));
+          }
         }, 15000);
-
+    
         sock.onopen = () => {
           opened = true; clearTimeout(t);
           setStatus('Signaling: connected');
-          send({ type: 'join', room, role: 'sender' });
+    
+          // Join using the scoped room id
+          send({ type: 'join', room: signalRoom, role: 'sender' });
           send({ type: 'need-offer' }); // nudge any already-open receivers
           startWSHeartbeat();
           resolve();
         };
+    
         sock.onmessage = onSignal;
-        /*
-        sock.onerror = (e) => { console.warn('[WS error]', e); scheduleWSReconnect();};
-        sock.onclose = (e) => { console.warn('[WS closed]', e.code, e.reason); setStatus('Signaling: closed'); stopWSHeartbeat(); ws = null; scheduleWSReconnect();};
-        */
-        //https://chatgpt.com/c/692a14f5-1a80-832b-b4ba-8fc1fe05fcf9
+    
         sock.onerror = (e) => {
           console.warn('[WS error]', e);
-          // Close this socket; onclose will schedule the reconnect.
           if (ws === sock &&
               (sock.readyState === WebSocket.OPEN || sock.readyState === WebSocket.CONNECTING)) {
             try { sock.close(); } catch {}
           }
-          // ❌ Do NOT call scheduleWSReconnect() here anymore.
         };
-        
+            
         sock.onclose = (e) => {
           console.warn('[WS closed]', e.code, e.reason);
           setStatus('Signaling: closed');
@@ -831,7 +849,7 @@
       wsReconnectTimer = setTimeout(async () => {
         wsReconnectTimer = null;
         try {
-          await connectWS(currentRoom());   // rejoin room
+          await connectWS(currentUiRoom());   // rejoin with same UI label
           send({ type: 'need-offer' });     // nudge any receivers
         } catch (e) {
           // backoff and try again
@@ -1180,7 +1198,7 @@
         startBtn.disabled = true;
 
         updateMirrorClass();
-        const room = currentRoom();
+        const uiRoom = currentUiRoom();   // <-- UI label
         setStatus('Starting camera…');
         localStream = await getMedia();
         localVideo.srcObject = localStream;
@@ -1190,9 +1208,9 @@
         beginPreviewWindow(Number(previewMinsInput.value) || 1);
         // Make sure the PSK shim is installed for the selected room before signaling
         if (typeof window.__installPskForRoom === 'function') {
-          window.__installPskForRoom(room);
+          window.__installPskForRoom(uiRoom);
         }
-        await connectWS(room);
+        await connectWS(uiRoom);
         started = true;
         startBtn.textContent = 'Stop streaming';
         startBtn.disabled = false;
