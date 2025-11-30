@@ -116,11 +116,12 @@
     import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
     import { requirePskOrRedirect, listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
     import { ReceiverCore } from '/hungryface/webrtc/receiver/shared/receiver-core.js';
+    import { installRoomScope } from '/hungryface/webrtc/shared/psk/room-scope.js'; 
   
     /* ---------- Resolve room (aligned with Settings) ---------- */
     const qs = new URLSearchParams(location.search);
     const qsRoom = (qs.get('room') || '').trim();
-  
+    
     const env = await requirePskOrRedirect({
       intent: 'viewer',
       pairRoute: '/hungryface/webrtc/pairpsk/',
@@ -128,10 +129,16 @@
       fallbackRoom: 'Baby',
     });
   
+    // Expose env (optional, for debugging/other pages)
+    window.__pskEnv = env;
+    
     if (env.redirected) {
       console.log('[PSK][viewer] no PSK found → redirecting to Pair Devices…');
     }
-
+  
+    // 🔹 Derive PSK-based namespace + window.__scopeRoom(uiName)
+    await installRoomScope(env);
+  
     // Don't start the receiver if we're going to the pairing page
     if (!env.redirected) {
       const rooms     = listValidPskRooms();
@@ -153,15 +160,24 @@
         // defensive fallback – normally requirePskOrRedirect ensures we have a valid room
         : (envRoom || qsRoom || 'Baby');
     
+      // 🔹 Persist the UI label (not the scoped ID)
       try { localStorage.setItem('bm_receiver_room', resolvedRoom); } catch {}
       try { localStorage.setItem('naptio:lastRoom',  resolvedRoom); } catch {}
     
+      // 🔹 Split "UI room label" vs "signaling room"
+      const uiRoom = resolvedRoom;  // e.g. "Baby"
+      const scopedRoom =
+        (typeof window.__scopeRoom === 'function')
+          ? window.__scopeRoom(uiRoom)   // e.g. "a1b2c3d4e5f6a7b8:baby"
+          : uiRoom;
+    
       const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
-      const room = resolvedRoom;                 // ⬅️ single source of truth for this page
+      const room = scopedRoom;                 // ⬅️ signaling room used by ReceiverCore
       const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
     
-      const undo = installPskShim({ room });
-      console.log('[PSK][viewer] using PSK for room:', room);
+      // 🔹 IMPORTANT: PSK shim stays keyed by the *UI label* (so getPsk('Baby') still works)
+      const undo = installPskShim({ room: uiRoom });
+      console.log('[PSK][viewer] using PSK for UI room:', uiRoom, 'scoped signaling room:', room);
     
       /* ---------- DOM ---------- */
       const stage = document.getElementById('stage');
