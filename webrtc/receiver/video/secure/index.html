@@ -191,13 +191,74 @@
       const lullabyBtn = document.getElementById('lullabyBtn');
   
       /* ---------- Status overlay ---------- */
+      const SIGNALING_CONNECTED_STATUS = 'Signaling: connected';
       let hideStatusTimer = null;
-      function showStatus(msg) {
-        statusEl.textContent = msg;
+      // timers for the special "Signaling: connected" behaviour
+      let signalingInitialTimer   = null;
+      let signalingFlashTimer     = null;
+      let signalingRepeatInterval = null;
+      let signalingConnectedActive = false;
+
+      function stopSignalingConnectedTimers() {
+        signalingConnectedActive = false;
+        if (signalingInitialTimer)   { clearTimeout(signalingInitialTimer);   signalingInitialTimer = null; }
+        if (signalingFlashTimer)     { clearTimeout(signalingFlashTimer);     signalingFlashTimer = null; }
+        if (signalingRepeatInterval) { clearInterval(signalingRepeatInterval); signalingRepeatInterval = null; }
+      }
+
+      function startSignalingConnectedTimers() {
+        // reset any previous schedule
+        stopSignalingConnectedTimers();
+        signalingConnectedActive = true;
+        // 1) show immediately
+        statusEl.textContent = SIGNALING_CONNECTED_STATUS;
         overlay.classList.remove('hidden');
+        // 2) hide after 10 seconds (initial display)
+        signalingInitialTimer = setTimeout(() => {
+          signalingInitialTimer = null;
+          if (!signalingConnectedActive) return;
+          // only hide if nothing else has replaced the status
+          if (statusEl.textContent === SIGNALING_CONNECTED_STATUS) {
+            overlay.classList.add('hidden');
+          }
+        }, 10_000);
+        // 3) every minute, flash for 2 seconds
+        signalingRepeatInterval = setInterval(() => {
+          if (!signalingConnectedActive) return;
+          // avoid clobbering other important messages
+          if (!overlay.classList.contains('hidden') &&
+              statusEl.textContent &&
+              statusEl.textContent !== SIGNALING_CONNECTED_STATUS) {
+            return;
+          }
+          statusEl.textContent = SIGNALING_CONNECTED_STATUS;
+          overlay.classList.remove('hidden');
+          if (signalingFlashTimer) clearTimeout(signalingFlashTimer);
+          signalingFlashTimer = setTimeout(() => {
+            signalingFlashTimer = null;
+            if (!signalingConnectedActive) return;
+            if (statusEl.textContent === SIGNALING_CONNECTED_STATUS) {
+              overlay.classList.add('hidden');
+            }
+          }, 2_000);
+        }, 60_000);
+      }
+
+      function showStatus(msg) {
+        // Special behaviour only for the exact "Signaling: connected" string
+        if (msg === SIGNALING_CONNECTED_STATUS) {
+          startSignalingConnectedTimers();
+          return;
+        }
+        // Any other status → cancel special schedule and behave normally
+        stopSignalingConnectedTimers();
+        statusEl.textContent = msg;
         if (msg === 'Connected') {
+          overlay.classList.remove('hidden');
           if (hideStatusTimer) clearTimeout(hideStatusTimer);
-          hideStatusTimer = setTimeout(() => overlay.classList.add('hidden'), STATUS_HIDE_AFTER_CONNECTED_MS);
+          hideStatusTimer = setTimeout(() => {
+            overlay.classList.add('hidden');
+          }, 10_000);
         } else {
           if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
           overlay.classList.remove('hidden');
