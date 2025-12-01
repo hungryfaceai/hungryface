@@ -528,6 +528,7 @@
     const LS_SUPINE_KEY = "naptio:face-prone-supine:" + room;
 
     const STATUS_HIDE_MS = 3000;
+    const SIGNALING_CONNECTED_STATUS = 'Signaling: connected';
 
     // MediaPipe assets
     const TASKS_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
@@ -907,11 +908,65 @@
 
     /* ---------- Status overlay ---------- */
     let hideStatusTimer = null;
+
+    // Special timers for "Signaling: connected"
+    let signalingInitialTimer   = null;
+    let signalingFlashTimer     = null;
+    let signalingRepeatInterval = null;
+    let signalingConnectedActive = false;
+
+    function stopSignalingConnectedTimers() {
+      signalingConnectedActive = false;
+      if (signalingInitialTimer)   { clearTimeout(signalingInitialTimer);   signalingInitialTimer = null; }
+      if (signalingFlashTimer)     { clearTimeout(signalingFlashTimer);     signalingFlashTimer = null; }
+      if (signalingRepeatInterval) { clearInterval(signalingRepeatInterval); signalingRepeatInterval = null; }
+    }
+
+    function startSignalingConnectedTimers() {
+      stopSignalingConnectedTimers();
+      if (hideStatusTimer) { clearTimeout(hideStatusTimer); hideStatusTimer = null; }
+      signalingConnectedActive = true;
+      statusEl.textContent = SIGNALING_CONNECTED_STATUS;
+      overlay.classList.remove('hidden');
+
+      signalingInitialTimer = setTimeout(() => {
+        signalingInitialTimer = null;
+        if (!signalingConnectedActive) return;
+        if (statusEl.textContent === SIGNALING_CONNECTED_STATUS) {
+          overlay.classList.add('hidden');
+        }
+      }, 10_000);
+
+      signalingRepeatInterval = setInterval(() => {
+        if (!signalingConnectedActive) return;
+        // Don’t stomp on other visible important messages
+        if (!overlay.classList.contains('hidden') &&
+            statusEl.textContent &&
+            statusEl.textContent !== SIGNALING_CONNECTED_STATUS) {
+          return;
+        }
+        statusEl.textContent = SIGNALING_CONNECTED_STATUS;
+        overlay.classList.remove('hidden');
+        if (signalingFlashTimer) clearTimeout(signalingFlashTimer);
+        signalingFlashTimer = setTimeout(() => {
+          signalingFlashTimer = null;
+          if (!signalingConnectedActive) return;
+          if (statusEl.textContent === SIGNALING_CONNECTED_STATUS) {
+            overlay.classList.add('hidden');
+          }
+        }, 2_000);
+      }, 60_000);
+    }
+
     function showStatus(msg) {
+      console.log('[STATUS]', msg);
+      if (msg === SIGNALING_CONNECTED_STATUS) {
+        startSignalingConnectedTimers();
+        return;
+      }
+      stopSignalingConnectedTimers();
       statusEl.textContent = msg;
       overlay.classList.remove('hidden');
-      console.log('[STATUS]', msg);
-    
       if (hideStatusTimer) clearTimeout(hideStatusTimer);
       hideStatusTimer = setTimeout(() => {
         overlay.classList.add('hidden');
@@ -1593,8 +1648,10 @@
     window.addEventListener('beforeunload', () => {
       try { core?.stop?.(); } catch {}
       if (hideStatusTimer) clearTimeout(hideStatusTimer);
+      stopSignalingConnectedTimers();
       stopReceiverFaceLoop();
     });
+
 
     // Settings init
     applySettingsToUI();
