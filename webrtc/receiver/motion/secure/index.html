@@ -315,6 +315,7 @@
   <script type="module">
     import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
     import { requirePskOrRedirect, listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
+    import { installRoomScope } from '/hungryface/webrtc/shared/psk/room-scope.js';
   
     const qs = new URLSearchParams(location.search);
     const qsRoom = (qs.get('room') || '').trim();
@@ -326,6 +327,9 @@
       preferRoom: qsRoom,
       fallbackRoom: 'Baby',
     });
+
+    // Install PSK-based room scoping helper (namespacing) once we know the env
+    await installRoomScope(env);
   
     if (env.redirected) {
       console.log('[PSK][receiver-motion] redirecting to Pair Devices…');
@@ -350,26 +354,49 @@
           )
         // Defensive fallback if list is empty
         : (envRoom || qsRoom || 'Baby');
+
+      const uiRoom =
+        (resolvedRoom && resolvedRoom.trim())
+          ? resolvedRoom.trim()
+          : 'Baby';
+
+      const scopedRoom =
+        (typeof window.__scopeRoom === 'function')
+          ? window.__scopeRoom(uiRoom)
+          : uiRoom;
   
-      // Persist for future pages (Settings / other receivers)
-      try { localStorage.setItem('bm_receiver_room', resolvedRoom); } catch {}
-      try { localStorage.setItem('naptio:lastRoom',  resolvedRoom); } catch {}
+      // Persist UI label for future pages (Settings / other receivers)
+      try { localStorage.setItem('bm_receiver_room', uiRoom); } catch {}
+      try { localStorage.setItem('naptio:lastRoom',  uiRoom); } catch {}
   
-      // Install PSK shim for that same room
-      const undo = installPskShim({ room: resolvedRoom });
-      console.log('[PSK][receiver-motion] using PSK for room:', resolvedRoom);
+      // Install PSK shim keyed by the UI room label
+      const undo = installPskShim({ room: uiRoom });
+      console.log('[PSK][receiver-motion] UI room:', uiRoom, 'scoped signaling room:', scopedRoom);
   
       // Expose env + helpers in case other code (e.g. mini-dashboard) wants them
-      window.__pskEnv  = env;
-      window.__pskRoom = resolvedRoom;
-      window.__pskUndo = undo;
-      window.__installPskForRoom = (room) => {
+      window.__pskEnv      = env;
+      window.__pskRoom     = uiRoom;      // backward-compat alias for UI room
+      window.__uiRoom      = uiRoom;      // explicit UI label
+      window.__scopedRoom  = scopedRoom;  // PSK-scoped signaling room ID
+      window.__pskUndo     = undo;
+      window.__installPskForRoom = (roomLabel) => {
+        const label = (roomLabel || '').trim() || 'Baby';
+        const scoped =
+          (typeof window.__scopeRoom === 'function')
+            ? window.__scopeRoom(label)
+            : label;
+
         try { window.__pskUndo?.(); } catch {}
-        window.__pskUndo = installPskShim({ room });
-        console.log('[PSK][receiver-motion] shim re-installed for room:', room);
+        window.__pskUndo = installPskShim({ room: label });
+        console.log('[PSK][receiver-motion] shim re-installed for room:', label, 'scoped:', scoped);
+
+        window.__pskRoom    = label;
+        window.__uiRoom     = label;
+        window.__scopedRoom = scoped;
+
         try {
-          localStorage.setItem('bm_receiver_room', room);
-          localStorage.setItem('naptio:lastRoom',  room);
+          localStorage.setItem('bm_receiver_room', label);
+          localStorage.setItem('naptio:lastRoom',  label);
         } catch {}
       };
     }
@@ -386,7 +413,8 @@
 
     /* ---------- Constants ---------- */
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
-    const room = window.__pskRoom || "Baby";
+    const uiRoom = window.__uiRoom || window.__pskRoom || "Baby";
+    const room   = window.__scopedRoom || uiRoom;
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
     // live-pose gating
@@ -1058,9 +1086,9 @@
         }
       }
 
-// While moving, accumulate integrator score for an avg across the episode
-if (moving) { _motionSum += intScore; _motionCount++; }
-// ==== /Alerts integration ====
+      // While moving, accumulate integrator score for an avg across the episode
+      if (moving) { _motionSum += intScore; _motionCount++; }
+      // ==== /Alerts integration ====
 
 
       if (!moving && baseLm) {
