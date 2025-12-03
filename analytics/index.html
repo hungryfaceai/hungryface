@@ -203,7 +203,7 @@
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
       <label>
         <input type="checkbox" id="geoEnabled" />
-        Enable IP geolocation lookups
+        Enable geolocation lookups
       </label>
     </div>
     <div id="map"></div>
@@ -222,7 +222,6 @@
 
     const ANALYTICS_BASE = 'https://signaling-server-f5gu.onrender.com/a';
 
-    // Table column definitions
     const COLUMNS = [
       { key: 'ts',        label: 'Time' },
       { key: 'feature',   label: 'Feature' },
@@ -236,7 +235,6 @@
       { key: 'device',    label: 'Device' }, // derived from UA
     ];
 
-    // Load events + maxEvents from localStorage
     let events = [];
     try {
       events = JSON.parse(localStorage.getItem(STORAGE_KEY_EVENTS) || '[]');
@@ -315,7 +313,6 @@
     }
 
     function getDisplayEvents() {
-      // decorate + filter + sort
       let arr = events.map(e => ({
         ...e,
         device: formatDevice(e.ua),
@@ -521,7 +518,6 @@
       const data = getDisplayEvents();
       const rows = data.slice(-200).reverse(); // last 200
 
-      // sort indicators
       const headerRow = theadEl.querySelector('tr');
       const ths = headerRow ? headerRow.querySelectorAll('th') : [];
       ths.forEach(th => {
@@ -586,8 +582,7 @@
         console.warn('Leaflet not loaded, map will not work');
         return;
       }
-      // Default world view
-      map = L.map('map').setView([20, 0], 2);
+      map = L.map('map').setView([20, 0], 2); // world view
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 18,
         attribution: '&copy; OpenStreetMap contributors'
@@ -596,7 +591,7 @@
     }
 
     async function getGeoForIp(ip) {
-      if (!geoEnabled) return null; // respect toggle; no API calls when off
+      if (!geoEnabled) return null; // no external calls if disabled
       if (!ip || ip === '::1') return null;
       if (geoCache[ip]) return geoCache[ip];
       try {
@@ -630,15 +625,12 @@
       initMapIfNeeded();
       if (!map || !mapLayer) return;
 
-      // Always clear markers; we redraw them based on current toggle and events
       mapLayer.clearLayers();
 
       if (!geoEnabled) {
-        // Geolocation disabled: keep base map only, no markers.
-        return;
+        return; // keep base map; no markers
       }
 
-      // Aggregate by IP
       const ipStats = {};
       for (const e of events) {
         const ip = e.ip_full;
@@ -671,8 +663,7 @@
           .addTo(mapLayer)
           .bindPopup(popupHtml);
       }
-
-      // Note: we do NOT change center/zoom here, so user zoom/pan is preserved.
+      // No fitBounds here -> your zoom/pan are preserved
     }
 
     function rerender() {
@@ -699,10 +690,7 @@
         renderSummaryView();
       } else if (view === 'map') {
         renderMap().then(() => {
-          // Ensure map tiles/layout update after becoming visible
-          if (map) {
-            setTimeout(() => map.invalidateSize(), 0);
-          }
+          if (map) setTimeout(() => map.invalidateSize(), 0);
         });
       }
     }
@@ -733,17 +721,14 @@
     });
 
     document.getElementById('downloadCsv').addEventListener('click', () => {
-      const data = getDisplayEvents(); // respects current filters + sort
+      const data = getDisplayEvents();
 
       const headerKeys   = COLUMNS.map(c => c.key);
       const headerLabels = COLUMNS.map(c => c.label);
 
       const lines = [];
-
-      // header
       lines.push(headerLabels.map(escapeCsv).join(','));
 
-      // rows
       for (const row of data) {
         const line = headerKeys.map(key => {
           const v = row[key];
@@ -770,16 +755,11 @@
 
     geoCheckbox.addEventListener('change', () => {
       geoEnabled = geoCheckbox.checked;
-      save(); // persist toggle
-      if (!mapLayer) {
-        // map not initialised yet; nothing to clear
-        return;
-      }
+      save();
+      if (!mapLayer) return;
       if (!geoEnabled) {
-        // Turn off markers immediately, keep user zoom
         mapLayer.clearLayers();
       } else {
-        // Re-render markers using current events
         renderMap();
       }
     });
@@ -794,7 +774,7 @@
       try {
         const row = JSON.parse(ev.data);
         addEvent(row);
-        rerender(); // updates cards + current view (logs/summary/map)
+        rerender();
       } catch (e) {
         console.error('Bad event', e);
       }
