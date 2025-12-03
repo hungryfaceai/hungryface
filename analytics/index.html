@@ -426,6 +426,38 @@
       };
     }
 
+    // Country summary using IP geolocation
+    async function computeCountrySummary() {
+      if (!geoEnabled) return [];
+      const countryToInstalls = new Map();
+      const ipToCountry = new Map();
+
+      for (const e of events) {
+        const ip = e.ip_full;
+        if (!ip) continue;
+
+        let country = ipToCountry.get(ip);
+        if (country === undefined) {
+          const geo = await getGeoForIp(ip);
+          country = geo && geo.country ? geo.country : null;
+          ipToCountry.set(ip, country);
+        }
+        if (!country) continue;
+
+        if (!countryToInstalls.has(country)) {
+          countryToInstalls.set(country, new Set());
+        }
+        countryToInstalls.get(country).add(e.installId);
+      }
+
+      const list = [...countryToInstalls.entries()].map(([country, set]) => ({
+        country,
+        users: set.size,
+      })).sort((a, b) => b.users - a.users || a.country.localeCompare(b.country));
+
+      return list;
+    }
+
     function escapeCsv(value) {
       if (value == null) return '';
       const s = String(value);
@@ -546,13 +578,27 @@
       `).join('');
     }
 
-    function renderSummaryView() {
+    async function renderSummaryView() {
       const s = computeSummary();
+      const countries = geoEnabled ? await computeCountrySummary() : [];
+
       const fmtList = (items) => items.length
         ? items.map(it =>
             `<li><span class="key">${it.key}</span><span class="val">${it.val}</span></li>`
           ).join('')
         : '<li><span class="key">—</span></li>';
+
+      const fmtCountryList = () => {
+        if (!geoEnabled) {
+          return '<li><span class="key">Geolocation disabled</span></li>';
+        }
+        if (!countries.length) {
+          return '<li><span class="key">No country data yet</span></li>';
+        }
+        return countries.map(c =>
+          `<li><span class="key">${c.country}</span><span class="val">${c.users}</span></li>`
+        ).join('');
+      };
 
       summaryContentEl.innerHTML = `
         <div class="summary-grid">
@@ -571,6 +617,10 @@
           <div class="summary-section">
             <h2>Devices</h2>
             <ul>${fmtList(s.topDevices)}</ul>
+          </div>
+          <div class="summary-section">
+            <h2>Countries (unique installs)</h2>
+            <ul>${fmtCountryList()}</ul>
           </div>
         </div>
       `;
@@ -761,6 +811,11 @@
         mapLayer.clearLayers();
       } else {
         renderMap();
+        // also refresh summary so countries section updates
+        const activeView = document.querySelector('.view.view-active');
+        if (activeView && activeView.id === 'view-summary') {
+          renderSummaryView();
+        }
       }
     });
 
