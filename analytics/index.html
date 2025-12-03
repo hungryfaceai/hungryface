@@ -200,6 +200,12 @@
 
   <!-- Map view -->
   <div id="view-map" class="view">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <label>
+        <input type="checkbox" id="geoEnabled" />
+        Enable IP geolocation lookups
+      </label>
+    </div>
     <div id="map"></div>
     <p class="muted">
       Locations are approximate based on IP geolocation and may be inaccurate.
@@ -211,6 +217,7 @@
     // ---------- config / state ----------
     const STORAGE_KEY_EVENTS = 'naptioAnalyticsEvents';
     const STORAGE_KEY_MAX    = 'naptioAnalyticsMaxEvents';
+    const STORAGE_KEY_GEO    = 'naptioAnalyticsGeoEnabled';
     const MAX_EVENTS_DEFAULT = 5000; // for <100 installs, 5k events is plenty
 
     const ANALYTICS_BASE = 'https://signaling-server-f5gu.onrender.com/a';
@@ -242,6 +249,14 @@
       return Number.isFinite(n) && n > 0 ? n : MAX_EVENTS_DEFAULT;
     })();
 
+    // Geo toggle (default ON if not set)
+    let geoEnabled = (() => {
+      const raw = localStorage.getItem(STORAGE_KEY_GEO);
+      if (raw === '0') return false;
+      if (raw === '1') return true;
+      return true;
+    })();
+
     let sortKey = 'ts';
     let sortDir = 'desc';
     const filters = {};
@@ -264,6 +279,7 @@
       try {
         localStorage.setItem(STORAGE_KEY_EVENTS, JSON.stringify(events));
         localStorage.setItem(STORAGE_KEY_MAX, String(maxEvents));
+        localStorage.setItem(STORAGE_KEY_GEO, geoEnabled ? '1' : '0');
       } catch (e) {
         console.warn('localStorage full or blocked', e);
       }
@@ -428,6 +444,7 @@
     const theadEl = tableEl.querySelector('thead');
     const tbodyEl = tableEl.querySelector('tbody');
     const summaryContentEl = document.getElementById('summaryContent');
+    const geoCheckbox = document.getElementById('geoEnabled');
 
     function buildTableHeader() {
       const headerRow = document.createElement('tr');
@@ -579,6 +596,7 @@
     }
 
     async function getGeoForIp(ip) {
+      if (!geoEnabled) return null; // respect toggle; no API calls when off
       if (!ip || ip === '::1') return null;
       if (geoCache[ip]) return geoCache[ip];
       try {
@@ -612,8 +630,13 @@
       initMapIfNeeded();
       if (!map || !mapLayer) return;
 
-      // Don't recreate the map; just update markers.
+      // Always clear markers; we redraw them based on current toggle and events
       mapLayer.clearLayers();
+
+      if (!geoEnabled) {
+        // Geolocation disabled: keep base map only, no markers.
+        return;
+      }
 
       // Aggregate by IP
       const ipStats = {};
@@ -691,6 +714,8 @@
     const maxEventsInput = document.getElementById('maxEventsInput');
     maxEventsInput.value = String(maxEvents);
 
+    geoCheckbox.checked = geoEnabled;
+
     document.getElementById('applyMaxEvents').addEventListener('click', () => {
       const n = parseInt(maxEventsInput.value, 10);
       if (!Number.isFinite(n) || n <= 0) return;
@@ -741,6 +766,22 @@
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    });
+
+    geoCheckbox.addEventListener('change', () => {
+      geoEnabled = geoCheckbox.checked;
+      save(); // persist toggle
+      if (!mapLayer) {
+        // map not initialised yet; nothing to clear
+        return;
+      }
+      if (!geoEnabled) {
+        // Turn off markers immediately, keep user zoom
+        mapLayer.clearLayers();
+      } else {
+        // Re-render markers using current events
+        renderMap();
+      }
     });
 
     // ---------- initial render ----------
