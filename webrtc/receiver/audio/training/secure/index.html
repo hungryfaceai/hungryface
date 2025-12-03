@@ -399,78 +399,115 @@
   <!-- Load the external Help HTML (injected at runtime) -->
   <script type="module" src="./help-sheet.js"></script>
 
-	<!-- ⬇️ PSK bootstrap (viewer); resolves room using the same logic as Settings and installs shim -->
-	<script type="module">
-	  import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
-	  import { requirePskOrRedirect, listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
-	
-	  const qs = new URLSearchParams(location.search);
-	  const qsRoom = (qs.get('room') || '').trim();
-	
-	  // Ensure we have a PSK; if not, redirect to pairing
-	  const env = await requirePskOrRedirect({
-	    intent: 'viewer',
-	    pairRoute: '/hungryface/webrtc/pairpsk/',
-	    preferRoom: qsRoom,
-	    fallbackRoom: 'Baby',
-	  });
-	
-	  if (env.redirected) {
-	    console.log('[PSK][receiver-audio-training] redirecting to Pair Devices…');
-	  } else {
-	    const rooms     = listValidPskRooms();
-	    const lastRoom  = (localStorage.getItem('naptio:lastRoom') || '').trim();
-	    const persisted = (localStorage.getItem('bm_receiver_room') || '').trim();
-	    const envRoom   = (env.room || '').trim();
-	
-	    const uniq = new Set(rooms);
-	    if (envRoom) uniq.add(envRoom);
-	
-	    // Same priority chain as Settings:
-	    // ?room → lastRoom → bm_receiver_room → env.room → first available
-	    const resolvedRoom = uniq.size
-	      ? (
-	          (qsRoom    && uniq.has(qsRoom)    && qsRoom)    ||
-	          (lastRoom  && uniq.has(lastRoom)  && lastRoom)  ||
-	          (persisted && uniq.has(persisted) && persisted) ||
-	          envRoom ||
-	          Array.from(uniq)[0]
-	        )
-	      // Defensive fallback if list is empty
-	      : (envRoom || qsRoom || 'Baby');
-	
-	    // Persist for future pages (Settings / other receivers)
-	    try { localStorage.setItem('bm_receiver_room', resolvedRoom); } catch {}
-	    try { localStorage.setItem('naptio:lastRoom',  resolvedRoom); } catch {}
-	
-	    // Install PSK shim for that same room
-	    const undo = installPskShim({ room: resolvedRoom });
-	    console.log('[PSK][receiver-audio-training] using PSK for room:', resolvedRoom);
-	
-	    // Expose env + helpers in case other code (e.g. mini-dashboard) wants them
-	    window.__pskEnv  = env;
-	    window.__pskRoom = resolvedRoom;
-	    window.__pskUndo = undo;
-	    window.__installPskForRoom = (room) => {
-	      try { window.__pskUndo?.(); } catch {}
-	      window.__pskUndo = installPskShim({ room });
-	      console.log('[PSK][receiver-audio-training] shim re-installed for room:', room);
-	      try {
-	        localStorage.setItem('bm_receiver_room', room);
-	        localStorage.setItem('naptio:lastRoom',  room);
-	      } catch {}
-	    };
-	  }
-	</script>
-  
-  <script type="module">
-    /* ========= NEW: WebRTC (ReceiverCore) ========= */
-    import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
+<!-- ⬇️ PSK bootstrap (viewer) + PSK-scoped signaling room -->
+<script type="module">
+  import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+  import { requirePskOrRedirect, listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
+  import { installRoomScope } from '/hungryface/webrtc/shared/psk/room-scope.js';
 
-    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
-	function getRoom() {
-	  return window.__pskRoom || "Baby";
-	}
+  const qs = new URLSearchParams(location.search);
+  const qsRoom = (qs.get('room') || '').trim();
+
+  // Ensure we have a PSK; if not, redirect to pairing
+  const env = await requirePskOrRedirect({
+    intent: 'viewer',
+    pairRoute: '/hungryface/webrtc/pairpsk/',
+    preferRoom: qsRoom,
+    fallbackRoom: 'Baby',
+  });
+
+  // Expose env globally (optional / debugging)
+  window.__pskEnv = env;
+
+  if (env.redirected) {
+    console.log('[PSK][receiver-audio-training] redirecting to Pair Devices…');
+  } else {
+    // 🔹 Install PSK-based namespace helpers: window.__scopeRoom(uiLabel)
+    await installRoomScope(env);
+
+    const rooms     = listValidPskRooms();
+    const lastRoom  = (localStorage.getItem('naptio:lastRoom') || '').trim();
+    const persisted = (localStorage.getItem('bm_receiver_room') || '').trim();
+    const envRoom   = (env.room || '').trim();
+
+    const uniq = new Set(rooms);
+    if (envRoom) uniq.add(envRoom);
+
+    // Same priority chain as Settings:
+    // ?room → lastRoom → bm_receiver_room → env.room → first available
+    const resolvedRoom = uniq.size
+      ? (
+          (qsRoom    && uniq.has(qsRoom)    && qsRoom)    ||
+          (lastRoom  && uniq.has(lastRoom)  && lastRoom)  ||
+          (persisted && uniq.has(persisted) && persisted) ||
+          envRoom ||
+          Array.from(uniq)[0]
+        )
+      // Defensive fallback if list is empty
+      : (envRoom || qsRoom || 'Baby');
+
+    // Persist for future pages (Settings / other receivers)
+    try { localStorage.setItem('bm_receiver_room', resolvedRoom); } catch {}
+    try { localStorage.setItem('naptio:lastRoom',  resolvedRoom); } catch {}
+
+    // 🔹 Split UI label vs scoped signaling ID
+    const uiRoom = resolvedRoom;  // e.g. "Baby"
+    const scopedRoom =
+      (typeof window.__scopeRoom === 'function')
+        ? window.__scopeRoom(uiRoom)       // e.g. "a1b2c3d4:baby"
+        : uiRoom;
+
+    // PSK shim stays keyed by the *UI* room label (for getPsk('Baby') etc.)
+    const undo = installPskShim({ room: uiRoom });
+    console.log('[PSK][receiver-audio-training] PSK room label:', uiRoom, 'scoped signaling room:', scopedRoom);
+
+    // Expose globals for other scripts
+    window.__pskRoom       = uiRoom;      // human-readable label
+    window.__pskScopedRoom = scopedRoom;  // PSK-scoped signaling room
+    window.__pskUndo       = undo;
+
+    // Helper if some UI later wants to switch rooms
+    window.__installPskForRoom = (roomLabel) => {
+      const label = (roomLabel || '').trim() || 'Baby';
+      const scoped =
+        (typeof window.__scopeRoom === 'function')
+          ? window.__scopeRoom(label)
+          : label;
+
+      try { window.__pskUndo?.(); } catch {}
+      window.__pskUndo = installPskShim({ room: label });
+      console.log('[PSK][receiver-audio-training] shim re-installed for room label:', label, 'scoped:', scoped);
+
+      window.__pskRoom       = label;
+      window.__pskScopedRoom = scoped;
+
+      try {
+        localStorage.setItem('bm_receiver_room', label);
+        localStorage.setItem('naptio:lastRoom',  label);
+      } catch {}
+    };
+  }
+</script>
+  
+<script type="module">
+  /* ========= NEW: WebRTC (ReceiverCore) ========= */
+  import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
+
+  const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+
+  // UI label (what Settings / navbar use)
+  function getUiRoom() {
+    return window.__pskRoom || 'Baby';
+  }
+
+  // PSK-scoped signaling room ID (what WebRTC / signaling should use)
+  function getSignalingRoom() {
+    if (window.__pskScopedRoom) return window.__pskScopedRoom;
+    if (typeof window.__scopeRoom === 'function') {
+      try { return window.__scopeRoom(getUiRoom()); } catch {}
+    }
+    return getUiRoom();
+  }
 
     // WebRTC holder
     const wrtc = {
@@ -1635,7 +1672,7 @@
         const where = (localStorage.getItem('cryInferWhere') || 'sender') === 'receiver'
           ? 'receiver (from streamed audio)'
           : 'sender (scores via data channel)';
-        els.trainInfo.textContent = `WebRTC source (Sender). Inference @ ${where}. Room “${getRoom()}”.`;
+		els.trainInfo.textContent = `WebRTC source (Sender). Inference @ ${where}. Room “${getUiRoom()}”.`;
         ensureCoreStarted();
       }
     }
@@ -1887,7 +1924,7 @@
     
       wrtc.core = new ReceiverCore({
         wsEndpoint: WS_ENDPOINT,
-        room: getRoom(),
+        room: getSignalingRoom(),
         onStatus: (msg) => { log('info', `[RTC] ${msg}`); },
         onStream: (stream) => {
           if (EL('remote').srcObject !== stream) {
@@ -1916,9 +1953,15 @@
         onBye: () => log('warn', '[RTC] bye')
       });
     
-      wrtc.core.start()
-        .then(()=>{ wrtc.connected = true; log('ok', `[RTC] Connected to room “${getRoom()}”.`); })
-        .catch(e => log('err', `[RTC] start error: ${e?.message||e}`));
+	  wrtc.core.start()
+	    .then(() => {
+	      wrtc.connected = true;
+	      log(
+	        'ok',
+	        `[RTC] Connected to room label “${getUiRoom()}” (scoped: “${getSignalingRoom()}”).`
+	      );
+	    })
+	    .catch(e => log('err', `[RTC] start error: ${e?.message||e}`));
     }
     
     /* --- Optional: quick “no scores” watchdog (uncomment to use) --- */
