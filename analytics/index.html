@@ -1,141 +1,715 @@
 <!doctype html>
-<meta charset="utf-8" />
-<title>Naptio Analytics — Local</title>
-<style>
-  :root { color-scheme: dark; }
-  body {
-    background:#000; color:#eee; font-family:system-ui,Segoe UI,Roboto,Arial;
-    margin:24px;
-  }
-  h1 { margin:0 0 8px; }
-  .muted { opacity:.7; font-size:14px; margin-bottom:16px; }
-  table { border-collapse:collapse; width:100%; max-width:1000px; margin-top:16px; }
-  th, td { padding:6px 8px; border-bottom:1px solid #222; text-align:left; font-size:12px; }
-  th { opacity:.8; }
-  .cards { display:flex; gap:16px; flex-wrap:wrap; margin-top:12px; }
-  .card { padding:10px 12px; border-radius:8px; background:#111; font-size:14px; }
-</style>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Naptio Analytics — Local</title>
 
-<h1>Naptio Analytics (local only)</h1>
-<p class="muted">
-  This page listens to <code>/a/stream</code> and stores events in <code>localStorage</code> on this browser only.
-  No database, no server-side files.
-</p>
+  <!-- Leaflet for the map -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-<div class="cards" id="cards"></div>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      background:#000; color:#eee; font-family:system-ui,Segoe UI,Roboto,Arial;
+      margin:24px;
+    }
+    h1 { margin:0 0 8px; }
+    h2 { margin:16px 0 8px; font-size:16px; }
+    .muted { opacity:.7; font-size:14px; margin-bottom:16px; }
 
-<table id="eventsTable">
-  <thead>
-    <tr>
-      <th>ts</th>
-      <th>app</th>
-      <th>feature</th>
-      <th>page</th>
-      <th>installId</th>
-      <th>sessionId</th>
-      <th>kind</th>
-      <th>ev</th>
-      <th>activeMs</th>
-    </tr>
-  </thead>
-  <tbody></tbody>
-</table>
+    .toolbar {
+      display:flex;
+      flex-wrap:wrap;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+      margin:12px 0 8px;
+    }
+    .toolbar-left, .toolbar-right {
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      align-items:center;
+    }
+    button {
+      background:#111;
+      color:#eee;
+      border:1px solid #333;
+      border-radius:999px;
+      padding:6px 12px;
+      font-size:13px;
+      cursor:pointer;
+    }
+    button:hover { border-color:#555; }
+    button.tab-active {
+      background:#eee;
+      color:#000;
+      border-color:#eee;
+    }
+    label {
+      font-size:12px;
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+    }
+    input[type="number"], input[type="text"] {
+      background:#111;
+      border:1px solid #333;
+      color:#eee;
+      padding:4px 6px;
+      border-radius:6px;
+      font-size:12px;
+    }
 
-<script type="module">
-  const STORAGE_KEY = 'naptioAnalyticsEvents';
-  const MAX_EVENTS  = 20000; // also matches server ring buffer nicely
-  const events = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    .cards { display:flex; gap:16px; flex-wrap:wrap; margin-top:12px; }
+    .card {
+      padding:10px 12px;
+      border-radius:10px;
+      background:#111;
+      font-size:14px;
+      min-width:150px;
+    }
+    .card-title { font-size:12px; opacity:.7; margin-bottom:4px; }
+    .card-big { font-size:20px; font-weight:600; }
 
-  function save() {
+    .view { display:none; margin-top:12px; }
+    .view.view-active { display:block; }
+
+    table {
+      border-collapse:collapse;
+      width:100%;
+      max-width:1000px;
+      margin-top:8px;
+      font-size:12px;
+    }
+    th, td {
+      padding:6px 8px;
+      border-bottom:1px solid #222;
+      text-align:left;
+      vertical-align:top;
+    }
+    th {
+      opacity:.9;
+      position:relative;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    th .sort-indicator {
+      margin-left:4px;
+      opacity:.6;
+      font-size:10px;
+    }
+    thead tr.filters th {
+      padding-top:0;
+      padding-bottom:4px;
+    }
+    thead tr.filters input {
+      width:100%;
+      font-size:11px;
+    }
+    tbody tr:nth-child(even) { background:rgba(255,255,255,0.02); }
+
+    #map {
+      width:100%;
+      height:480px;
+      border-radius:10px;
+      overflow:hidden;
+      margin-top:8px;
+    }
+
+    .summary-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+      gap:12px;
+      margin-top:12px;
+    }
+    .summary-section {
+      background:#111;
+      border-radius:10px;
+      padding:10px 12px;
+    }
+    .summary-section ul {
+      list-style:none;
+      padding:0;
+      margin:6px 0 0;
+      font-size:12px;
+    }
+    .summary-section li {
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      padding:2px 0;
+    }
+    .summary-section li span.key {
+      opacity:.8;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .summary-section li span.val {
+      font-variant-numeric:tabular-nums;
+    }
+  </style>
+</head>
+<body>
+  <h1>Naptio Analytics (local only)</h1>
+  <p class="muted">
+    This page listens to <code>/a/stream</code> and stores events in <code>localStorage</code> on this browser only.
+    No database, no server-side files. Data is approximate and for your own use.
+  </p>
+
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <button class="tabButton tab-active" data-view="logs">Logs</button>
+      <button class="tabButton" data-view="summary">Summary</button>
+      <button class="tabButton" data-view="map">Map</button>
+    </div>
+    <div class="toolbar-right">
+      <label>
+        Max events
+        <input id="maxEventsInput" type="number" min="500" step="500" />
+      </label>
+      <button id="applyMaxEvents">Apply</button>
+      <button id="clearEvents">Clear all</button>
+    </div>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+  <!-- Logs view -->
+  <div id="view-logs" class="view view-active">
+    <table id="eventsTable">
+      <thead></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- Summary view -->
+  <div id="view-summary" class="view">
+    <div id="summaryContent"></div>
+  </div>
+
+  <!-- Map view -->
+  <div id="view-map" class="view">
+    <div id="map"></div>
+    <p class="muted">
+      Locations are approximate based on IP geolocation and may be inaccurate.
+      Only IPs seen in your local log are shown.
+    </p>
+  </div>
+
+  <script type="module">
+    // ---------- config / state ----------
+    const STORAGE_KEY_EVENTS = 'naptioAnalyticsEvents';
+    const STORAGE_KEY_MAX    = 'naptioAnalyticsMaxEvents';
+    const MAX_EVENTS_DEFAULT = 5000; // for <100 installs, 5k events is plenty
+
+    const ANALYTICS_BASE = 'https://signaling-server-f5gu.onrender.com/a';
+
+    // Table column definitions
+    const COLUMNS = [
+      { key: 'ts',        label: 'Time' },
+      { key: 'feature',   label: 'Feature' },
+      { key: 'page',      label: 'Page' },
+      { key: 'installId', label: 'Install' },
+      { key: 'sessionId', label: 'Session' },
+      { key: 'kind',      label: 'Kind' },
+      { key: 'ev',        label: 'Event' },
+      { key: 'activeMs',  label: 'Active ms' },
+      { key: 'ip_full',   label: 'IP (full)' },
+      { key: 'device',    label: 'Device' }, // derived from UA
+    ];
+
+    // Load events + maxEvents from localStorage
+    let events = [];
     try {
-      if (events.length > MAX_EVENTS) {
-        events.splice(0, events.length - MAX_EVENTS);
+      events = JSON.parse(localStorage.getItem(STORAGE_KEY_EVENTS) || '[]');
+      if (!Array.isArray(events)) events = [];
+    } catch { events = []; }
+
+    let maxEvents = (() => {
+      const raw = localStorage.getItem(STORAGE_KEY_MAX);
+      const n = raw ? parseInt(raw, 10) : MAX_EVENTS_DEFAULT;
+      return Number.isFinite(n) && n > 0 ? n : MAX_EVENTS_DEFAULT;
+    })();
+
+    let sortKey = 'ts';
+    let sortDir = 'desc';
+    const filters = {};
+    for (const col of COLUMNS) filters[col.key] = '';
+
+    // Map state
+    let map = null;
+    let mapLayer = null;
+    const geoCache = {}; // ip -> { lat, lon, city, country }
+
+    // ---------- helpers ----------
+    function enforceLimit() {
+      if (events.length > maxEvents) {
+        events.splice(0, events.length - maxEvents);
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
-    } catch (e) {
-      console.warn('localStorage full or blocked', e);
     }
-  }
 
-  function addEvent(ev) {
-    events.push(ev);
-    if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS);
-    save();
-  }
-
-  function computeSummary() {
-    const now = Date.now();
-    const oneDay  = 86400 * 1000;
-    const dau = new Set();
-    const wau = new Set();
-    const mau = new Set();
-
-    for (const e of events) {
-      const ts = new Date(e.ts).getTime();
-      const diff = now - ts;
-      if (diff <= 30 * oneDay) mau.add(e.installId);
-      if (diff <= 7  * oneDay) wau.add(e.installId);
-      if (diff <= 1  * oneDay) dau.add(e.installId);
+    function save() {
+      enforceLimit();
+      try {
+        localStorage.setItem(STORAGE_KEY_EVENTS, JSON.stringify(events));
+        localStorage.setItem(STORAGE_KEY_MAX, String(maxEvents));
+      } catch (e) {
+        console.warn('localStorage full or blocked', e);
+      }
     }
-    return {
-      totalEvents: events.length,
-      dau: dau.size,
-      wau: wau.size,
-      mau: mau.size,
-    };
-  }
 
-  function renderSummary() {
-    const s = computeSummary();
-    const cards = document.getElementById('cards');
-    cards.innerHTML = `
-      <div class="card">Events stored (this browser): <b>${s.totalEvents}</b></div>
-      <div class="card">DAU (last 24h): <b>${s.dau}</b></div>
-      <div class="card">WAU (7d): <b>${s.wau}</b></div>
-      <div class="card">MAU (30d): <b>${s.mau}</b></div>
-    `;
-  }
+    function addEvent(ev) {
+      events.push(ev);
+      enforceLimit();
+      save();
+    }
 
-  function renderTable() {
-    const tbody = document.querySelector('#eventsTable tbody');
-    const last = events.slice(-200).reverse(); // show last 200 events
-    tbody.innerHTML = last.map(e => `
-      <tr>
-        <td>${e.ts?.replace('T',' ').slice(0,19) || ''}</td>
-        <td>${e.app || ''}</td>
-        <td>${e.feature || ''}</td>
-        <td>${e.page || ''}</td>
-        <td>${e.installId || ''}</td>
-        <td>${e.sessionId || ''}</td>
-        <td>${e.kind || ''}</td>
-        <td>${e.ev || ''}</td>
-        <td>${e.activeMs ?? ''}</td>
-      </tr>
-    `).join('');
-  }
+    function parseUA(ua) {
+      ua = ua || '';
+      let os = 'Other';
+      if (ua.includes('Windows')) os = 'Windows';
+      else if (ua.includes('Mac OS X') || ua.includes('Macintosh')) os = 'macOS';
+      else if (ua.includes('iPhone')) os = 'iPhone';
+      else if (ua.includes('iPad')) os = 'iPad';
+      else if (ua.includes('Android')) os = 'Android';
 
-  function rerender() {
-    renderSummary();
-    renderTable();
-  }
+      let browser = 'Other';
+      if (ua.includes('Edg/')) browser = 'Edge';
+      else if (ua.includes('Chrome/')) browser = 'Chrome';
+      else if (ua.includes('Safari/') && !ua.includes('Chrome/')) browser = 'Safari';
+      else if (ua.includes('Firefox/')) browser = 'Firefox';
 
-  // Initial render from whatever is already in localStorage
-  rerender();
+      return { os, browser };
+    }
 
-  // 🔌 Connect to your signaling / analytics server
-  const ANALYTICS_BASE = 'https://signaling-server-f5gu.onrender.com/a'; // e.g. https://naptio-signal.onrender.com/a
+    function formatDevice(ua) {
+      const { os, browser } = parseUA(ua);
+      return `${os} / ${browser}`;
+    }
 
-  const es = new EventSource(`${ANALYTICS_BASE}/stream`);
-  es.onmessage = (ev) => {
-    try {
-      const row = JSON.parse(ev.data);
-      addEvent(row);
+    function getDisplayEvents() {
+      // decorate + filter + sort
+      let arr = events.map(e => ({
+        ...e,
+        device: formatDevice(e.ua),
+      }));
+
+      arr = arr.filter(e => {
+        for (const [key, val] of Object.entries(filters)) {
+          if (!val) continue;
+          const field = (e[key] ?? '').toString().toLowerCase();
+          if (!field.includes(val)) return false;
+        }
+        return true;
+      });
+
+      arr.sort((a, b) => {
+        const k = sortKey;
+        let va = a[k];
+        let vb = b[k];
+        if (k === 'ts') {
+          const ta = new Date(va).getTime();
+          const tb = new Date(vb).getTime();
+          return sortDir === 'asc' ? ta - tb : tb - ta;
+        }
+        if (k === 'activeMs') {
+          va = Number(va) || 0;
+          vb = Number(vb) || 0;
+          return sortDir === 'asc' ? va - vb : vb - va;
+        }
+        va = (va ?? '').toString().toLowerCase();
+        vb = (vb ?? '').toString().toLowerCase();
+        if (va < vb) return sortDir === 'asc' ? -1 : 1;
+        if (va > vb) return sortDir === 'asc' ? 1 : -1;
+        return 0;
+      });
+
+      return arr;
+    }
+
+    function computeSummary() {
+      const now = Date.now();
+      const oneDay  = 86400 * 1000;
+      const dau = new Set();
+      const wau = new Set();
+      const mau = new Set();
+      const live = new Set(); // last 2 minutes
+      const liveWindow = 2 * 60 * 1000;
+
+      const allInstalls = new Set();
+
+      const featureCounts = new Map();
+      const pageCounts = new Map();
+      const errorCounts = new Map();
+      const deviceCounts = new Map();
+
+      let lastEventTs = null;
+
+      for (const e of events) {
+        const t = new Date(e.ts).getTime();
+        if (!Number.isFinite(t)) continue;
+        const diff = now - t;
+
+        allInstalls.add(e.installId);
+
+        if (diff <= 30 * oneDay) mau.add(e.installId);
+        if (diff <= 7  * oneDay) wau.add(e.installId);
+        if (diff <= 1  * oneDay) dau.add(e.installId);
+        if (diff <= liveWindow) live.add(e.installId);
+
+        const feat = e.feature || '(none)';
+        featureCounts.set(feat, (featureCounts.get(feat) || 0) + 1);
+
+        const page = e.page || '(none)';
+        pageCounts.set(page, (pageCounts.get(page) || 0) + 1);
+
+        if (e.ev && typeof e.ev === 'string') {
+          const evName = e.ev;
+          if (
+            evName.startsWith('error_') ||
+            evName.endsWith('_failed') ||
+            evName.endsWith('_timeout')
+          ) {
+            errorCounts.set(evName, (errorCounts.get(evName) || 0) + 1);
+          }
+        }
+
+        const dev = formatDevice(e.ua);
+        deviceCounts.set(dev, (deviceCounts.get(dev) || 0) + 1);
+
+        if (!lastEventTs || t > lastEventTs) lastEventTs = t;
+      }
+
+      const toTop = (map, limit = 5) => {
+        return [...map.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, limit)
+          .map(([key, val]) => ({ key, val }));
+      };
+
+      return {
+        totalEvents: events.length,
+        dau: dau.size,
+        wau: wau.size,
+        mau: mau.size,
+        live: live.size,
+        installs: allInstalls.size,
+        lastEvent: lastEventTs ? new Date(lastEventTs) : null,
+        topFeatures: toTop(featureCounts),
+        topPages: toTop(pageCounts),
+        topErrors: toTop(errorCounts),
+        topDevices: toTop(deviceCounts),
+      };
+    }
+
+    // ---------- UI rendering ----------
+    const cardsEl = document.getElementById('cards');
+    const tableEl = document.getElementById('eventsTable');
+    const theadEl = tableEl.querySelector('thead');
+    const tbodyEl = tableEl.querySelector('tbody');
+    const summaryContentEl = document.getElementById('summaryContent');
+
+    function buildTableHeader() {
+      const headerRow = document.createElement('tr');
+      for (const col of COLUMNS) {
+        const th = document.createElement('th');
+        th.dataset.key = col.key;
+        th.textContent = col.label;
+        const span = document.createElement('span');
+        span.className = 'sort-indicator';
+        th.appendChild(span);
+        th.addEventListener('click', () => {
+          if (sortKey === col.key) {
+            sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+          } else {
+            sortKey = col.key;
+            sortDir = 'desc';
+          }
+          rerender();
+        });
+        headerRow.appendChild(th);
+      }
+
+      const filterRow = document.createElement('tr');
+      filterRow.className = 'filters';
+      for (const col of COLUMNS) {
+        const th = document.createElement('th');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'filter';
+        input.value = filters[col.key] || '';
+        input.addEventListener('input', () => {
+          filters[col.key] = input.value.toLowerCase();
+          rerender();
+        });
+        th.appendChild(input);
+        filterRow.appendChild(th);
+      }
+
+      theadEl.innerHTML = '';
+      theadEl.appendChild(headerRow);
+      theadEl.appendChild(filterRow);
+    }
+
+    function renderCards() {
+      const s = computeSummary();
+      const fmtDateTime = (d) =>
+        d ? d.toISOString().replace('T',' ').slice(0,19) : '—';
+
+      cardsEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">Events stored (this browser)</div>
+          <div class="card-big">${s.totalEvents}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Installs seen (all time)</div>
+          <div class="card-big">${s.installs}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Active now (last 2 min)</div>
+          <div class="card-big">${s.live}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">DAU / WAU / MAU</div>
+          <div><b>${s.dau}</b> / <b>${s.wau}</b> / <b>${s.mau}</b></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Last event</div>
+          <div>${fmtDateTime(s.lastEvent)}</div>
+        </div>
+      `;
+    }
+
+    function renderTable() {
+      const data = getDisplayEvents();
+      const rows = data.slice(-200).reverse(); // last 200
+
+      // sort indicators
+      const headerRow = theadEl.querySelector('tr');
+      const ths = headerRow ? headerRow.querySelectorAll('th') : [];
+      ths.forEach(th => {
+        const key = th.dataset.key;
+        const baseLabel = COLUMNS.find(c => c.key === key)?.label || th.textContent;
+        const span = th.querySelector('.sort-indicator');
+        if (key === sortKey) {
+          if (span) span.textContent = sortDir === 'asc' ? '▲' : '▼';
+        } else if (span) {
+          span.textContent = '';
+        }
+      });
+
+      tbodyEl.innerHTML = rows.map(e => `
+        <tr>
+          <td>${e.ts?.replace('T',' ').slice(0,19) || ''}</td>
+          <td>${e.feature || ''}</td>
+          <td>${e.page || ''}</td>
+          <td>${e.installId || ''}</td>
+          <td>${e.sessionId || ''}</td>
+          <td>${e.kind || ''}</td>
+          <td>${e.ev || ''}</td>
+          <td>${e.activeMs ?? ''}</td>
+          <td>${e.ip_full || ''}</td>
+          <td>${e.device || ''}</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderSummaryView() {
+      const s = computeSummary();
+      const fmtList = (items) => items.length
+        ? items.map(it =>
+            `<li><span class="key">${it.key}</span><span class="val">${it.val}</span></li>`
+          ).join('')
+        : '<li><span class="key">—</span></li>';
+
+      summaryContentEl.innerHTML = `
+        <div class="summary-grid">
+          <div class="summary-section">
+            <h2>Top features</h2>
+            <ul>${fmtList(s.topFeatures)}</ul>
+          </div>
+          <div class="summary-section">
+            <h2>Top pages</h2>
+            <ul>${fmtList(s.topPages)}</ul>
+          </div>
+          <div class="summary-section">
+            <h2>Error events</h2>
+            <ul>${fmtList(s.topErrors)}</ul>
+          </div>
+          <div class="summary-section">
+            <h2>Devices</h2>
+            <ul>${fmtList(s.topDevices)}</ul>
+          </div>
+        </div>
+      `;
+    }
+
+    function initMapIfNeeded() {
+      if (map) return;
+      if (!window.L) {
+        console.warn('Leaflet not loaded, map will not work');
+        return;
+      }
+      map = L.map('map').setView([20, 0], 2);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+      mapLayer = L.layerGroup().addTo(map);
+    }
+
+    async function getGeoForIp(ip) {
+      if (!ip || ip === '::1') return null;
+      if (geoCache[ip]) return geoCache[ip];
+      try {
+        const res = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}`);
+        if (!res.ok) {
+          geoCache[ip] = null;
+          return null;
+        }
+        const data = await res.json();
+        if (data.success === false) {
+          geoCache[ip] = null;
+          return null;
+        }
+        const info = {
+          lat: data.latitude,
+          lon: data.longitude,
+          city: data.city,
+          country: data.country,
+          isp: data.connection?.isp || data.org || ''
+        };
+        geoCache[ip] = info;
+        return info;
+      } catch (e) {
+        console.warn('Geo lookup failed', ip, e);
+        geoCache[ip] = null;
+        return null;
+      }
+    }
+
+    async function renderMap() {
+      initMapIfNeeded();
+      if (!map || !mapLayer) return;
+
+      mapLayer.clearLayers();
+
+      // Aggregate by IP
+      const ipStats = {};
+      for (const e of events) {
+        const ip = e.ip_full;
+        if (!ip) continue;
+        if (!ipStats[ip]) {
+          ipStats[ip] = {
+            lastSeen: e.ts,
+            installs: new Set(),
+            sessions: new Set(),
+          };
+        }
+        const stat = ipStats[ip];
+        if (new Date(e.ts) > new Date(stat.lastSeen)) stat.lastSeen = e.ts;
+        stat.installs.add(e.installId);
+        stat.sessions.add(e.sessionId);
+      }
+
+      const entries = Object.entries(ipStats);
+      for (const [ip, stat] of entries) {
+        const geo = await getGeoForIp(ip);
+        if (!geo || !Number.isFinite(geo.lat) || !Number.isFinite(geo.lon)) continue;
+        const popupHtml = `
+          <b>${ip}</b><br/>
+          ${geo.city ? `${geo.city}, ` : ''}${geo.country || ''}<br/>
+          Installs: ${stat.installs.size}<br/>
+          Sessions: ${stat.sessions.size}<br/>
+          Last seen: ${stat.lastSeen.replace('T',' ').slice(0,19)}
+        `;
+        L.marker([geo.lat, geo.lon])
+          .addTo(mapLayer)
+          .bindPopup(popupHtml);
+      }
+
+      const layers = mapLayer.getLayers();
+      if (layers.length) {
+        const bounds = L.featureGroup(layers).getBounds();
+        map.fitBounds(bounds, { padding: [40, 40] });
+      }
+    }
+
+    function rerender() {
+      renderCards();
+      renderTable();
+      const activeView = document.querySelector('.view.view-active');
+      if (activeView && activeView.id === 'view-summary') {
+        renderSummaryView();
+      } else if (activeView && activeView.id === 'view-map') {
+        renderMap();
+      }
+    }
+
+    // ---------- view switching ----------
+    const tabButtons = document.querySelectorAll('.tabButton');
+    function showView(view) {
+      tabButtons.forEach(btn => {
+        btn.classList.toggle('tab-active', btn.dataset.view === view);
+      });
+      document.querySelectorAll('.view').forEach(v => {
+        v.classList.toggle('view-active', v.id === `view-${view}`);
+      });
+      if (view === 'summary') {
+        renderSummaryView();
+      } else if (view === 'map') {
+        renderMap();
+      }
+    }
+    tabButtons.forEach(btn => {
+      btn.addEventListener('click', () => showView(btn.dataset.view));
+    });
+
+    // ---------- controls ----------
+    const maxEventsInput = document.getElementById('maxEventsInput');
+    maxEventsInput.value = String(maxEvents);
+
+    document.getElementById('applyMaxEvents').addEventListener('click', () => {
+      const n = parseInt(maxEventsInput.value, 10);
+      if (!Number.isFinite(n) || n <= 0) return;
+      maxEvents = n;
+      enforceLimit();
+      save();
       rerender();
-    } catch (e) {
-      console.error('Bad event', e);
-    }
-  };
-  es.onerror = (err) => {
-    console.warn('EventSource error', err);
-  };
-</script>
+    });
+
+    document.getElementById('clearEvents').addEventListener('click', () => {
+      if (!confirm('Clear all locally stored events?')) return;
+      events = [];
+      save();
+      rerender();
+    });
+
+    // ---------- initial render ----------
+    buildTableHeader();
+    rerender();
+
+    // ---------- SSE hookup ----------
+    const es = new EventSource(`${ANALYTICS_BASE}/stream`);
+    es.onmessage = (ev) => {
+      try {
+        const row = JSON.parse(ev.data);
+        addEvent(row);
+        rerender();
+      } catch (e) {
+        console.error('Bad event', e);
+      }
+    };
+    es.onerror = (err) => {
+      console.warn('EventSource error', err);
+    };
+  </script>
+</body>
+</html>
