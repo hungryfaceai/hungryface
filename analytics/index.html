@@ -1,0 +1,141 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Naptio Analytics — Local</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    background:#000; color:#eee; font-family:system-ui,Segoe UI,Roboto,Arial;
+    margin:24px;
+  }
+  h1 { margin:0 0 8px; }
+  .muted { opacity:.7; font-size:14px; margin-bottom:16px; }
+  table { border-collapse:collapse; width:100%; max-width:1000px; margin-top:16px; }
+  th, td { padding:6px 8px; border-bottom:1px solid #222; text-align:left; font-size:12px; }
+  th { opacity:.8; }
+  .cards { display:flex; gap:16px; flex-wrap:wrap; margin-top:12px; }
+  .card { padding:10px 12px; border-radius:8px; background:#111; font-size:14px; }
+</style>
+
+<h1>Naptio Analytics (local only)</h1>
+<p class="muted">
+  This page listens to <code>/a/stream</code> and stores events in <code>localStorage</code> on this browser only.
+  No database, no server-side files.
+</p>
+
+<div class="cards" id="cards"></div>
+
+<table id="eventsTable">
+  <thead>
+    <tr>
+      <th>ts</th>
+      <th>app</th>
+      <th>feature</th>
+      <th>page</th>
+      <th>installId</th>
+      <th>sessionId</th>
+      <th>kind</th>
+      <th>ev</th>
+      <th>activeMs</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script type="module">
+  const STORAGE_KEY = 'naptioAnalyticsEvents';
+  const MAX_EVENTS  = 20000; // also matches server ring buffer nicely
+  const events = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+
+  function save() {
+    try {
+      if (events.length > MAX_EVENTS) {
+        events.splice(0, events.length - MAX_EVENTS);
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+    } catch (e) {
+      console.warn('localStorage full or blocked', e);
+    }
+  }
+
+  function addEvent(ev) {
+    events.push(ev);
+    if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS);
+    save();
+  }
+
+  function computeSummary() {
+    const now = Date.now();
+    const oneDay  = 86400 * 1000;
+    const dau = new Set();
+    const wau = new Set();
+    const mau = new Set();
+
+    for (const e of events) {
+      const ts = new Date(e.ts).getTime();
+      const diff = now - ts;
+      if (diff <= 30 * oneDay) mau.add(e.installId);
+      if (diff <= 7  * oneDay) wau.add(e.installId);
+      if (diff <= 1  * oneDay) dau.add(e.installId);
+    }
+    return {
+      totalEvents: events.length,
+      dau: dau.size,
+      wau: wau.size,
+      mau: mau.size,
+    };
+  }
+
+  function renderSummary() {
+    const s = computeSummary();
+    const cards = document.getElementById('cards');
+    cards.innerHTML = `
+      <div class="card">Events stored (this browser): <b>${s.totalEvents}</b></div>
+      <div class="card">DAU (last 24h): <b>${s.dau}</b></div>
+      <div class="card">WAU (7d): <b>${s.wau}</b></div>
+      <div class="card">MAU (30d): <b>${s.mau}</b></div>
+    `;
+  }
+
+  function renderTable() {
+    const tbody = document.querySelector('#eventsTable tbody');
+    const last = events.slice(-200).reverse(); // show last 200 events
+    tbody.innerHTML = last.map(e => `
+      <tr>
+        <td>${e.ts?.replace('T',' ').slice(0,19) || ''}</td>
+        <td>${e.app || ''}</td>
+        <td>${e.feature || ''}</td>
+        <td>${e.page || ''}</td>
+        <td>${e.installId || ''}</td>
+        <td>${e.sessionId || ''}</td>
+        <td>${e.kind || ''}</td>
+        <td>${e.ev || ''}</td>
+        <td>${e.activeMs ?? ''}</td>
+      </tr>
+    `).join('');
+  }
+
+  function rerender() {
+    renderSummary();
+    renderTable();
+  }
+
+  // Initial render from whatever is already in localStorage
+  rerender();
+
+  // 🔌 Connect to your signaling / analytics server
+  const ANALYTICS_BASE = 'https://YOUR-SIGNALING-HOSTNAME-HERE/a'; // e.g. https://naptio-signal.onrender.com/a
+
+  const es = new EventSource(`${ANALYTICS_BASE}/stream`);
+  es.onmessage = (ev) => {
+    try {
+      const row = JSON.parse(ev.data);
+      addEvent(row);
+      rerender();
+    } catch (e) {
+      console.error('Bad event', e);
+    }
+  };
+  es.onerror = (err) => {
+    console.warn('EventSource error', err);
+  };
+</script>
