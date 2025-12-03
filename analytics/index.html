@@ -36,6 +36,7 @@
       gap:8px;
       align-items:center;
     }
+
     button {
       background:#111;
       color:#eee;
@@ -51,6 +52,7 @@
       color:#000;
       border-color:#eee;
     }
+
     label {
       font-size:12px;
       display:inline-flex;
@@ -150,6 +152,7 @@
       overflow:hidden;
       text-overflow:ellipsis;
       white-space:nowrap;
+      max-width:200px;
     }
     .summary-section li span.val {
       font-variant-numeric:tabular-nums;
@@ -176,6 +179,7 @@
       </label>
       <button id="applyMaxEvents">Apply</button>
       <button id="clearEvents">Clear all</button>
+      <button id="downloadCsv">Download CSV</button>
     </div>
   </div>
 
@@ -409,6 +413,15 @@
       };
     }
 
+    function escapeCsv(value) {
+      if (value == null) return '';
+      const s = String(value);
+      if (s.includes('"') || s.includes(',') || s.includes('\n')) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }
+
     // ---------- UI rendering ----------
     const cardsEl = document.getElementById('cards');
     const tableEl = document.getElementById('eventsTable');
@@ -496,7 +509,6 @@
       const ths = headerRow ? headerRow.querySelectorAll('th') : [];
       ths.forEach(th => {
         const key = th.dataset.key;
-        const baseLabel = COLUMNS.find(c => c.key === key)?.label || th.textContent;
         const span = th.querySelector('.sort-indicator');
         if (key === sortKey) {
           if (span) span.textContent = sortDir === 'asc' ? '▲' : '▼';
@@ -557,6 +569,7 @@
         console.warn('Leaflet not loaded, map will not work');
         return;
       }
+      // Default world view
       map = L.map('map').setView([20, 0], 2);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 18,
@@ -599,6 +612,7 @@
       initMapIfNeeded();
       if (!map || !mapLayer) return;
 
+      // Don't recreate the map; just update markers.
       mapLayer.clearLayers();
 
       // Aggregate by IP
@@ -635,11 +649,7 @@
           .bindPopup(popupHtml);
       }
 
-      const layers = mapLayer.getLayers();
-      if (layers.length) {
-        const bounds = L.featureGroup(layers).getBounds();
-        map.fitBounds(bounds, { padding: [40, 40] });
-      }
+      // Note: we do NOT change center/zoom here, so user zoom/pan is preserved.
     }
 
     function rerender() {
@@ -665,7 +675,12 @@
       if (view === 'summary') {
         renderSummaryView();
       } else if (view === 'map') {
-        renderMap();
+        renderMap().then(() => {
+          // Ensure map tiles/layout update after becoming visible
+          if (map) {
+            setTimeout(() => map.invalidateSize(), 0);
+          }
+        });
       }
     }
     tabButtons.forEach(btn => {
@@ -692,17 +707,53 @@
       rerender();
     });
 
+    document.getElementById('downloadCsv').addEventListener('click', () => {
+      const data = getDisplayEvents(); // respects current filters + sort
+
+      const headerKeys   = COLUMNS.map(c => c.key);
+      const headerLabels = COLUMNS.map(c => c.label);
+
+      const lines = [];
+
+      // header
+      lines.push(headerLabels.map(escapeCsv).join(','));
+
+      // rows
+      for (const row of data) {
+        const line = headerKeys.map(key => {
+          const v = row[key];
+          return escapeCsv(v == null ? '' : v);
+        }).join(',');
+        lines.push(line);
+      }
+
+      const csv = lines.join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+
+      const ts = new Date().toISOString().slice(0,19).replace(/[:T]/g, '-');
+      const filename = `naptio-analytics-${ts}.csv`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+
     // ---------- initial render ----------
     buildTableHeader();
     rerender();
 
-    // ---------- SSE hookup ----------
+    // ---------- SSE hookup (live refresh on every event) ----------
     const es = new EventSource(`${ANALYTICS_BASE}/stream`);
     es.onmessage = (ev) => {
       try {
         const row = JSON.parse(ev.data);
         addEvent(row);
-        rerender();
+        rerender(); // updates cards + current view (logs/summary/map)
       } catch (e) {
         console.error('Bad event', e);
       }
