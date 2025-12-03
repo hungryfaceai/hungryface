@@ -265,6 +265,28 @@
     let mapLayer = null;
     const geoCache = {}; // ip -> { lat, lon, city, country }
 
+    // Throttling for save + render
+    let saveScheduled = false;
+    let renderScheduled = false;
+
+    function scheduleSave() {
+      if (saveScheduled) return;
+      saveScheduled = true;
+      setTimeout(() => {
+        saveScheduled = false;
+        save();
+      }, 1000); // at most once per second
+    }
+
+    function scheduleRender() {
+      if (renderScheduled) return;
+      renderScheduled = true;
+      requestAnimationFrame(() => {
+        renderScheduled = false;
+        rerender();
+      });
+    }
+
     // ---------- helpers ----------
     function enforceLimit() {
       if (events.length > maxEvents) {
@@ -286,7 +308,8 @@
     function addEvent(ev) {
       events.push(ev);
       enforceLimit();
-      save();
+      scheduleSave();
+      scheduleRender();
     }
 
     function parseUA(ua) {
@@ -354,18 +377,20 @@
     function computeSummary() {
       const now = Date.now();
       const oneDay  = 86400 * 1000;
+      const liveWindow = 2 * 60 * 1000;
+
       const dau = new Set();
       const wau = new Set();
       const mau = new Set();
-      const live = new Set(); // last 2 minutes
-      const liveWindow = 2 * 60 * 1000;
-
+      const live = new Set();
       const allInstalls = new Set();
 
-      const featureCounts = new Map();
-      const pageCounts = new Map();
-      const errorCounts = new Map();
-      const deviceCounts = new Map();
+      // Unique installs per key
+      const featureInstalls = new Map(); // feature -> Set(installId)
+      const pageInstalls    = new Map(); // page   -> Set(installId)
+      const deviceInstalls  = new Map(); // device -> Set(installId)
+
+      const errorCounts = new Map();     // errors remain event-count based
 
       let lastEventTs = null;
 
@@ -373,20 +398,50 @@
         const t = new Date(e.ts).getTime();
         if (!Number.isFinite(t)) continue;
         const diff = now - t;
+        const installId = e.installId;
 
-        allInstalls.add(e.installId);
+        if (installId) {
+          allInstalls.add(installId);
+          if (diff <= 30 * oneDay) mau.add(installId);
+          if (diff <=  7 * oneDay) wau.add(installId);
+          if (diff <=      oneDay) dau.add(installId);
+          if (diff <= liveWindow)  live.add(installId);
+        }
 
-        if (diff <= 30 * oneDay) mau.add(e.installId);
-        if (diff <= 7  * oneDay) wau.add(e.installId);
-        if (diff <= 1  * oneDay) dau.add(e.installId);
-        if (diff <= liveWindow) live.add(e.installId);
-
+        // feature uniques
         const feat = e.feature || '(none)';
-        featureCounts.set(feat, (featureCounts.get(feat) || 0) + 1);
+        if (installId) {
+          let set = featureInstalls.get(feat);
+          if (!set) {
+            set = new Set();
+            featureInstalls.set(feat, set);
+          }
+          set.add(installId);
+        }
 
+        // page uniques
         const page = e.page || '(none)';
-        pageCounts.set(page, (pageCounts.get(page) || 0) + 1);
+        if (installId) {
+          let set = pageInstalls.get(page);
+          if (!set) {
+            set = new Set();
+            pageInstalls.set(page, set);
+          }
+          set.add(installId);
+        }
 
+        // device uniques (from UA)
+        const dev = formatDevice(e.ua);
+        if (installId) {
+          let set = deviceInstalls.get(dev);
+          if (!set) {
+            set = new Set();
+            deviceInstalls.set(dev, set);
+          }
+          set.add(installId);
+        }
+
+        // error events (count events)
         if (e.ev && typeof e.ev === 'string') {
           const evName = e.ev;
           if (
@@ -398,18 +453,22 @@
           }
         }
 
-        const dev = formatDevice(e.ua);
-        deviceCounts.set(dev, (deviceCounts.get(dev) || 0) + 1);
-
-        if (!lastEventTs || t > lastEventTs) lastEventTs = t;
+        if (!lastEventTs || t > lastEventTs) {
+          lastEventTs = t;
+        }
       }
 
-      const toTop = (map, limit = 5) => {
-        return [...map.entries()]
-          .sort((a, b) => b[1] - a[1])
+      const toTopUnique = (map, limit = 5) =>
+        [...map.entries()]
+          .map(([key, set]) => ({ key, val: set.size }))
+          .sort((a, b) => b.val - a.val || a.key.localeCompare(b.key))
+          .slice(0, limit);
+
+      const toTopErrors = (map, limit = 5) =>
+        [...map.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
           .slice(0, limit)
           .map(([key, val]) => ({ key, val }));
-      };
 
       return {
         totalEvents: events.length,
@@ -419,10 +478,10 @@
         live: live.size,
         installs: allInstalls.size,
         lastEvent: lastEventTs ? new Date(lastEventTs) : null,
-        topFeatures: toTop(featureCounts),
-        topPages: toTop(pageCounts),
-        topErrors: toTop(errorCounts),
-        topDevices: toTop(deviceCounts),
+        topFeatures: toTopUnique(featureInstalls),
+        topPages:    toTopUnique(pageInstalls),
+        topDevices:  toTopUnique(deviceInstalls),
+        topErrors:   toTopErrors(errorCounts),
       };
     }
 
@@ -811,7 +870,6 @@
         mapLayer.clearLayers();
       } else {
         renderMap();
-        // also refresh summary so countries section updates
         const activeView = document.querySelector('.view.view-active');
         if (activeView && activeView.id === 'view-summary') {
           renderSummaryView();
@@ -823,13 +881,12 @@
     buildTableHeader();
     rerender();
 
-    // ---------- SSE hookup (live refresh on every event) ----------
+    // ---------- SSE hookup (live refresh on every event, but throttled) ----------
     const es = new EventSource(`${ANALYTICS_BASE}/stream`);
     es.onmessage = (ev) => {
       try {
         const row = JSON.parse(ev.data);
-        addEvent(row);
-        rerender();
+        addEvent(row); // schedules save + render
       } catch (e) {
         console.error('Bad event', e);
       }
