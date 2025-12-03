@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Naptio Analytics — Local</title>
+  <title>Naptio Analytics — Local Aggregates</title>
 
   <!-- Leaflet for the map -->
   <link
@@ -157,13 +157,20 @@
     .summary-section li span.val {
       font-variant-numeric:tabular-nums;
     }
+
+    .last-updated {
+      font-size:11px;
+      opacity:.7;
+      margin-top:4px;
+    }
   </style>
 </head>
 <body>
-  <h1>Naptio Analytics (local only)</h1>
+  <h1>Naptio Analytics (local aggregates)</h1>
   <p class="muted">
-    This page listens to <code>/a/stream</code> and stores events in <code>localStorage</code> on this browser only.
-    No database, no server-side files. Data is approximate and for your own use.
+    This page listens to <code>/a/stream</code> and stores
+    <strong>aggregated analytics</strong> in <code>localStorage</code> on this browser only.
+    No database, no server-side files. Click <b>Refresh view</b> to update the dashboard.
   </p>
 
   <div class="toolbar">
@@ -174,16 +181,18 @@
     </div>
     <div class="toolbar-right">
       <label>
-        Max events
+        Max log events
         <input id="maxEventsInput" type="number" min="500" step="500" />
       </label>
       <button id="applyMaxEvents">Apply</button>
-      <button id="clearEvents">Clear all</button>
+      <button id="clearAll">Reset all data</button>
       <button id="downloadCsv">Download CSV</button>
+      <button id="refreshView">Refresh view</button>
     </div>
   </div>
 
   <div class="cards" id="cards"></div>
+  <div class="last-updated" id="lastUpdated"></div>
 
   <!-- Logs view -->
   <div id="view-logs" class="view view-active">
@@ -209,18 +218,19 @@
     <div id="map"></div>
     <p class="muted">
       Locations are approximate based on IP geolocation and may be inaccurate.
-      Only IPs seen in your local log are shown.
+      Only IPs seen in your local aggregated data are shown.
     </p>
   </div>
 
   <script type="module">
-    // ---------- config / state ----------
-    const STORAGE_KEY_EVENTS = 'naptioAnalyticsEvents';
-    const STORAGE_KEY_MAX    = 'naptioAnalyticsMaxEvents';
-    const STORAGE_KEY_GEO    = 'naptioAnalyticsGeoEnabled';
-    const MAX_EVENTS_DEFAULT = 5000; // for <100 installs, 5k events is plenty
-
-    const ANALYTICS_BASE = 'https://signaling-server-f5gu.onrender.com/a';
+    // ---------- config / storage keys ----------
+    const STORAGE_KEY_STATE        = 'naptio:aggState:v1';
+    const STORAGE_KEY_RECENT       = 'naptio:recentEvents:v1';
+    const STORAGE_KEY_MAX_RECENT   = 'naptio:maxRecentEvents:v1';
+    const STORAGE_KEY_GEO          = 'naptio:geoEnabled:v1';
+    const MAX_RECENT_DEFAULT       = 2000; // rolling log buffer
+    const ANALYTICS_BASE           = 'https://signaling-server-f5gu.onrender.com/a';
+    const LIVE_WINDOW_MS           = 2 * 60 * 1000; // "live" = last 2 minutes
 
     const COLUMNS = [
       { key: 'ts',        label: 'Time' },
@@ -232,86 +242,188 @@
       { key: 'ev',        label: 'Event' },
       { key: 'activeMs',  label: 'Active ms' },
       { key: 'ip_full',   label: 'IP (full)' },
-      { key: 'device',    label: 'Device' }, // derived from UA
+      { key: 'device',    label: 'Device' },
     ];
 
-    let events = [];
-    try {
-      events = JSON.parse(localStorage.getItem(STORAGE_KEY_EVENTS) || '[]');
-      if (!Array.isArray(events)) events = [];
-    } catch { events = []; }
+    // ---------- aggregated state ----------
+    function createDefaultState() {
+      return {
+        lastEventTs: 0,
+        totalEvents: 0,
+        installs: {},    // installId -> { firstSeen, lastSeen }
+        sessions: {},    // sessionId -> { installId, lastActiveMs, lastPage, lastTs }
+        pageStats: {},   // page -> { installs:Set, sessions:Set, totalActiveMs, lastSeen }
+        featureStats: {},// feature -> { installs:Set, sessions:Set, lastSeen }
+        deviceStats: {}, // device -> { installs:Set }
+        errorCounts: {}, // ev -> count
+        ipStats: {},     // ip -> { installs:Set, sessions:Set, lastSeen }
+        geoCache: {},    // ip -> { lat, lon, country, city, ... }
+      };
+    }
 
-    let maxEvents = (() => {
-      const raw = localStorage.getItem(STORAGE_KEY_MAX);
-      const n = raw ? parseInt(raw, 10) : MAX_EVENTS_DEFAULT;
-      return Number.isFinite(n) && n > 0 ? n : MAX_EVENTS_DEFAULT;
-    })();
+    let state = createDefaultState();
+    let recentEvents = [];
+    let maxRecent = MAX_RECENT_DEFAULT;
+    let geoEnabled = true;
 
-    // Geo toggle (default ON if not set)
-    let geoEnabled = (() => {
-      const raw = localStorage.getItem(STORAGE_KEY_GEO);
-      if (raw === '0') return false;
-      if (raw === '1') return true;
-      return true;
-    })();
-
-    let sortKey = 'ts';
-    let sortDir = 'desc';
-    const filters = {};
-    for (const col of COLUMNS) filters[col.key] = '';
-
-    // Map state
-    let map = null;
-    let mapLayer = null;
-    const geoCache = {}; // ip -> { lat, lon, city, country }
-
-    // Throttling for save + render
+    // throttled save
     let saveScheduled = false;
-    let renderScheduled = false;
-
-    function scheduleSave() {
+    function scheduleSaveAll() {
       if (saveScheduled) return;
       saveScheduled = true;
       setTimeout(() => {
         saveScheduled = false;
-        save();
-      }, 1000); // at most once per second
+        saveAll();
+      }, 1000);
     }
 
-    function scheduleRender() {
-      if (renderScheduled) return;
-      renderScheduled = true;
-      requestAnimationFrame(() => {
-        renderScheduled = false;
-        rerender();
-      });
-    }
+    function hydrateState(raw) {
+      const s = createDefaultState();
+      if (!raw || typeof raw !== 'object') return s;
+      s.lastEventTs = Number(raw.lastEventTs) || 0;
+      s.totalEvents = Number(raw.totalEvents) || 0;
+      s.installs    = raw.installs && typeof raw.installs === 'object' ? raw.installs : {};
+      s.sessions    = raw.sessions && typeof raw.sessions === 'object' ? raw.sessions : {};
+      s.errorCounts = raw.errorCounts && typeof raw.errorCounts === 'object' ? raw.errorCounts : {};
+      s.geoCache    = raw.geoCache && typeof raw.geoCache === 'object' ? raw.geoCache : {};
 
-    // ---------- helpers ----------
-    function enforceLimit() {
-      if (events.length > maxEvents) {
-        events.splice(0, events.length - maxEvents);
+      // stats maps: convert arrays back to Sets
+      s.pageStats = {};
+      if (raw.pageStats && typeof raw.pageStats === 'object') {
+        for (const [page, ps] of Object.entries(raw.pageStats)) {
+          s.pageStats[page] = {
+            installs: new Set(ps.installs || []),
+            sessions: new Set(ps.sessions || []),
+            totalActiveMs: Number(ps.totalActiveMs) || 0,
+            lastSeen: Number(ps.lastSeen) || 0,
+          };
+        }
       }
+
+      s.featureStats = {};
+      if (raw.featureStats && typeof raw.featureStats === 'object') {
+        for (const [feat, fs] of Object.entries(raw.featureStats)) {
+          s.featureStats[feat] = {
+            installs: new Set(fs.installs || []),
+            sessions: new Set(fs.sessions || []),
+            lastSeen: Number(fs.lastSeen) || 0,
+          };
+        }
+      }
+
+      s.deviceStats = {};
+      if (raw.deviceStats && typeof raw.deviceStats === 'object') {
+        for (const [dev, ds] of Object.entries(raw.deviceStats)) {
+          s.deviceStats[dev] = {
+            installs: new Set(ds.installs || []),
+          };
+        }
+      }
+
+      s.ipStats = {};
+      if (raw.ipStats && typeof raw.ipStats === 'object') {
+        for (const [ip, ips] of Object.entries(raw.ipStats)) {
+          s.ipStats[ip] = {
+            installs: new Set(ips.installs || []),
+            sessions: new Set(ips.sessions || []),
+            lastSeen: Number(ips.lastSeen) || 0,
+          };
+        }
+      }
+
+      return s;
     }
 
-    function save() {
-      enforceLimit();
+    function serializeState(s) {
+      const out = {
+        lastEventTs: s.lastEventTs,
+        totalEvents: s.totalEvents,
+        installs: s.installs,
+        sessions: s.sessions,
+        errorCounts: s.errorCounts,
+        geoCache: s.geoCache,
+        pageStats: {},
+        featureStats: {},
+        deviceStats: {},
+        ipStats: {},
+      };
+
+      for (const [page, ps] of Object.entries(s.pageStats)) {
+        out.pageStats[page] = {
+          installs: Array.from(ps.installs || []),
+          sessions: Array.from(ps.sessions || []),
+          totalActiveMs: ps.totalActiveMs || 0,
+          lastSeen: ps.lastSeen || 0,
+        };
+      }
+      for (const [feat, fs] of Object.entries(s.featureStats)) {
+        out.featureStats[feat] = {
+          installs: Array.from(fs.installs || []),
+          sessions: Array.from(fs.sessions || []),
+          lastSeen: fs.lastSeen || 0,
+        };
+      }
+      for (const [dev, ds] of Object.entries(s.deviceStats)) {
+        out.deviceStats[dev] = {
+          installs: Array.from(ds.installs || []),
+        };
+      }
+      for (const [ip, ips] of Object.entries(s.ipStats)) {
+        out.ipStats[ip] = {
+          installs: Array.from(ips.installs || []),
+          sessions: Array.from(ips.sessions || []),
+          lastSeen: ips.lastSeen || 0,
+        };
+      }
+      return out;
+    }
+
+    function loadAll() {
       try {
-        localStorage.setItem(STORAGE_KEY_EVENTS, JSON.stringify(events));
-        localStorage.setItem(STORAGE_KEY_MAX, String(maxEvents));
+        const rawState = JSON.parse(localStorage.getItem(STORAGE_KEY_STATE) || 'null');
+        state = hydrateState(rawState);
+      } catch {
+        state = createDefaultState();
+      }
+
+      try {
+        recentEvents = JSON.parse(localStorage.getItem(STORAGE_KEY_RECENT) || '[]');
+        if (!Array.isArray(recentEvents)) recentEvents = [];
+      } catch {
+        recentEvents = [];
+      }
+
+      const rawMax = localStorage.getItem(STORAGE_KEY_MAX_RECENT);
+      const n = rawMax ? parseInt(rawMax, 10) : MAX_RECENT_DEFAULT;
+      maxRecent = Number.isFinite(n) && n > 0 ? n : MAX_RECENT_DEFAULT;
+
+      const rawGeo = localStorage.getItem(STORAGE_KEY_GEO);
+      if (rawGeo === '0') geoEnabled = false;
+      else if (rawGeo === '1') geoEnabled = true;
+      else geoEnabled = true;
+
+      enforceRecentLimit();
+    }
+
+    function saveAll() {
+      enforceRecentLimit();
+      try {
+        localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(serializeState(state)));
+        localStorage.setItem(STORAGE_KEY_RECENT, JSON.stringify(recentEvents));
+        localStorage.setItem(STORAGE_KEY_MAX_RECENT, String(maxRecent));
         localStorage.setItem(STORAGE_KEY_GEO, geoEnabled ? '1' : '0');
       } catch (e) {
         console.warn('localStorage full or blocked', e);
       }
     }
 
-    function addEvent(ev) {
-      events.push(ev);
-      enforceLimit();
-      scheduleSave();
-      scheduleRender();
+    function enforceRecentLimit() {
+      if (recentEvents.length > maxRecent) {
+        recentEvents.splice(0, recentEvents.length - maxRecent);
+      }
     }
 
+    // ---------- UA / device helpers ----------
     function parseUA(ua) {
       ua = ua || '';
       let os = 'Other';
@@ -335,12 +447,391 @@
       return `${os} / ${browser}`;
     }
 
-    function getDisplayEvents() {
-      let arr = events.map(e => ({
+    // ---------- ingestion / aggregates ----------
+    function addToRecent(ev) {
+      recentEvents.push(ev);
+      enforceRecentLimit();
+    }
+
+    function ingestEvent(ev) {
+      const tsMs = Date.parse(ev.ts);
+      if (!Number.isFinite(tsMs)) return;
+      // Avoid double-counting older replays from the server buffer.
+      if (tsMs < state.lastEventTs) return;
+      if (tsMs > state.lastEventTs) state.lastEventTs = tsMs;
+
+      state.totalEvents += 1;
+
+      const installId = ev.installId;
+      const sessionId = ev.sessionId;
+      const page      = ev.page || '(none)';
+      const feature   = ev.feature || '(none)';
+      const device    = formatDevice(ev.ua);
+      const ip        = ev.ip_full || null;
+      const kind      = ev.kind || 'hb';
+      const curActive = Number(ev.activeMs) || 0;
+
+      // installs
+      if (installId) {
+        let inst = state.installs[installId];
+        if (!inst) {
+          inst = { firstSeen: tsMs, lastSeen: tsMs };
+          state.installs[installId] = inst;
+        } else {
+          inst.lastSeen = Math.max(inst.lastSeen || 0, tsMs);
+        }
+      }
+
+      // session + deltaMs
+      let deltaMs = 0;
+      if (sessionId) {
+        let sess = state.sessions[sessionId];
+        if (!sess) {
+          sess = {
+            installId: installId || null,
+            lastActiveMs: 0,
+            lastPage: page,
+            lastTs: tsMs,
+          };
+        }
+        if (kind === 'hb') {
+          const prev = Number(sess.lastActiveMs) || 0;
+          deltaMs = Math.max(0, curActive - prev);
+          if (curActive > prev) {
+            sess.lastActiveMs = curActive;
+          }
+        }
+        sess.lastPage = page;
+        sess.lastTs = tsMs;
+        state.sessions[sessionId] = sess;
+      }
+
+      // page stats
+      {
+        const key = page;
+        let ps = state.pageStats[key];
+        if (!ps) {
+          ps = {
+            installs: new Set(),
+            sessions: new Set(),
+            totalActiveMs: 0,
+            lastSeen: 0,
+          };
+          state.pageStats[key] = ps;
+        }
+        ps.lastSeen = Math.max(ps.lastSeen || 0, tsMs);
+        if (installId) ps.installs.add(installId);
+        if (sessionId) ps.sessions.add(sessionId);
+        if (deltaMs > 0) ps.totalActiveMs += deltaMs;
+      }
+
+      // feature stats
+      {
+        const key = feature;
+        let fs = state.featureStats[key];
+        if (!fs) {
+          fs = {
+            installs: new Set(),
+            sessions: new Set(),
+            lastSeen: 0,
+          };
+          state.featureStats[key] = fs;
+        }
+        fs.lastSeen = Math.max(fs.lastSeen || 0, tsMs);
+        if (installId) fs.installs.add(installId);
+        if (sessionId) fs.sessions.add(sessionId);
+      }
+
+      // device stats
+      {
+        const key = device;
+        let ds = state.deviceStats[key];
+        if (!ds) {
+          ds = {
+            installs: new Set(),
+          };
+          state.deviceStats[key] = ds;
+        }
+        if (installId) ds.installs.add(installId);
+      }
+
+      // IP stats
+      if (ip) {
+        let ips = state.ipStats[ip];
+        if (!ips) {
+          ips = {
+            installs: new Set(),
+            sessions: new Set(),
+            lastSeen: 0,
+          };
+          state.ipStats[ip] = ips;
+        }
+        ips.lastSeen = Math.max(ips.lastSeen || 0, tsMs);
+        if (installId) ips.installs.add(installId);
+        if (sessionId) ips.sessions.add(sessionId);
+      }
+
+      // error events (count events)
+      if (ev.kind === 'ev' && typeof ev.ev === 'string') {
+        const name = ev.ev;
+        if (
+          name.startsWith('error_') ||
+          name.endsWith('_failed') ||
+          name.endsWith('_timeout')
+        ) {
+          state.errorCounts[name] = (state.errorCounts[name] || 0) + 1;
+        }
+      }
+
+      // rolling log buffer
+      addToRecent(ev);
+
+      // persist aggregated state + log
+      scheduleSaveAll();
+    }
+
+    // ---------- summary computation ----------
+    function computeSummary() {
+      const now = Date.now();
+      const oneDay = 86400 * 1000;
+
+      const dau = new Set();
+      const wau = new Set();
+      const mau = new Set();
+      const live = new Set();
+
+      for (const [installId, rec] of Object.entries(state.installs)) {
+        const last = Number(rec.lastSeen) || 0;
+        if (!last) continue;
+        const diff = now - last;
+        if (diff <= 30 * oneDay) mau.add(installId);
+        if (diff <= 7 * oneDay)  wau.add(installId);
+        if (diff <= oneDay)      dau.add(installId);
+        if (diff <= LIVE_WINDOW_MS) live.add(installId);
+      }
+
+      const installsCount = Object.keys(state.installs).length;
+
+      const topPages = Object.entries(state.pageStats).map(([page, ps]) => ({
+        key: page,
+        installs: ps.installs.size,
+        val: ps.installs.size, // for display as "unique users"
+        totalActiveMs: ps.totalActiveMs || 0,
+      }))
+      .filter(x => x.installs > 0)
+      .sort((a,b) => b.installs - a.installs || a.key.localeCompare(b.key))
+      .slice(0,5);
+
+      const topFeatures = Object.entries(state.featureStats).map(([feat, fs]) => ({
+        key: feat,
+        val: fs.installs.size,
+      }))
+      .filter(x => x.val > 0)
+      .sort((a,b) => b.val - a.val || a.key.localeCompare(b.key))
+      .slice(0,5);
+
+      const topDevices = Object.entries(state.deviceStats).map(([dev, ds]) => ({
+        key: dev,
+        val: ds.installs.size,
+      }))
+      .filter(x => x.val > 0)
+      .sort((a,b) => b.val - a.val || a.key.localeCompare(b.key))
+      .slice(0,5);
+
+      const topErrors = Object.entries(state.errorCounts).map(([name, count]) => ({
+        key: name,
+        val: count,
+      }))
+      .sort((a,b) => b.val - a.val || a.key.localeCompare(b.key))
+      .slice(0,5);
+
+      return {
+        totalEvents: state.totalEvents,
+        installs: installsCount,
+        dau: dau.size,
+        wau: wau.size,
+        mau: mau.size,
+        live: live.size,
+        lastEvent: state.lastEventTs ? new Date(state.lastEventTs) : null,
+        topPages,
+        topFeatures,
+        topDevices,
+        topErrors,
+      };
+    }
+
+    // ---------- country summary using geoCache + ipStats ----------
+    async function computeCountrySummary() {
+      if (!geoEnabled) return [];
+      const countryToInstalls = new Map();
+      for (const [ip, ips] of Object.entries(state.ipStats)) {
+        const geo = await getGeoForIp(ip);
+        if (!geo || !geo.country) continue;
+        const country = geo.country;
+        let set = countryToInstalls.get(country);
+        if (!set) {
+          set = new Set();
+          countryToInstalls.set(country, set);
+        }
+        for (const installId of ips.installs || []) {
+          if (installId) set.add(installId);
+        }
+      }
+      return [...countryToInstalls.entries()]
+        .map(([country, set]) => ({ country, users: set.size }))
+        .sort((a,b) => b.users - a.users || a.country.localeCompare(b.country));
+    }
+
+    // ---------- Leaflet map + geolocation ----------
+    let map = null;
+    let mapLayer = null;
+
+    function initMapIfNeeded() {
+      if (map) return;
+      if (!window.L) {
+        console.warn('Leaflet not loaded, map will not work');
+        return;
+      }
+      map = L.map('map').setView([20, 0], 2); // world view
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+      mapLayer = L.layerGroup().addTo(map);
+    }
+
+    async function getGeoForIp(ip) {
+      if (!geoEnabled) return null;
+      if (!ip || ip === '::1') return null;
+      if (state.geoCache[ip]) return state.geoCache[ip];
+      try {
+        const res = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}`);
+        if (!res.ok) {
+          state.geoCache[ip] = null;
+          scheduleSaveAll();
+          return null;
+        }
+        const data = await res.json();
+        if (data.success === false) {
+          state.geoCache[ip] = null;
+          scheduleSaveAll();
+          return null;
+        }
+        const info = {
+          lat: data.latitude,
+          lon: data.longitude,
+          city: data.city,
+          country: data.country,
+          isp: data.connection?.isp || data.org || ''
+        };
+        state.geoCache[ip] = info;
+        scheduleSaveAll();
+        return info;
+      } catch (e) {
+        console.warn('Geo lookup failed', ip, e);
+        state.geoCache[ip] = null;
+        scheduleSaveAll();
+        return null;
+      }
+    }
+
+    async function renderMap() {
+      initMapIfNeeded();
+      if (!map || !mapLayer) return;
+
+      mapLayer.clearLayers();
+
+      if (!geoEnabled) {
+        return; // keep base map; no markers
+      }
+
+      const ipStatsEntries = Object.entries(state.ipStats);
+      for (const [ip, ips] of ipStatsEntries) {
+        const geo = await getGeoForIp(ip);
+        if (!geo || !Number.isFinite(geo.lat) || !Number.isFinite(geo.lon)) continue;
+        const installsCount = (ips.installs && ips.installs.size) || 0;
+        const sessionsCount = (ips.sessions && ips.sessions.size) || 0;
+        const lastSeen = ips.lastSeen
+          ? new Date(ips.lastSeen).toISOString().replace('T',' ').slice(0,19)
+          : '—';
+
+        const popupHtml = `
+          <b>${ip}</b><br/>
+          ${geo.city ? `${geo.city}, ` : ''}${geo.country || ''}<br/>
+          Installs: ${installsCount}<br/>
+          Sessions: ${sessionsCount}<br/>
+          Last seen: ${lastSeen}
+        `;
+        L.marker([geo.lat, geo.lon])
+          .addTo(mapLayer)
+          .bindPopup(popupHtml);
+      }
+      // No fitBounds -> user zoom/pan preserved
+    }
+
+    // ---------- Logs table (from recentEvents) ----------
+    const tableEl   = document.getElementById('eventsTable');
+    const theadEl   = tableEl.querySelector('thead');
+    const tbodyEl   = tableEl.querySelector('tbody');
+    const cardsEl   = document.getElementById('cards');
+    const summaryContentEl = document.getElementById('summaryContent');
+    const lastUpdatedEl    = document.getElementById('lastUpdated');
+    const geoCheckbox      = document.getElementById('geoEnabled');
+
+    let sortKey = 'ts';
+    let sortDir = 'desc';
+    const filters = {};
+    for (const col of COLUMNS) filters[col.key] = '';
+
+    function buildTableHeader() {
+      const headerRow = document.createElement('tr');
+      for (const col of COLUMNS) {
+        const th = document.createElement('th');
+        th.dataset.key = col.key;
+        th.textContent = col.label;
+        const span = document.createElement('span');
+        span.className = 'sort-indicator';
+        th.appendChild(span);
+        th.addEventListener('click', () => {
+          if (sortKey === col.key) {
+            sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+          } else {
+            sortKey = col.key;
+            sortDir = 'desc';
+          }
+          renderLogsTable();
+        });
+        headerRow.appendChild(th);
+      }
+
+      const filterRow = document.createElement('tr');
+      filterRow.className = 'filters';
+      for (const col of COLUMNS) {
+        const th = document.createElement('th');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'filter';
+        input.value = filters[col.key] || '';
+        input.addEventListener('input', () => {
+          filters[col.key] = input.value.toLowerCase();
+          renderLogsTable();
+        });
+        th.appendChild(input);
+        filterRow.appendChild(th);
+      }
+
+      theadEl.innerHTML = '';
+      theadEl.appendChild(headerRow);
+      theadEl.appendChild(filterRow);
+    }
+
+    function getDisplayLogs() {
+      let arr = recentEvents.map(e => ({
         ...e,
         device: formatDevice(e.ua),
       }));
 
+      // filters
       arr = arr.filter(e => {
         for (const [key, val] of Object.entries(filters)) {
           if (!val) continue;
@@ -350,6 +841,7 @@
         return true;
       });
 
+      // sort
       arr.sort((a, b) => {
         const k = sortKey;
         let va = a[k];
@@ -374,239 +866,8 @@
       return arr;
     }
 
-    function computeSummary() {
-      const now = Date.now();
-      const oneDay  = 86400 * 1000;
-      const liveWindow = 2 * 60 * 1000;
-
-      const dau = new Set();
-      const wau = new Set();
-      const mau = new Set();
-      const live = new Set();
-      const allInstalls = new Set();
-
-      // Unique installs per key
-      const featureInstalls = new Map(); // feature -> Set(installId)
-      const pageInstalls    = new Map(); // page   -> Set(installId)
-      const deviceInstalls  = new Map(); // device -> Set(installId)
-
-      const errorCounts = new Map();     // errors remain event-count based
-
-      let lastEventTs = null;
-
-      for (const e of events) {
-        const t = new Date(e.ts).getTime();
-        if (!Number.isFinite(t)) continue;
-        const diff = now - t;
-        const installId = e.installId;
-
-        if (installId) {
-          allInstalls.add(installId);
-          if (diff <= 30 * oneDay) mau.add(installId);
-          if (diff <=  7 * oneDay) wau.add(installId);
-          if (diff <=      oneDay) dau.add(installId);
-          if (diff <= liveWindow)  live.add(installId);
-        }
-
-        // feature uniques
-        const feat = e.feature || '(none)';
-        if (installId) {
-          let set = featureInstalls.get(feat);
-          if (!set) {
-            set = new Set();
-            featureInstalls.set(feat, set);
-          }
-          set.add(installId);
-        }
-
-        // page uniques
-        const page = e.page || '(none)';
-        if (installId) {
-          let set = pageInstalls.get(page);
-          if (!set) {
-            set = new Set();
-            pageInstalls.set(page, set);
-          }
-          set.add(installId);
-        }
-
-        // device uniques (from UA)
-        const dev = formatDevice(e.ua);
-        if (installId) {
-          let set = deviceInstalls.get(dev);
-          if (!set) {
-            set = new Set();
-            deviceInstalls.set(dev, set);
-          }
-          set.add(installId);
-        }
-
-        // error events (count events)
-        if (e.ev && typeof e.ev === 'string') {
-          const evName = e.ev;
-          if (
-            evName.startsWith('error_') ||
-            evName.endsWith('_failed') ||
-            evName.endsWith('_timeout')
-          ) {
-            errorCounts.set(evName, (errorCounts.get(evName) || 0) + 1);
-          }
-        }
-
-        if (!lastEventTs || t > lastEventTs) {
-          lastEventTs = t;
-        }
-      }
-
-      const toTopUnique = (map, limit = 5) =>
-        [...map.entries()]
-          .map(([key, set]) => ({ key, val: set.size }))
-          .sort((a, b) => b.val - a.val || a.key.localeCompare(b.key))
-          .slice(0, limit);
-
-      const toTopErrors = (map, limit = 5) =>
-        [...map.entries()]
-          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-          .slice(0, limit)
-          .map(([key, val]) => ({ key, val }));
-
-      return {
-        totalEvents: events.length,
-        dau: dau.size,
-        wau: wau.size,
-        mau: mau.size,
-        live: live.size,
-        installs: allInstalls.size,
-        lastEvent: lastEventTs ? new Date(lastEventTs) : null,
-        topFeatures: toTopUnique(featureInstalls),
-        topPages:    toTopUnique(pageInstalls),
-        topDevices:  toTopUnique(deviceInstalls),
-        topErrors:   toTopErrors(errorCounts),
-      };
-    }
-
-    // Country summary using IP geolocation
-    async function computeCountrySummary() {
-      if (!geoEnabled) return [];
-      const countryToInstalls = new Map();
-      const ipToCountry = new Map();
-
-      for (const e of events) {
-        const ip = e.ip_full;
-        if (!ip) continue;
-
-        let country = ipToCountry.get(ip);
-        if (country === undefined) {
-          const geo = await getGeoForIp(ip);
-          country = geo && geo.country ? geo.country : null;
-          ipToCountry.set(ip, country);
-        }
-        if (!country) continue;
-
-        if (!countryToInstalls.has(country)) {
-          countryToInstalls.set(country, new Set());
-        }
-        countryToInstalls.get(country).add(e.installId);
-      }
-
-      const list = [...countryToInstalls.entries()].map(([country, set]) => ({
-        country,
-        users: set.size,
-      })).sort((a, b) => b.users - a.users || a.country.localeCompare(b.country));
-
-      return list;
-    }
-
-    function escapeCsv(value) {
-      if (value == null) return '';
-      const s = String(value);
-      if (s.includes('"') || s.includes(',') || s.includes('\n')) {
-        return '"' + s.replace(/"/g, '""') + '"';
-      }
-      return s;
-    }
-
-    // ---------- UI rendering ----------
-    const cardsEl = document.getElementById('cards');
-    const tableEl = document.getElementById('eventsTable');
-    const theadEl = tableEl.querySelector('thead');
-    const tbodyEl = tableEl.querySelector('tbody');
-    const summaryContentEl = document.getElementById('summaryContent');
-    const geoCheckbox = document.getElementById('geoEnabled');
-
-    function buildTableHeader() {
-      const headerRow = document.createElement('tr');
-      for (const col of COLUMNS) {
-        const th = document.createElement('th');
-        th.dataset.key = col.key;
-        th.textContent = col.label;
-        const span = document.createElement('span');
-        span.className = 'sort-indicator';
-        th.appendChild(span);
-        th.addEventListener('click', () => {
-          if (sortKey === col.key) {
-            sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-          } else {
-            sortKey = col.key;
-            sortDir = 'desc';
-          }
-          rerender();
-        });
-        headerRow.appendChild(th);
-      }
-
-      const filterRow = document.createElement('tr');
-      filterRow.className = 'filters';
-      for (const col of COLUMNS) {
-        const th = document.createElement('th');
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.placeholder = 'filter';
-        input.value = filters[col.key] || '';
-        input.addEventListener('input', () => {
-          filters[col.key] = input.value.toLowerCase();
-          rerender();
-        });
-        th.appendChild(input);
-        filterRow.appendChild(th);
-      }
-
-      theadEl.innerHTML = '';
-      theadEl.appendChild(headerRow);
-      theadEl.appendChild(filterRow);
-    }
-
-    function renderCards() {
-      const s = computeSummary();
-      const fmtDateTime = (d) =>
-        d ? d.toISOString().replace('T',' ').slice(0,19) : '—';
-
-      cardsEl.innerHTML = `
-        <div class="card">
-          <div class="card-title">Events stored (this browser)</div>
-          <div class="card-big">${s.totalEvents}</div>
-        </div>
-        <div class="card">
-          <div class="card-title">Installs seen (all time)</div>
-          <div class="card-big">${s.installs}</div>
-        </div>
-        <div class="card">
-          <div class="card-title">Active now (last 2 min)</div>
-          <div class="card-big">${s.live}</div>
-        </div>
-        <div class="card">
-          <div class="card-title">DAU / WAU / MAU</div>
-          <div><b>${s.dau}</b> / <b>${s.wau}</b> / <b>${s.mau}</b></div>
-        </div>
-        <div class="card">
-          <div class="card-title">Last event</div>
-          <div>${fmtDateTime(s.lastEvent)}</div>
-        </div>
-      `;
-    }
-
-    function renderTable() {
-      const data = getDisplayEvents();
+    function renderLogsTable() {
+      const data = getDisplayLogs();
       const rows = data.slice(-200).reverse(); // last 200
 
       const headerRow = theadEl.querySelector('tr');
@@ -632,20 +893,50 @@
           <td>${e.ev || ''}</td>
           <td>${e.activeMs ?? ''}</td>
           <td>${e.ip_full || ''}</td>
-          <td>${e.device || ''}</td>
+          <td>${formatDevice(e.ua)}</td>
         </tr>
       `).join('');
+    }
+
+    function renderCards() {
+      const s = computeSummary();
+      const fmtDateTime = (d) =>
+        d ? d.toISOString().replace('T',' ').slice(0,19) : '—';
+
+      cardsEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">Events aggregated (approx.)</div>
+          <div class="card-big">${s.totalEvents}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Installs seen (all time)</div>
+          <div class="card-big">${s.installs}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Active now (last 2 min)</div>
+          <div class="card-big">${s.live}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">DAU / WAU / MAU</div>
+          <div><b>${s.dau}</b> / <b>${s.wau}</b> / <b>${s.mau}</b></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Last event</div>
+          <div>${fmtDateTime(s.lastEvent)}</div>
+        </div>
+      `;
     }
 
     async function renderSummaryView() {
       const s = computeSummary();
       const countries = geoEnabled ? await computeCountrySummary() : [];
 
-      const fmtList = (items) => items.length
-        ? items.map(it =>
-            `<li><span class="key">${it.key}</span><span class="val">${it.val}</span></li>`
-          ).join('')
-        : '<li><span class="key">—</span></li>';
+      const fmtList = (items) =>
+        items.length
+          ? items.map(it =>
+              `<li><span class="key">${it.key}</span><span class="val">${it.val}</span></li>`
+            ).join('')
+          : '<li><span class="key">—</span></li>';
 
       const fmtCountryList = () => {
         if (!geoEnabled) {
@@ -662,20 +953,20 @@
       summaryContentEl.innerHTML = `
         <div class="summary-grid">
           <div class="summary-section">
-            <h2>Top features</h2>
+            <h2>Top pages (unique installs)</h2>
+            <ul>${fmtList(s.topPages.map(p => ({ key: p.key, val: p.val })))}</ul>
+          </div>
+          <div class="summary-section">
+            <h2>Top features (unique installs)</h2>
             <ul>${fmtList(s.topFeatures)}</ul>
           </div>
           <div class="summary-section">
-            <h2>Top pages</h2>
-            <ul>${fmtList(s.topPages)}</ul>
-          </div>
-          <div class="summary-section">
-            <h2>Error events</h2>
-            <ul>${fmtList(s.topErrors)}</ul>
-          </div>
-          <div class="summary-section">
-            <h2>Devices</h2>
+            <h2>Devices (unique installs)</h2>
             <ul>${fmtList(s.topDevices)}</ul>
+          </div>
+          <div class="summary-section">
+            <h2>Error events (counts)</h2>
+            <ul>${fmtList(s.topErrors)}</ul>
           </div>
           <div class="summary-section">
             <h2>Countries (unique installs)</h2>
@@ -685,105 +976,22 @@
       `;
     }
 
-    function initMapIfNeeded() {
-      if (map) return;
-      if (!window.L) {
-        console.warn('Leaflet not loaded, map will not work');
-        return;
-      }
-      map = L.map('map').setView([20, 0], 2); // world view
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 18,
-        attribution: '&copy; OpenStreetMap contributors'
-      }).addTo(map);
-      mapLayer = L.layerGroup().addTo(map);
-    }
-
-    async function getGeoForIp(ip) {
-      if (!geoEnabled) return null; // no external calls if disabled
-      if (!ip || ip === '::1') return null;
-      if (geoCache[ip]) return geoCache[ip];
-      try {
-        const res = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}`);
-        if (!res.ok) {
-          geoCache[ip] = null;
-          return null;
-        }
-        const data = await res.json();
-        if (data.success === false) {
-          geoCache[ip] = null;
-          return null;
-        }
-        const info = {
-          lat: data.latitude,
-          lon: data.longitude,
-          city: data.city,
-          country: data.country,
-          isp: data.connection?.isp || data.org || ''
-        };
-        geoCache[ip] = info;
-        return info;
-      } catch (e) {
-        console.warn('Geo lookup failed', ip, e);
-        geoCache[ip] = null;
-        return null;
-      }
-    }
-
-    async function renderMap() {
-      initMapIfNeeded();
-      if (!map || !mapLayer) return;
-
-      mapLayer.clearLayers();
-
-      if (!geoEnabled) {
-        return; // keep base map; no markers
-      }
-
-      const ipStats = {};
-      for (const e of events) {
-        const ip = e.ip_full;
-        if (!ip) continue;
-        if (!ipStats[ip]) {
-          ipStats[ip] = {
-            lastSeen: e.ts,
-            installs: new Set(),
-            sessions: new Set(),
-          };
-        }
-        const stat = ipStats[ip];
-        if (new Date(e.ts) > new Date(stat.lastSeen)) stat.lastSeen = e.ts;
-        stat.installs.add(e.installId);
-        stat.sessions.add(e.sessionId);
-      }
-
-      const entries = Object.entries(ipStats);
-      for (const [ip, stat] of entries) {
-        const geo = await getGeoForIp(ip);
-        if (!geo || !Number.isFinite(geo.lat) || !Number.isFinite(geo.lon)) continue;
-        const popupHtml = `
-          <b>${ip}</b><br/>
-          ${geo.city ? `${geo.city}, ` : ''}${geo.country || ''}<br/>
-          Installs: ${stat.installs.size}<br/>
-          Sessions: ${stat.sessions.size}<br/>
-          Last seen: ${stat.lastSeen.replace('T',' ').slice(0,19)}
-        `;
-        L.marker([geo.lat, geo.lon])
-          .addTo(mapLayer)
-          .bindPopup(popupHtml);
-      }
-      // No fitBounds here -> your zoom/pan are preserved
+    function updateLastUpdatedLabel() {
+      const d = new Date();
+      const s = d.toISOString().replace('T',' ').slice(0,19);
+      lastUpdatedEl.textContent = `Last dashboard refresh: ${s}`;
     }
 
     function rerender() {
       renderCards();
-      renderTable();
+      renderLogsTable();
       const activeView = document.querySelector('.view.view-active');
       if (activeView && activeView.id === 'view-summary') {
         renderSummaryView();
       } else if (activeView && activeView.id === 'view-map') {
         renderMap();
       }
+      updateLastUpdatedLabel();
     }
 
     // ---------- view switching ----------
@@ -809,29 +1017,22 @@
 
     // ---------- controls ----------
     const maxEventsInput = document.getElementById('maxEventsInput');
-    maxEventsInput.value = String(maxEvents);
+    const clearAllBtn    = document.getElementById('clearAll');
+    const downloadCsvBtn = document.getElementById('downloadCsv');
+    const refreshViewBtn = document.getElementById('refreshView');
+    const applyMaxBtn    = document.getElementById('applyMaxEvents');
 
-    geoCheckbox.checked = geoEnabled;
+    function escapeCsv(value) {
+      if (value == null) return '';
+      const s = String(value);
+      if (s.includes('"') || s.includes(',') || s.includes('\n')) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }
 
-    document.getElementById('applyMaxEvents').addEventListener('click', () => {
-      const n = parseInt(maxEventsInput.value, 10);
-      if (!Number.isFinite(n) || n <= 0) return;
-      maxEvents = n;
-      enforceLimit();
-      save();
-      rerender();
-    });
-
-    document.getElementById('clearEvents').addEventListener('click', () => {
-      if (!confirm('Clear all locally stored events?')) return;
-      events = [];
-      save();
-      rerender();
-    });
-
-    document.getElementById('downloadCsv').addEventListener('click', () => {
-      const data = getDisplayEvents();
-
+    downloadCsvBtn.addEventListener('click', () => {
+      const data = getDisplayLogs();
       const headerKeys   = COLUMNS.map(c => c.key);
       const headerLabels = COLUMNS.map(c => c.label);
 
@@ -840,7 +1041,7 @@
 
       for (const row of data) {
         const line = headerKeys.map(key => {
-          const v = row[key];
+          const v = key === 'device' ? formatDevice(row.ua) : row[key];
           return escapeCsv(v == null ? '' : v);
         }).join(',');
         lines.push(line);
@@ -862,31 +1063,58 @@
       URL.revokeObjectURL(url);
     });
 
+    clearAllBtn.addEventListener('click', () => {
+      if (!confirm('Reset all locally stored analytics data (aggregates + log)?')) return;
+      state = createDefaultState();
+      recentEvents = [];
+      saveAll();
+      rerender();
+    });
+
+    applyMaxBtn.addEventListener('click', () => {
+      const n = parseInt(maxEventsInput.value, 10);
+      if (!Number.isFinite(n) || n <= 0) return;
+      maxRecent = n;
+      enforceRecentLimit();
+      saveAll();
+      renderLogsTable();
+    });
+
+    refreshViewBtn.addEventListener('click', () => {
+      rerender();
+    });
+
     geoCheckbox.addEventListener('change', () => {
       geoEnabled = geoCheckbox.checked;
-      save();
-      if (!mapLayer) return;
-      if (!geoEnabled) {
+      saveAll();
+      if (!geoEnabled && mapLayer) {
         mapLayer.clearLayers();
-      } else {
-        renderMap();
+      } else if (geoEnabled) {
         const activeView = document.querySelector('.view.view-active');
-        if (activeView && activeView.id === 'view-summary') {
+        if (activeView && activeView.id === 'view-map') {
+          renderMap();
+        }
+        const summaryViewActive = document.querySelector('.view.view-active')?.id === 'view-summary';
+        if (summaryViewActive) {
           renderSummaryView();
         }
       }
     });
 
-    // ---------- initial render ----------
+    // ---------- initial load ----------
+    loadAll();
     buildTableHeader();
+    maxEventsInput.value = String(maxRecent);
+    geoCheckbox.checked = geoEnabled;
     rerender();
 
-    // ---------- SSE hookup (live refresh on every event, but throttled) ----------
+    // ---------- SSE hookup: just evolve state, no auto-rerender ----------
     const es = new EventSource(`${ANALYTICS_BASE}/stream`);
     es.onmessage = (ev) => {
       try {
         const row = JSON.parse(ev.data);
-        addEvent(row); // schedules save + render
+        ingestEvent(row);
+        // No rerender here: dashboard updates only on "Refresh view"
       } catch (e) {
         console.error('Bad event', e);
       }
