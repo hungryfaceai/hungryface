@@ -1,0 +1,899 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Naptio Analytics — Local</title>
+
+  <!-- Leaflet for the map -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      background:#000; color:#eee; font-family:system-ui,Segoe UI,Roboto,Arial;
+      margin:24px;
+    }
+    h1 { margin:0 0 8px; }
+    h2 { margin:16px 0 8px; font-size:16px; }
+    .muted { opacity:.7; font-size:14px; margin-bottom:16px; }
+
+    .toolbar {
+      display:flex;
+      flex-wrap:wrap;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+      margin:12px 0 8px;
+    }
+    .toolbar-left, .toolbar-right {
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      align-items:center;
+    }
+
+    button {
+      background:#111;
+      color:#eee;
+      border:1px solid #333;
+      border-radius:999px;
+      padding:6px 12px;
+      font-size:13px;
+      cursor:pointer;
+    }
+    button:hover { border-color:#555; }
+    button.tab-active {
+      background:#eee;
+      color:#000;
+      border-color:#eee;
+    }
+
+    label {
+      font-size:12px;
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+    }
+    input[type="number"], input[type="text"] {
+      background:#111;
+      border:1px solid #333;
+      color:#eee;
+      padding:4px 6px;
+      border-radius:6px;
+      font-size:12px;
+    }
+
+    .cards { display:flex; gap:16px; flex-wrap:wrap; margin-top:12px; }
+    .card {
+      padding:10px 12px;
+      border-radius:10px;
+      background:#111;
+      font-size:14px;
+      min-width:150px;
+    }
+    .card-title { font-size:12px; opacity:.7; margin-bottom:4px; }
+    .card-big { font-size:20px; font-weight:600; }
+
+    .view { display:none; margin-top:12px; }
+    .view.view-active { display:block; }
+
+    table {
+      border-collapse:collapse;
+      width:100%;
+      max-width:1000px;
+      margin-top:8px;
+      font-size:12px;
+    }
+    th, td {
+      padding:6px 8px;
+      border-bottom:1px solid #222;
+      text-align:left;
+      vertical-align:top;
+    }
+    th {
+      opacity:.9;
+      position:relative;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    th .sort-indicator {
+      margin-left:4px;
+      opacity:.6;
+      font-size:10px;
+    }
+    thead tr.filters th {
+      padding-top:0;
+      padding-bottom:4px;
+    }
+    thead tr.filters input {
+      width:100%;
+      font-size:11px;
+    }
+    tbody tr:nth-child(even) { background:rgba(255,255,255,0.02); }
+
+    #map {
+      width:100%;
+      height:480px;
+      border-radius:10px;
+      overflow:hidden;
+      margin-top:8px;
+    }
+
+    .summary-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+      gap:12px;
+      margin-top:12px;
+    }
+    .summary-section {
+      background:#111;
+      border-radius:10px;
+      padding:10px 12px;
+    }
+    .summary-section ul {
+      list-style:none;
+      padding:0;
+      margin:6px 0 0;
+      font-size:12px;
+    }
+    .summary-section li {
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      padding:2px 0;
+    }
+    .summary-section li span.key {
+      opacity:.8;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      max-width:200px;
+    }
+    .summary-section li span.val {
+      font-variant-numeric:tabular-nums;
+    }
+  </style>
+</head>
+<body>
+  <h1>Naptio Analytics (local only)</h1>
+  <p class="muted">
+    This page listens to <code>/a/stream</code> and stores events in <code>localStorage</code> on this browser only.
+    No database, no server-side files. Data is approximate and for your own use.
+  </p>
+
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <button class="tabButton tab-active" data-view="logs">Logs</button>
+      <button class="tabButton" data-view="summary">Summary</button>
+      <button class="tabButton" data-view="map">Map</button>
+    </div>
+    <div class="toolbar-right">
+      <label>
+        Max events
+        <input id="maxEventsInput" type="number" min="500" step="500" />
+      </label>
+      <button id="applyMaxEvents">Apply</button>
+      <button id="clearEvents">Clear all</button>
+      <button id="downloadCsv">Download CSV</button>
+    </div>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+  <!-- Logs view -->
+  <div id="view-logs" class="view view-active">
+    <table id="eventsTable">
+      <thead></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- Summary view -->
+  <div id="view-summary" class="view">
+    <div id="summaryContent"></div>
+  </div>
+
+  <!-- Map view -->
+  <div id="view-map" class="view">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <label>
+        <input type="checkbox" id="geoEnabled" />
+        Enable geolocation lookups
+      </label>
+    </div>
+    <div id="map"></div>
+    <p class="muted">
+      Locations are approximate based on IP geolocation and may be inaccurate.
+      Only IPs seen in your local log are shown.
+    </p>
+  </div>
+
+  <script type="module">
+    // ---------- config / state ----------
+    const STORAGE_KEY_EVENTS = 'naptioAnalyticsEvents';
+    const STORAGE_KEY_MAX    = 'naptioAnalyticsMaxEvents';
+    const STORAGE_KEY_GEO    = 'naptioAnalyticsGeoEnabled';
+    const MAX_EVENTS_DEFAULT = 5000; // for <100 installs, 5k events is plenty
+
+    const ANALYTICS_BASE = 'https://signaling-server-f5gu.onrender.com/a';
+
+    const COLUMNS = [
+      { key: 'ts',        label: 'Time' },
+      { key: 'feature',   label: 'Feature' },
+      { key: 'page',      label: 'Page' },
+      { key: 'installId', label: 'Install' },
+      { key: 'sessionId', label: 'Session' },
+      { key: 'kind',      label: 'Kind' },
+      { key: 'ev',        label: 'Event' },
+      { key: 'activeMs',  label: 'Active ms' },
+      { key: 'ip_full',   label: 'IP (full)' },
+      { key: 'device',    label: 'Device' }, // derived from UA
+    ];
+
+    let events = [];
+    try {
+      events = JSON.parse(localStorage.getItem(STORAGE_KEY_EVENTS) || '[]');
+      if (!Array.isArray(events)) events = [];
+    } catch { events = []; }
+
+    let maxEvents = (() => {
+      const raw = localStorage.getItem(STORAGE_KEY_MAX);
+      const n = raw ? parseInt(raw, 10) : MAX_EVENTS_DEFAULT;
+      return Number.isFinite(n) && n > 0 ? n : MAX_EVENTS_DEFAULT;
+    })();
+
+    // Geo toggle (default ON if not set)
+    let geoEnabled = (() => {
+      const raw = localStorage.getItem(STORAGE_KEY_GEO);
+      if (raw === '0') return false;
+      if (raw === '1') return true;
+      return true;
+    })();
+
+    let sortKey = 'ts';
+    let sortDir = 'desc';
+    const filters = {};
+    for (const col of COLUMNS) filters[col.key] = '';
+
+    // Map state
+    let map = null;
+    let mapLayer = null;
+    const geoCache = {}; // ip -> { lat, lon, city, country }
+
+    // Throttling for save + render
+    let saveScheduled = false;
+    let renderScheduled = false;
+
+    function scheduleSave() {
+      if (saveScheduled) return;
+      saveScheduled = true;
+      setTimeout(() => {
+        saveScheduled = false;
+        save();
+      }, 1000); // at most once per second
+    }
+
+    function scheduleRender() {
+      if (renderScheduled) return;
+      renderScheduled = true;
+      requestAnimationFrame(() => {
+        renderScheduled = false;
+        rerender();
+      });
+    }
+
+    // ---------- helpers ----------
+    function enforceLimit() {
+      if (events.length > maxEvents) {
+        events.splice(0, events.length - maxEvents);
+      }
+    }
+
+    function save() {
+      enforceLimit();
+      try {
+        localStorage.setItem(STORAGE_KEY_EVENTS, JSON.stringify(events));
+        localStorage.setItem(STORAGE_KEY_MAX, String(maxEvents));
+        localStorage.setItem(STORAGE_KEY_GEO, geoEnabled ? '1' : '0');
+      } catch (e) {
+        console.warn('localStorage full or blocked', e);
+      }
+    }
+
+    function addEvent(ev) {
+      events.push(ev);
+      enforceLimit();
+      scheduleSave();
+      scheduleRender();
+    }
+
+    function parseUA(ua) {
+      ua = ua || '';
+      let os = 'Other';
+      if (ua.includes('Windows')) os = 'Windows';
+      else if (ua.includes('Mac OS X') || ua.includes('Macintosh')) os = 'macOS';
+      else if (ua.includes('iPhone')) os = 'iPhone';
+      else if (ua.includes('iPad')) os = 'iPad';
+      else if (ua.includes('Android')) os = 'Android';
+
+      let browser = 'Other';
+      if (ua.includes('Edg/')) browser = 'Edge';
+      else if (ua.includes('Chrome/')) browser = 'Chrome';
+      else if (ua.includes('Safari/') && !ua.includes('Chrome/')) browser = 'Safari';
+      else if (ua.includes('Firefox/')) browser = 'Firefox';
+
+      return { os, browser };
+    }
+
+    function formatDevice(ua) {
+      const { os, browser } = parseUA(ua);
+      return `${os} / ${browser}`;
+    }
+
+    function getDisplayEvents() {
+      let arr = events.map(e => ({
+        ...e,
+        device: formatDevice(e.ua),
+      }));
+
+      arr = arr.filter(e => {
+        for (const [key, val] of Object.entries(filters)) {
+          if (!val) continue;
+          const field = (e[key] ?? '').toString().toLowerCase();
+          if (!field.includes(val)) return false;
+        }
+        return true;
+      });
+
+      arr.sort((a, b) => {
+        const k = sortKey;
+        let va = a[k];
+        let vb = b[k];
+        if (k === 'ts') {
+          const ta = new Date(va).getTime();
+          const tb = new Date(vb).getTime();
+          return sortDir === 'asc' ? ta - tb : tb - ta;
+        }
+        if (k === 'activeMs') {
+          va = Number(va) || 0;
+          vb = Number(vb) || 0;
+          return sortDir === 'asc' ? va - vb : vb - va;
+        }
+        va = (va ?? '').toString().toLowerCase();
+        vb = (vb ?? '').toString().toLowerCase();
+        if (va < vb) return sortDir === 'asc' ? -1 : 1;
+        if (va > vb) return sortDir === 'asc' ? 1 : -1;
+        return 0;
+      });
+
+      return arr;
+    }
+
+    function computeSummary() {
+      const now = Date.now();
+      const oneDay  = 86400 * 1000;
+      const liveWindow = 2 * 60 * 1000;
+
+      const dau = new Set();
+      const wau = new Set();
+      const mau = new Set();
+      const live = new Set();
+      const allInstalls = new Set();
+
+      // Unique installs per key
+      const featureInstalls = new Map(); // feature -> Set(installId)
+      const pageInstalls    = new Map(); // page   -> Set(installId)
+      const deviceInstalls  = new Map(); // device -> Set(installId)
+
+      const errorCounts = new Map();     // errors remain event-count based
+
+      let lastEventTs = null;
+
+      for (const e of events) {
+        const t = new Date(e.ts).getTime();
+        if (!Number.isFinite(t)) continue;
+        const diff = now - t;
+        const installId = e.installId;
+
+        if (installId) {
+          allInstalls.add(installId);
+          if (diff <= 30 * oneDay) mau.add(installId);
+          if (diff <=  7 * oneDay) wau.add(installId);
+          if (diff <=      oneDay) dau.add(installId);
+          if (diff <= liveWindow)  live.add(installId);
+        }
+
+        // feature uniques
+        const feat = e.feature || '(none)';
+        if (installId) {
+          let set = featureInstalls.get(feat);
+          if (!set) {
+            set = new Set();
+            featureInstalls.set(feat, set);
+          }
+          set.add(installId);
+        }
+
+        // page uniques
+        const page = e.page || '(none)';
+        if (installId) {
+          let set = pageInstalls.get(page);
+          if (!set) {
+            set = new Set();
+            pageInstalls.set(page, set);
+          }
+          set.add(installId);
+        }
+
+        // device uniques (from UA)
+        const dev = formatDevice(e.ua);
+        if (installId) {
+          let set = deviceInstalls.get(dev);
+          if (!set) {
+            set = new Set();
+            deviceInstalls.set(dev, set);
+          }
+          set.add(installId);
+        }
+
+        // error events (count events)
+        if (e.ev && typeof e.ev === 'string') {
+          const evName = e.ev;
+          if (
+            evName.startsWith('error_') ||
+            evName.endsWith('_failed') ||
+            evName.endsWith('_timeout')
+          ) {
+            errorCounts.set(evName, (errorCounts.get(evName) || 0) + 1);
+          }
+        }
+
+        if (!lastEventTs || t > lastEventTs) {
+          lastEventTs = t;
+        }
+      }
+
+      const toTopUnique = (map, limit = 5) =>
+        [...map.entries()]
+          .map(([key, set]) => ({ key, val: set.size }))
+          .sort((a, b) => b.val - a.val || a.key.localeCompare(b.key))
+          .slice(0, limit);
+
+      const toTopErrors = (map, limit = 5) =>
+        [...map.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .slice(0, limit)
+          .map(([key, val]) => ({ key, val }));
+
+      return {
+        totalEvents: events.length,
+        dau: dau.size,
+        wau: wau.size,
+        mau: mau.size,
+        live: live.size,
+        installs: allInstalls.size,
+        lastEvent: lastEventTs ? new Date(lastEventTs) : null,
+        topFeatures: toTopUnique(featureInstalls),
+        topPages:    toTopUnique(pageInstalls),
+        topDevices:  toTopUnique(deviceInstalls),
+        topErrors:   toTopErrors(errorCounts),
+      };
+    }
+
+    // Country summary using IP geolocation
+    async function computeCountrySummary() {
+      if (!geoEnabled) return [];
+      const countryToInstalls = new Map();
+      const ipToCountry = new Map();
+
+      for (const e of events) {
+        const ip = e.ip_full;
+        if (!ip) continue;
+
+        let country = ipToCountry.get(ip);
+        if (country === undefined) {
+          const geo = await getGeoForIp(ip);
+          country = geo && geo.country ? geo.country : null;
+          ipToCountry.set(ip, country);
+        }
+        if (!country) continue;
+
+        if (!countryToInstalls.has(country)) {
+          countryToInstalls.set(country, new Set());
+        }
+        countryToInstalls.get(country).add(e.installId);
+      }
+
+      const list = [...countryToInstalls.entries()].map(([country, set]) => ({
+        country,
+        users: set.size,
+      })).sort((a, b) => b.users - a.users || a.country.localeCompare(b.country));
+
+      return list;
+    }
+
+    function escapeCsv(value) {
+      if (value == null) return '';
+      const s = String(value);
+      if (s.includes('"') || s.includes(',') || s.includes('\n')) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }
+
+    // ---------- UI rendering ----------
+    const cardsEl = document.getElementById('cards');
+    const tableEl = document.getElementById('eventsTable');
+    const theadEl = tableEl.querySelector('thead');
+    const tbodyEl = tableEl.querySelector('tbody');
+    const summaryContentEl = document.getElementById('summaryContent');
+    const geoCheckbox = document.getElementById('geoEnabled');
+
+    function buildTableHeader() {
+      const headerRow = document.createElement('tr');
+      for (const col of COLUMNS) {
+        const th = document.createElement('th');
+        th.dataset.key = col.key;
+        th.textContent = col.label;
+        const span = document.createElement('span');
+        span.className = 'sort-indicator';
+        th.appendChild(span);
+        th.addEventListener('click', () => {
+          if (sortKey === col.key) {
+            sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+          } else {
+            sortKey = col.key;
+            sortDir = 'desc';
+          }
+          rerender();
+        });
+        headerRow.appendChild(th);
+      }
+
+      const filterRow = document.createElement('tr');
+      filterRow.className = 'filters';
+      for (const col of COLUMNS) {
+        const th = document.createElement('th');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'filter';
+        input.value = filters[col.key] || '';
+        input.addEventListener('input', () => {
+          filters[col.key] = input.value.toLowerCase();
+          rerender();
+        });
+        th.appendChild(input);
+        filterRow.appendChild(th);
+      }
+
+      theadEl.innerHTML = '';
+      theadEl.appendChild(headerRow);
+      theadEl.appendChild(filterRow);
+    }
+
+    function renderCards() {
+      const s = computeSummary();
+      const fmtDateTime = (d) =>
+        d ? d.toISOString().replace('T',' ').slice(0,19) : '—';
+
+      cardsEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">Events stored (this browser)</div>
+          <div class="card-big">${s.totalEvents}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Installs seen (all time)</div>
+          <div class="card-big">${s.installs}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Active now (last 2 min)</div>
+          <div class="card-big">${s.live}</div>
+        </div>
+        <div class="card">
+          <div class="card-title">DAU / WAU / MAU</div>
+          <div><b>${s.dau}</b> / <b>${s.wau}</b> / <b>${s.mau}</b></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Last event</div>
+          <div>${fmtDateTime(s.lastEvent)}</div>
+        </div>
+      `;
+    }
+
+    function renderTable() {
+      const data = getDisplayEvents();
+      const rows = data.slice(-200).reverse(); // last 200
+
+      const headerRow = theadEl.querySelector('tr');
+      const ths = headerRow ? headerRow.querySelectorAll('th') : [];
+      ths.forEach(th => {
+        const key = th.dataset.key;
+        const span = th.querySelector('.sort-indicator');
+        if (key === sortKey) {
+          if (span) span.textContent = sortDir === 'asc' ? '▲' : '▼';
+        } else if (span) {
+          span.textContent = '';
+        }
+      });
+
+      tbodyEl.innerHTML = rows.map(e => `
+        <tr>
+          <td>${e.ts?.replace('T',' ').slice(0,19) || ''}</td>
+          <td>${e.feature || ''}</td>
+          <td>${e.page || ''}</td>
+          <td>${e.installId || ''}</td>
+          <td>${e.sessionId || ''}</td>
+          <td>${e.kind || ''}</td>
+          <td>${e.ev || ''}</td>
+          <td>${e.activeMs ?? ''}</td>
+          <td>${e.ip_full || ''}</td>
+          <td>${e.device || ''}</td>
+        </tr>
+      `).join('');
+    }
+
+    async function renderSummaryView() {
+      const s = computeSummary();
+      const countries = geoEnabled ? await computeCountrySummary() : [];
+
+      const fmtList = (items) => items.length
+        ? items.map(it =>
+            `<li><span class="key">${it.key}</span><span class="val">${it.val}</span></li>`
+          ).join('')
+        : '<li><span class="key">—</span></li>';
+
+      const fmtCountryList = () => {
+        if (!geoEnabled) {
+          return '<li><span class="key">Geolocation disabled</span></li>';
+        }
+        if (!countries.length) {
+          return '<li><span class="key">No country data yet</span></li>';
+        }
+        return countries.map(c =>
+          `<li><span class="key">${c.country}</span><span class="val">${c.users}</span></li>`
+        ).join('');
+      };
+
+      summaryContentEl.innerHTML = `
+        <div class="summary-grid">
+          <div class="summary-section">
+            <h2>Top features</h2>
+            <ul>${fmtList(s.topFeatures)}</ul>
+          </div>
+          <div class="summary-section">
+            <h2>Top pages</h2>
+            <ul>${fmtList(s.topPages)}</ul>
+          </div>
+          <div class="summary-section">
+            <h2>Error events</h2>
+            <ul>${fmtList(s.topErrors)}</ul>
+          </div>
+          <div class="summary-section">
+            <h2>Devices</h2>
+            <ul>${fmtList(s.topDevices)}</ul>
+          </div>
+          <div class="summary-section">
+            <h2>Countries (unique installs)</h2>
+            <ul>${fmtCountryList()}</ul>
+          </div>
+        </div>
+      `;
+    }
+
+    function initMapIfNeeded() {
+      if (map) return;
+      if (!window.L) {
+        console.warn('Leaflet not loaded, map will not work');
+        return;
+      }
+      map = L.map('map').setView([20, 0], 2); // world view
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+      mapLayer = L.layerGroup().addTo(map);
+    }
+
+    async function getGeoForIp(ip) {
+      if (!geoEnabled) return null; // no external calls if disabled
+      if (!ip || ip === '::1') return null;
+      if (geoCache[ip]) return geoCache[ip];
+      try {
+        const res = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}`);
+        if (!res.ok) {
+          geoCache[ip] = null;
+          return null;
+        }
+        const data = await res.json();
+        if (data.success === false) {
+          geoCache[ip] = null;
+          return null;
+        }
+        const info = {
+          lat: data.latitude,
+          lon: data.longitude,
+          city: data.city,
+          country: data.country,
+          isp: data.connection?.isp || data.org || ''
+        };
+        geoCache[ip] = info;
+        return info;
+      } catch (e) {
+        console.warn('Geo lookup failed', ip, e);
+        geoCache[ip] = null;
+        return null;
+      }
+    }
+
+    async function renderMap() {
+      initMapIfNeeded();
+      if (!map || !mapLayer) return;
+
+      mapLayer.clearLayers();
+
+      if (!geoEnabled) {
+        return; // keep base map; no markers
+      }
+
+      const ipStats = {};
+      for (const e of events) {
+        const ip = e.ip_full;
+        if (!ip) continue;
+        if (!ipStats[ip]) {
+          ipStats[ip] = {
+            lastSeen: e.ts,
+            installs: new Set(),
+            sessions: new Set(),
+          };
+        }
+        const stat = ipStats[ip];
+        if (new Date(e.ts) > new Date(stat.lastSeen)) stat.lastSeen = e.ts;
+        stat.installs.add(e.installId);
+        stat.sessions.add(e.sessionId);
+      }
+
+      const entries = Object.entries(ipStats);
+      for (const [ip, stat] of entries) {
+        const geo = await getGeoForIp(ip);
+        if (!geo || !Number.isFinite(geo.lat) || !Number.isFinite(geo.lon)) continue;
+        const popupHtml = `
+          <b>${ip}</b><br/>
+          ${geo.city ? `${geo.city}, ` : ''}${geo.country || ''}<br/>
+          Installs: ${stat.installs.size}<br/>
+          Sessions: ${stat.sessions.size}<br/>
+          Last seen: ${stat.lastSeen.replace('T',' ').slice(0,19)}
+        `;
+        L.marker([geo.lat, geo.lon])
+          .addTo(mapLayer)
+          .bindPopup(popupHtml);
+      }
+      // No fitBounds here -> your zoom/pan are preserved
+    }
+
+    function rerender() {
+      renderCards();
+      renderTable();
+      const activeView = document.querySelector('.view.view-active');
+      if (activeView && activeView.id === 'view-summary') {
+        renderSummaryView();
+      } else if (activeView && activeView.id === 'view-map') {
+        renderMap();
+      }
+    }
+
+    // ---------- view switching ----------
+    const tabButtons = document.querySelectorAll('.tabButton');
+    function showView(view) {
+      tabButtons.forEach(btn => {
+        btn.classList.toggle('tab-active', btn.dataset.view === view);
+      });
+      document.querySelectorAll('.view').forEach(v => {
+        v.classList.toggle('view-active', v.id === `view-${view}`);
+      });
+      if (view === 'summary') {
+        renderSummaryView();
+      } else if (view === 'map') {
+        renderMap().then(() => {
+          if (map) setTimeout(() => map.invalidateSize(), 0);
+        });
+      }
+    }
+    tabButtons.forEach(btn => {
+      btn.addEventListener('click', () => showView(btn.dataset.view));
+    });
+
+    // ---------- controls ----------
+    const maxEventsInput = document.getElementById('maxEventsInput');
+    maxEventsInput.value = String(maxEvents);
+
+    geoCheckbox.checked = geoEnabled;
+
+    document.getElementById('applyMaxEvents').addEventListener('click', () => {
+      const n = parseInt(maxEventsInput.value, 10);
+      if (!Number.isFinite(n) || n <= 0) return;
+      maxEvents = n;
+      enforceLimit();
+      save();
+      rerender();
+    });
+
+    document.getElementById('clearEvents').addEventListener('click', () => {
+      if (!confirm('Clear all locally stored events?')) return;
+      events = [];
+      save();
+      rerender();
+    });
+
+    document.getElementById('downloadCsv').addEventListener('click', () => {
+      const data = getDisplayEvents();
+
+      const headerKeys   = COLUMNS.map(c => c.key);
+      const headerLabels = COLUMNS.map(c => c.label);
+
+      const lines = [];
+      lines.push(headerLabels.map(escapeCsv).join(','));
+
+      for (const row of data) {
+        const line = headerKeys.map(key => {
+          const v = row[key];
+          return escapeCsv(v == null ? '' : v);
+        }).join(',');
+        lines.push(line);
+      }
+
+      const csv = lines.join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+
+      const ts = new Date().toISOString().slice(0,19).replace(/[:T]/g, '-');
+      const filename = `naptio-analytics-${ts}.csv`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+
+    geoCheckbox.addEventListener('change', () => {
+      geoEnabled = geoCheckbox.checked;
+      save();
+      if (!mapLayer) return;
+      if (!geoEnabled) {
+        mapLayer.clearLayers();
+      } else {
+        renderMap();
+        const activeView = document.querySelector('.view.view-active');
+        if (activeView && activeView.id === 'view-summary') {
+          renderSummaryView();
+        }
+      }
+    });
+
+    // ---------- initial render ----------
+    buildTableHeader();
+    rerender();
+
+    // ---------- SSE hookup (live refresh on every event, but throttled) ----------
+    const es = new EventSource(`${ANALYTICS_BASE}/stream`);
+    es.onmessage = (ev) => {
+      try {
+        const row = JSON.parse(ev.data);
+        addEvent(row); // schedules save + render
+      } catch (e) {
+        console.error('Bad event', e);
+      }
+    };
+    es.onerror = (err) => {
+      console.warn('EventSource error', err);
+    };
+  </script>
+</body>
+</html>
