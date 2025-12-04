@@ -135,6 +135,10 @@
       border-radius:10px;
       padding:10px 12px;
     }
+    .summary-section h2 {
+      font-size:14px;
+      margin:0 0 4px;
+    }
     .summary-section ul {
       list-style:none;
       padding:0;
@@ -152,16 +156,75 @@
       white-space: normal;        /* allow wrapping */
       overflow-wrap: anywhere;    /* break long URLs nicely */
       max-width: none;            /* no artificial limit */
-      /* remove overflow + text-overflow so we don't ellipsis */
+																
     }
     .summary-section li span.val {
       font-variant-numeric:tabular-nums;
+    }
+
+    .summary-section .country-row {
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .summary-section ul.cities {
+      list-style:none;
+      padding:0;
+      margin:4px 0 0 0;
+      font-size:11px;
+    }
+    .summary-section ul.cities li {
+      padding:1px 0;
     }
 
     .last-updated {
       font-size:11px;
       opacity:.7;
       margin-top:4px;
+    }
+
+    /* Small-screen tweaks */
+    @media (max-width: 640px) {
+      body {
+        margin:12px;
+      }
+      h1 {
+        font-size:18px;
+      }
+      h2 {
+        font-size:14px;
+        margin:12px 0 6px;
+      }
+      .summary-section h2 {
+        font-size:13px;
+      }
+      .cards {
+        gap:8px;
+      }
+      .card {
+        font-size:13px;
+        padding:8px 10px;
+      }
+      .card-big {
+        font-size:18px;
+      }
+      table {
+        font-size:11px;
+      }
+      th, td {
+        padding:4px 6px;
+      }
+      .toolbar {
+        flex-direction:column;
+        align-items:flex-start;
+      }
+      .toolbar-right {
+        width:100%;
+        justify-content:flex-start;
+      }
+      #map {
+        height:260px; /* don’t fill screen on phones */
+      }
     }
   </style>
 </head>
@@ -175,8 +238,8 @@
 
   <div class="toolbar">
     <div class="toolbar-left">
-      <button class="tabButton tab-active" data-view="logs">Logs</button>
-      <button class="tabButton" data-view="summary">Summary</button>
+      <button class="tabButton" data-view="logs">Logs</button>
+      <button class="tabButton tab-active" data-view="summary">Summary</button>
       <button class="tabButton" data-view="map">Map</button>
     </div>
     <div class="toolbar-right">
@@ -195,15 +258,15 @@
   <div class="last-updated" id="lastUpdated"></div>
 
   <!-- Logs view -->
-  <div id="view-logs" class="view view-active">
+  <div id="view-logs" class="view">
     <table id="eventsTable">
       <thead></thead>
       <tbody></tbody>
     </table>
   </div>
 
-  <!-- Summary view -->
-  <div id="view-summary" class="view">
+  <!-- Summary view (default) -->
+  <div id="view-summary" class="view view-active">
     <div id="summaryContent"></div>
   </div>
 
@@ -456,19 +519,19 @@
     function normalizePage(path) {
       if (!path) return '(none)';
       let p = String(path);
-    
+
       // Strip query + hash
       const q = p.indexOf('?');
       if (q >= 0) p = p.slice(0, q);
       const h = p.indexOf('#');
       if (h >= 0) p = p.slice(0, h);
-    
+
       // Normalise trailing index.html
       p = p.replace(/index\.html$/i, '');
-    
+
       // Ensure trailing slash for consistency
       if (!p.endsWith('/')) p += '/';
-    
+
       return p;
     }
 
@@ -679,26 +742,56 @@
       };
     }
 
-    // ---------- country summary using geoCache + ipStats ----------
+    // ---------- country + city summary using geoCache + ipStats ----------
     async function computeCountrySummary() {
       if (!geoEnabled) return [];
-      const countryToInstalls = new Map();
+      const countryMap = new Map(); // country -> { installs:Set, cities: Map<city, Set> }
+
       for (const [ip, ips] of Object.entries(state.ipStats)) {
         const geo = await getGeoForIp(ip);
         if (!geo || !geo.country) continue;
-        const country = geo.country;
-        let set = countryToInstalls.get(country);
-        if (!set) {
-          set = new Set();
-          countryToInstalls.set(country, set);
+
+        const country = geo.country || 'Unknown country';
+        const city = geo.city || 'Unknown city';
+
+        let rec = countryMap.get(country);
+        if (!rec) {
+          rec = { installs: new Set(), cities: new Map() };
+          countryMap.set(country, rec);
         }
-        for (const installId of ips.installs || []) {
-          if (installId) set.add(installId);
+
+        const installsSet = ips.installs || new Set();
+        for (const installId of installsSet) {
+          if (!installId) continue;
+          rec.installs.add(installId);
+
+          if (city) {
+            let citySet = rec.cities.get(city);
+            if (!citySet) {
+              citySet = new Set();
+              rec.cities.set(city, citySet);
+            }
+            citySet.add(installId);
+          }
         }
       }
-      return [...countryToInstalls.entries()]
-        .map(([country, set]) => ({ country, users: set.size }))
-        .sort((a,b) => b.users - a.users || a.country.localeCompare(b.country));
+
+      const result = [];
+      for (const [country, rec] of countryMap.entries()) {
+        const cities = [];
+        for (const [city, set] of rec.cities.entries()) {
+          cities.push({ city, users: set.size });
+        }
+        cities.sort((a,b) => b.users - a.users || a.city.localeCompare(b.city));
+        result.push({
+          country,
+          users: rec.installs.size,
+          cities,
+        });
+      }
+
+      result.sort((a,b) => b.users - a.users || a.country.localeCompare(b.country));
+      return result;
     }
 
     // ---------- Leaflet map + geolocation ----------
@@ -964,9 +1057,24 @@
         if (!countries.length) {
           return '<li><span class="key">No country data yet</span></li>';
         }
-        return countries.map(c =>
-          `<li><span class="key">${c.country}</span><span class="val">${c.users}</span></li>`
-        ).join('');
+        return countries.map(c => {
+          const citiesHtml = c.cities && c.cities.length
+            ? `<ul class="cities">` +
+              c.cities.map(city =>
+                `<li><span class="key">${city.city}</span><span class="val">${city.users}</span></li>`
+              ).join('') +
+              `</ul>`
+            : '';
+          return `
+            <li>
+              <div class="country-row">
+                <span class="key">${c.country}</span>
+                <span class="val">${c.users}</span>
+              </div>
+              ${citiesHtml}
+            </li>
+          `;
+        }).join('');
       };
 
       summaryContentEl.innerHTML = `
@@ -988,7 +1096,7 @@
             <ul>${fmtList(s.topErrors)}</ul>
           </div>
           <div class="summary-section">
-            <h2>Countries (unique installs)</h2>
+            <h2>Countries & cities (unique installs)</h2>
             <ul>${fmtCountryList()}</ul>
           </div>
         </div>
@@ -1125,7 +1233,7 @@
     buildTableHeader();
     maxEventsInput.value = String(maxRecent);
     geoCheckbox.checked = geoEnabled;
-    rerender();
+    rerender(); // Summary is the default active view
 
     // ---------- SSE hookup: just evolve state, no auto-rerender ----------
     const es = new EventSource(`${ANALYTICS_BASE}/stream`);
