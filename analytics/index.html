@@ -453,6 +453,25 @@
       enforceRecentLimit();
     }
 
+    function normalizePage(path) {
+      if (!path) return '(none)';
+      let p = String(path);
+    
+      // Strip query + hash
+      const q = p.indexOf('?');
+      if (q >= 0) p = p.slice(0, q);
+      const h = p.indexOf('#');
+      if (h >= 0) p = p.slice(0, h);
+    
+      // Normalise trailing index.html
+      p = p.replace(/index\.html$/i, '');
+    
+      // Ensure trailing slash for consistency
+      if (!p.endsWith('/')) p += '/';
+    
+      return p;
+    }
+
     function ingestEvent(ev) {
       const tsMs = Date.parse(ev.ts);
       if (!Number.isFinite(tsMs)) return;
@@ -464,7 +483,7 @@
 
       const installId = ev.installId;
       const sessionId = ev.sessionId;
-      const page      = ev.page || '(none)';
+      const page      = normalizePage(ev.page);
       const feature   = ev.feature || '(none)';
       const device    = formatDevice(ev.ua);
       const ip        = ev.ip_full || null;
@@ -620,7 +639,7 @@
       }))
       .filter(x => x.installs > 0)
       .sort((a,b) => b.installs - a.installs || a.key.localeCompare(b.key))
-      .slice(0,5);
+      .slice(0,20);
 
       const topFeatures = Object.entries(state.featureStats).map(([feat, fs]) => ({
         key: feat,
@@ -628,7 +647,7 @@
       }))
       .filter(x => x.val > 0)
       .sort((a,b) => b.val - a.val || a.key.localeCompare(b.key))
-      .slice(0,5);
+      .slice(0,20);
 
       const topDevices = Object.entries(state.deviceStats).map(([dev, ds]) => ({
         key: dev,
@@ -636,14 +655,14 @@
       }))
       .filter(x => x.val > 0)
       .sort((a,b) => b.val - a.val || a.key.localeCompare(b.key))
-      .slice(0,5);
+      .slice(0,20);
 
       const topErrors = Object.entries(state.errorCounts).map(([name, count]) => ({
         key: name,
         val: count,
       }))
       .sort((a,b) => b.val - a.val || a.key.localeCompare(b.key))
-      .slice(0,5);
+      .slice(0,20);
 
       return {
         totalEvents: state.totalEvents,
