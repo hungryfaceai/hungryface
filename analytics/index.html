@@ -53,6 +53,34 @@
       border-color:#eee;
     }
 
+    /* Big primary refresh button */
+    .refresh-primary {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:10px 18px;
+      font-size:14px;
+      font-weight:600;
+      border-radius:999px;
+      margin:8px 0 4px;
+      border-width:1px;
+    }
+    .refresh-primary.refresh-fresh {
+      background:#8a5a00;   /* orange-ish */
+      border-color:#b36f00;
+      color:#fff;
+    }
+    .refresh-primary.refresh-stale {
+      background:#5a0000;   /* dark red */
+      border-color:#880000;
+      color:#fff;
+    }
+    .refresh-primary.refresh-just-updated {
+      background:#0b6b2b;   /* green */
+      border-color:#0db03f;
+      color:#fff;
+    }
+
     label {
       font-size:12px;
       display:inline-flex;
@@ -156,7 +184,6 @@
       white-space: normal;        /* allow wrapping */
       overflow-wrap: anywhere;    /* break long URLs nicely */
       max-width: none;            /* no artificial limit */
-																
     }
     .summary-section li span.val {
       font-variant-numeric:tabular-nums;
@@ -225,11 +252,19 @@
       #map {
         height:260px; /* don’t fill screen on phones */
       }
+      .refresh-primary {
+        width:100%;
+        justify-content:center;
+      }
+      .summary-grid {
+        grid-template-columns:1fr;
+      }
     }
   </style>
 </head>
 <body>
   <h1>Analytics</h1>
+  <button id="refreshView" class="refresh-primary">Refresh view</button>
   <p class="muted">
     This page listens to <code>https://signaling-server-f5gu.onrender.com/a/stream</code> and stores
     <strong>aggregated analytics</strong> in <code>localStorage</code> on this browser only.
@@ -249,7 +284,6 @@
       <button id="applyMaxEvents">Apply</button>
       <button id="clearAll">Reset all data</button>
       <button id="downloadCsv">Download CSV</button>
-      <button id="refreshView">Refresh view</button>
     </div>
   </div>
 
@@ -293,6 +327,11 @@
     const MAX_RECENT_DEFAULT       = 2000; // rolling log buffer
     const ANALYTICS_BASE           = 'https://signaling-server-f5gu.onrender.com/a';
     const LIVE_WINDOW_MS           = 2 * 60 * 1000; // "live" = last 2 minutes
+
+    const REFRESH_FRESH_MS = 60 * 60 * 1000; // 1 hour
+    const REFRESH_JUST_MS  = 3000;           // 3 seconds
+    let lastRefreshTs = null;
+    let refreshJustTimeout = null;
 
     const COLUMNS = [
       { key: 'ts',        label: 'Time' },
@@ -656,7 +695,7 @@
       if (ev.kind === 'ev' && typeof ev.ev === 'string') {
         const name = ev.ev;
         if (
-          name.startsWith('error_') ||
+          name.startswith('error_') ||
           name.endsWith('_failed') ||
           name.endsWith('_timeout')
         ) {
@@ -979,7 +1018,7 @@
 
     function renderLogsTable() {
       const data = getDisplayLogs();
-      const rows = data.slice(-200); // last 200
+      const rows = data.slice(0, 200); // newest 200
 
       const headerRow = theadEl.querySelector('tr');
       const ths = headerRow ? headerRow.querySelectorAll('th') : [];
@@ -1091,10 +1130,6 @@
             <ul>${fmtList(s.topDevices)}</ul>
           </div>
           <div class="summary-section">
-            <h2>Error events (counts)</h2>
-            <ul>${fmtList(s.topErrors)}</ul>
-          </div>
-          <div class="summary-section">
             <h2>Countries & cities (unique installs)</h2>
             <ul>${fmtCountryList()}</ul>
           </div>
@@ -1103,9 +1138,47 @@
     }
 
     function updateLastUpdatedLabel() {
-      const d = new Date();
+      if (!lastUpdatedEl) return;
+      if (!lastRefreshTs) {
+        lastUpdatedEl.textContent = 'Last dashboard refresh: —';
+        return;
+      }
+      const d = new Date(lastRefreshTs);
       const s = d.toISOString().replace('T',' ').slice(0,19);
       lastUpdatedEl.textContent = `Last dashboard refresh: ${s}`;
+    }
+
+    function updateRefreshButtonState() {
+      const refreshViewBtn = document.getElementById('refreshView');
+      if (!refreshViewBtn) return;
+      refreshViewBtn.classList.add('refresh-primary');
+      refreshViewBtn.classList.remove('refresh-stale', 'refresh-fresh', 'refresh-just-updated');
+
+      if (!lastRefreshTs) {
+        refreshViewBtn.classList.add('refresh-stale');
+        return;
+      }
+      const age = Date.now() - lastRefreshTs;
+      if (age > REFRESH_FRESH_MS) {
+        refreshViewBtn.classList.add('refresh-stale');
+      } else {
+        refreshViewBtn.classList.add('refresh-fresh');
+      }
+    }
+
+    function markJustUpdatedState() {
+      const refreshViewBtn = document.getElementById('refreshView');
+      if (!refreshViewBtn) return;
+      if (refreshJustTimeout) {
+        clearTimeout(refreshJustTimeout);
+        refreshJustTimeout = null;
+      }
+      refreshViewBtn.classList.remove('refresh-stale', 'refresh-fresh');
+      refreshViewBtn.classList.add('refresh-just-updated');
+      refreshJustTimeout = setTimeout(() => {
+        refreshJustTimeout = null;
+        updateRefreshButtonState();
+      }, REFRESH_JUST_MS);
     }
 
     function rerender() {
@@ -1118,6 +1191,15 @@
         renderMap();
       }
       updateLastUpdatedLabel();
+    }
+
+    function doRefresh(markJustUpdated = false) {
+      lastRefreshTs = Date.now();
+      rerender();
+      updateRefreshButtonState();
+      if (markJustUpdated) {
+        markJustUpdatedState();
+      }
     }
 
     // ---------- view switching ----------
@@ -1194,7 +1276,7 @@
       state = createDefaultState();
       recentEvents = [];
       saveAll();
-      rerender();
+      doRefresh(true);
     });
 
     applyMaxBtn.addEventListener('click', () => {
@@ -1207,7 +1289,7 @@
     });
 
     refreshViewBtn.addEventListener('click', () => {
-      rerender();
+      doRefresh(true);
     });
 
     geoCheckbox.addEventListener('change', () => {
@@ -1232,7 +1314,9 @@
     buildTableHeader();
     maxEventsInput.value = String(maxRecent);
     geoCheckbox.checked = geoEnabled;
-    rerender(); // Summary is the default active view
+    doRefresh(false); // Summary is the default active view; no green flash on initial load
+    updateRefreshButtonState();
+    setInterval(updateRefreshButtonState, 60 * 1000);
 
     // ---------- SSE hookup: just evolve state, no auto-rerender ----------
     const es = new EventSource(`${ANALYTICS_BASE}/stream`);
