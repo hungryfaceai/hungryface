@@ -39,6 +39,14 @@ workflows:
 #            --workspace "App.xcworkspace" \
 #            --scheme "App"
 
+      - name: Bump iOS build number (CFBundleVersion)
+        script: |
+          # Codemagic provides BUILD_NUMBER starting from 1 for this workflow.
+          # We add 1 so the first uploaded build is at least 2 (greater than previousBundleVersion=1).
+          NEW_BUILD_NUMBER=$(($BUILD_NUMBER + 1))
+          echo "Setting CFBundleVersion to $NEW_BUILD_NUMBER"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW_BUILD_NUMBER" "ios/App/App/Info.plist"
+
       - name: Set up code signing settings on Xcode project
         script: |
           xcode-project use-profiles --project ios/App/App.xcodeproj
