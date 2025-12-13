@@ -39,6 +39,22 @@ workflows:
 #            --workspace "App.xcworkspace" \
 #            --scheme "App"
 
+      - name: Add iOS camera/microphone permissions (Info.plist)
+        script: |
+          PLIST="ios/App/App/Info.plist"
+
+          # Camera
+          /usr/libexec/PlistBuddy -c \
+            "Add :NSCameraUsageDescription string 'Naptio uses the camera to stream video from your baby monitor.'" "$PLIST" || \
+          /usr/libexec/PlistBuddy -c \
+            "Set :NSCameraUsageDescription 'Naptio uses the camera to stream video from your baby monitor.'" "$PLIST"
+
+          # Microphone
+          /usr/libexec/PlistBuddy -c \
+            "Add :NSMicrophoneUsageDescription string 'Naptio uses the microphone for audio in your baby monitor stream.'" "$PLIST" || \
+          /usr/libexec/PlistBuddy -c \
+            "Set :NSMicrophoneUsageDescription 'Naptio uses the microphone for audio in your baby monitor stream.'" "$PLIST"
+
       - name: Bump iOS build number (CFBundleVersion)
         script: |
           # Codemagic provides BUILD_NUMBER starting from 1 for this workflow.
