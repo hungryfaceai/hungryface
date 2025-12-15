@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Naptio – Pair devices (Share secret)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Share a one-time PSK to pair two devices. Local secret, quick share." />
+  <link rel="icon" href="data:,">
+  <style>
+    :root { color-scheme: dark; }
+    html, body { height: 100%; margin: 0; background: #000; color: #fff;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+    a { color: #fff; text-decoration: none; opacity: 0.9; }
+    a:hover, a:focus { opacity: 1; }
+
+    /* Prevent underline on Camera / Viewer pills */
+    .nav-center a,
+    .nav-center a:hover,
+    .nav-center a:focus { text-decoration: none; }
+
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    .page { min-height: 100%; display: flex; flex-direction: column; }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center; padding: 14px 20px; gap: 12px;
+    }
+    .nav-left, .nav-center, .nav-right {
+      display: flex; gap: 18px; align-items: center; white-space: nowrap; font-size: 0.95rem;
+    }
+    .nav-left  { justify-self: start; }
+    .nav-center{ justify-self: center; gap: 12px; min-width: 0; }
+    .nav-right { justify-self: end; gap: 12px; }
+
+    .home-link { display: inline-flex; align-items: center; line-height: 1; }
+    .icon { width: var(--icon-size, 24px); height: var(--icon-size, 24px); display: block; }
+    .icon-home { --icon-size: 26px; }
+
+    .nav-center a {
+      color: #000; background: #fff; border-radius: 9999px; border: 1px solid #fff;
+      opacity: 1; font-weight: 600; line-height: 1; white-space: nowrap;
+      font-size: clamp(0.78rem, 2.6vw, 0.95rem);
+      padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
+    }
+    .nav-center a:hover { background: #eaeaea; }
+    .nav-center a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+    /* Disabled state for Camera/Viewer when PSK is missing */
+    .nav-center a.is-disabled {
+      background: #1a1a1a !important;
+      border-color: #2a2a2a !important;
+      color: #8a8a8a !important;
+      opacity: 0.6 !important;
+      cursor: not-allowed !important;
+      pointer-events: none; /* make non-clickable */
+    }
+
+    .btn-pill {
+      color: #fff; background: #000; border: 1px solid #fff; border-radius: 9999px;
+      font-weight: 600; line-height: 1; opacity: 1; white-space: nowrap;
+      font-size: clamp(0.78rem, 2.6vw, 0.95rem);
+      padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
+      transition: background-color .15s ease, box-shadow .15s ease;
+      cursor: pointer; /* show hand on hover for pills/buttons */
+    }
+    .btn-pill:hover, .btn-pill:focus {
+      background: #141414; border-color: #e6e6e6; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16);
+    }
+    .btn-pill:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+    main { flex: 1; display: grid; place-items: center; padding: 24px; text-align: center; }
+    .hero { width: min(920px, 96vw); }
+
+    .pair-card {
+      background: #0b0b0b; border: 1px solid #141414; border-radius: 16px;
+      padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      display: grid; gap: 14px; justify-items: center;
+    }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:center; }
+    .input { border-radius:12px; padding:12px 14px; border:1px solid #222; background:#0b0b0b; color:#fff; }
+    .label { opacity:.9; }
+    .chip { border-radius:9999px; padding:8px 12px; border:1px solid #242424; background:#0a0a0a; color:#d9d9d9; font-size:.9rem; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    /* Make PSK chip focusable for show/hide on focus/blur */
+    #pskChip { outline: none; }
+    #pskChip:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+    .pair-qr {
+      width: 240px; height: 240px; background: #111; border: 1px solid #222; border-radius: 12px;
+      display: grid; place-items: center; overflow: hidden;
+    }
+
+    .invite-toast {
+      position: fixed; bottom: 20px; left: 50%;
+      transform: translateX(-50%) translateY(12px);
+      background: #111; border: 1px solid #222; color: #fff;
+      padding: 12px 18px;               /* a bit bigger */
+      border-radius: 9999px;
+      opacity: 0; transition: opacity .2s ease, transform .2s ease;
+      z-index: 1100; font-size: 1rem;   /* bigger text */
+      font-weight: 600;                  /* slightly bolder */
+    }
+    .invite-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    
+    /* Green success pill variant */
+    .invite-toast.success {
+      background: #0f2;                 /* bright green like your prior page */
+      color: #001500;                    /* dark text for contrast */
+      border-color: #1a1a1a;
+      box-shadow: 0 4px 24px rgba(0,255,0,0.25);
+    }
+
+    @media (max-width: 560px) {
+      header { grid-template-columns: 1fr 1fr; grid-auto-rows: minmax(0, auto); row-gap:10px; }
+      .nav-left{ grid-column:1; grid-row:1; justify-self:start; }
+      .nav-right{ grid-column:2; grid-row:1; justify-self:end; gap:10px; }
+      .nav-center{ grid-column:1/-1; grid-row:2; justify-content:center; gap:12px; width:100%; }
+      .nav-center a { font-size: clamp(0.92rem, 3.8vw, 1.12rem); padding: clamp(8px, 2.2vw, 12px) clamp(14px, 4.5vw, 18px); }
+      .btn-pill { font-size: clamp(0.78rem, 3.0vw, 0.92rem); padding: clamp(6px, 1.8vw, 8px) clamp(10px, 3.0vw, 14px); }
+    }
+    @media (max-width: 380px) {
+      .nav-left a, .nav-right a { font-size: 0.82rem; }
+      .nav-left, .nav-right { gap: 10px; } .nav-center { gap: 10px; }
+      header { padding: 12px 14px; }
+    }
+
+    /* === QR scanner (safe-area aware) === */
+    #qr-shell{ position:fixed; inset:0; background:#000; z-index:2000; }
+    #qr-shell[hidden]{ display:none !important; }
+    #qr-video{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+    #qr-overlay{
+      position:absolute; inset:0;
+      padding: max(12px, env(safe-area-inset-top))
+               max(12px, env(safe-area-inset-right))
+               max(20px, env(safe-area-inset-bottom))
+               max(12px, env(safe-area-inset-left));
+      display:flex; flex-direction:column; justify-content:space-between;
+      pointer-events:none;
+    }
+    #qr-overlay .guide{
+      margin:auto; width:min(70vmin,80%); height:min(70vmin,80%);
+      outline:3px solid rgba(255,255,255,.85); border-radius:16px;
+      box-shadow:0 0 0 9999px rgba(0,0,0,.35);
+    }
+    #qr-overlay .qr-actions{ display:flex; justify-content:space-between; pointer-events:auto; }
+    #qr-overlay .btn-pill{ background:rgba(255,255,255,.92); color:#000; border-color:#fff; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <nav class="nav-left" aria-label="Primary">
+        <a href="https://hungryfaceai.github.io/hungryface/home" class="home-link" aria-label="Home" title="Home">
+          <svg class="icon icon-home" aria-hidden="true" focusable="false">
+            <use href="/hungryface/assets/icons.svg#icon-cradle-ai" xlink:href="/hungryface/assets/icons.svg#icon-cradle-ai"></use>
+          </svg>
+          <span class="sr-only">Home</span>
+        </a>
+        <!-- About link removed -->
+      </nav>
+
+      <nav class="nav-center" aria-label="Modes">
+        <a id="linkSender" href="https://hungryfaceai.github.io/hungryface/webrtc/sender/secure/" role="button">Camera (Baby)</a>
+        <a id="linkViewer" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/shared/alerts/dashboard/" role="button">Viewer (Parent)</a>
+      </nav>
+
+      <nav class="nav-right" aria-label="Quick actions">
+        <!-- Pair devices pill removed -->
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="pair-card" aria-labelledby="pair-title">
+          <h2 id="pair-title" style="margin:0">Pair devices (share)</h2>
+
+          <!-- Room above action pills -->
+          <div class="row" style="gap:12px">
+            <label for="roomSel" class="label">Room</label>
+            <select id="roomSel" class="input mono" style="min-width:160px"></select>
+          </div>
+
+          <div class="row">
+            <button id="regen" class="btn-pill" type="button">Rotate secret</button>
+            <button id="forget" class="btn-pill" type="button" style="border-color:#444">Forget on this device</button>
+            <button id="scanQR" class="btn-pill" type="button" aria-label="Scan QR to import key">Scan QR</button>
+          </div>
+
+          <!-- PSK chip (masked). Click/focus to reveal, blur to hide -->
+          <div class="row mono" style="gap:8px;">
+            <div id="pskChip" class="chip" tabindex="0" role="button" aria-label="Temporarily show secret">
+              Key: <span id="tokenMasked" class="mono" style="margin-left:6px; opacity:.9">—</span>
+            </div>
+          </div>
+
+          <!-- QR only (no URL text) -->
+          <div class="pair-qr">
+            <canvas id="qrMain" width="240" height="240" aria-label="Pairing QR"></canvas>
+          </div>
+
+          <div class="row">
+            <button id="shareLink" class="btn-pill" type="button">Share</button>
+            <button id="copyLink" class="btn-pill" type="button">Copy</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer removed -->
+  </div>
+
+  <div id="toast" class="invite-toast" aria-live="polite"></div>
+
+  <!-- QR Scanner overlay (hidden by default) -->
+  <section id="qr-shell" hidden aria-hidden="true">
+    <video id="qr-video" playsinline muted autoplay></video>
+    <canvas id="qr-canvas" hidden></canvas>
+    <div id="qr-overlay">
+      <div class="guide" aria-hidden="true"></div>
+      <div class="qr-actions">
+        <button id="qr-torch" class="btn-pill" hidden>Flash</button>
+        <button id="qr-close" class="btn-pill">Close</button>
+      </div>
+    </div>
+  </section>
+
+  <script type="module">
+    import { ensureTermsAccepted } from '/hungryface/legal/require-terms.js';
+    import { ensurePskForRoom, getPsk } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+
+    await ensureTermsAccepted({ role: 'pair' });
+
+    // ---- Elements
+    const roomSel  = document.getElementById('roomSel');
+    const regenBtn = document.getElementById('regen');
+    const forgetBtn = document.getElementById('forget');
+
+    const linkSender = document.getElementById('linkSender');
+    const linkViewer = document.getElementById('linkViewer');
+
+    const pskChip = document.getElementById('pskChip');
+    const tokenMaskedEl = document.getElementById('tokenMasked');
+
+    const shareBtn = document.getElementById('shareLink');
+    const copyBtn = document.getElementById('copyLink');
+    const qrMain = document.getElementById('qrMain');
+    const toastEl = document.getElementById('toast');
+
+    const INSTALLER_URL   = './pair-install.html'; // target page on the other device
+    const PSK_PREFIX      = 'psk:';
+    const ADD_ROOM_SENTINEL = '__add_new_room__';
+    const LS_LAST_ROOM    = 'naptio:lastRoom';
+    const LS_SENDER_ROOM  = 'bm_sender_room';
+
+    let AUTO_CREATE = true;
+    let everHadRooms = false; // becomes true once we detect any PSK-backed rooms
+
+    // Helpers
+    function showToast(msg, ms = 1600, variant = '') {
+      toastEl.textContent = msg;
+      if (variant) toastEl.classList.add(variant);
+      toastEl.classList.add('show');
+      clearTimeout(showToast._t);
+      showToast._t = setTimeout(() => {
+        toastEl.classList.remove('show');
+        if (variant) toastEl.classList.remove(variant);
+      }, ms);
+    }
+
+    function fingerprint(b64u) { return b64u ? b64u.slice(-6) : '—'; }
+    function maskToken(b64u) { return b64u ? ('•••• (…' + fingerprint(b64u) + ')') : '—'; }
+
+    function hasOption(sel, value) {
+      return !!Array.from(sel?.options || []).find(o => o.value === value);
+    }
+
+    // Enumerate PSK-backed rooms from localStorage
+    function listPskRooms() {
+      const rooms = new Set();
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith(PSK_PREFIX)) {
+            const room = key.slice(PSK_PREFIX.length).trim();
+            if (room) rooms.add(room);
+          }
+        }
+      } catch {}
+      const arr = Array.from(rooms).sort((a, b) => a.localeCompare(b));
+      if (arr.length) everHadRooms = true;
+      return arr;
+    }
+
+    function rememberRoom(room) {
+      if (!room) return;
+      try {
+        localStorage.setItem(LS_LAST_ROOM, room);
+        localStorage.setItem(LS_SENDER_ROOM, room);
+      } catch {}
+    }
+
+    function pickPreferredRoom(rooms) {
+      if (!rooms || !rooms.length) return '';
+      const roomSet = new Set(rooms);
+      const last = (localStorage.getItem(LS_LAST_ROOM) || '').trim();
+      const sender = (localStorage.getItem(LS_SENDER_ROOM) || '').trim();
+      if (last && roomSet.has(last)) return last;
+      if (sender && roomSet.has(sender)) return sender;
+      return rooms[0];
+    }
+
+    function currentRoom() {
+      const val = roomSel.value;
+      if (!val || val === ADD_ROOM_SENTINEL) return '';
+      return val.trim();
+    }
+
+    function getCurrentToken() {
+      const room = currentRoom();
+      if (!room) return '';
+      const { tokenB64u = '' } = getPsk(room) || {};
+      return tokenB64u;
+    }
+
+    function setModeLinksEnabled(enabled) {
+      [linkSender, linkViewer].forEach(a => {
+        if (!a) return;
+        if (enabled) {
+          a.classList.remove('is-disabled');
+          a.removeAttribute('aria-disabled');
+          a.tabIndex = 0;
+        } else {
+          a.classList.add('is-disabled');
+          a.setAttribute('aria-disabled', 'true');
+          a.tabIndex = -1; // remove from tab order
+        }
+      });
+    }
+
+    // Build / rebuild the room <select> based on current PSKs
+    function rebuildRoomSelect({ initial = false } = {}) {
+      const rooms = listPskRooms();
+      roomSel.innerHTML = '';
+
+      let selected = '';
+
+      if (rooms.length > 0) {
+        selected = pickPreferredRoom(rooms) || rooms[0];
+        for (const r of rooms) {
+          const opt = document.createElement('option');
+          opt.value = r;
+          opt.textContent = r;
+          roomSel.appendChild(opt);
+        }
+      } else if (initial && !everHadRooms) {
+        // First-time visit, no PSKs anywhere: default to "Baby"
+        selected = 'Baby';
+        const opt = document.createElement('option');
+        opt.value = 'Baby';
+        opt.textContent = 'Baby';
+        roomSel.appendChild(opt);
+      }
+
+      // "➕ Add new room…" sentinel (always last)
+      const addOpt = document.createElement('option');
+      addOpt.value = ADD_ROOM_SENTINEL;
+      addOpt.textContent = '➕ Add new room…';
+      roomSel.appendChild(addOpt);
+
+      if (selected) {
+        roomSel.value = selected;
+        rememberRoom(selected);
+      } else {
+        roomSel.value = ADD_ROOM_SENTINEL;
+      }
+
+      return selected;
+    }
+
+    // QR
+    async function drawQR(canvas, text) {
+      try {
+        if (!window.QRious) {
+          await new Promise((res, rej) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js';
+            s.onload = res; s.onerror = rej; document.head.appendChild(s);
+          });
+        }
+        // eslint-disable-next-line no-undef
+        new QRious({ element: canvas, value: text, size: 240, level: 'H' });
+      } catch {
+        const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,240,240);
+        ctx.fillStyle = '#000'; ctx.font = '12px monospace'; wrap(ctx, text, 6, 16, 228, 14);
+      }
+    }
+    function wrap(ctx, text, x, y, w, lh){
+      const words = String(text).split(' '); let line = '';
+      for (let n=0;n<words.length;n++){
+        const test = line + words[n] + ' ';
+        if (ctx.measureText(test).width > w && n>0){
+          ctx.fillText(line, x, y); line = words[n] + ' '; y += lh;
+        } else {
+          line = test;
+        }
+      }
+      ctx.fillText(line, x, y);
+    }
+
+    function makeInstallUrl(room, tokenB64u) {
+      const url = new URL(INSTALLER_URL, location.href);
+      url.hash = new URLSearchParams({ room, psk: tokenB64u }).toString();
+      return url.toString();
+    }
+
+    function drawEmptyQr(label = 'No PSK') {
+      const ctx = qrMain.getContext('2d');
+      ctx.clearRect(0,0,qrMain.width,qrMain.height);
+      ctx.fillStyle = '#222'; ctx.fillRect(0,0,qrMain.width,qrMain.height);
+      ctx.fillStyle = '#aaa'; ctx.font = '14px monospace';
+      ctx.fillText(label, 8, 24);
+    }
+
+    async function refresh() {
+      const room = currentRoom();
+
+      if (!room) {
+        // No real room selected (e.g. after forgetting last PSK)
+        tokenMaskedEl.textContent = '—';
+        setModeLinksEnabled(false);
+        drawEmptyQr('No room');
+        shareBtn.disabled = true;
+        copyBtn.disabled = true;
+        return;
+      }
+
+      if (AUTO_CREATE) {
+        await ensurePskForRoom(room, 'sender');
+      }
+
+      const token = getCurrentToken();
+      tokenMaskedEl.textContent = maskToken(token);
+
+      // Enable/disable top mode pills if PSK is present
+      setModeLinksEnabled(!!token);
+
+      // Build QR to installer, but DO NOT display raw URL
+      if (token) {
+        const smartUrl = makeInstallUrl(room, token);
+        await drawQR(qrMain, smartUrl);
+        shareBtn.disabled = false;
+        copyBtn.disabled = false;
+      } else {
+        drawEmptyQr('No PSK');
+        shareBtn.disabled = true;
+        copyBtn.disabled = true;
+      }
+    }
+
+    // --- PSK chip interactions: reveal on click/focus, hide on blur
+    function revealPSK() {
+      const token = getCurrentToken();
+      tokenMaskedEl.textContent = token || '—';
+    }
+    function hidePSK() {
+      const token = getCurrentToken();
+      tokenMaskedEl.textContent = maskToken(token);
+    }
+
+    pskChip.addEventListener('click', () => {
+      pskChip.focus(); // ensure we get blur later
+      revealPSK();
+    });
+    pskChip.addEventListener('focus', revealPSK);
+    pskChip.addEventListener('blur', hidePSK);
+    pskChip.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        revealPSK();
+      }
+    });
+
+    // Rotate / Forget
+    regenBtn.addEventListener('click', async () => {
+      const room = currentRoom();
+      if (!room) {
+        showToast('No room selected');
+        return;
+      }
+      AUTO_CREATE = true;
+      try { localStorage.removeItem(PSK_PREFIX + room); } catch {}
+      await ensurePskForRoom(room, 'sender');
+      await refresh();
+      showToast('Secret rotated');
+    });
+
+    forgetBtn.addEventListener('click', async () => {
+      const room = currentRoom();
+      if (!room) {
+        showToast('No room to forget');
+        return;
+      }
+      AUTO_CREATE = false; // do not auto recreate immediately
+      try { localStorage.removeItem(PSK_PREFIX + room); } catch {}
+
+      // Rebuild dropdown from storage; if this was the last PSK and we had rooms
+      // before, we'll end up with only "➕ Add new room…" selected.
+      rebuildRoomSelect({ initial: false });
+      await refresh();
+      showToast('Forgot on this device');
+    });
+
+    // Room selection (including "➕ Add new room…" flow)
+    roomSel.addEventListener('change', async () => {
+      const val = roomSel.value;
+
+      if (val === ADD_ROOM_SENTINEL) {
+        const input = (prompt('New room name') || '').trim();
+        if (!input) {
+          // Restore a sensible selection if possible
+          const rooms = listPskRooms();
+          const fallback = pickPreferredRoom(rooms) || rooms[0] || '';
+          if (fallback && hasOption(roomSel, fallback)) {
+            roomSel.value = fallback;
+            rememberRoom(fallback);
+            await refresh();
+          } else {
+            roomSel.value = ADD_ROOM_SENTINEL;
+            await refresh();
+          }
+          return;
+        }
+
+        const rooms = listPskRooms();
+        const existing = rooms.find(r => r === input);
+        if (existing) {
+          // Room already exists: just select it
+          if (!hasOption(roomSel, existing)) {
+            const opt = document.createElement('option');
+            opt.value = existing;
+            opt.textContent = existing;
+            roomSel.insertBefore(opt, roomSel.querySelector(`option[value="${ADD_ROOM_SENTINEL}"]`));
+          }
+          roomSel.value = existing;
+          rememberRoom(existing);
+          AUTO_CREATE = false;
+          await refresh();
+          showToast('Room already exists – switched', 2000);
+          return;
+        }
+
+        // Truly new room: create PSK and add
+        AUTO_CREATE = true;
+        await ensurePskForRoom(input, 'sender');
+        rememberRoom(input);
+        rebuildRoomSelect({ initial: false });
+        if (hasOption(roomSel, input)) {
+          roomSel.value = input;
+        }
+        await refresh();
+        showToast('Room added', 2000);
+        return;
+      }
+
+      // Switched to a different existing room
+      const room = currentRoom();
+      rememberRoom(room);
+      AUTO_CREATE = true; // safe: ensurePskForRoom is idempotent
+      await refresh();
+    });
+
+    // Share & Copy (URL only)
+    shareBtn.addEventListener('click', async () => {
+      const room = currentRoom();
+      const token = getCurrentToken();
+      if (!room || !token) return;
+      const url = makeInstallUrl(room, token);
+      try {
+        if (navigator.share && (!navigator.canShare || navigator.canShare({ url }))) {
+          await navigator.share({ title: 'Naptio pairing', text: 'Install secret for room ' + room, url });
+        } else {
+          await navigator.clipboard.writeText(url);
+          showToast('Link copied');
+        }
+      } catch {}
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      const room = currentRoom();
+      const token = getCurrentToken();
+      if (!room || !token) return;
+      const url = makeInstallUrl(room, token);
+      try { await navigator.clipboard.writeText(url); showToast('Link copied'); } catch {}
+    });
+
+    // Initial setup
+    rebuildRoomSelect({ initial: true });
+    await refresh();
+
+    // ===== Cross-platform in-app QR scanner (imports external key) =====
+    const scanBtn = document.getElementById('scanQR');
+    const qrShell  = document.getElementById('qr-shell');
+    const qrVideo  = document.getElementById('qr-video');
+    const qrCanvas = document.getElementById('qr-canvas');
+    const qrTorch  = document.getElementById('qr-torch');
+    const qrClose  = document.getElementById('qr-close');
+
+    let qrStream, qrTrack, qrDetector, qrRAF, qrActive = false;
+
+    async function ensureJsQR(){
+      if (window.jsQR) return window.jsQR;
+      await new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
+        s.crossOrigin = 'anonymous';
+        s.onload = res;
+        s.onerror = rej;
+        document.head.appendChild(s);
+      });
+      return window.jsQR;
+    }
+
+    function showScannerUI(show){
+      if (show) { qrShell.hidden = false; qrShell.setAttribute('aria-hidden','false'); }
+      else      { qrShell.hidden = true;  qrShell.setAttribute('aria-hidden','true'); }
+    }
+
+    async function startQRScanner(onResult){
+      showScannerUI(true);
+      qrActive = true;
+
+      qrStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode:{ ideal:'environment' }, width:{ ideal:1280 }, height:{ ideal:720 } },
+        audio: false
+      });
+      qrVideo.srcObject = qrStream;
+      qrTrack = qrStream.getVideoTracks()[0];
+
+      // Torch (supported on some browsers/devices)
+      try {
+        const caps = qrTrack.getCapabilities?.();
+        if (caps?.torch) {
+          qrTorch.hidden = false;
+          qrTorch.onclick = async () => {
+            const on = !qrTrack.getSettings?.().torch;
+            await qrTrack.applyConstraints({ advanced:[{ torch:on }] });
+            qrTorch.textContent = on ? 'Flash On' : 'Flash';
+          };
+        } else qrTorch.hidden = true;
+      } catch { qrTorch.hidden = true; }
+
+      if ('BarcodeDetector' in window) {
+        qrDetector = new window.BarcodeDetector({ formats: ['qr_code','aztec','pdf417','data_matrix'] });
+        readNative(onResult);
+      } else {
+        const jsQR = await ensureJsQR();
+        readCanvas(onResult, jsQR);
+      }
+    }
+
+    function stopQRScanner(){
+      qrActive = false;
+      if (qrRAF) cancelAnimationFrame(qrRAF);
+      try { qrStream?.getTracks().forEach(t => t.stop()); } catch {}
+      qrVideo.srcObject = null;
+      showScannerUI(false);
+    }
+
+    async function readNative(onResult){
+      const step = async () => {
+        if (!qrActive) return;
+        try {
+          const codes = await qrDetector.detect(qrVideo);
+          if (codes?.length) {
+            navigator.vibrate?.(8);
+            onResult(codes[0].rawValue || codes[0].rawValueText || '');
+            stopQRScanner();
+            return;
+          }
+        } catch {}
+        qrRAF = requestAnimationFrame(step);
+      };
+      qrRAF = requestAnimationFrame(step);
+    }
+
+    function readCanvas(onResult, jsQR){
+      const ctx = qrCanvas.getContext('2d', { willReadFrequently:true });
+      const step = () => {
+        if (!qrActive) return;
+        const vw = qrVideo.videoWidth, vh = qrVideo.videoHeight;
+        if (vw && vh) {
+          qrCanvas.width = vw; qrCanvas.height = vh;
+          ctx.drawImage(qrVideo, 0, 0, vw, vh);
+          const img = ctx.getImageData(0, 0, vw, vh);
+          const code = jsQR(img.data, vw, vh, { inversionAttempts:'dontInvert' });
+          if (code?.data) {
+            navigator.vibrate?.(8);
+            onResult(code.data);
+            stopQRScanner();
+            return;
+          }
+        }
+        qrRAF = requestAnimationFrame(step);
+      };
+      qrRAF = requestAnimationFrame(step);
+    }
+
+    function parseScanned(text){
+      try {
+        const u = new URL(text);
+        const qs = u.searchParams;
+        const hs = new URLSearchParams(u.hash?.startsWith('#') ? u.hash.slice(1) : '');
+        const get = (k) => hs.get(k) || qs.get(k) || '';
+        const room = (get('room') || '').trim();
+        const psk  = (get('psk')  || '').trim();
+        if (room || psk) return { room, psk };
+      } catch { /* not a URL */ }
+      return { room:'', psk:(text||'').trim() };
+    }
+
+    function looksBase64Url(s){ return !!s && /^[A-Za-z0-9\-_]+$/.test(s); }
+
+    scanBtn?.addEventListener('click', async () => {
+      try {
+        await startQRScanner((scanned) => {
+          const { room, psk } = parseScanned(scanned);
+          const fallbackRoom = currentRoom() || 'Baby';
+          const targetRoom = (room || fallbackRoom).trim();
+
+          if (!targetRoom) {
+            showToast('No room name in QR');
+            return;
+          }
+
+          if (!looksBase64Url(psk)) {
+            showToast('No key found');
+            return;
+          }
+
+          try {
+            const payload = { tokenB64u: psk, installedFrom: 'qr', ts: new Date().toISOString() };
+            localStorage.setItem(PSK_PREFIX + targetRoom, JSON.stringify(payload));
+          } catch {}
+
+          rememberRoom(targetRoom);
+          rebuildRoomSelect({ initial: false });
+          if (hasOption(roomSel, targetRoom)) {
+            roomSel.value = targetRoom;
+          }
+          AUTO_CREATE = false; // we already have the imported key
+          (async () => { await refresh(); })();
+          showToast('Key imported', 3000, 'success');
+        });
+      } catch (err) {
+        showToast('Camera error');
+      }
+    });
+
+    qrClose.addEventListener('click', stopQRScanner);
+  </script>
+</body>
+</html>
