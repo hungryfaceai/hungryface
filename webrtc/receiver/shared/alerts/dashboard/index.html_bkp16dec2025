@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Naptio – Alerts Dashboard</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
+
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin:0; background:#000; color:#fff; font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
+    .container { padding:16px; box-sizing:border-box; max-width:1200px; margin:0 auto; }
+
+    header.topbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+    h1 { margin:.2rem 0 .1rem; font-size:22px; }
+    .muted { color:#aaa; }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+
+    .btn { padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.4); background:transparent; color:#fff; font-weight:600; cursor:pointer; }
+    .btn:active { transform:scale(.98); }
+    .btn.small { padding:8px 10px; font-size:13px; border-radius:10px; }
+
+    .chip { display:inline-flex; gap:8px; align-items:center; padding:6px 10px; border-radius:999px; border:1px solid #333; background:#0d0d0d; color:#ddd; font-size:13px; cursor:pointer; }
+    .chip.active { background:#1a1a1a; border-color:#555; }
+    .chip .dot { width:10px; height:10px; border-radius:999px; display:inline-block; }
+
+    input[type="text"], select { padding:10px 12px; border-radius:10px; border:1px solid #222; background:#0b0b0b; color:#ddd; }
+    .flex-spacer { flex:1 1 auto; }
+
+    .panel { background:#0b0b0b; border:1px solid #141414; border-radius:14px; padding:12px; margin:0 auto 16px; }
+
+    /* Timeline */
+    .timeline-wrap { position:relative; }
+    .timeline { width:100%; height:300px; display:block; background:#0a0a0a; border:1px solid #171717; border-radius:12px; }
+    .legend { margin-top:8px; display:flex; flex-wrap:wrap; gap:8px; font-size:12px; color:#ccc; }
+    .legend .key { width:14px; height:3px; border-radius:2px; display:inline-block; margin-right:4px; vertical-align:middle; }
+
+    /* Table */
+    table.table { width:100%; border-collapse:collapse; }
+    .table th, .table td { padding:8px 10px; border-bottom:1px solid #1f2937; text-align:left; font-size:13px; white-space:nowrap; }
+    .table th { color:#ddd; font-weight:700; cursor:pointer; user-select:none; }
+    .table td { color:#bbb; }
+    .table .muted { color:#aaa; }
+    .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+
+    .toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+    .toolbar .group { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+
+    /* Color tokens (match your palette where possible) */
+    .c-audio  { background:#ef4444; }
+    .c-prone  { background:#f59e0b; }
+    .c-motion { background:#60a5fa; }
+    .c-fence  { background:#22c55e; }
+
+    .dot-audio  { background:#ef4444; }
+    .dot-prone  { background:#f59e0b; }
+    .dot-motion { background:#60a5fa; }
+    .dot-fence  { background:#22c55e; }
+
+    /* Empty state */
+    .empty { color:#aaa; padding:10px; text-align:center; }
+
+    /* Brush overlay hint */
+    .hint { font-size:12px; color:#aaa; margin-top:6px; }
+
+    /* --- Active/selected visuals --- */
+    /* chips (alert-type filters) */
+    .chip {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.18);
+      color: #ddd;
+      transition: background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
+    }
+    .chip.active,
+    .chip[aria-pressed="true"] {
+      background: rgba(255,255,255,0.26);   /* whiter */
+      border-color: rgba(255,255,255,0.48);
+      color: #fff;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.18) inset;
+    }
+    
+    /* rolling window buttons */
+    button[data-win] {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.18);
+      color: #ddd;
+      transition: background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
+    }
+    button[data-win].active,
+    button[data-win][aria-pressed="true"] {
+      background: rgba(255,255,255,0.26);   /* whiter */
+      border-color: rgba(255,255,255,0.48);
+      color: #fff;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.18) inset;
+    }
+    
+    /* nicer focus ring */
+    .chip:focus-visible,
+    button[data-win]:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.55);
+      border-color: rgba(255,255,255,0.65);
+    }
+    
+    /* stop the page from scrolling when you drag the timeline */
+    .timeline,
+    .timeline-wrap {
+      touch-action: none;
+    }
+
+  </style>
+</head>
+<body>
+  <!-- shared sidebar injection -->
+  <script type="module">
+    (async () => {
+      try {
+        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
+        const html = await res.text();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html.trim();
+        document.body.prepend(...wrap.childNodes);
+
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
+          s.onload = resolve; s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      } catch (err) { console.error('[Sidebar] failed to load shared assets:', err); }
+    })();
+  </script>
+
+  <div class="container">
+    <header class="topbar">
+      <div class="row">
+        <h1 style="padding-left:3ch">Alerts dashboard</h1>
+        <div class="muted"> </div>
+      </div>
+      <div class="row">
+        <button id="btnExportJSON" class="btn small">Export JSON</button>
+        <button id="btnExportCSV" class="btn small">Export CSV</button>
+        <button id="btnClearAll"  class="btn small">Clear all</button>
+        <button id="toggleSound" class="btn small">🔕 Sounds: Off</button>
+      </div>
+    </header>
+
+    <!-- Timeline panel -->
+    <div class="panel">
+      <div class="toolbar">
+        <div class="group">
+          <span class="muted">Window:</span>
+            <button class="btn small" data-win="0.25">15m</button>
+            <button class="btn small active" data-win="2" aria-pressed="true">2h</button>
+            <button class="btn small" data-win="8">8h</button>
+            <button class="btn small" data-win="24">24h</button>
+            <button class="btn small" data-win="168">7d</button>
+        </div>
+        <div class="flex-spacer"></div>
+        <div class="group">
+          <span class="muted">Filter:</span>
+          <button class="chip active" data-type="Audio" aria-pressed="true"><span class="dot dot-audio"></span>Audio</button>
+          <button class="chip active" data-type="Prone" aria-pressed="true"><span class="dot dot-prone"></span>Prone</button>
+          <button class="chip active" data-type="Motion" aria-pressed="true"><span class="dot dot-motion"></span>Motion</button>
+          <button class="chip active" data-type="Fence" aria-pressed="true"><span class="dot dot-fence"></span>Fence</button>
+        </div>
+        <div class="group">
+          <input id="q" type="text" placeholder="Search in type/message…" />
+        </div>
+      </div>
+
+      <div class="timeline-wrap">
+        <!-- SVG injected by JS -->
+        <svg id="timeline" class="timeline" role="img" aria-label="Alerts timeline"></svg>
+      </div>
+      <div class="legend">
+        <span><span class="key c-audio"></span> Audio</span>
+        <span><span class="key c-prone"></span> Prone</span>
+        <span><span class="key c-motion"></span> Motion</span>
+        <span><span class="key c-fence"></span> Fence</span>
+        <span class="muted" style="margin-left:auto;">Tip: drag on the timeline to zoom; double-click to reset</span>
+      </div>
+      <div class="hint">Opacity encodes avgScore; bar length encodes duration; thin band above shows alerts/min.</div>
+    </div>
+
+    <!-- Table panel -->
+    <div class="panel">
+      <div class="toolbar">
+        <div class="muted">Alerts in window: <strong id="countInWindow">0</strong></div>
+        <div class="flex-spacer"></div>
+        <div class="muted" id="windowLabel"></div>
+      </div>
+
+      <div style="overflow:auto;">
+        <table class="table" id="alertsTable">
+          <thead>
+            <tr>
+              <th data-key="startAt">Start</th>
+              <th data-key="endAt">End</th>
+              <th data-key="duration">Duration</th>
+              <th data-key="avgScore">Avg score</th>
+              <th data-key="type">Type</th>
+              <th data-key="message">Message</th>
+            </tr>
+          </thead>
+          <tbody id="alertsTbody">
+            <tr><td class="muted" colspan="6">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./dashboard.js"></script>
+
+  <!-- analytics -->
+  <script type="module">
+    import { installAnalytics } from '/hungryface/shared/analytics.js';
+    window.analytics = installAnalytics({ feature: 'receiver-dashboard' });
+    // Later: window.analytics.event('dashboard_opened');
+  </script>
+  
+</body>
+</html>
