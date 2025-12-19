@@ -56,21 +56,21 @@
     }
     #controls {
       position: fixed;
-      /*bottom: max(12px, env(safe-area-inset-bottom));   lift above iOS home bar */
       left: 50%;
+      bottom: 16px;                            /* base bottom position, like fence page */
       transform: translateX(-50%);
     
       /* layout */
       display: flex;
-      flex-wrap: wrap;                  /* allow a second row on small screens */
+      flex-wrap: wrap;                         /* allow a second row on small screens */
       align-items: center;
       justify-content: center;
-      gap: 10px 12px;                   /* row/column gaps */
+      gap: 10px 12px;                          /* row/column gaps */
       z-index: 6;
     
-      /* keep within the visible (small) viewport + notches */
-      max-width: calc(100svw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));
-      padding: 6px 8px;                 /* small breathing room so edges aren’t clipped */
+      /* desktop / non-iOS fallback width */
+      max-width: calc(100vw - 24px);
+      padding: 6px 8px;
       box-sizing: border-box;
     
       /* fallback if wrapping still overflows (very narrow devices) */
@@ -80,9 +80,16 @@
     }
     #controls::-webkit-scrollbar { display: none; }
     
-    /* Fallback for browsers without svw/safe areas (older) */
-    @supports not (width: 100svw) {
-      #controls { max-width: calc(100vw - 24px); }
+    /* --- iOS safe-area for shared sidebar & bottom controls (match fence receiver) --- */
+    @supports (padding: env(safe-area-inset-top)) {
+      #controls {
+        bottom: calc(16px + env(safe-area-inset-bottom)); /* lift above home indicator */
+        max-width: calc(
+          100svw - 24px
+          - env(safe-area-inset-left)
+          - env(safe-area-inset-right)
+        );
+      }
     }
 
     #enableAudioBtn, #disableAudioBtn { display: none; }
