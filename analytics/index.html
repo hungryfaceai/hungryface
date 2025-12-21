@@ -333,6 +333,36 @@
     let lastRefreshTs = null;
     let refreshJustTimeout = null;
 
+    // Map marker recency tiers (colors)
+    // NOTE: 10s is less "flickery" than 3s on mobile networks; change to 3000 if you prefer.
+    const MAP_NOW_WINDOW_MS   = 10 * 1000;        // green: "active now"
+    const MAP_HOUR_WINDOW_MS  = 60 * 60 * 1000;   // orange: last hour (otherwise blue)
+
+    function getIpTier(lastSeenMs) {
+      const last = Number(lastSeenMs) || 0;
+      const age = Date.now() - last;
+      if (!last || !Number.isFinite(age)) return 'old';
+      if (age <= MAP_NOW_WINDOW_MS) return 'now';
+      if (age <= MAP_HOUR_WINDOW_MS) return 'hour';
+      return 'old';
+    }
+
+    function styleForTier(tier) {
+      if (tier === 'now') {
+        return { color: '#22c55e', fillColor: '#22c55e', fillOpacity: 0.9, weight: 2, radius: 8 };
+      }
+      if (tier === 'hour') {
+        return { color: '#f59e0b', fillColor: '#f59e0b', fillOpacity: 0.9, weight: 2, radius: 7 };
+      }
+      return { color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.85, weight: 2, radius: 6 };
+    }
+
+    function tierLabel(tier) {
+      if (tier === 'now') return `Active now (≤ ${Math.round(MAP_NOW_WINDOW_MS / 1000)}s)`;
+      if (tier === 'hour') return 'Active in the last hour';
+      return 'Older';
+    }
+
     const COLUMNS = [
       { key: 'ts',        label: 'Time' },
       { key: 'feature',   label: 'Feature' },
@@ -835,6 +865,7 @@
     // ---------- Leaflet map + geolocation ----------
     let map = null;
     let mapLayer = null;
+    let markersByIp = new Map(); // ip -> Leaflet layer
 
     function initMapIfNeeded() {
       if (map) return;
@@ -890,6 +921,7 @@
       if (!map || !mapLayer) return;
 
       mapLayer.clearLayers();
+      markersByIp.clear();
 
       if (!geoEnabled) {
         return; // keep base map; no markers
@@ -899,22 +931,29 @@
       for (const [ip, ips] of ipStatsEntries) {
         const geo = await getGeoForIp(ip);
         if (!geo || !Number.isFinite(geo.lat) || !Number.isFinite(geo.lon)) continue;
+
         const installsCount = (ips.installs && ips.installs.size) || 0;
         const sessionsCount = (ips.sessions && ips.sessions.size) || 0;
-        const lastSeen = ips.lastSeen
+        const lastSeenIso = ips.lastSeen
           ? new Date(ips.lastSeen).toISOString().replace('T',' ').slice(0,19)
           : '—';
+
+        const tier = getIpTier(ips.lastSeen);
 
         const popupHtml = `
           <b>${ip}</b><br/>
           ${geo.city ? `${geo.city}, ` : ''}${geo.country || ''}<br/>
           Installs: ${installsCount}<br/>
           Sessions: ${sessionsCount}<br/>
-          Last seen: ${lastSeen}
+          Last seen: ${lastSeenIso}<br/>
+          Status: <b>${tierLabel(tier)}</b>
         `;
-        L.marker([geo.lat, geo.lon])
+
+        const marker = L.circleMarker([geo.lat, geo.lon], styleForTier(tier))
           .addTo(mapLayer)
           .bindPopup(popupHtml);
+
+        markersByIp.set(ip, marker);
       }
       // No fitBounds -> user zoom/pan preserved
     }
@@ -1297,6 +1336,7 @@
       saveAll();
       if (!geoEnabled && mapLayer) {
         mapLayer.clearLayers();
+        markersByIp.clear();
       } else if (geoEnabled) {
         const activeView = document.querySelector('.view.view-active');
         if (activeView && activeView.id === 'view-map') {
@@ -1317,6 +1357,19 @@
     doRefresh(false); // Summary is the default active view; no green flash on initial load
     updateRefreshButtonState();
     setInterval(updateRefreshButtonState, 60 * 1000);
+
+    // Optional: keep marker colors "decaying" while map view is open (no geo lookups)
+    setInterval(() => {
+      const activeView = document.querySelector('.view.view-active');
+      if (!activeView || activeView.id !== 'view-map') return;
+      if (!geoEnabled) return;
+
+      for (const [ip, marker] of markersByIp.entries()) {
+        const ips = state.ipStats[ip];
+        if (!ips) continue;
+        marker.setStyle(styleForTier(getIpTier(ips.lastSeen)));
+      }
+    }, 1000);
 
     // ---------- SSE hookup: just evolve state, no auto-rerender ----------
     const es = new EventSource(`${ANALYTICS_BASE}/stream`);
