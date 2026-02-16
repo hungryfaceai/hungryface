@@ -3,13 +3,13 @@
 
 export function installReviewNudge(userOptions = {}) {
   const options = {
-    daysAfterFirstSeen: 0, //7,
+    daysAfterFirstSeen: 1, //7,
     snoozeDays: 7, //14,
     maxDeferrals: 3, //2,
 
     // Debug/testing: bypass all checks and always show the nudge card.
     // In force mode, we do NOT persist state (no deferrals/snooze/done written).
-    force: true,
+    force: false,
 
     // Where to send users:
     appStoreUrl: 'https://apps.apple.com/us/app/naptio/id6756505573',
