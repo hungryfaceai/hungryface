@@ -1,9 +1,6 @@
 // /hungryface/home/review-nudge.js
 // Naptio review nudge (native-only), shown on Home when returning from Camera/Viewer.
 
-// /hungryface/home/review-nudge.js
-// Naptio review nudge (native-only), shown on Home when returning from Camera/Viewer.
-
 export function installReviewNudge(userOptions = {}) {
   const options = {
     daysAfterFirstSeen: 7,
