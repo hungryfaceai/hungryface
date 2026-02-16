@@ -3,9 +3,9 @@
 
 export function installReviewNudge(userOptions = {}) {
   const options = {
-    daysAfterFirstSeen: 7,
-    snoozeDays: 14,
-    maxDeferrals: 2,
+    daysAfterFirstSeen: 3, //7,
+    snoozeDays: 7, //14,
+    maxDeferrals: 3, //2,
 
     // Debug/testing: bypass all checks and always show the nudge card.
     // In force mode, we do NOT persist state (no deferrals/snooze/done written).
