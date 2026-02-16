@@ -3,7 +3,7 @@
 
 export function installReviewNudge(userOptions = {}) {
   const options = {
-    daysAfterFirstSeen: 7,
+    daysAfterFirstSeen: 0,
     snoozeDays: 14,
     maxDeferrals: 2,
 
