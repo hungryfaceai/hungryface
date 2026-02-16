@@ -360,8 +360,7 @@ export function installReviewNudge(userOptions = {}) {
   
     document.head.appendChild(style);
   }
-
-}
+} // end installReviewNudge
 
 /* ---------- State + runtime detection ---------- */
 
