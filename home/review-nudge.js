@@ -9,7 +9,7 @@ export function installReviewNudge(userOptions = {}) {
 
     // Debug/testing: bypass all checks and always show the nudge card.
     // In force mode, we do NOT persist state (no deferrals/snooze/done written).
-    force: false,
+    force: true,
 
     // Where to send users:
     appStoreUrl: 'https://apps.apple.com/us/app/naptio/id6756505573',
