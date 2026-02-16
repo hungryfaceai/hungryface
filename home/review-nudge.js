@@ -6,6 +6,7 @@ export function installReviewNudge(userOptions = {}) {
     daysAfterFirstSeen: 0,
     snoozeDays: 14,
     maxDeferrals: 2,
+    force: true,
 
     // Where to send users:
     appStoreUrl: 'https://apps.apple.com/us/app/naptio/id6756505573',
@@ -27,7 +28,7 @@ export function installReviewNudge(userOptions = {}) {
   };
 
   const runtime = getRuntime();
-  if (!runtime.allowed) return; // do nothing on web
+  if (!options.force && !runtime.allowed) return; // do nothing on web unless forced
 
   const state = loadState();
 
@@ -38,32 +39,37 @@ export function installReviewNudge(userOptions = {}) {
   }
 
   // Must be returning from Camera/Viewer
-  if (!cameFromCameraOrViewer(options.fromPatterns)) return;
+  if (!options.force && !cameFromCameraOrViewer(options.fromPatterns)) return;
 
   // Stop conditions
-  if (state.done) return;
-  if ((state.deferral_count || 0) >= options.maxDeferrals) return;
+  if (!options.force) {
+    if (state.done) return;
+    if ((state.deferral_count || 0) >= options.maxDeferrals) return;
 
-  // Snooze check
-  if (state.snooze_until && Date.now() < state.snooze_until) return;
+    if (state.snooze_until && Date.now() < state.snooze_until) return;
 
-  // Eligibility (7 days after first native Home view)
-  const eligibleAt = state.first_native_home_seen_at + options.daysAfterFirstSeen * 24 * 60 * 60 * 1000;
-  if (Date.now() < eligibleAt) return;
+    const eligibleAt =
+      state.first_native_home_seen_at +
+      options.daysAfterFirstSeen * 24 * 60 * 60 * 1000;
 
-  // Optional daily cap
-  if (options.oncePerDay) {
-    const today = dayStamp();
-    if (state.last_shown_day === today) return;
+    if (Date.now() < eligibleAt) return;
+
+    if (options.oncePerDay) {
+      const today = dayStamp();
+      if (state.last_shown_day === today) return;
+    }
   }
+
 
   // Show UI
   const card = renderCard();
   injectCard(card, options.insertAfterSelector);
 
   // Mark shown
-  state.last_shown_day = options.oncePerDay ? dayStamp() : state.last_shown_day;
-  saveState(state);
+  if (!options.force) {
+    state.last_shown_day = options.oncePerDay ? dayStamp() : state.last_shown_day;
+    saveState(state);
+  }
 
   // Track "ignore" (user leaves Home without clicking)
   const visit = {
