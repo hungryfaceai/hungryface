@@ -233,6 +233,7 @@ export function installReviewNudge(userOptions = {}) {
 
   function ensureStyles() {
     if (document.getElementById('review-nudge-styles')) return;
+  
     const style = document.createElement('style');
     style.id = 'review-nudge-styles';
     style.textContent = `
@@ -242,52 +243,74 @@ export function installReviewNudge(userOptions = {}) {
         padding: 0 6px;
         box-sizing: border-box;
       }
+  
       .review-nudge__inner{
         position: relative;
         display: grid;
         grid-template-columns: 1fr auto;
         gap: 12px;
         align-items: center;
-        background: #0b0b0b;
-        border: 1px solid #1a1a1a;
+  
+        /* Make it stand out from your black background */
+        background: #0d1220;        /* tinted dark */
+        border: 1px solid #22304f;  /* cooler border */
         border-radius: 16px;
-        padding: 14px 14px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  
+        /* IMPORTANT: reserve space for the close button so it never overlaps */
+        padding: 16px 56px 16px 16px;
+  
+        box-shadow: 0 14px 38px rgba(0,0,0,0.55);
       }
+  
+      /* Accent stripe to increase salience */
+      .review-nudge__inner::before{
+        content: "";
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        width: 4px;
+        border-radius: 16px 0 0 16px;
+        background: #7aa2ff;
+      }
+  
       @media (max-width: 560px){
         .review-nudge__inner{
           grid-template-columns: 1fr;
           gap: 10px;
-          padding: 14px 12px 12px;
+  
+          /* Keep right padding for the close button on small screens too */
+          padding: 16px 56px 14px 12px;
         }
       }
-
+  
       .review-nudge__close{
         position: absolute;
-        top: 8px; right: 8px;
+        top: 10px; right: 10px;
         width: 34px; height: 34px;
         border-radius: 9999px;
-        border: 1px solid #2a2a2a;
-        background: #0d0d0d;
+  
+        border: 1px solid rgba(255,255,255,0.18);
+        background: rgba(255,255,255,0.08);
         color: #fff;
+  
         font-size: 22px;
         line-height: 1;
         cursor: pointer;
+        z-index: 2;
       }
-      .review-nudge__close:hover{ background:#111; }
+      .review-nudge__close:hover{ background: rgba(255,255,255,0.12); }
       .review-nudge__close:focus-visible{ outline: 2px solid #fff; outline-offset: 2px; }
-
+  
       .review-nudge__title{
         font-weight: 800;
         font-size: 0.95rem;
         margin-bottom: 4px;
       }
       .review-nudge__body{
-        opacity: 0.9;
+        opacity: 0.92;
         font-size: 0.9rem;
         line-height: 1.25;
       }
-
+  
       .review-nudge__actions{
         display: inline-flex;
         gap: 10px;
@@ -300,11 +323,11 @@ export function installReviewNudge(userOptions = {}) {
           justify-content: flex-start;
         }
       }
-
+  
       .review-nudge__btn{
         appearance: none;
-        border: 1px solid rgba(255,255,255,0.28);
-        background: rgba(255,255,255,0.12);
+        border: 1px solid rgba(255,255,255,0.22);
+        background: rgba(255,255,255,0.10);
         color: #fff;
         border-radius: 9999px;
         padding: 10px 12px;
@@ -314,12 +337,13 @@ export function installReviewNudge(userOptions = {}) {
         font-size: 0.9rem;
       }
       .review-nudge__btn:hover{
-        background: rgba(255,255,255,0.16);
+        background: rgba(255,255,255,0.14);
       }
       .review-nudge__btn:focus-visible{
         outline: 2px solid #7aa2ff;
         outline-offset: 2px;
       }
+  
       .review-nudge__btn--primary{
         background: #fff;
         color: #000;
@@ -328,13 +352,15 @@ export function installReviewNudge(userOptions = {}) {
       .review-nudge__btn--primary:hover{
         background: #eaeaea;
       }
-
+  
       @media (prefers-reduced-motion: reduce){
         .review-nudge__btn, .review-nudge__close { transition: none !important; }
       }
     `;
+  
     document.head.appendChild(style);
   }
+
 }
 
 /* ---------- State + runtime detection ---------- */
