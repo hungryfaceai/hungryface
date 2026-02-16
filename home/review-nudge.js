@@ -250,16 +250,20 @@ export function installReviewNudge(userOptions = {}) {
         grid-template-columns: 1fr auto;
         gap: 12px;
         align-items: center;
-  
-        /* Make it stand out from your black background */
-        background: #0d1220;        /* tinted dark */
-        border: 1px solid #22304f;  /* cooler border */
+      
+        /* Make it stand out more (Option A) */
+        background: #101a33; /* slightly brighter tint */
+        border: 1px solid rgba(122,162,255,0.45);
         border-radius: 16px;
-  
+      
         /* IMPORTANT: reserve space for the close button so it never overlaps */
         padding: 16px 56px 16px 16px;
-  
-        box-shadow: 0 14px 38px rgba(0,0,0,0.55);
+      
+        box-shadow:
+          0 18px 48px rgba(0,0,0,0.65),
+          0 0 0 1px rgba(122,162,255,0.10) inset;
+      
+        filter: drop-shadow(0 0 12px rgba(122,162,255,0.20));
       }
   
       /* Accent stripe to increase salience */
