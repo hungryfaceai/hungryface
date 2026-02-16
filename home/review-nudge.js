@@ -1,12 +1,18 @@
 // /hungryface/home/review-nudge.js
 // Naptio review nudge (native-only), shown on Home when returning from Camera/Viewer.
 
+// /hungryface/home/review-nudge.js
+// Naptio review nudge (native-only), shown on Home when returning from Camera/Viewer.
+
 export function installReviewNudge(userOptions = {}) {
   const options = {
-    daysAfterFirstSeen: 0,
+    daysAfterFirstSeen: 7,
     snoozeDays: 14,
     maxDeferrals: 2,
-    force: true,
+
+    // Debug/testing: bypass all checks and always show the nudge card.
+    // In force mode, we do NOT persist state (no deferrals/snooze/done written).
+    force: false,
 
     // Where to send users:
     appStoreUrl: 'https://apps.apple.com/us/app/naptio/id6756505573',
@@ -27,21 +33,23 @@ export function installReviewNudge(userOptions = {}) {
     ...userOptions,
   };
 
+  const persist = !options.force; // QA mode: no localStorage writes / no counters
+
   const runtime = getRuntime();
   if (!options.force && !runtime.allowed) return; // do nothing on web unless forced
 
   const state = loadState();
 
-  // Set first_native_home_seen_at once (native-only)
-  if (!state.first_native_home_seen_at) {
+  // Set first_native_home_seen_at once (native-only) — only when persisting
+  if (persist && !state.first_native_home_seen_at) {
     state.first_native_home_seen_at = Date.now();
     saveState(state);
   }
 
-  // Must be returning from Camera/Viewer
+  // Must be returning from Camera/Viewer (unless forced)
   if (!options.force && !cameFromCameraOrViewer(options.fromPatterns)) return;
 
-  // Stop conditions
+  // Stop conditions / eligibility (skipped in force mode)
   if (!options.force) {
     if (state.done) return;
     if ((state.deferral_count || 0) >= options.maxDeferrals) return;
@@ -60,13 +68,12 @@ export function installReviewNudge(userOptions = {}) {
     }
   }
 
-
   // Show UI
   const card = renderCard();
   injectCard(card, options.insertAfterSelector);
 
-  // Mark shown
-  if (!options.force) {
+  // Mark shown (only when persisting)
+  if (persist) {
     state.last_shown_day = options.oncePerDay ? dayStamp() : state.last_shown_day;
     saveState(state);
   }
@@ -83,6 +90,8 @@ export function installReviewNudge(userOptions = {}) {
     if (visit.actionTaken) return;
     if (visit.ignoreCounted) return;
     visit.ignoreCounted = true;
+
+    if (!persist) return; // force mode: do not persist/counter anything
 
     incrementDeferralAndMaybeDone(state, options);
     // no snooze for ignore
@@ -126,8 +135,10 @@ export function installReviewNudge(userOptions = {}) {
     visit.actionTaken = true;
     visit.visible = false;
 
-    state.done = true; // stop forever immediately
-    saveState(state);
+    if (persist) {
+      state.done = true; // stop forever immediately
+      saveState(state);
+    }
 
     removeCard(card);
 
@@ -143,11 +154,13 @@ export function installReviewNudge(userOptions = {}) {
     visit.actionTaken = true;
     visit.visible = false;
 
-    state.deferral_count = (state.deferral_count || 0) + 1;
-    state.snooze_until = Date.now() + options.snoozeDays * 24 * 60 * 60 * 1000;
+    if (persist) {
+      state.deferral_count = (state.deferral_count || 0) + 1;
+      state.snooze_until = Date.now() + options.snoozeDays * 24 * 60 * 60 * 1000;
 
-    if (state.deferral_count >= options.maxDeferrals) state.done = true;
-    saveState(state);
+      if (state.deferral_count >= options.maxDeferrals) state.done = true;
+      saveState(state);
+    }
 
     removeCard(card);
   });
@@ -156,10 +169,12 @@ export function installReviewNudge(userOptions = {}) {
     visit.actionTaken = true;
     visit.visible = false;
 
-    // Dismiss counts as deferral, no snooze
-    state.deferral_count = (state.deferral_count || 0) + 1;
-    if (state.deferral_count >= options.maxDeferrals) state.done = true;
-    saveState(state);
+    if (persist) {
+      // Dismiss counts as deferral, no snooze
+      state.deferral_count = (state.deferral_count || 0) + 1;
+      if (state.deferral_count >= options.maxDeferrals) state.done = true;
+      saveState(state);
+    }
 
     removeCard(card);
   });
