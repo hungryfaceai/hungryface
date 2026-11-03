@@ -133,6 +133,7 @@
     }
     #debugToggle:active { transform: scale(.98); }
   </style>
+    <script defer src="https://cloud.umami.is/script.js" data-website-id="e5feef4a-8ebd-4094-b6ff-36bdc4512e2e" data-exclude-search="true" data-exclude-hash="true" data-domains="hungryfaceai.github.io"></script>
 </head>
 <body class="blackout">
   <!-- Header -->
@@ -306,6 +307,8 @@
 
   <script type="module">
     import { listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
+    import { keepAwake } from '/hungryface/webrtc/shared/wake-lock.js';
+    let screenAwake = null; // wake lock handle while streaming
     const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
     const UI_AUTOHIDE_MS = 10000;
     // UI room = label in dropdown (e.g. "Baby")
@@ -1213,6 +1216,7 @@
         }
         await connectWS(uiRoom);
         started = true;
+        try { screenAwake?.release(); screenAwake = keepAwake({ log: (m) => console.log('[SENDER]', m) }); } catch {}
         startBtn.textContent = 'Stop streaming';
         startBtn.disabled = false;
 
@@ -1240,6 +1244,7 @@
     async function stopStreaming() {
       try { send({ type: 'bye' }); } catch {}
       started = false;                        // so scheduleWSReconnect() bails out
+      try { screenAwake?.release(); } catch {} screenAwake = null;
       roomSel.disabled = false;
       stopWSHeartbeat();
       if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }

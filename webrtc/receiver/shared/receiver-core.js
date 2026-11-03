@@ -41,6 +41,13 @@ export class ReceiverCore {
     this.offerResendTimer = null;
     this.iceDisconnectedSince = null;
 
+    // Lifecycle guards (prevent overlapping reconnect chains / zombie timers)
+    this.closed = false;
+    this.reconnectTimer = null;
+    this.iceGraceTimer = null;
+    this.startPromise = null;
+    this.wsConnectPromise = null;
+
     // Targeted routing
     this.targetSenderId = null;
     this.senderId = null;
@@ -48,16 +55,26 @@ export class ReceiverCore {
 
   /* ---------- Public API ---------- */
   async start() {
-    await this.#ensureWS();
-    await this.#ensurePC();
-    await this.#negotiate();
+    this.closed = false;
+    // Single-flight: concurrent callers share one in-progress start
+    if (this.startPromise) return this.startPromise;
+    this.startPromise = (async () => {
+      await this.#ensureWS();
+      await this.#ensurePC();
+      await this.#negotiate();
+    })();
+    try { return await this.startPromise; }
+    finally { this.startPromise = null; }
   }
 
   close() {
+    this.closed = true;
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    this.#clearIceGraceTimer();
     try { this.#stopOfferResendLoop(); } catch {}
     try { this.ws?.close(); } catch {}
     try { this.pc?.close(); } catch {}
-    if (this.wsKeepalive) clearInterval(this.wsKeepalive);
+    if (this.wsKeepalive) { clearInterval(this.wsKeepalive); this.wsKeepalive = null; }
   }
 
   getPeerConnection() { return this.pc; }
@@ -65,7 +82,18 @@ export class ReceiverCore {
   /* ---------- Internals ---------- */
   async #ensureWS() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
-    await new Promise((resolve, reject) => {
+    if (this.closed) throw new Error('ReceiverCore closed');
+    // A connect attempt is already in flight — share it instead of opening a second socket
+    if (this.wsConnectPromise) return this.wsConnectPromise;
+
+    // Retire a dead socket (CLOSING/CLOSED) so its late onclose can't schedule another reconnect
+    const old = this.ws;
+    if (old) {
+      old.onopen = old.onmessage = old.onerror = old.onclose = null;
+      try { old.close(); } catch {}
+    }
+
+    this.wsConnectPromise = new Promise((resolve, reject) => {
       const url = `${this.wsEndpoint}?room=${encodeURIComponent(this.room)}`;
       this.#status('Connecting to signaling…');
       const sock = new WebSocket(url);
@@ -92,19 +120,43 @@ export class ReceiverCore {
       sock.onmessage = (evt) => this.#onSignal(evt);
       sock.onerror = (e) => console.warn('[WS error]', e);
       sock.onclose  = () => {
+        clearTimeout(t);
+        if (sock !== this.ws) return;              // stale socket — ignore
         this.#status('Signaling: closed');
         if (this.wsKeepalive) { clearInterval(this.wsKeepalive); this.wsKeepalive = null; }
+        if (!opened) reject(new Error('WS closed before open'));
         this.#scheduleReconnect();
       };
     });
+    try { await this.wsConnectPromise; }
+    finally { this.wsConnectPromise = null; }
   }
 
   #scheduleReconnect() {
-    const delay = Math.min(this.wsRetryMs, this.reconnectMaxMs);
-    setTimeout(() => {
+    if (this.closed || this.reconnectTimer) return; // one pending reconnect at a time
+    const base  = Math.min(this.wsRetryMs, this.reconnectMaxMs);
+    const delay = Math.round(base * (0.8 + Math.random() * 0.4)); // ±20% jitter
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.closed) return;
       this.wsRetryMs = Math.min(this.wsRetryMs * 2, this.reconnectMaxMs);
-      this.start().catch(()=>{});
+      this.start().catch(() => {
+        // start() failed (e.g. WS timeout without onclose) — keep trying
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) this.#scheduleReconnect();
+      });
     }, delay);
+  }
+
+  #clearIceGraceTimer() {
+    if (this.iceGraceTimer) { clearTimeout(this.iceGraceTimer); this.iceGraceTimer = null; }
+  }
+
+  async #restartPC() {
+    if (this.closed) return;
+    this.#clearIceGraceTimer();
+    this.iceDisconnectedSince = null;
+    await this.#ensurePC(true);
+    await this.#negotiate();
   }
 
   #send(obj) {
@@ -118,7 +170,13 @@ export class ReceiverCore {
   async #ensurePC(force = false) {
     if (this.pc && !force) return;
 
-    if (this.pc) { try { this.pc.close(); } catch{}; }
+    if (this.pc) {
+      const oldPc = this.pc;
+      // Detach handlers so the retired PC's state events can't trigger another rebuild
+      oldPc.oniceconnectionstatechange = oldPc.onicecandidate = oldPc.ontrack = oldPc.ondatachannel = null;
+      try { oldPc.close(); } catch{};
+    }
+    this.#clearIceGraceTimer();
     this.#stopOfferResendLoop();   // kill any old resend timer
     this.processingAnswer = false; // clear any stale lock
     this.pc = null;
@@ -148,28 +206,33 @@ export class ReceiverCore {
     };
 
     pc.oniceconnectionstatechange = () => {
+      if (pc !== this.pc) return;                  // event from a retired PC
       const s = pc.iceConnectionState;
       this.onIceState?.(s);
       //if (s === 'connected' || s === 'completed') {
-      if (s === 'connected') { // ignore 'completed' to avoid duplicate status
+      if (s === 'connected' || s === 'completed') {
         //this.#status('Connected'); //// UI logging handled by onIceState in the page
         this.iceDisconnectedSince = null;
+        this.#clearIceGraceTimer();
       } else if (s === 'failed') {
         this.#status('ICE: failed');
-        this.#ensurePC(true);
-        this.#negotiate().catch(()=>{});
+        this.#restartPC().catch(()=>{});
       } else if (s === 'disconnected') {
         if (!this.iceDisconnectedSince) this.iceDisconnectedSince = Date.now();
         const grace = this.iceDisconnectGraceMs;
-        setTimeout(() => {
-          if (this.iceDisconnectedSince && Date.now() - this.iceDisconnectedSince >= grace) {
-            //this.#status(`ICE: disconnected >${Math.round(grace/1000)}s (renegotiating)`);
-            this.#ensurePC(true);
-            this.#negotiate().catch(()=>{});
-          }
-        }, grace + 100); // ← was 15100 to exceed the ≥ check reliably
+        if (!this.iceGraceTimer) {
+          this.iceGraceTimer = setTimeout(() => {
+            this.iceGraceTimer = null;
+            if (pc !== this.pc) return;
+            if (this.iceDisconnectedSince && Date.now() - this.iceDisconnectedSince >= grace) {
+              //this.#status(`ICE: disconnected >${Math.round(grace/1000)}s (renegotiating)`);
+              this.#restartPC().catch(()=>{});
+            }
+          }, grace + 100); // ← was 15100 to exceed the ≥ check reliably
+        }
         this.#status('ICE: disconnected');
       } else if (s === 'closed') {
+        this.#clearIceGraceTimer();
         this.#status('ICE: closed');
       } else {
         //this.#status('ICE: ' + s);
