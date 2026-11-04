@@ -362,7 +362,7 @@
     const ui        = document.getElementById('ui');
     const tap       = document.getElementById('tap');
     const stage     = document.getElementById('stage');
-    const talkbackAudio = document.getElementById('talkbackAudio'); //https://chatgpt.com/c/68cbdcf2-d4f8-8330-97d8-a97eb665eb33
+    const talkbackAudio = document.getElementById('talkbackAudio');
 
     // --- PSK Room dropdown population & default selection ---
     function hasOption(sel, val) {
@@ -558,7 +558,7 @@
 
     let previewTimer = null, previewTicker = null, previewEnd = 0;
     const poseDCs = new Set();
-    // Cache the most recent audio score payload so late-joining receivers get one instantly. //https://chatgpt.com/c/68c1d349-17d8-832f-9534-fcb6826946a4
+    // Cache the most recent audio score payload so late-joining receivers get one instantly.
     let lastAudioPayload = null;
     let lastPosePayload = null;
     let lastFacePayload = null;    
@@ -781,7 +781,7 @@
     videoOn.addEventListener('change', applyVideoToggle);
     audioOn.addEventListener('change', async () => {
       await applyAudioToggle();
-      //applyAudioUI(); //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+      //applyAudioUI();
       // force the AI loop to re-pick its source (tap vs separate)
       if (audioAiOn?.checked && audioAiWhere?.value === 'sender') {
         stopSenderAudioLoop();
@@ -1564,7 +1564,7 @@
       else stopSenderPoseLoop();
     }
 
-    // --- FACE helpers shared with receiver --- //https://chatgpt.com/c/68c93e96-8f88-832f-89f1-87198b5ee34c
+    // --- FACE helpers shared with receiver ---
     function computeEulerXYZ(m){ // m: Float32Array[16] row-major
       const m00=m[0], m01=m[1], m02=m[2];
       const m10=m[4], m11=m[5], m12=m[6];
@@ -1672,7 +1672,7 @@
       const streamedTrack = getLocalAudioTrack();
       const canTap = !!(streamedTrack && streamedTrack.readyState === 'live' && streamedTrack.enabled);
 
-      //let originLabel = 'separate mic'; //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+      //let originLabel = 'separate mic';
       //let tapUsed = false;
       //let useSeparateMic = !DEBUG_AUDIO.FORCE_TAP; // default: prefer separate RAW mic
       //let openedSeparate = false;
@@ -1686,12 +1686,12 @@
       // Build muted sink
       const sink = audioCtx.createGain();
       sink.gain.value = 0;
-      //sink.connect(audioCtx.destination); //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+      //sink.connect(audioCtx.destination);
       // Keep the graph alive without opening the output device
       const blackhole = audioCtx.createMediaStreamDestination();
       sink.connect(blackhole);
 
-      // Try separate RAW mic first (AEC/NS/AGC OFF), unless FORCE_TAP //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+      // Try separate RAW mic first (AEC/NS/AGC OFF), unless FORCE_TAP
       //if (useSeparateMic) {
       // Only open a second capture when we are NOT already sending audio
       if (!preferTap) {
@@ -1711,19 +1711,19 @@
 
       // Fallback or FORCE_TAP → tap the processed streaming track
       if (!openedSeparate) {
-        //if (DEBUG_AUDIO.FORCE_TAP && !canTap) { //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+        //if (DEBUG_AUDIO.FORCE_TAP && !canTap) {
         if (preferTap && !canTap) {
           console.warn('[AUDIO][sender] FORCE_TAP requested but no live enabled streaming track to tap.');
         }
         if (canTap) {
           try {
-            //audioSource = makeSourceFromTrack(audioCtx, streamedTrack); //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+            //audioSource = makeSourceFromTrack(audioCtx, streamedTrack);
             // Clone so the AI graph lifecycle can’t affect the sender’s live track.
             aiTapTrack = streamedTrack.clone();
             aiTapTrack.enabled = true;
             audioSource = makeSourceFromTrack(audioCtx, aiTapTrack);
             tapUsed = true;
-            //originLabel = DEBUG_AUDIO.FORCE_TAP ? 'tap: streaming track (forced)' : 'tap: streaming track (fallback)'; //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+            //originLabel = DEBUG_AUDIO.FORCE_TAP ? 'tap: streaming track (forced)' : 'tap: streaming track (fallback)';
             originLabel = preferTap ? 'tap: streaming track (preferred)' : 'tap: streaming track (fallback)';
           } catch (e) {
             console.warn('[AUDIO][sender] unable to tap streamed track:', e);
@@ -1883,7 +1883,7 @@
             }
 
             const payload = JSON.stringify({ type:'audio', categories: classifications, ts: performance.now() });
-            // Remember the last payload so new data channels get an immediate score //https://chatgpt.com/c/68c1d349-17d8-832f-9534-fcb6826946a4
+            // Remember the last payload so new data channels get an immediate score
             lastAudioPayload = payload;
             let sent = 0;
             for (const ch of poseDCs) if (ch.readyState === 'open') { ch.send(payload); sent++; }
@@ -1901,7 +1901,7 @@
 
       audioLoopRunning = true;
       audioStarting = false;
-      //lastAIMode = tapUsed ? (DEBUG_AUDIO.FORCE_TAP ? 'tap-forced' : 'tap-fallback') : 'separate'; //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+      //lastAIMode = tapUsed ? (DEBUG_AUDIO.FORCE_TAP ? 'tap-forced' : 'tap-fallback') : 'separate';
       lastAIMode = tapUsed ? (DEBUG_AUDIO.FORCE_TAP ? 'tap-forced' : (preferTap ? 'tap-preferred' : 'tap-fallback')) : 'separate';
 
       // Try worklet for classification
@@ -1936,7 +1936,7 @@
       }
 
       // --- Parallel RMS monitor for the *streaming track* (always from localStream track)
-      //if (streamedTrack) { //https://chatgpt.com/c/68c169df-50c4-8327-a77b-413161f56031
+      //if (streamedTrack) {
       const ENABLE_RMS_MONITOR = false; // set true when debugging
       if (streamedTrack && ENABLE_RMS_MONITOR) {
         try {

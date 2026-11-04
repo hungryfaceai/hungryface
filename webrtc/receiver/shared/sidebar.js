@@ -116,7 +116,6 @@
     }*/
 
     // ---------- Menu interactions (highlight only; navigation via anchors) ----------
-    //https://chatgpt.com/c/68ac564d-b3e4-8328-ae07-598697bbd50c
     function setActive(itemName) {
       navItems.forEach(btn => {
         const isActive = btn.dataset.item === itemName;
