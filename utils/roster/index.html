@@ -475,27 +475,7 @@
   <div id="roster-banner" class="roster-banner" aria-live="polite"></div>
 
   <!-- ⬇️ Inject shared sidebar markup and behavior (kept separate from your code) -->
-  <script type="module">
-    (async () => {
-      try {
-        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
-        const html = await res.text();
-        const wrap = document.createElement('div');
-        wrap.innerHTML = html.trim();
-        document.body.prepend(...wrap.childNodes);
-
-        await new Promise((resolve, reject) => {
-          const s = document.createElement('script');
-          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
-          s.onload = resolve;
-          s.onerror = reject;
-          document.body.appendChild(s);
-        });
-      } catch (err) {
-        console.error('[Sidebar] failed to load shared assets:', err);
-      }
-    })();
-  </script>
+  <script type="module" src="/hungryface/webrtc/receiver/shared/sidebar-loader.js"></script>
 
   <div class="wrap">
     <header>
@@ -508,6 +488,7 @@
 
     <div class="toolbar">
       <input id="endpoint" type="url" value="https://signaling-server-f5gu.onrender.com/rooms" aria-label="Rooms endpoint">
+      <input id="admin-key" type="password" placeholder="Admin key" autocomplete="off" aria-label="Admin key" style="max-width:12rem">
       <button id="btn-refresh" type="button">Refresh now</button>
 
       <div class="toolbar-inline">
@@ -589,6 +570,12 @@
   <script>
     (() => {
       const endpointInput   = document.getElementById('endpoint');
+    // Admin key: kept only for this tab (sessionStorage), sent as a Bearer header, never in the URL.
+    const adminKeyInput = document.getElementById('admin-key');
+    try { adminKeyInput.value = sessionStorage.getItem('naptio:adminKey') || ''; } catch {}
+    adminKeyInput.addEventListener('change', () => { try { sessionStorage.setItem('naptio:adminKey', adminKeyInput.value.trim()); } catch {} });
+    function adminHeaders(){ const k = adminKeyInput.value.trim(); return k ? { Authorization: 'Bearer ' + k } : {}; }
+
       const grid            = document.getElementById('grid');
       const statusDot       = document.getElementById('status-dot');
       const statusMsg       = document.getElementById('status-msg');
@@ -1311,10 +1298,10 @@
           const statusLabel = s.currentlyActive ? 'Active' : 'Inactive';
           const statusClass = s.currentlyActive ? 'analytics-status-pill active' : 'analytics-status-pill';
           html += '<tr>';
-          html += '<td>Room ' + String(s.roomId) + '</td>';
+          html += '<td>Room ' + esc(s.roomId) + '</td>';
           html += '<td>' + formatDuration(s.activeTimeMs) + '</td>';
-          html += '<td>' + (s.firstSeen || '—') + '</td>';
-          html += '<td>' + (s.lastSeen || '—') + '</td>';
+          html += '<td>' + esc(s.firstSeen || '—') + '</td>';
+          html += '<td>' + esc(s.lastSeen || '—') + '</td>';
           html += '<td>' + participantsCount + '</td>';
           html += '<td><span class="' + statusClass + '">' + statusLabel + '</span></td>';
           html += '</tr>';
@@ -1330,7 +1317,7 @@
             : 0;
           const width = maxActiveMs > 0 ? widthPct + '%' : '0%';
           html += '<div class="analytics-bar-row">';
-          html += '<span class="analytics-bar-label">' + String(s.roomId) + '</span>';
+          html += '<span class="analytics-bar-label">' + esc(s.roomId) + '</span>';
           html += '<div class="analytics-bar-track"><div class="analytics-bar-fill' +
                   (s.currentlyActive ? ' active' : '') +
                   '" style="width:' + width + ';"></div></div>';
@@ -1419,6 +1406,8 @@
         return { senders, receivers };
       }
 
+      // Escape server-supplied text (room names / peer ids come from any client) before HTML insertion
+      function esc(v){ return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
       function shortId(id) {
         if (!id) return '—';
         if (id.length <= 14) return id;
@@ -1449,7 +1438,7 @@
           card.setAttribute('role', 'listitem');
           card.innerHTML = `
             <div class="room-head">
-              <div class="room-title">Room ${roomId}</div>
+              <div class="room-title">Room ${esc(roomId)}</div>
               <div class="counts">
                 <span class="count">
                   <span class="dot sender" style="width:8px;height:8px;border-radius:50%"></span>
@@ -1474,7 +1463,7 @@
             node.className = `node ${role}`;
             node.innerHTML = `
               <span class="badge-role" title="${role === 'sender' ? 'Sender' : 'Receiver'}">${role === 'sender' ? 'S' : 'R'}</span>
-              <span class="mono" title="${m.id || ''}">${shortId(m.id)}</span>
+              <span class="mono" title="${esc(m.id || '')}">${esc(shortId(m.id))}</span>
             `;
             node.addEventListener('click', () => {
               if (!m.id) return;
@@ -1505,7 +1494,8 @@
         }
 
         try {
-          const resp = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store' });
+          const resp = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store', headers: adminHeaders() });
+          if (resp.status === 401) throw new Error('Unauthorized — enter the admin key');
           if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
           data = await resp.json();
           render(data);

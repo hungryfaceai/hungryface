@@ -40,10 +40,8 @@ export async function beginAlert({ type, message }) {
     endAt: null,
     avgScore: 0
   };
-  const id = await addAlert(rec);
-  // Notify listeners (drawer & badge refresh themselves)
-  document.dispatchEvent(new CustomEvent('alerts:changed', { detail: { action: 'add', id, record: { id, ...rec } } }));
-  return id;
+  // addAlert() notifies listeners itself (this tab + other tabs) with the full record
+  return addAlert(rec);
 }
 
 /** Finish an existing alert episode (by id). */
@@ -53,9 +51,8 @@ export async function finishAlert(id, { avgScore = 0, message = '' } = {}) {
     avgScore: Number(avgScore) || 0
   };
   if (message) patch.message = message;
-  const ok = await updateAlert(id, patch);
-  if (ok) document.dispatchEvent(new CustomEvent('alerts:changed', { detail: { action: 'update', id, record: patch } }));
-  return ok;
+  // updateAlert() notifies listeners itself (this tab + other tabs) with the full record
+  return updateAlert(id, patch);
 }
 
 /** Red banner (styled like audio page) */

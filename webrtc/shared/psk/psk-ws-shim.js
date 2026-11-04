@@ -123,48 +123,45 @@ export function installPskShim({ room }) {
       this._onerror = null;
       this._onclose = null;
   
+      // Inbound messages are processed strictly in arrival order. HMAC verification is
+      // async; without this queue a later message could finish verifying first, and the
+      // counter (replay) check would then drop the earlier, legitimate one.
+      let inboundChain = Promise.resolve();
+      const deliver = (data) => {
+        const evOut = new MessageEvent('message', { data });
+        this.dispatchEvent(evOut);
+        this._onmessage && this._onmessage(evOut);
+      };
+      const handleInbound = async (data) => {
+        if (!tokenBytes) { deliver(data); return; }
+        let obj;
+        try { obj = JSON.parse(data); } catch { deliver(data); return; }
+        const t = obj?.type || obj?.op || '';
+        if (PASSTHRU.has(t)) { deliver(JSON.stringify(obj)); return; }
+
+        const sig = obj?.psk;
+        if (!sig || typeof sig.ctr !== 'number' || typeof sig.mac !== 'string') return; // drop
+
+        const view = viewFor(obj, sig.ctr);
+        const payload = te.encode(JSON.stringify(view));
+        const expect = await hmac(tokenBytes, payload);
+        let got;
+        try { got = b64uToBytes(sig.mac); } catch { return; } // malformed MAC → drop
+        if (!timingSafeEq(expect, got)) return;               // bad MAC → drop
+        const key = obj.from || 'room';
+        const last = lastCtrByPeer.get(key) || 0;
+        if (sig.ctr <= last) return;                          // replay → drop
+        lastCtrByPeer.set(key, sig.ctr);
+        deliver(JSON.stringify(obj));
+      };
+
       // Relay from inner → outer
       const relay = (type, evIn) => {
-        // Build outbound event (preserve MessageEvent data; forward original for property handler)
         if (type === 'message') {
           const data = evIn.data;
-          if (!tokenBytes) {
-            const evOut = new MessageEvent('message', { data });
-            this.dispatchEvent(evOut);
-            this._onmessage && this._onmessage(evOut);
-            return;
-          }
-          let obj;
-          try { obj = JSON.parse(data); } catch {
-            const evOut = new MessageEvent('message', { data });
-            this.dispatchEvent(evOut);
-            this._onmessage && this._onmessage(evOut);
-            return;
-          }
-          const t = obj?.type || obj?.op || '';
-          if (PASSTHRU.has(t)) {
-            const evOut = new MessageEvent('message', { data: JSON.stringify(obj) });
-            this.dispatchEvent(evOut);
-            this._onmessage && this._onmessage(evOut);
-            return;
-          }
-          const sig = obj?.psk;
-          if (!sig || typeof sig.ctr !== 'number' || typeof sig.mac !== 'string') return; // drop
-  
-          const view = viewFor(obj, sig.ctr);
-          const payload = te.encode(JSON.stringify(view));
-          hmac(tokenBytes, payload).then(expect => {
-            const got = b64uToBytes(sig.mac);
-            if (!timingSafeEq(expect, got)) return; // bad MAC → drop
-            const key = obj.from || 'room';
-            const last = lastCtrByPeer.get(key) || 0;
-            if (sig.ctr <= last) return;           // replay → drop
-            lastCtrByPeer.set(key, sig.ctr);
-  
-            const evOut = new MessageEvent('message', { data: JSON.stringify(obj) });
-            this.dispatchEvent(evOut);
-            this._onmessage && this._onmessage(evOut);
-          });
+          inboundChain = inboundChain
+            .then(() => handleInbound(data))
+            .catch(e => console.warn('[PSK] inbound message dropped:', e?.message || e));
           return;
         }
   
@@ -205,24 +202,33 @@ export function installPskShim({ room }) {
       if (!tokenBytes) { this._inner.send(data); return; }
       let obj;
       try { obj = (typeof data === 'string') ? JSON.parse(data) : data; } catch { obj = null; }
-      if (!obj || typeof obj !== 'object') { this._inner.send(data); return; }
+      if (!obj || typeof obj !== 'object') { this._enqueueSend(() => data); return; }
       const t = obj?.type || obj?.op || '';
-      if (PASSTHRU.has(t)) { this._inner.send(JSON.stringify(obj)); return; }
+      if (PASSTHRU.has(t)) { this._enqueueSend(() => JSON.stringify(obj)); return; }
       const nextCtr = ++ctr;
       const view = viewFor(obj, nextCtr);
       const payload = te.encode(JSON.stringify(view));
-      (async () => {
+      this._enqueueSend(async () => {
         const mac = await hmac(tokenBytes, payload);
         obj.psk = { mac: bytesToB64u(mac), ctr: nextCtr };
-        this._inner.send(JSON.stringify(obj));
-      })();
+        return JSON.stringify(obj);
+      });
+    }
+
+    // Outbound messages leave in call order (signing is async; out-of-order sends would
+    // make the peer's counter check drop the earlier message).
+    _enqueueSend(build) {
+      this._sendChain = (this._sendChain || Promise.resolve())
+        .then(build)
+        .then(out => {
+          if (this._inner.readyState !== NativeWS.OPEN) return; // closed meanwhile → drop (as native would error)
+          this._inner.send(out);
+        })
+        .catch(e => console.warn('[PSK] send failed:', e?.message || e));
     }
   
     close(code, reason) { try { this._inner.close(code, reason); } catch {} }
   }
-  PskWS.CLOSING = NativeWS.CLOSING; PskWS.CLOSED = NativeWS.CLOSED; PskWS.CONNECTING = NativeWS.CONNECTING; PskWS.OPEN = NativeWS.OPEN;
-  
-    
   PskWS.__pskWrapped = true;
   PskWS.CLOSING = NativeWS.CLOSING; PskWS.CLOSED = NativeWS.CLOSED; PskWS.CONNECTING = NativeWS.CONNECTING; PskWS.OPEN = NativeWS.OPEN;
 

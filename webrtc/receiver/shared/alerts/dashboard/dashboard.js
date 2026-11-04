@@ -7,6 +7,7 @@ import {
   exportAlertsJSON,
   exportAlertsCSV,
   AlertTypes,
+  TAB_ID,
 } from '/hungryface/webrtc/receiver/shared/alerts/store.js';
 
 // ------- State -------
@@ -49,7 +50,8 @@ const els = {
 const bc = ('BroadcastChannel' in window) ? new BroadcastChannel('alerts-bc') : null;
 bc && (bc.onmessage = async (ev) => {
   console.log('[BC] at', new Date().toISOString(), ev?.data);
-  if (ev?.data?.type === 'changed') {
+  // this tab's own writes arrive via the same-tab 'alerts:changed' event instead
+  if (ev?.data?.type === 'changed' && ev.data.tab !== TAB_ID) {
     const prev = state.rowsAll;
     const fresh = await getAllAlerts();
     state.rowsAll = fresh;
@@ -63,6 +65,7 @@ bc && (bc.onmessage = async (ev) => {
 
 // Keep in sync with store updates (same-tab writes)
 document.addEventListener('alerts:changed', async (ev) => {
+  if (ev?.detail?.fromOtherTab) return; // already handled by the BroadcastChannel listener above
   console.log('[evt] alerts:changed at', new Date().toISOString(), ev?.detail);
   const prev = state.rowsAll;
   const fresh = await getAllAlerts();

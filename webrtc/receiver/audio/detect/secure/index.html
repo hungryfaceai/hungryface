@@ -109,28 +109,7 @@
 </head>
 <body>
   <!-- Inject the shared sidebar markup + behavior (same snippet as pose/cry pages) -->
-  <script type="module">
-    (async () => {
-      try {
-        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
-        const html = await res.text();
-        const wrap = document.createElement('div');
-        wrap.innerHTML = html.trim();
-        document.body.prepend(...wrap.childNodes);
-  
-        await new Promise((resolve, reject) => {
-          const s = document.createElement('script');
-          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
-          s.onload = resolve;
-          s.onerror = reject;
-          document.body.appendChild(s);
-        });
-        console.log('[LIVE][sidebar] loaded');
-      } catch (err) {
-        console.error('[LIVE][sidebar] failed to load shared assets:', err);
-      }
-    })();
-  </script>
+  <script type="module" src="/hungryface/webrtc/receiver/shared/sidebar-loader.js"></script>
 
   <div id="stage">
     <div class="panel">
@@ -313,89 +292,8 @@
 
   <!-- ⬇️ PSK bootstrap (viewer); resolves room using the same logic as Settings and installs shim -->
   <script type="module">
-    import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
-    import { requirePskOrRedirect, listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
-    import { installRoomScope } from '/hungryface/webrtc/shared/psk/room-scope.js';
-  
-    const qs = new URLSearchParams(location.search);
-    const qsRoom = (qs.get('room') || '').trim();
-  
-    // Ensure we have a PSK; if not, redirect to pairing
-    const env = await requirePskOrRedirect({
-      intent: 'viewer',
-      pairRoute: '/hungryface/webrtc/pairpsk/',
-      preferRoom: qsRoom,
-      fallbackRoom: 'Baby',
-    });
-
-    // Install PSK-based room scoping helper
-    await installRoomScope(env);
-  
-    if (env.redirected) {
-      console.log('[PSK][receiver-audio-detect] redirecting to Pair Devices…');
-    } else {
-      const rooms     = listValidPskRooms();
-      const lastRoom  = (localStorage.getItem('naptio:lastRoom') || '').trim();
-      const persisted = (localStorage.getItem('bm_receiver_room') || '').trim();
-      const envRoom   = (env.room || '').trim();
-  
-      const uniq = new Set(rooms);
-      if (envRoom) uniq.add(envRoom);
-  
-      // Same priority chain as Settings:
-      // ?room → lastRoom → bm_receiver_room → env.room → first available
-      const resolvedRoom = uniq.size
-        ? (
-            (qsRoom    && uniq.has(qsRoom)    && qsRoom)    ||
-            (lastRoom  && uniq.has(lastRoom)  && lastRoom)  ||
-            (persisted && uniq.has(persisted) && persisted) ||
-            envRoom ||
-            Array.from(uniq)[0]
-          )
-        // Defensive fallback if list is empty
-        : (envRoom || qsRoom || 'Baby');
-
-      const uiRoom = resolvedRoom;
-      const scopedRoom =
-        (typeof window.__scopeRoom === 'function')
-          ? window.__scopeRoom(uiRoom)
-          : uiRoom;
-  
-      // Persist UI label for future pages (Settings / other receivers)
-      try { localStorage.setItem('bm_receiver_room', uiRoom); } catch {}
-      try { localStorage.setItem('naptio:lastRoom',  uiRoom); } catch {}
-  
-      // Install PSK shim keyed by the UI room label (PSK lookup by "Baby"/"Baby2")
-      const undo = installPskShim({ room: uiRoom });
-      console.log('[PSK][receiver-audio-detect] UI room:', uiRoom, 'scoped signaling room:', scopedRoom);
-  
-      // Expose env + helpers for other code (ReceiverCore, mini-dash, etc.)
-      window.__pskEnv      = env;
-      window.__pskRoom     = uiRoom;      // backward-compat alias for UI room
-      window.__uiRoom      = uiRoom;      // explicit UI label
-      window.__scopedRoom  = scopedRoom;  // PSK-scoped signaling room ID
-      window.__pskUndo     = undo;
-      window.__installPskForRoom = (roomLabel) => {
-        const label = (roomLabel || '').trim() || 'Baby';
-        const scoped =
-          (typeof window.__scopeRoom === 'function')
-            ? window.__scopeRoom(label)
-            : label;
-
-        try { window.__pskUndo?.(); } catch {}
-        window.__pskUndo = installPskShim({ room: label });
-        console.log('[PSK][receiver-audio-detect] shim re-installed for room:', label, 'scoped:', scoped);
-
-        window.__pskRoom    = label;
-        window.__uiRoom     = label;
-        window.__scopedRoom = scoped;
-
-        try {
-          localStorage.setItem('bm_receiver_room', label);
-          localStorage.setItem('naptio:lastRoom',  label);
-        } catch {}
-      };
-    }
+    import { bootstrapSecureReceiver } from '/hungryface/webrtc/shared/psk/bootstrap.js';
+    await bootstrapSecureReceiver({ label: 'receiver-audio-detect' });
   </script>
   
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
@@ -410,7 +308,8 @@
 
     /* ========= WebRTC (ReceiverCore) ========= */
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
-    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    import { createStreamingResampler } from "/hungryface/webrtc/shared/audio-resampler.js";
+    import { WS_ENDPOINT } from '/hungryface/webrtc/shared/config.js';
 
     const DEFAULT_ROOM = 'Baby';
     // UI label (e.g. "Baby") vs PSK-scoped signaling ID
@@ -1047,7 +946,38 @@
     /* ========= Classify loop ========= */
     function concatFloat32(a,b){ const out=new Float32Array(a.length+b.length); out.set(a,0); out.set(b,a.length); return out; }
 
-    async function classifyChunk(chunk, deviceSr){
+    // Continuous resampler (recreated if the source rate/target changes; reset on stop)
+    let _rs = null;
+    function resampleStream(chunk, fromSr, toSr){
+      if (!_rs || _rs.fromSr !== fromSr || _rs.toSr !== toSr) _rs = createStreamingResampler(fromSr, toSr);
+      return _rs.process(chunk);
+    }
+    function resetResampler(){ _rs = null; }
+
+    // Serialize chunk processing: the worklet posts ~375 chunks/s without waiting, and
+    // classifyChunk awaits model calls, so unqueued calls interleave on state.ring/lastPos.
+    // Backlog is capped (~4 s of audio) so a slow/failed model load can't grow memory unbounded.
+    const _pending = [];
+    let _draining = false, _droppedChunks = 0;
+    function classifyChunk(chunk, deviceSr){
+      _pending.push([chunk, deviceSr]);
+      const maxPending = Math.ceil((deviceSr || 48000) * 4 / Math.max(1, chunk.length));
+      while (_pending.length > maxPending) { _pending.shift(); _droppedChunks++; }
+      if (!_draining) _drainChunks();
+    }
+    async function _drainChunks(){
+      _draining = true;
+      try {
+        while (_pending.length) {
+          const [c, sr] = _pending.shift();
+          try { await _classifyChunk(c, sr); } catch (e) { console.warn('[CRY] chunk error', e); }
+          if (_droppedChunks) { log('warn', `Audio backlog: dropped ${_droppedChunks} old chunks`); _droppedChunks = 0; }
+        }
+      } finally { _draining = false; }
+    }
+    function resetChunkQueue(){ _pending.length = 0; _droppedChunks = 0; }
+
+    async function _classifyChunk(chunk, deviceSr){
       if (state.mode !== 'detect') return;
 
       const SR_TARGET = Number(els.SR_TARGET.value)||16000;
@@ -1059,7 +989,7 @@
       let s=0; for(let i=0;i<chunk.length;i++){ const v=chunk[i]; s+=v*v; }
       setRMS(Math.sqrt(s/Math.max(1,chunk.length)));
 
-      const x16 = resampleLinear(chunk, deviceSr, SR_TARGET);
+      const x16 = resampleStream(chunk, deviceSr, SR_TARGET);
       state.ring = concatFloat32(state.ring, x16);
       const fram = Math.round((Number(els.FRAME_LEN_S.value)||0.975) * SR_TARGET);
       const hop  = Math.round(HOP_S * SR_TARGET);
@@ -1075,6 +1005,7 @@
         let w = state.ring.slice(start, end); if (w.length !== fram) { const pad = new Float32Array(fram); pad.set(w, 0); w = pad; }
 
         const res = await classifyMP(task, w, SR_TARGET);
+        if (state.mode !== 'detect') return; // stopped while the model was running
         const cats = extractCategories(res);
 
         onCategories(cats);
@@ -1109,6 +1040,7 @@
         await stopMicOnly();
         return;
       }
+      state.micStream = stream; // kept so stopMicOnly() can release the mic
       const src = ctx.createMediaStreamSource(stream);
       const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
       state.srcNode = src; state.sinkNode = sink;
@@ -1146,7 +1078,8 @@
       try { state.srcNode?.disconnect(); } catch {}
       try { state.sinkNode?.disconnect(); } catch {}
       try { state.micCtx && state.micCtx.state!=='closed' && state.micCtx.close(); } catch {}
-      state.procNode=null; state.srcNode=null; state.sinkNode=null; state.micCtx=null;
+      try { state.micStream?.getTracks().forEach(t => t.stop()); } catch {}
+      state.procNode=null; state.srcNode=null; state.sinkNode=null; state.micCtx=null; state.micStream=null;
     }
 
     async function stopAll(){
@@ -1171,6 +1104,7 @@
       await stopMicOnly();
       await stopRemoteAudioTap();
       state.ring=new Float32Array(0); state.lastPos=0; state.perClassEma.clear(); state.fusedEma=0; state.frameCount=0;
+      resetResampler(); resetChunkQueue();
       state.asmLastLogTs = 0; state.scoreLastLogTs = 0;
       setRMS(0); clearTopBars(); setupChart();
       if (wasRunning) log('warn','Stopped audio graph.');
@@ -1463,12 +1397,6 @@
     })();
   </script>
 
-  <!-- analytics -->
-  <script type="module">
-    import { installAnalytics } from '/hungryface/shared/analytics.js';
-    window.analytics = installAnalytics({ feature: 'receiver-audio-detect' });
-    // Later: window.analytics.event('audio_detect_opened');
-  </script>
 
   <script type="module">
     import { installMiniDashboard } from '/hungryface/webrtc/receiver/shared/mini-dash.js';

@@ -167,28 +167,7 @@
 <body>
   
   <!-- Inject the shared sidebar markup + behavior (same snippet as pose/cry pages) https://chatgpt.com/c/68c85105-d464-8331-be03-071c3da1f850-->
-  <script type="module">
-    (async () => {
-      try {
-        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
-        const html = await res.text();
-        const wrap = document.createElement('div');
-        wrap.innerHTML = html.trim();
-        document.body.prepend(...wrap.childNodes);
-  
-        await new Promise((resolve, reject) => {
-          const s = document.createElement('script');
-          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
-          s.onload = resolve;
-          s.onerror = reject;
-          document.body.appendChild(s);
-        });
-        console.log('[TRAIN][sidebar] loaded');
-      } catch (err) {
-        console.error('[TRAIN][sidebar] failed to load shared assets:', err);
-      }
-    })();
-  </script>
+  <script type="module" src="/hungryface/webrtc/receiver/shared/sidebar-loader.js"></script>
   
   <div id="stage">
     <div class="panel">
@@ -430,99 +409,16 @@
 
 <!-- ⬇️ PSK bootstrap (viewer) + PSK-scoped signaling room -->
 <script type="module">
-  import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
-  import { requirePskOrRedirect, listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
-  import { installRoomScope } from '/hungryface/webrtc/shared/psk/room-scope.js';
-
-  const qs = new URLSearchParams(location.search);
-  const qsRoom = (qs.get('room') || '').trim();
-
-  // Ensure we have a PSK; if not, redirect to pairing
-  const env = await requirePskOrRedirect({
-    intent: 'viewer',
-    pairRoute: '/hungryface/webrtc/pairpsk/',
-    preferRoom: qsRoom,
-    fallbackRoom: 'Baby',
-  });
-
-  // Expose env globally (optional / debugging)
-  window.__pskEnv = env;
-
-  if (env.redirected) {
-    console.log('[PSK][receiver-audio-training] redirecting to Pair Devices…');
-  } else {
-    // 🔹 Install PSK-based namespace helpers: window.__scopeRoom(uiLabel)
-    await installRoomScope(env);
-
-    const rooms     = listValidPskRooms();
-    const lastRoom  = (localStorage.getItem('naptio:lastRoom') || '').trim();
-    const persisted = (localStorage.getItem('bm_receiver_room') || '').trim();
-    const envRoom   = (env.room || '').trim();
-
-    const uniq = new Set(rooms);
-    if (envRoom) uniq.add(envRoom);
-
-    // Same priority chain as Settings:
-    // ?room → lastRoom → bm_receiver_room → env.room → first available
-    const resolvedRoom = uniq.size
-      ? (
-          (qsRoom    && uniq.has(qsRoom)    && qsRoom)    ||
-          (lastRoom  && uniq.has(lastRoom)  && lastRoom)  ||
-          (persisted && uniq.has(persisted) && persisted) ||
-          envRoom ||
-          Array.from(uniq)[0]
-        )
-      // Defensive fallback if list is empty
-      : (envRoom || qsRoom || 'Baby');
-
-    // Persist for future pages (Settings / other receivers)
-    try { localStorage.setItem('bm_receiver_room', resolvedRoom); } catch {}
-    try { localStorage.setItem('naptio:lastRoom',  resolvedRoom); } catch {}
-
-    // 🔹 Split UI label vs scoped signaling ID
-    const uiRoom = resolvedRoom;  // e.g. "Baby"
-    const scopedRoom =
-      (typeof window.__scopeRoom === 'function')
-        ? window.__scopeRoom(uiRoom)       // e.g. "a1b2c3d4:baby"
-        : uiRoom;
-
-    // PSK shim stays keyed by the *UI* room label (for getPsk('Baby') etc.)
-    const undo = installPskShim({ room: uiRoom });
-    console.log('[PSK][receiver-audio-training] PSK room label:', uiRoom, 'scoped signaling room:', scopedRoom);
-
-    // Expose globals for other scripts
-    window.__pskRoom       = uiRoom;      // human-readable label
-    window.__pskScopedRoom = scopedRoom;  // PSK-scoped signaling room
-    window.__pskUndo       = undo;
-
-    // Helper if some UI later wants to switch rooms
-    window.__installPskForRoom = (roomLabel) => {
-      const label = (roomLabel || '').trim() || 'Baby';
-      const scoped =
-        (typeof window.__scopeRoom === 'function')
-          ? window.__scopeRoom(label)
-          : label;
-
-      try { window.__pskUndo?.(); } catch {}
-      window.__pskUndo = installPskShim({ room: label });
-      console.log('[PSK][receiver-audio-training] shim re-installed for room label:', label, 'scoped:', scoped);
-
-      window.__pskRoom       = label;
-      window.__pskScopedRoom = scoped;
-
-      try {
-        localStorage.setItem('bm_receiver_room', label);
-        localStorage.setItem('naptio:lastRoom',  label);
-      } catch {}
-    };
-  }
+  import { bootstrapSecureReceiver } from '/hungryface/webrtc/shared/psk/bootstrap.js';
+  await bootstrapSecureReceiver({ label: 'receiver-audio-training' });
 </script>
   
 <script type="module">
   /* ========= NEW: WebRTC (ReceiverCore) ========= */
   import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
+  import { createStreamingResampler } from "/hungryface/webrtc/shared/audio-resampler.js";
 
-  const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+  import { WS_ENDPOINT } from '/hungryface/webrtc/shared/config.js';
 
   // UI label (what Settings / navbar use)
   function getUiRoom() {
@@ -1367,7 +1263,36 @@
     /* ========= Classify loop & modes ========= */
     function concatFloat32(a,b){ const out=new Float32Array(a.length+b.length); out.set(a,0); out.set(b,a.length); return out; }
 
-    async function classifyChunk(chunk, deviceSr, params, mode){
+    // Continuous resampler — must match detection exactly so calibrations transfer.
+    let _rs = null;
+    function resampleStream(chunk, fromSr, toSr){
+      if (!_rs || _rs.fromSr !== fromSr || _rs.toSr !== toSr) _rs = createStreamingResampler(fromSr, toSr);
+      return _rs.process(chunk);
+    }
+    function resetResampler(){ _rs = null; }
+
+    // Serialize chunk processing (worklet posts chunks without awaiting; unqueued calls
+    // interleave on state.ring/lastPos). Training never drops audio — it only warns.
+    const _pending = [];
+    let _draining = false, _backlogWarned = false;
+    function classifyChunk(chunk, deviceSr, params, mode){
+      _pending.push([chunk, deviceSr, params, mode]);
+      const warnAt = Math.ceil((deviceSr || 48000) * 10 / Math.max(1, chunk.length)); // ~10 s
+      if (_pending.length > warnAt && !_backlogWarned) { _backlogWarned = true; log('warn', 'Audio backlog > 10 s — model is slower than real time on this device.'); }
+      if (!_draining) _drainChunks();
+    }
+    async function _drainChunks(){
+      _draining = true;
+      try {
+        while (_pending.length) {
+          const a = _pending.shift();
+          try { await _classifyChunk(...a); } catch (e) { console.warn('[TRAIN] chunk error', e); }
+        }
+      } finally { _draining = false; _backlogWarned = false; }
+    }
+    function resetChunkQueue(){ _pending.length = 0; _backlogWarned = false; }
+
+    async function _classifyChunk(chunk, deviceSr, params, mode){
       if (state.mode !== mode) return;
 
       const SR_TARGET = Number(els.SR_TARGET.value)||16000;
@@ -1379,7 +1304,7 @@
       let s=0; for(let i=0;i<chunk.length;i++){ const v=chunk[i]; s+=v*v; }
       setRMS(Math.sqrt(s/Math.max(1,chunk.length)));
 
-      const x16 = resampleLinear(chunk, deviceSr, SR_TARGET);
+      const x16 = resampleStream(chunk, deviceSr, SR_TARGET);
       state.ring = concatFloat32(state.ring, x16);
       const fram = Math.round(0.975 * SR_TARGET);
       const hop  = Math.round(HOP_S * SR_TARGET);
@@ -1395,6 +1320,7 @@
         let w = state.ring.slice(start, end); if (w.length !== fram) { const pad = new Float32Array(fram); pad.set(w, 0); w = pad; }
 
         const res = await classifyMP(task, w, SR_TARGET);
+        if (state.mode !== mode) return; // stopped while the model was running
         const cats = extractCategories(res);
 
         onCategories(cats, mode);
@@ -1423,6 +1349,7 @@
         audio: { channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false },
         video: false
       });
+      state.micStream = stream; // kept so stopMicOnly() can release the mic
       const src = ctx.createMediaStreamSource(stream);
       const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
       state.srcNode = src; state.sinkNode = sink;
@@ -1464,7 +1391,8 @@
       try { state.srcNode?.disconnect(); } catch {}
       try { state.sinkNode?.disconnect(); } catch {}
       try { state.micCtx && state.micCtx.state!=='closed' && state.micCtx.close(); } catch {}
-      state.procNode=null; state.srcNode=null; state.sinkNode=null; state.micCtx=null;
+      try { state.micStream?.getTracks().forEach(t => t.stop()); } catch {}
+      state.procNode=null; state.srcNode=null; state.sinkNode=null; state.micCtx=null; state.micStream=null;
     }
 
     async function stopAll(){
@@ -1473,6 +1401,7 @@
       await stopMicOnly();
       await stopRemoteAudioTap();
       state.ring=new Float32Array(0); state.lastPos=0; state.perClassEma.clear(); state.fusedEma=0; state.frameCount=0;
+      resetResampler(); resetChunkQueue();
       state.asmLastLogTs = 0; state.scoreLastLogTs = 0;
       setPill('idle', false); setRMS(0);
       clearTopBars(); setupChart();
@@ -1521,6 +1450,7 @@
     }
 
     function setTrainAudioSrcFromFile(file){
+      resetResampler(); // don't carry filter state from the previous file
       if (trainBlobUrl) { try { URL.revokeObjectURL(trainBlobUrl); } catch {} }
       trainBlobUrl = URL.createObjectURL(file);
       els.trainAudio.src = trainBlobUrl;
@@ -2107,12 +2037,6 @@
     })();
   </script>
 
-  <!-- analytics -->
-  <script type="module">
-    import { installAnalytics } from '/hungryface/shared/analytics.js';
-    window.analytics = installAnalytics({ feature: 'receiver-audio-training' });
-    // Later: window.analytics.event('audio_training_opened');
-  </script>
 	
 </body>
 </html>

@@ -308,8 +308,10 @@
   <script type="module">
     import { listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
     import { keepAwake } from '/hungryface/webrtc/shared/wake-lock.js';
+    import { createStreamingResampler } from '/hungryface/webrtc/shared/audio-resampler.js';
     let screenAwake = null; // wake lock handle while streaming
-    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    import { WS_ENDPOINT, ICE_SERVERS } from '/hungryface/webrtc/shared/config.js';
+    import { createVisionTask } from '/hungryface/webrtc/shared/vision-task.js';
     const UI_AUTOHIDE_MS = 10000;
     // UI room = label in dropdown (e.g. "Baby")
     // Scoped room = namespace:slug, derived from PSK token
@@ -830,10 +832,13 @@
         };
             
         sock.onclose = (e) => {
+          clearTimeout(t);
+          if (ws !== sock) return;              // an older, replaced socket — ignore
           console.warn('[WS closed]', e.code, e.reason);
           setStatus('Signaling: closed');
           stopWSHeartbeat();
-          if (ws === sock) ws = null;
+          ws = null;
+          if (!opened) reject(new Error('WS closed before open'));
           scheduleWSReconnect();
         };
       });
@@ -846,20 +851,28 @@
     function stopWSHeartbeat() {
       if (wsHeartbeat) { clearInterval(wsHeartbeat); wsHeartbeat = null; }
     }
+    // Reconnect with exponential backoff + jitter: 1.5 s, 3 s, 6 s … capped at 30 s, reset on
+    // success. Coming back to the foreground retries promptly (reason 'tab-visible').
+    const WS_RETRY_MIN_MS = 1500, WS_RETRY_MAX_MS = 30000;
+    let wsRetryMs = WS_RETRY_MIN_MS;
     function scheduleWSReconnect(reason = 'retry') {
       if (!started) return;                 // only while streaming
       if (wsReconnectTimer) return;         // already queued
-      console.log('[WS] scheduling reconnect:', reason);
+      const base = reason === 'tab-visible' ? WS_RETRY_MIN_MS : wsRetryMs;
+      const delay = Math.round(base * (0.8 + Math.random() * 0.4));
+      console.log('[WS] scheduling reconnect:', reason, 'in', delay, 'ms');
       wsReconnectTimer = setTimeout(async () => {
         wsReconnectTimer = null;
+        if (!started) return;
         try {
           await connectWS(currentUiRoom());   // rejoin with same UI label
+          wsRetryMs = WS_RETRY_MIN_MS;        // healthy again
           send({ type: 'need-offer' });     // nudge any receivers
         } catch (e) {
-          // backoff and try again
-          scheduleWSReconnect();
+          wsRetryMs = Math.min(wsRetryMs * 2, WS_RETRY_MAX_MS);
+          scheduleWSReconnect('backoff');
         }
-      }, 1500);
+      }, delay);
     }
 
     
@@ -874,7 +887,7 @@
       }
 
       const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+        iceServers: ICE_SERVERS,
         bundlePolicy: 'max-bundle',
         sdpSemantics: 'unified-plan'
       });
@@ -1235,6 +1248,13 @@
       } catch (err) {
         roomSel.disabled = false;
         console.error(err);
+        // Starting failed part-way (e.g. signalling timed out after the camera opened): run the
+        // normal stop so the camera/mic, socket, preview timers and layout are all released.
+        if (!started) {
+          const sock = ws; ws = null;          // detach first so its onclose won't reconnect
+          try { sock?.close(); } catch {}
+          try { await stopStreaming(); } catch (e) { console.warn('[SENDER] cleanup after failed start', e); }
+        }
         alert(err.message || err);
         setStatus('Idle');
         startBtn.disabled = false;
@@ -1320,15 +1340,13 @@
       await ensureTasksLoaded();
       if (poseTask) return poseTask;
       const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
-      poseTask = await PoseLandmarker.createFromOptions(vision, {
+      poseTask = await createVisionTask(PoseLandmarker, vision, {
         baseOptions: {
           modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
-          delegate: "GPU"
-        },
+            "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task" },
         runningMode: "VIDEO",
         numPoses: 1
-      });
+      }, { label: 'sender-pose' });
       return poseTask;
     }
 
@@ -1336,8 +1354,8 @@
       await ensureTasksLoaded();
       if (faceTask) return faceTask;
       const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
-      faceTask = await FaceLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate: "GPU" },
+      faceTask = await createVisionTask(FaceLandmarker, vision, {
+        baseOptions: { modelAssetPath: FACE_MODEL_URL },
         runningMode: "VIDEO",
         numFaces: 1,
         outputFaceBlendshapes: false,
@@ -1345,7 +1363,7 @@
         minFaceDetectionConfidence: FACE_OPTS.minDet,
         minTrackingConfidence: FACE_OPTS.minTrack,
         minFacePresenceConfidence: FACE_OPTS.minPres,
-      });
+      }, { label: 'sender-face' });
       return faceTask;
     }
 
@@ -1733,6 +1751,8 @@
       const CLIP_SAMPLES_16 = Math.round(SR_TARGET * WINDOW_SEC);
       let ring16 = new Float32Array(0);
       let _seriesClips = 0;
+      // Continuous, filtered resampling across chunks (one instance per loop start)
+      const resampler16 = createStreamingResampler(SR_DEVICE, SR_TARGET);
 
       // Silence watchdog
       aiSilentFrames = 0;
@@ -1823,7 +1843,7 @@
         }
 
         // resample -> 16k mono
-        let x16 = resampleLinear(frameFloat32, SR_DEVICE, SR_TARGET);
+        let x16 = resampler16.process(frameFloat32);
         // pre-gain (classifier only)
         const pregainLin = Math.pow(10, (DEBUG_AUDIO.PREGAIN_DB || 0) / 20);
         if (pregainLin !== 1) {
@@ -2090,12 +2110,6 @@
 
   </script>
 
-  <!-- analytics -->
-  <script type="module">
-    import { installAnalytics } from '/hungryface/shared/analytics.js';
-    window.analytics = installAnalytics({ feature: 'sender-streaming' });
-    // Later: window.analytics.event('sender_opened');
-  </script>
   
 </body>
 </html>

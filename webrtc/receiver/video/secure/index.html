@@ -73,27 +73,7 @@
 </head>
 <body>
   <!-- ⬇️ Inject shared sidebar markup and behavior (kept separate from your code) -->
-  <script type="module">
-    (async () => {
-      try {
-        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
-        const html = await res.text();
-        const wrap = document.createElement('div');
-        wrap.innerHTML = html.trim();
-        document.body.prepend(...wrap.childNodes);
-
-        await new Promise((resolve, reject) => {
-          const s = document.createElement('script');
-          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
-          s.onload = resolve;
-          s.onerror = reject;
-          document.body.appendChild(s);
-        });
-      } catch (err) {
-        console.error('[Sidebar] failed to load shared assets:', err);
-      }
-    })();
-  </script>
+  <script type="module" src="/hungryface/webrtc/receiver/shared/sidebar-loader.js"></script>
 
   <div id="controls">
     <button id="enableAudioBtn" class="btn" type="button">Enable audio</button>
@@ -118,6 +98,7 @@
     import { requirePskOrRedirect, listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
     import { ReceiverCore } from '/hungryface/webrtc/receiver/shared/receiver-core.js';
     import { installRoomScope } from '/hungryface/webrtc/shared/psk/room-scope.js'; 
+    import { WS_ENDPOINT } from '/hungryface/webrtc/shared/config.js';
   
     /* ---------- Resolve room (aligned with Settings) ---------- */
     const qs = new URLSearchParams(location.search);
@@ -172,7 +153,6 @@
           ? window.__scopeRoom(uiRoom)   // e.g. "a1b2c3d4e5f6a7b8:baby"
           : uiRoom;
     
-      const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
       const room = scopedRoom;                 // ⬅️ signaling room used by ReceiverCore
       const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
     
@@ -711,12 +691,6 @@
     }
   </script>
 
-<!-- analytics -->
-<script type="module">
-  import { installAnalytics } from '/hungryface/shared/analytics.js';
-  window.analytics = installAnalytics({ feature: 'receiver-video' });
-  // Later: window.analytics.event('video_opened');
-</script>
 
   <script type="module">
     import { installMiniDashboard } from '/hungryface/webrtc/receiver/shared/mini-dash.js';

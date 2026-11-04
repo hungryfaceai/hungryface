@@ -334,27 +334,7 @@
 </head>
 <body>
   <!-- ⬇️ Shared sidebar -->
-  <script type="module">
-    (async () => {
-      try {
-        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
-        const html = await res.text();
-        const wrap = document.createElement('div');
-        wrap.innerHTML = html.trim();
-        document.body.prepend(...wrap.childNodes);
-
-        await new Promise((resolve, reject) => {
-          const s = document.createElement('script');
-          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
-          s.onload = resolve;
-          s.onerror = reject;
-          document.body.appendChild(s);
-        });
-      } catch (err) {
-        console.error('[Sidebar] failed to load shared assets:', err);
-      }
-    })();
-  </script>
+  <script type="module" src="/hungryface/webrtc/receiver/shared/sidebar-loader.js"></script>
 
   <!-- HUD pill (now left side). Alert pill lives inside it. -->
   <div id="hud" class="hud">
@@ -460,89 +440,8 @@
 
   <!-- ⬇️ PSK bootstrap (viewer); resolves room using the same logic as Settings and installs shim -->
   <script type="module">
-    import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
-    import { requirePskOrRedirect, listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
-    import { installRoomScope } from '/hungryface/webrtc/shared/psk/room-scope.js';
-
-    const qs = new URLSearchParams(location.search);
-    const qsRoom = (qs.get('room') || '').trim();
-  
-    // Ensure we have a PSK; if not, redirect to pairing
-    const env = await requirePskOrRedirect({
-      intent: 'viewer',
-      pairRoute: '/hungryface/webrtc/pairpsk/',
-      preferRoom: qsRoom,
-      fallbackRoom: 'Baby',
-    });
-
-    // Install PSK-based namespace helper (scoped room IDs)
-    await installRoomScope(env);
-  
-    if (env.redirected) {
-      console.log('[PSK][receiver-prone] redirecting to Pair Devices…');
-    } else {
-      const rooms     = listValidPskRooms();
-      const lastRoom  = (localStorage.getItem('naptio:lastRoom') || '').trim();
-      const persisted = (localStorage.getItem('bm_receiver_room') || '').trim();
-      const envRoom   = (env.room || '').trim();
-  
-      const uniq = new Set(rooms);
-      if (envRoom) uniq.add(envRoom);
-  
-      // Same priority chain as Settings:
-      // ?room → lastRoom → bm_receiver_room → env.room → first available
-      const resolvedRoom = uniq.size
-        ? (
-            (qsRoom    && uniq.has(qsRoom)    && qsRoom)    ||
-            (lastRoom  && uniq.has(lastRoom)  && lastRoom)  ||
-            (persisted && uniq.has(persisted) && persisted) ||
-            envRoom ||
-            Array.from(uniq)[0]
-          )
-        // Defensive fallback if list is empty
-        : (envRoom || qsRoom || 'Baby');
-
-      const uiRoom = resolvedRoom;
-      const scopedRoom =
-        (typeof window.__scopeRoom === 'function')
-          ? window.__scopeRoom(uiRoom)
-          : uiRoom;
-  
-      // Persist UI label for future pages (Settings / other receivers)
-      try { localStorage.setItem('bm_receiver_room', uiRoom); } catch {}
-      try { localStorage.setItem('naptio:lastRoom',  uiRoom); } catch {}
-  
-      // Install PSK shim keyed by the UI room label (PSK lookup by "Baby"/"Baby2")
-      const undo = installPskShim({ room: uiRoom });
-      console.log('[PSK][receiver-prone] UI room:', uiRoom, 'scoped signaling room:', scopedRoom);
-  
-      // Expose env + helpers for other scripts
-      window.__pskEnv      = env;
-      window.__pskRoom     = uiRoom;      // backward-compat alias for UI room
-      window.__uiRoom      = uiRoom;      // explicit UI label
-      window.__scopedRoom  = scopedRoom;  // PSK-scoped signaling room ID
-      window.__pskUndo     = undo;
-      window.__installPskForRoom = (roomLabel) => {
-        const label = (roomLabel || '').trim() || 'Baby';
-        const scoped =
-          (typeof window.__scopeRoom === 'function')
-            ? window.__scopeRoom(label)
-            : label;
-
-        try { window.__pskUndo?.(); } catch {}
-        window.__pskUndo = installPskShim({ room: label });
-        console.log('[PSK][receiver-prone] shim re-installed for room:', label, 'scoped:', scoped);
-
-        window.__pskRoom    = label;
-        window.__uiRoom     = label;
-        window.__scopedRoom = scoped;
-
-        try {
-          localStorage.setItem('bm_receiver_room', label);
-          localStorage.setItem('naptio:lastRoom',  label);
-        } catch {}
-      };
-    }
+    import { bootstrapSecureReceiver } from '/hungryface/webrtc/shared/psk/bootstrap.js';
+    await bootstrapSecureReceiver({ label: 'receiver-prone' });
   </script>
   
   <script type="module">
@@ -553,7 +452,8 @@
     import { installAlertSound } from "/hungryface/webrtc/receiver/shared/alerts/notify-sound.js";
 
     /* ---------- Constants ---------- */
-    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    import { WS_ENDPOINT } from '/hungryface/webrtc/shared/config.js';
+    import { createVisionTask } from '/hungryface/webrtc/shared/vision-task.js';
     // UI room label (e.g. "Baby") vs PSK-scoped signaling room
     const uiRoom = window.__uiRoom || window.__pskRoom || "Baby";
     const room   = window.__scopedRoom || uiRoom;
@@ -1166,8 +1066,8 @@
     async function ensureFaceTask() {
       if (faceTask) return faceTask;
       const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
-      faceTask = await FaceLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate: "GPU" },
+      faceTask = await createVisionTask(FaceLandmarker, vision, {
+        baseOptions: { modelAssetPath: FACE_MODEL_URL },
         runningMode: "VIDEO",
         numFaces: 1,
         outputFaceBlendshapes: false,
@@ -1175,7 +1075,7 @@
         minFaceDetectionConfidence: S.minDet,
         minTrackingConfidence: S.minTrack,
         minFacePresenceConfidence: S.minPres
-      });
+      }, { label: 'prone' });
       return faceTask;
     }
     async function recreateFaceTask(){
@@ -1699,12 +1599,6 @@
     function beginViewportSetle(){ beginViewportSettle(); }
   </script>
   
-    <!-- analytics -->
-  <script type="module">
-    import { installAnalytics } from '/hungryface/shared/analytics.js';
-    window.analytics = installAnalytics({ feature: 'receiver-prone' });
-    // Later: window.analytics.event('prone_opened');
-  </script>
 
   <script type="module">
     import { installMiniDashboard } from '/hungryface/webrtc/receiver/shared/mini-dash.js';

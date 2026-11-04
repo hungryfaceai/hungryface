@@ -5,6 +5,9 @@ const DB = 'naptioAlerts';
 const STORE = 'alerts';
 // Cross-tab notifications
 const _bc = ('BroadcastChannel' in self) ? new BroadcastChannel('alerts-bc') : null;
+// Identifies this tab, so channel listeners in the same tab can ignore its own messages
+// (another BroadcastChannel object in the same tab DOES receive them).
+export const TAB_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 function _notify(action, payload = {}) {
   try {
@@ -13,8 +16,22 @@ function _notify(action, payload = {}) {
       detail: { action, ...payload }
     }));
     // Cross-tab listeners
-    _bc?.postMessage({ type: 'changed', action, ...payload });
+    _bc?.postMessage({ type: 'changed', action, ...payload, tab: TAB_ID });
   } catch {}
+}
+
+// Relay changes made in OTHER tabs as a local 'alerts:changed' event, so the badge and
+// drawer on every open page stay current (BroadcastChannel never echoes to the sender).
+// fromOtherTab lets listeners that also watch the channel themselves skip the duplicate.
+if (_bc) {
+  _bc.addEventListener('message', (ev) => {
+    const d = ev?.data;
+    if (d?.type !== 'changed' || d.tab === TAB_ID) return;
+    try {
+      const { type, ...rest } = d;
+      document.dispatchEvent(new CustomEvent('alerts:changed', { detail: { ...rest, fromOtherTab: true } }));
+    } catch {}
+  });
 }
 
 // Open (or create) the DB + object store

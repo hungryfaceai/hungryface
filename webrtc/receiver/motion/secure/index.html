@@ -171,24 +171,7 @@
 </head>
 <body>
   <!-- shared sidebar -->
-  <script type="module">
-    (async () => {
-      try {
-        const res = await fetch('/hungryface/webrtc/receiver/shared/sidebar.html', { cache: 'no-cache' });
-        const html = await res.text();
-        const wrap = document.createElement('div');
-        wrap.innerHTML = html.trim();
-        document.body.prepend(...wrap.childNodes);
-
-        await new Promise((resolve, reject) => {
-          const s = document.createElement('script');
-          s.src = '/hungryface/webrtc/receiver/shared/sidebar.js';
-          s.onload = resolve; s.onerror = reject;
-          document.body.appendChild(s);
-        });
-      } catch (err) { console.error('[Sidebar] failed to load shared assets:', err); }
-    })();
-  </script>
+  <script type="module" src="/hungryface/webrtc/receiver/shared/sidebar-loader.js"></script>
 
   <!-- NEW: inject the Help side-sheet HTML -->
   <script type="module" src="/hungryface/webrtc/receiver/motion/help-sheet.js"></script>
@@ -308,93 +291,8 @@
 
   <!-- ⬇️ PSK bootstrap (viewer); resolves room using the same logic as Settings and installs shim -->
   <script type="module">
-    import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
-    import { requirePskOrRedirect, listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
-    import { installRoomScope } from '/hungryface/webrtc/shared/psk/room-scope.js';
-  
-    const qs = new URLSearchParams(location.search);
-    const qsRoom = (qs.get('room') || '').trim();
-  
-    // Ensure we have a PSK; if not, redirect to pairing
-    const env = await requirePskOrRedirect({
-      intent: 'viewer',
-      pairRoute: '/hungryface/webrtc/pairpsk/',
-      preferRoom: qsRoom,
-      fallbackRoom: 'Baby',
-    });
-
-    // Install PSK-based room scoping helper (namespacing) once we know the env
-    await installRoomScope(env);
-  
-    if (env.redirected) {
-      console.log('[PSK][receiver-motion] redirecting to Pair Devices…');
-    } else {
-      const rooms     = listValidPskRooms();
-      const lastRoom  = (localStorage.getItem('naptio:lastRoom') || '').trim();
-      const persisted = (localStorage.getItem('bm_receiver_room') || '').trim();
-      const envRoom   = (env.room || '').trim();
-  
-      const uniq = new Set(rooms);
-      if (envRoom) uniq.add(envRoom);
-  
-      // Same priority chain as Settings:
-      // ?room → lastRoom → bm_receiver_room → env.room → first available
-      const resolvedRoom = uniq.size
-        ? (
-            (qsRoom    && uniq.has(qsRoom)    && qsRoom)    ||
-            (lastRoom  && uniq.has(lastRoom)  && lastRoom)  ||
-            (persisted && uniq.has(persisted) && persisted) ||
-            envRoom ||
-            Array.from(uniq)[0]
-          )
-        // Defensive fallback if list is empty
-        : (envRoom || qsRoom || 'Baby');
-
-      const uiRoom =
-        (resolvedRoom && resolvedRoom.trim())
-          ? resolvedRoom.trim()
-          : 'Baby';
-
-      const scopedRoom =
-        (typeof window.__scopeRoom === 'function')
-          ? window.__scopeRoom(uiRoom)
-          : uiRoom;
-  
-      // Persist UI label for future pages (Settings / other receivers)
-      try { localStorage.setItem('bm_receiver_room', uiRoom); } catch {}
-      try { localStorage.setItem('naptio:lastRoom',  uiRoom); } catch {}
-  
-      // Install PSK shim keyed by the UI room label
-      const undo = installPskShim({ room: uiRoom });
-      console.log('[PSK][receiver-motion] UI room:', uiRoom, 'scoped signaling room:', scopedRoom);
-  
-      // Expose env + helpers in case other code (e.g. mini-dashboard) wants them
-      window.__pskEnv      = env;
-      window.__pskRoom     = uiRoom;      // backward-compat alias for UI room
-      window.__uiRoom      = uiRoom;      // explicit UI label
-      window.__scopedRoom  = scopedRoom;  // PSK-scoped signaling room ID
-      window.__pskUndo     = undo;
-      window.__installPskForRoom = (roomLabel) => {
-        const label = (roomLabel || '').trim() || 'Baby';
-        const scoped =
-          (typeof window.__scopeRoom === 'function')
-            ? window.__scopeRoom(label)
-            : label;
-
-        try { window.__pskUndo?.(); } catch {}
-        window.__pskUndo = installPskShim({ room: label });
-        console.log('[PSK][receiver-motion] shim re-installed for room:', label, 'scoped:', scoped);
-
-        window.__pskRoom    = label;
-        window.__uiRoom     = label;
-        window.__scopedRoom = scoped;
-
-        try {
-          localStorage.setItem('bm_receiver_room', label);
-          localStorage.setItem('naptio:lastRoom',  label);
-        } catch {}
-      };
-    }
+    import { bootstrapSecureReceiver } from '/hungryface/webrtc/shared/psk/bootstrap.js';
+    await bootstrapSecureReceiver({ label: 'receiver-motion' });
   </script>
   
   <script type="module">
@@ -407,7 +305,8 @@
     const on = (el, ev, fn, opts) => { if (el && el.addEventListener) el.addEventListener(ev, fn, opts); };
 
     /* ---------- Constants ---------- */
-    const WS_ENDPOINT = "wss://signaling-server-f5gu.onrender.com/ws";
+    import { WS_ENDPOINT } from '/hungryface/webrtc/shared/config.js';
+    import { createVisionTask } from '/hungryface/webrtc/shared/vision-task.js';
     const uiRoom = window.__uiRoom || window.__pskRoom || "Baby";
     const room   = window.__scopedRoom || uiRoom;
     const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
@@ -1251,11 +1150,11 @@
     async function ensurePoseTask() {
       if (poseTask) return poseTask;
       const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
-      poseTask = await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: POSE_MODEL_URL, delegate: "GPU" },
+      poseTask = await createVisionTask(PoseLandmarker, vision, {
+        baseOptions: { modelAssetPath: POSE_MODEL_URL },
         runningMode: "VIDEO",
         numPoses: 1
-      });
+      }, { label: 'motion' });
       return poseTask;
     }
     const videoHasFrame = (v) => v && v.readyState >= HAVE_CURRENT_DATA && v.videoWidth > 0 && v.videoHeight > 0;
@@ -1677,12 +1576,6 @@
     if (document.getElementById('helpSheet')) wireHelpOnce();
   </script>
 
-    <!-- analytics -->
-  <script type="module">
-    import { installAnalytics } from '/hungryface/shared/analytics.js';
-    window.analytics = installAnalytics({ feature: 'receiver-motion' });
-    // Later: window.analytics.event('motion_opened');
-  </script>
 
   <script type="module">
     import { installMiniDashboard } from '/hungryface/webrtc/receiver/shared/mini-dash.js';

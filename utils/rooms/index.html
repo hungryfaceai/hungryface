@@ -135,6 +135,7 @@
 
     <div class="toolbar">
       <input id="endpoint" type="url" value="https://signaling-server-f5gu.onrender.com/rooms" aria-label="Rooms endpoint">
+      <input id="admin-key" type="password" placeholder="Admin key" autocomplete="off" aria-label="Admin key" style="max-width:12rem">
       <button id="btn-refresh" type="button">Refresh now</button>
       <label class="btn"><input id="auto" type="checkbox" checked style="accent-color: var(--focus); margin-right:6px;">Auto refresh (3s)</label>
       <div class="spacer"></div>
@@ -163,6 +164,12 @@
   <script>
     (() => {
       const endpointInput = document.getElementById('endpoint');
+    // Admin key: kept only for this tab (sessionStorage), sent as a Bearer header, never in the URL.
+    const adminKeyInput = document.getElementById('admin-key');
+    try { adminKeyInput.value = sessionStorage.getItem('naptio:adminKey') || ''; } catch {}
+    adminKeyInput.addEventListener('change', () => { try { sessionStorage.setItem('naptio:adminKey', adminKeyInput.value.trim()); } catch {} });
+    function adminHeaders(){ const k = adminKeyInput.value.trim(); return k ? { Authorization: 'Bearer ' + k } : {}; }
+
       const grid          = document.getElementById('grid');
       const badge         = document.getElementById('status-badge');
       const statusMsg     = document.getElementById('status-msg');
@@ -196,6 +203,8 @@
         return { senders, receivers };
       }
 
+      // Escape server-supplied text (room names / peer ids come from any client) before HTML insertion
+      function esc(v){ return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
       function shortId(id) {
         if (!id) return '—';
         if (id.length <= 14) return id;
@@ -227,7 +236,7 @@
           card.setAttribute('role', 'listitem');
           card.innerHTML = `
             <div class="room-head">
-              <div class="room-title">Room ${roomId}</div>
+              <div class="room-title">Room ${esc(roomId)}</div>
               <div class="counts">
                 <span class="count"><span class="dot sender" style="width:8px;height:8px;border-radius:50%"></span> ${senders} sender${senders!==1?'s':''}</span>
                 <span class="count"><span class="dot receiver" style="width:8px;height:8px;border-radius:50%"></span> ${receivers} receiver${receivers!==1?'s':''}</span>
@@ -247,7 +256,7 @@
             node.className = `node ${role}`;
             node.innerHTML = `
               <span class="badge-role" title="${role === 'sender' ? 'Sender' : 'Receiver'}">${role === 'sender' ? 'S' : 'R'}</span>
-              <span class="mono" title="${m.id || ''}">${shortId(m.id)}</span>
+              <span class="mono" title="${esc(m.id || '')}">${esc(shortId(m.id))}</span>
             `;
             // Click to copy full ID
             node.addEventListener('click', () => {
@@ -271,7 +280,8 @@
         statusMsg.textContent = 'Fetching roster…';
 
         try {
-          const resp = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store' });
+          const resp = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store', headers: adminHeaders() });
+          if (resp.status === 401) throw new Error('Unauthorized — enter the admin key');
           if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
           const data = await resp.json();
           render(data);

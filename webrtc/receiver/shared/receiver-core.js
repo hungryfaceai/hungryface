@@ -1,10 +1,12 @@
 
 // receiver-core.js — shared signaling + WebRTC for receivers (targets a specific sender)
+import { ICE_SERVERS } from '/hungryface/webrtc/shared/config.js';
+
 export class ReceiverCore {
   constructor(cfg) {
     this.wsEndpoint = cfg.wsEndpoint;                 // wss://.../ws
     this.room       = cfg.room || 'Baby';
-    this.iceServers = cfg.iceServers || [{ urls: 'stun:stun.l.google.com:19302' }];
+    this.iceServers = cfg.iceServers || ICE_SERVERS;
 
     // UI / lifecycle hooks (all optional)
     this.onStatus        = cfg.onStatus        || (()=>{});
