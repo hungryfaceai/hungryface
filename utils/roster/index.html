@@ -76,6 +76,10 @@
     .status-dot.fetching { background: var(--warn); }
     .status-dot.error { background: var(--err); }
 
+    /* Signed out: show only the password + Sign in (body gets .signed-in after sign-in) */
+    body:not(.signed-in) .admin-only { display: none !important; }
+    body:not(.signed-in) .toolbar { gap: 0; }
+
     /* Admin sign-in (rendered by admin-session.js inside .toolbar) */
     .toolbar form.admin-signin { display: flex !important; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
     .toolbar form.admin-signin input[type="password"] { flex: 1 1 200px; max-width: none !important; }
@@ -176,11 +180,11 @@
     <main class="panel" role="main">
       <div class="header">
         <h1>Roster</h1>
-        <p class="sub">Devices connected to the signalling server right now.</p>
+        <p class="sub admin-only">Devices connected to the signalling server right now.</p>
       </div>
 
       <div class="toolbar" aria-label="Roster controls">
-        <div class="toolbar-row">
+        <div class="toolbar-row admin-only">
           <button id="btn-refresh" type="button" class="btn btn-primary">Refresh</button>
           <label class="switch-label">
             <input id="auto" type="checkbox" checked>
@@ -196,11 +200,11 @@
         <!-- the admin sign-in form is added here by admin-session.js -->
       </div>
 
-      <div id="grid" class="grid" role="list" aria-label="Rooms"></div>
+      <div id="grid" class="grid admin-only" role="list" aria-label="Rooms"></div>
 
-      <p class="updated">Last updated <span id="last-updated">—</span></p>
+      <p class="updated admin-only">Last updated <span id="last-updated">—</span></p>
 
-      <details class="more">
+      <details class="more admin-only">
         <summary>Logs &amp; analytics</summary>
         <div class="more-body">
           <div class="more-row">
@@ -217,7 +221,7 @@
         </div>
       </details>
 
-      <details class="more">
+      <details class="more admin-only">
         <summary>Server</summary>
         <div class="more-body">
           <label class="field-label" for="endpoint">Rooms address</label>
@@ -259,9 +263,11 @@
     const adminSession = NaptioAdmin.mount({
       toolbar: document.querySelector('.toolbar'),
       loginUrl: new URL('/admin/login', document.getElementById('endpoint').value || 'https://signaling-server-f5gu.onrender.com/').href,
-      onChange: (on) => { if (on) setTimeout(() => document.getElementById('btn-refresh')?.click(), 0); },
+      onChange: (on) => { setSignedIn(on); if (on) setTimeout(() => document.getElementById('btn-refresh')?.click(), 0); },
     });
     function adminHeaders(){ return adminSession.headers(); }
+    function setSignedIn(on){ document.body.classList.toggle('signed-in', !!on); }
+    setSignedIn(adminSession.signedIn());   // e.g. still signed in from last time
 
       const grid            = document.getElementById('grid');
       const statusDot       = document.getElementById('status-dot');
