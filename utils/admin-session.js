@@ -1,9 +1,14 @@
 // utils/admin-session.js — password sign-in for the admin tools (rooms, roster).
 //
 // The password is sent once to the signalling server's /admin/login, which checks it against a
-// salted scrypt hash and returns a short-lived session token. The password is then cleared; only
-// the token is kept, for this tab only (sessionStorage), and sent as "Authorization: Bearer …".
-// The token expires on its own (8 h by default); "Sign out" forgets it immediately.
+// salted scrypt hash and returns a session token. The password is then cleared; only the token is
+// kept and sent as "Authorization: Bearer …". How long a sign-in lasts is set on the server
+// (ADMIN_SESSION_HOURS on Render).
+//
+// "Keep me signed in on this device" (on by default) keeps the token in localStorage, so it
+// survives closing the tab or browser; unticked, it lives only in this tab (sessionStorage).
+// "Sign out" forgets it on this device. To sign out EVERY device, change ADMIN_SESSION_SECRET
+// (or the password) on Render.
 //
 // Usage (classic script, after the page's toolbar exists):
 //   const admin = NaptioAdmin.mount({ toolbar, loginUrl, onChange });
@@ -12,17 +17,31 @@
 (function () {
   const KEY = 'naptio:adminSession';
   const LEGACY_KEY = 'naptio:adminKey';
+  const MAX_TIMER_MS = 2147483647;   // setTimeout limit (~24.8 days); longer delays fire immediately
   try { sessionStorage.removeItem(LEGACY_KEY); } catch {}   // old static key: no longer kept
 
+  const stores = () => [(() => { try { return localStorage; } catch { return null; } })(),
+                        (() => { try { return sessionStorage; } catch { return null; } })()].filter(Boolean);
   function load() {
-    try {
-      const s = JSON.parse(sessionStorage.getItem(KEY) || 'null');
-      if (s && s.token && Date.parse(s.expiresAt) > Date.now()) return s;
-    } catch {}
-    try { sessionStorage.removeItem(KEY); } catch {}
+    for (const st of stores()) {
+      try {
+        const s = JSON.parse(st.getItem(KEY) || 'null');
+        if (s && s.token && Date.parse(s.expiresAt) > Date.now()) return s;
+        st.removeItem(KEY);                 // expired or unreadable
+      } catch {}
+    }
     return null;
   }
-  function save(s) { try { s ? sessionStorage.setItem(KEY, JSON.stringify(s)) : sessionStorage.removeItem(KEY); } catch {} }
+  function save(s) {
+    for (const st of stores()) { try { st.removeItem(KEY); } catch {} }
+    if (!s) return;
+    try { (s.remember ? localStorage : sessionStorage).setItem(KEY, JSON.stringify(s)); } catch {}
+  }
+  function until(expiresAt) {
+    const d = new Date(expiresAt), soon = d - Date.now() < 864e5;
+    return soon ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+  }
 
   function mount({ toolbar, loginUrl, onChange = () => {} }) {
     let session = load();
@@ -31,27 +50,38 @@
     const wrap = document.createElement('form');
     wrap.className = 'admin-signin';
     wrap.setAttribute('autocomplete', 'on');
-    wrap.style.cssText = 'display:inline-flex;gap:6px;align-items:center;margin:0';
+    wrap.style.cssText = 'display:inline-flex;gap:6px;align-items:center;margin:0;flex-wrap:wrap';
     wrap.innerHTML =
       '<input name="username" autocomplete="username" value="naptio-admin" hidden>' +   // lets password managers file it
       '<input type="password" name="password" autocomplete="current-password" placeholder="Admin password" aria-label="Admin password" style="max-width:12rem">' +
+      '<label class="admin-remember" style="font-size:12px;display:inline-flex;gap:4px;align-items:center;cursor:pointer">' +
+        '<input type="checkbox" checked> Keep me signed in on this device</label>' +
       '<button type="submit">Sign in</button>' +
       '<span class="admin-state" role="status" aria-live="polite" style="font-size:12px;opacity:.85"></span>' +
       '<button type="button" class="admin-signout" hidden>Sign out</button>';
     toolbar.appendChild(wrap);
     const pw = wrap.querySelector('input[type="password"]');
+    const remember = wrap.querySelector('.admin-remember input');
+    const rememberLabel = wrap.querySelector('.admin-remember');
     const signIn = wrap.querySelector('button[type="submit"]');
     const state = wrap.querySelector('.admin-state');
     const signOut = wrap.querySelector('.admin-signout');
 
+    function end(msg) { session = null; save(null); render(msg); onChange(false); }
+    function scheduleExpiry() {
+      clearTimeout(expiryTimer);
+      if (!session) return;
+      const left = Date.parse(session.expiresAt) - Date.now();
+      if (left <= 0) return end('Session expired — sign in again');
+      // Long sessions: re-check periodically instead of one huge (overflowing) timeout.
+      expiryTimer = setTimeout(scheduleExpiry, Math.min(left, MAX_TIMER_MS));
+    }
     function render(msg) {
       const on = !!session;
-      pw.hidden = signIn.hidden = on;
+      pw.hidden = signIn.hidden = rememberLabel.hidden = on;
       signOut.hidden = !on;
-      state.textContent = msg || (on ? 'Signed in until ' + new Date(session.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
-      clearTimeout(expiryTimer);
-      if (on) expiryTimer = setTimeout(() => { session = null; save(null); render('Session expired — sign in again'); onChange(false); },
-                                       Math.max(0, Date.parse(session.expiresAt) - Date.now()));
+      state.textContent = msg || (on ? 'Signed in until ' + until(session.expiresAt) + (session.remember ? ' on this device' : '') : '');
+      scheduleExpiry();
     }
 
     wrap.addEventListener('submit', async (e) => {
@@ -66,7 +96,7 @@
         });
         const body = await resp.json().catch(() => ({}));
         if (!resp.ok || !body.token) throw new Error(body.error || ('Sign-in failed (HTTP ' + resp.status + ')'));
-        session = { token: body.token, expiresAt: body.expiresAt };
+        session = { token: body.token, expiresAt: body.expiresAt, remember: remember.checked };
         save(session); render(); onChange(true);
       } catch (err) {
         render((err && err.message) || 'Sign-in failed');
@@ -75,14 +105,20 @@
         signIn.disabled = false;
       }
     });
-    signOut.addEventListener('click', () => { session = null; save(null); render('Signed out'); onChange(false); });
+    signOut.addEventListener('click', () => end('Signed out on this device'));
+    // Signing in/out in another tab of this browser: follow it.
+    window.addEventListener('storage', (ev) => {
+      if (ev.key !== KEY) return;
+      const next = load();
+      if (!!next !== !!session || (next && session && next.token !== session.token)) { session = next; render(); onChange(!!session); }
+    });
 
     render();
     return {
       headers() { return session ? { Authorization: 'Bearer ' + session.token } : {}; },
       signedIn() { return !!session; },
-      /** Call when the server answers 401: the token was revoked (e.g. password changed). */
-      expired() { if (session) { session = null; save(null); render('Session ended — sign in again'); onChange(false); } },
+      /** Call when the server answers 401: the token was revoked (password or secret changed). */
+      expired() { if (session) end('Session ended — sign in again'); },
     };
   }
 
