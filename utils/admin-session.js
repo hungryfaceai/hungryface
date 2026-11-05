@@ -74,7 +74,7 @@
     if (!document.getElementById('admin-session-css')) {
       const css = document.createElement('style'); css.id = 'admin-session-css';
       css.textContent =
-        '.admin-signin .admin-error{flex:1 0 100%;display:flex;align-items:center;gap:8px;margin:2px 0 0;padding:10px 12px;' +
+        '.admin-signin .admin-error{flex:1 0 100%;box-sizing:border-box;display:flex;align-items:center;gap:8px;margin:2px 0 0;padding:10px 12px;' +
         'border-radius:10px;background:#2a1212;border:1px solid #7f1d1d;color:#fecaca;font-size:15px;font-weight:600;line-height:1.35}' +
         '.admin-signin .admin-error[hidden]{display:none}' +
         '.admin-signin .admin-error svg{flex:0 0 18px;color:#ef4444}' +
@@ -83,10 +83,14 @@
         '@keyframes adminShake{0%,100%{transform:none}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}';
       document.head.appendChild(css);
     }
+    // Keep the error box exactly as wide as the password field (it would otherwise span the whole row).
+    function fitError() { if (!errBox.hidden && pw.offsetWidth) errBox.style.maxWidth = pw.offsetWidth + 'px'; }
+    if ('ResizeObserver' in window) new ResizeObserver(fitError).observe(pw); else addEventListener('resize', fitError);
     function showError(msg) {
-      errText.textContent = msg;
+      errText.textContent = msg === 'Wrong password.' ? 'Wrong password' : msg;
       errBox.hidden = false;
       pw.setAttribute('aria-invalid', 'true');
+      fitError();
       errBox.classList.remove('shake'); void errBox.offsetWidth; errBox.classList.add('shake');   // replay on each failure
     }
     function clearError() {

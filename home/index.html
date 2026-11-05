@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Naptio — Privacy-first AI Baby Monitor (no sign-up, no cloud video)</title>
+  <title>Naptio | Privacy-first AI Baby Monitor (no sign-up, no cloud video)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="description" content="Turn two devices into a private baby monitor. Local connection, on-device AI for cry & motion alerts. No sign-up, no cloud video.">
   <link rel="manifest" href="/hungryface/manifest.webmanifest">
@@ -278,54 +278,6 @@
       header { padding: 12px 14px; }
     }
 
-    /* ============ Invite modal (with × close icon) ============ */
-    .invite-modal {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
-      display: none; align-items: center; justify-content: center;
-      z-index: 1000;
-    }
-    .invite-modal.visible { display: flex; }
-    .invite-card {
-      position: relative;
-      width: min(92vw, 480px);
-      background: var(--nt-bg-soft, #0b0b0b); border: 1px solid #141414; border-radius: 16px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
-      padding: 18px 18px 20px;
-    }
-    .invite-header {
-      display: flex; align-items: center; justify-content: center; margin-bottom: 8px;
-    }
-    .invite-title { font-size: 1rem; font-weight: 700; margin: 0; }
-    .invite-close {
-      position: absolute; top: 10px; right: 10px;
-      width: 36px; height: 36px; border-radius: 9999px;
-      display: grid; place-items: center;
-      background: #0d0d0d; border: 1px solid var(--nt-border-strong, #2a2a2a); color: var(--nt-text, #fff);
-      font-size: 22px; line-height: 1; cursor: pointer;
-    }
-    .invite-close:hover { background: var(--nt-surface, #111); }
-    .invite-close:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-
-    .invite-body { display: grid; gap: 12px; justify-items: center; }
-    .invite-qr {
-      width: 220px; height: 220px; background: var(--nt-surface, #111); border: 1px solid var(--nt-border, #222); border-radius: 12px;
-      display: grid; place-items: center; overflow: hidden;
-    }
-    .invite-url {
-      width: 100%; background: #090909; border: 1px solid #1a1a1a; color: var(--nt-text, #fff);
-      border-radius: 10px; padding: 10px 12px; box-sizing: border-box; font-size: 0.9rem;
-    }
-    .invite-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
-    .invite-actions .btn-pill { border-color: #444; }
-
-    /* Toast */
-    .invite-toast {
-      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(12px);
-      background: var(--nt-surface, #111); border: 1px solid var(--nt-border, #222); color: var(--nt-text, #fff); padding: 10px 14px;
-      border-radius: 9999px; opacity: 0; transition: opacity .2s ease, transform .2s ease;
-      z-index: 1100; font-size: 0.9rem;
-    }
-    .invite-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
     /* ---- Scroll-aware header Pair CTA ---- */
     .header-pair { display: none; }
@@ -333,7 +285,7 @@
 
     /* Reduced-motion: neutralize transitions/animations */
     @media (prefers-reduced-motion: reduce){
-      .btn-pill, .invite-toast, .yt-modal, .yt-player, .hero-ctas .btn { transition: none !important; animation: none !important; }
+      .btn-pill, .yt-modal, .yt-player, .hero-ctas .btn { transition: none !important; animation: none !important; }
       html:focus-within { scroll-behavior: auto; }
     }
 
@@ -379,7 +331,7 @@
           Pair devices
         </a>
 
-        <a id="menu-invite" class="btn-pill" href="#" aria-label="Share Naptio — show QR and share options" role="button">
+        <a id="menu-invite" class="btn-pill" href="#" aria-haspopup="dialog" data-invite-title="Share Naptio" role="button">
           Share
         </a>
       </nav>
@@ -448,171 +400,8 @@
     </footer>
   </div>
 
-  <!-- Invite Modal (unchanged structure; with focus trap added in JS) -->
-  <div id="invite-modal" class="invite-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="invite-title">
-    <div class="invite-card">
-      <button type="button" class="invite-close" aria-label="Close">
-        &times;
-      </button>
-      <div class="invite-header">
-        <h2 id="invite-title" class="invite-title">Share Naptio</h2>
-      </div>
-      <div class="invite-body">
-        <div class="invite-qr">
-          <img id="invite-qr" src="" alt="QR code" width="220" height="220" loading="lazy" />
-        </div>
-        <input id="invite-url" class="invite-url" type="text" readonly value="" aria-label="Shareable link" />
-        <div class="invite-actions">
-          <a id="invite-open" class="btn-pill" href="#" target="_blank" rel="noopener">Open</a>
-          <button id="invite-copy" class="btn-pill" type="button">Copy</button>
-          <button id="invite-share" class="btn-pill" type="button">Share</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script>
-  // Standalone Invite Modal (existing) + focus trap
-  (() => {
-    const trigger  = document.getElementById('menu-invite');
-    const modal    = document.getElementById('invite-modal');
-    const qrImg    = document.getElementById('invite-qr');
-    const urlInput = document.getElementById('invite-url');
-    const btnCopy  = document.getElementById('invite-copy');
-    const btnOpen  = document.getElementById('invite-open');
-    const btnShare = document.getElementById('invite-share');
-    const btnClose = modal?.querySelector('.invite-close');
-
-    if (!trigger || !modal) return;
-
-    const INVITE_URL = window.HF_INVITE_URL
-      || (document.body && document.body.dataset && document.body.dataset.inviteUrl)
-      || location.href;
-
-    const QR_ENDPOINT = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&format=svg&data=';
-
-    function toast(msg) {
-      const el = document.createElement('div');
-      el.className = 'invite-toast';
-      el.textContent = msg;
-      document.body.appendChild(el);
-      requestAnimationFrame(() => el.classList.add('show'));
-      setTimeout(() => {
-        el.classList.remove('show');
-        el.addEventListener('transitionend', () => el.remove(), { once: true });
-      }, 1400);
-    }
-
-    let lastFocused = null;
-    let trapHandler = null;
-
-    function enableTrap() {
-      const focusables = modal.querySelectorAll('a[href], button, input, textarea, select, [tabindex]:not([tabindex="-1"])');
-      const list = Array.from(focusables).filter(el => !el.hasAttribute('disabled') && el.tabIndex !== -1);
-      if (!list.length) return;
-      const first = list[0];
-      const last = list[list.length - 1];
-      trapHandler = (e) => {
-        if (e.key !== 'Tab') return;
-        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-      };
-      modal.addEventListener('keydown', trapHandler);
-      (btnClose || first || modal).focus();
-    }
-
-    function disableTrap() {
-      if (trapHandler) {
-        modal.removeEventListener('keydown', trapHandler);
-        trapHandler = null;
-      }
-    }
-
-    function openInvite() {
-      lastFocused = document.activeElement;
-
-      const url = INVITE_URL;
-      if (qrImg) {
-        qrImg.src = QR_ENDPOINT + encodeURIComponent(url);
-        qrImg.alt = 'QR code for ' + url;
-      }
-      if (urlInput) {
-        urlInput.value = url;
-        setTimeout(() => {
-          try { urlInput.focus({ preventScroll: true }); urlInput.setSelectionRange(url.length, url.length); } catch {}
-          urlInput.scrollLeft = urlInput.scrollWidth;
-        }, 0);
-      }
-      if (btnOpen) btnOpen.href = url;
-
-      modal.classList.add('visible');
-      modal.setAttribute('aria-hidden', 'false');
-
-      document.addEventListener('keydown', onEsc, { once: true });
-      enableTrap();
-    }
-
-    function closeInvite() {
-      modal.classList.remove('visible');
-      modal.setAttribute('aria-hidden', 'true');
-      disableTrap();
-      lastFocused?.focus?.();
-    }
-
-    function onEsc(e) { if (e.key === 'Escape') closeInvite(); }
-
-    trigger.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      openInvite();
-    });
-
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) closeInvite();
-    });
-
-    if (btnClose) btnClose.addEventListener('click', closeInvite);
-    if (btnCopy) {
-      btnCopy.addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(urlInput.value);
-          toast('Link copied');
-        } catch {
-          urlInput?.select?.();
-          toast('Copy failed — select and copy');
-        }
-      });
-    }
-
-    if (btnShare) {
-      const canWebShare = typeof navigator !== 'undefined' && 'share' in navigator;
-      if (!canWebShare) btnShare.style.display = 'none';
-
-      btnShare.addEventListener('click', async () => {
-        const url = (urlInput && urlInput.value) || INVITE_URL;
-        try {
-          if (navigator.canShare && !navigator.canShare({ url })) {
-            throw new Error('URL sharing not supported');
-          }
-          await navigator.share({
-            title: 'Naptio',
-            text: 'Share Naptio with a friend:',
-            url
-          });
-        } catch (err) {
-          if (err && err.name === 'AbortError') return; // user canceled
-          try {
-            await navigator.clipboard.writeText(url);
-            toast('Link copied');
-          } catch {
-            urlInput?.select?.();
-            toast('Share failed — link selected to copy');
-          }
-        }
-      });
-    }
-  })();
-  </script>
+  <!-- "Share" window: same as the menu's "Invite a friend" (QR drawn on this device) -->
+  <script src="/hungryface/shared/invite.js" defer></script>
 
   <!-- Scroll-aware header Pair CTA (hide over hero, show after scroll) -->
   <script>
