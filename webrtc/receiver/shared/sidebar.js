@@ -185,118 +185,90 @@
        ======================= */
     (function initInvite() {
       const trigger  = document.getElementById('menu-invite');
-      if (!trigger) return;
-
       const modal    = document.getElementById('invite-modal');
-      const qrImg    = document.getElementById('invite-qr');
-      const urlInput = document.getElementById('invite-url');
+      if (!trigger || !modal) return;
+
+      const canvas   = document.getElementById('invite-qr');
+      const urlText  = document.getElementById('invite-url');
       const btnCopy  = document.getElementById('invite-copy');
-      const btnOpen  = document.getElementById('invite-open');
       const btnShare = document.getElementById('invite-share');
       const btnClose = modal.querySelector('.invite-close');
+      const statusEl = document.getElementById('invite-status');
 
-      // Allow per-page override via:
-      // 1) window.HF_INVITE_URL
-      // 2) <body data-invite-url="...">
-      // 3) default to HungryFace home
-      const INVITE_URL = window.HF_INVITE_URL
-        || document.body?.dataset?.inviteUrl
-        || 'https://hungryfaceai.github.io/hungryface/home/';
+      // Per-page override: window.HF_INVITE_URL or <body data-invite-url="…">; default: Naptio home.
+      const INVITE_URL = window.HF_INVITE_URL || document.body?.dataset?.inviteUrl || 'https://hungryfaceai.github.io/hungryface/home/';
+      const SHARE = { title: 'Naptio', text: 'Naptio turns two phones into a private baby monitor. Take a look:' };
 
-      const QR_ENDPOINT = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&format=svg&data=';
+      // Share where the device supports it (phones); otherwise Copy is the main action.
+      const canShare = 'share' in navigator && (!navigator.canShare || navigator.canShare({ url: INVITE_URL }));
+      if (!canShare) { btnShare.hidden = true; btnCopy.classList.add('invite-btn-primary'); }
 
-      function toast(msg) {
-        const el = document.createElement('div');
-        el.className = 'invite-toast';
-        el.textContent = msg;
-        document.body.appendChild(el);
-        requestAnimationFrame(() => el.classList.add('show'));
-        setTimeout(() => {
-          el.classList.remove('show');
-          el.addEventListener('transitionend', () => el.remove(), { once: true });
-        }, 1400);
+      // QR code drawn on this device (QRious, as on the pairing page): the link isn't sent to a QR service.
+      let qrReady = null;
+      function loadQRious() {
+        if (window.QRious) return Promise.resolve();
+        return qrReady || (qrReady = new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js';
+          s.onload = resolve; s.onerror = () => { qrReady = null; reject(new Error('QR library failed to load')); };
+          document.head.appendChild(s);
+        }));
+      }
+      async function drawQR() {
+        try {
+          await loadQRious();
+          // Dark modules on white, with a quiet zone: the most reliable for phone cameras.
+          new window.QRious({ element: canvas, value: INVITE_URL, size: 440, padding: 24, level: 'M', background: '#ffffff', foreground: '#000000' });
+          canvas.classList.remove('invite-qr-failed');
+        } catch {
+          canvas.classList.add('invite-qr-failed');
+          canvas.setAttribute('aria-label', 'QR code unavailable — use Share or Copy link');
+        }
       }
 
-      function openInvite() {
-        const url = INVITE_URL;
-        if (qrImg) {
-          qrImg.src = QR_ENDPOINT + encodeURIComponent(url);
-          qrImg.alt = 'QR code for ' + url;
-        }
-        if (urlInput) {
-          urlInput.value = url;
-          setTimeout(() => {
-            try { urlInput.focus({ preventScroll: true }); urlInput.setSelectionRange(url.length, url.length); } catch {}
-            urlInput.scrollLeft = urlInput.scrollWidth;
-          }, 0);
-        }
-        if (btnOpen) btnOpen.href = url;
+      function say(msg) { statusEl.textContent = msg; clearTimeout(say.t); say.t = setTimeout(() => { statusEl.textContent = ''; }, 2500); }
 
+      let lastFocus = null;
+      function focusables() { return [...modal.querySelectorAll('button:not([hidden])')].filter(b => b.offsetParent !== null); }
+      function onKey(e) {
+        if (e.key === 'Escape') { e.preventDefault(); closeInvite(); return; }
+        if (e.key !== 'Tab') return;
+        const f = focusables(); if (!f.length) return;
+        const first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+      function openInvite() {
+        lastFocus = document.activeElement;
+        urlText.textContent = INVITE_URL.replace(/^https?:\/\//, '').replace(/\/$/, '');
+        drawQR();
+        statusEl.textContent = '';
         modal.classList.add('visible');
         modal.setAttribute('aria-hidden', 'false');
-
-        document.addEventListener('keydown', onEsc, { once: true });
+        document.addEventListener('keydown', onKey);
+        const primary = focusables().find(b => b.classList.contains('invite-btn-primary'));
+        setTimeout(() => (primary || btnClose).focus(), 0);
       }
-
       function closeInvite() {
         modal.classList.remove('visible');
         modal.setAttribute('aria-hidden', 'true');
+        document.removeEventListener('keydown', onKey);
+        if (lastFocus && lastFocus.focus && document.contains(lastFocus)) lastFocus.focus();
       }
 
-      function onEsc(e) { if (e.key === 'Escape') closeInvite(); }
+      async function copyLink() {
+        try { await navigator.clipboard.writeText(INVITE_URL); say('Link copied'); btnCopy.textContent = 'Copied'; setTimeout(() => { btnCopy.textContent = 'Copy link'; }, 1500); }
+        catch { const r = document.createRange(); r.selectNodeContents(urlText); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); say('Press and hold the link to copy it'); }
+      }
 
-      trigger.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openInvite();
-      });
-
+      trigger.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openInvite(); });
       modal.addEventListener('click', (e) => { if (e.target === modal) closeInvite(); });
-      if (btnClose) btnClose.addEventListener('click', closeInvite);
-
-      if (btnCopy) {
-        btnCopy.addEventListener('click', async () => {
-          try {
-            await navigator.clipboard.writeText(urlInput.value);
-            toast('Link copied');
-          } catch {
-            urlInput?.select?.();
-            toast('Copy failed — select and copy');
-          }
-        });
-      }
-      
-      if (btnShare) {
-      const canWebShare = typeof navigator !== 'undefined' && 'share' in navigator;
-      // Hide the Share button if unsupported (most desktops)
-      if (!canWebShare) btnShare.style.display = 'none';
-    
-      btnShare.addEventListener('click', async () => {
-        const url = (urlInput && urlInput.value) || INVITE_URL;
-        try {
-          // Extra guard for some iOS versions
-          if (navigator.canShare && !navigator.canShare({ url })) {
-            throw new Error('URL sharing not supported');
-          }
-          await navigator.share({
-            title: 'HungryFace',
-            text: 'Join me on HungryFace:',
-            url
-          });
-        } catch (err) {
-          // Ignore user-cancel; for other errors, fall back to copying the link
-          if (err && err.name === 'AbortError') return;
-          try {
-            await navigator.clipboard.writeText(url);
-            toast('Link copied');
-          } catch {
-            urlInput?.select?.();
-            toast('Share failed — link selected to copy');
-          }
-        }
+      btnClose && btnClose.addEventListener('click', closeInvite);
+      btnCopy && btnCopy.addEventListener('click', copyLink);
+      btnShare && btnShare.addEventListener('click', async () => {
+        try { await navigator.share({ ...SHARE, url: INVITE_URL }); }
+        catch (err) { if (!err || err.name !== 'AbortError') copyLink(); }   // cancelled: do nothing; failed: copy instead
       });
-    }
-          
     })();
   }
 })();

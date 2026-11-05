@@ -19,8 +19,8 @@
       --ok:    var(--nt-ok, #22c55e);
       --warn:  var(--nt-warn, #fbbf24);
       --err:   var(--nt-danger, #ef4444);
-      --cam:   #22c55e;   /* Camera chips */
-      --view:  #60a5fa;   /* Viewer chips */
+      --cam:   #1baf7a;   /* Camera identity (validated vs #111: CVD dE 23, normal dE 24) */
+      --view:  #2a78d6;   /* Viewer identity */
     }
     html, body {
       margin: 0; background: var(--nt-bg, #000); color: var(--nt-text, #fff);
@@ -90,6 +90,22 @@
     .toolbar form.admin-signin .admin-state { font-size: 14px !important; color: var(--nt-text-2, #ddd); opacity: 1 !important; }
     .toolbar form.admin-signin .admin-remember { font-size: 14px !important; color: var(--nt-text-2, #ddd); }
 
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+    /* Summary (KPI row): hero figure + supporting stat tiles */
+    .summary { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 14px; }
+    @media (min-width: 560px) { .summary { grid-template-columns: 1.4fr 1fr 1fr 1fr; } }
+    .tile { background: var(--nt-surface, #111); border: 1px solid var(--ring); border-radius: 14px; padding: 12px 14px; min-width: 0; }
+    .tile-label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+    .tile-value { font-size: 28px; font-weight: 600; line-height: 1.15; margin-top: 2px; color: var(--nt-text, #fff); }
+    .tile-hero .tile-label { font-size: 14px; color: var(--nt-text-2, #ddd); font-weight: 600; }
+    .tile-hero .tile-value { font-size: 52px; font-weight: 700; letter-spacing: -.5px; }
+    .tile-note { font-size: 13px; color: var(--muted); margin: 2px 0 0; }
+    .tile-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
+    .tile-dot.cam { background: var(--cam); }
+    .tile-dot.view { background: var(--view); }
+    .summary-rest { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    @media (min-width: 560px) { .summary-rest { display: contents; } }
+
     /* Room cards */
     .grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 14px; }
     @media (min-width: 720px) { .grid { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); } }
@@ -108,9 +124,10 @@
             padding: 6px 12px; border-radius: 999px; background: var(--nt-bg, #000); border: 1px solid var(--nt-border-strong, #2a2a2a);
             color: var(--nt-text, #fff); }
     .node:hover { background: var(--nt-surface-3, #1a1a1a); }
-    .node-role { font-size: 13px; font-weight: 700; }
-    .node.sender .node-role { color: var(--cam); }
-    .node.receiver .node-role { color: var(--view); }
+    .node-role { font-size: 13px; font-weight: 700; color: var(--nt-text, #fff); display: inline-flex; align-items: center; gap: 6px; }
+    .node-role::before { content: ""; width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
+    .node.sender .node-role::before { background: var(--cam); }
+    .node.receiver .node-role::before { background: var(--view); }
     .node-id { font-size: 12px; color: var(--muted); }
     .warnline { margin-top: 12px; font-size: 14px; color: var(--warn); }
     .room-empty { text-align: center; padding: 26px 14px; }
@@ -199,6 +216,20 @@
         </div>
         <!-- the admin sign-in form is added here by admin-session.js -->
       </div>
+
+      <p class="sr-only" id="summaryLive" aria-live="polite"></p>
+      <section class="summary admin-only" id="summary" aria-label="Summary" hidden>
+        <div class="tile tile-hero">
+          <div class="tile-label">Rooms in use</div>
+          <div class="tile-value" id="sumInUse">0</div>
+          <p class="tile-note">With a camera and a viewer connected</p>
+        </div>
+        <div class="summary-rest">
+          <div class="tile"><div class="tile-label">Rooms</div><div class="tile-value" id="sumRooms">0</div></div>
+          <div class="tile"><div class="tile-label"><span class="tile-dot cam" aria-hidden="true"></span>Cameras</div><div class="tile-value" id="sumCams">0</div></div>
+          <div class="tile"><div class="tile-label"><span class="tile-dot view" aria-hidden="true"></span>Viewers</div><div class="tile-value" id="sumViews">0</div></div>
+        </div>
+      </section>
 
       <div id="grid" class="grid admin-only" role="list" aria-label="Rooms"></div>
 
@@ -1111,7 +1142,29 @@
         return i > 0 && i < s.length - 1 ? s.slice(i + 1) : s;
       }
 
+      // Summary counts. "In use" = at least one camera AND one viewer in the room.
+      function renderSummary(data) {
+        const box = document.getElementById('summary'); if (!box) return;
+        let rooms = 0, inUse = 0, cams = 0, views = 0;
+        for (const members of Object.values(data || {})) {
+          const { senders, receivers } = summarizeRoom(Array.isArray(members) ? members : []);
+          rooms++; cams += senders; views += receivers;
+          if (senders > 0 && receivers > 0) inUse++;
+        }
+        const fmt = (n) => n.toLocaleString();
+        document.getElementById('sumInUse').textContent = fmt(inUse);
+        document.getElementById('sumRooms').textContent  = fmt(rooms);
+        document.getElementById('sumCams').textContent   = fmt(cams);
+        document.getElementById('sumViews').textContent  = fmt(views);
+        const label = `${inUse} of ${rooms} rooms in use, ${cams} cameras, ${views} viewers`;
+        box.setAttribute('aria-label', 'Summary: ' + label);
+        if (renderSummary.last !== undefined && renderSummary.last !== label) document.getElementById('summaryLive').textContent = label;  // announce changes only
+        renderSummary.last = label;
+        box.hidden = false;
+      }
+
       function render(data) {
+        renderSummary(data);
         grid.innerHTML = '';
         const roomIds = Object.keys(data || {}).sort((a, b) => roomLabel(a).localeCompare(roomLabel(b)) || String(a).localeCompare(String(b)));
 

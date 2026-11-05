@@ -53,7 +53,8 @@
     wrap.style.cssText = 'display:inline-flex;gap:6px;align-items:center;margin:0;flex-wrap:wrap';
     wrap.innerHTML =
       '<input name="username" autocomplete="username" value="naptio-admin" hidden>' +   // lets password managers file it
-      '<input type="password" name="password" autocomplete="current-password" placeholder="Admin password" aria-label="Admin password" style="max-width:12rem">' +
+      '<input type="password" name="password" autocomplete="current-password" placeholder="Admin password" aria-label="Admin password" aria-describedby="adminSigninError" style="max-width:12rem">' +
+      '<p class="admin-error" id="adminSigninError" role="alert" hidden><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M12 7v6M12 16.5v.5" stroke="#1a0606" stroke-width="2.4" stroke-linecap="round"/></svg><span></span></p>' +
       '<label class="admin-remember" style="font-size:12px;gap:4px;align-items:center;cursor:pointer">' +
         '<input type="checkbox" checked> Keep me signed in on this device</label>' +
       '<button type="submit">Sign in</button>' +
@@ -66,6 +67,33 @@
     const signIn = wrap.querySelector('button[type="submit"]');
     const state = wrap.querySelector('.admin-state');
     const signOut = wrap.querySelector('.admin-signout');
+    const errBox = wrap.querySelector('.admin-error');
+    const errText = errBox.querySelector('span');
+
+    // Error styling lives here so it looks the same on every page that uses this module.
+    if (!document.getElementById('admin-session-css')) {
+      const css = document.createElement('style'); css.id = 'admin-session-css';
+      css.textContent =
+        '.admin-signin .admin-error{flex:1 0 100%;display:flex;align-items:center;gap:8px;margin:2px 0 0;padding:10px 12px;' +
+        'border-radius:10px;background:#2a1212;border:1px solid #7f1d1d;color:#fecaca;font-size:15px;font-weight:600;line-height:1.35}' +
+        '.admin-signin .admin-error[hidden]{display:none}' +
+        '.admin-signin .admin-error svg{flex:0 0 18px;color:#ef4444}' +
+        '.admin-signin input[aria-invalid="true"]{border-color:#ef4444 !important;box-shadow:0 0 0 3px rgba(239,68,68,.25) !important}' +
+        '@media (prefers-reduced-motion:no-preference){.admin-signin .admin-error.shake{animation:adminShake .3s}}' +
+        '@keyframes adminShake{0%,100%{transform:none}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}';
+      document.head.appendChild(css);
+    }
+    function showError(msg) {
+      errText.textContent = msg;
+      errBox.hidden = false;
+      pw.setAttribute('aria-invalid', 'true');
+      errBox.classList.remove('shake'); void errBox.offsetWidth; errBox.classList.add('shake');   // replay on each failure
+    }
+    function clearError() {
+      errBox.hidden = true; errText.textContent = '';
+      pw.removeAttribute('aria-invalid');
+    }
+    pw.addEventListener('input', clearError);          // start typing again -> error goes away
 
     function end(msg) { session = null; save(null); render(msg); onChange(false); }
     function scheduleExpiry() {
@@ -81,6 +109,7 @@
       // Set display directly: an inline/page `display` value would override the `hidden` attribute.
       const show = (el, yes) => { el.hidden = !yes; el.style.display = yes ? '' : 'none'; };
       show(pw, !on); show(signIn, !on); show(rememberLabel, !on); show(signOut, on);
+      if (on) clearError();
       state.textContent = msg || (on ? 'Signed in until ' + until(session.expiresAt) : '');
       scheduleExpiry();
     }
@@ -89,7 +118,7 @@
       e.preventDefault();
       const password = pw.value;
       if (!password) { pw.focus(); return; }
-      signIn.disabled = true; state.textContent = 'Signing in…';
+      signIn.disabled = true; clearError(); state.textContent = 'Signing in…';
       try {
         const resp = await fetch(loginUrl, {
           method: 'POST', mode: 'cors', cache: 'no-store', credentials: 'omit',
@@ -98,12 +127,14 @@
         const body = await resp.json().catch(() => ({}));
         if (!resp.ok || !body.token) throw new Error(body.error || ('Sign-in failed (HTTP ' + resp.status + ')'));
         session = { token: body.token, expiresAt: body.expiresAt, remember: remember.checked };
-        save(session); render(); onChange(true);
+        clearError(); save(session); render(); onChange(true);
       } catch (err) {
-        render((err && err.message) || 'Sign-in failed');
+        render('');
+        showError((err && err.message) || 'Sign-in failed.');
       } finally {
         pw.value = '';                      // never keep the password around
         signIn.disabled = false;
+        if (!session) pw.focus();           // ready to type again
       }
     });
     signOut.addEventListener('click', () => end('Signed out on this device'));
