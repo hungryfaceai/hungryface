@@ -86,14 +86,18 @@
     // Keep the error box exactly as wide as the password field (it would otherwise span the whole row).
     function fitError() { if (!errBox.hidden && pw.offsetWidth) errBox.style.maxWidth = pw.offsetWidth + 'px'; }
     if ('ResizeObserver' in window) new ResizeObserver(fitError).observe(pw); else addEventListener('resize', fitError);
+    const ERROR_VISIBLE_MS = 1000;
+    let errTimer = null;
     function showError(msg) {
       errText.textContent = msg === 'Wrong password.' ? 'Wrong password' : msg;
       errBox.hidden = false;
       pw.setAttribute('aria-invalid', 'true');
       fitError();
       errBox.classList.remove('shake'); void errBox.offsetWidth; errBox.classList.add('shake');   // replay on each failure
+      clearTimeout(errTimer); errTimer = setTimeout(clearError, ERROR_VISIBLE_MS);              // brief: vanishes after 1 s
     }
     function clearError() {
+      clearTimeout(errTimer);
       errBox.hidden = true; errText.textContent = '';
       pw.removeAttribute('aria-invalid');
     }
