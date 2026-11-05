@@ -136,7 +136,6 @@
 
     <div class="toolbar">
       <input id="endpoint" type="url" value="https://signaling-server-f5gu.onrender.com/rooms" aria-label="Rooms endpoint">
-      <input id="admin-key" type="password" placeholder="Admin key" autocomplete="off" aria-label="Admin key" style="max-width:12rem">
       <button id="btn-refresh" type="button">Refresh now</button>
       <label class="btn"><input id="auto" type="checkbox" checked style="accent-color: var(--focus); margin-right:6px;">Auto refresh (3s)</label>
       <div class="spacer"></div>
@@ -162,14 +161,18 @@
     </div>
   </div>
 
+  <script src="/hungryface/utils/admin-session.js"></script>
   <script>
     (() => {
       const endpointInput = document.getElementById('endpoint');
     // Admin key: kept only for this tab (sessionStorage), sent as a Bearer header, never in the URL.
-    const adminKeyInput = document.getElementById('admin-key');
-    try { adminKeyInput.value = sessionStorage.getItem('naptio:adminKey') || ''; } catch {}
-    adminKeyInput.addEventListener('change', () => { try { sessionStorage.setItem('naptio:adminKey', adminKeyInput.value.trim()); } catch {} });
-    function adminHeaders(){ const k = adminKeyInput.value.trim(); return k ? { Authorization: 'Bearer ' + k } : {}; }
+    // Admin sign-in (password -> short-lived session token); see /hungryface/utils/admin-session.js
+    const adminSession = NaptioAdmin.mount({
+      toolbar: document.querySelector('.toolbar'),
+      loginUrl: new URL('/admin/login', document.getElementById('endpoint').value || 'https://signaling-server-f5gu.onrender.com/').href,
+      onChange: (on) => { if (on) setTimeout(() => document.getElementById('btn-refresh')?.click(), 0); },
+    });
+    function adminHeaders(){ return adminSession.headers(); }
 
       const grid          = document.getElementById('grid');
       const badge         = document.getElementById('status-badge');
@@ -282,7 +285,7 @@
 
         try {
           const resp = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store', headers: adminHeaders() });
-          if (resp.status === 401) throw new Error('Unauthorized — enter the admin key');
+          if (resp.status === 401) { adminSession.expired(); throw new Error('Not signed in — enter the admin password'); }
           if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
           const data = await resp.json();
           render(data);
