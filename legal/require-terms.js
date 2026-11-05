@@ -33,8 +33,7 @@ export async function ensureTermsAccepted(opts = {}) {
         </p>
         <p class="tos-meta">
           By continuing, you agree to our
-          <a class="tos-link" href="/hungryface/legal/" target="_blank" rel="noopener">Terms of Use & Privacy Notice</a>
-          <span class="tos-pill" aria-label="Effective date">Effective: 11 Oct 2025</span>
+          <a class="tos-link" href="/hungryface/legal/" target="_blank" rel="noopener">Terms of Use & Privacy Notice</a>.
         </p>
 
         <label class="tos-check">
@@ -60,7 +59,6 @@ export async function ensureTermsAccepted(opts = {}) {
   .tos-body{padding:20px}
   .tos-lead{opacity:.95;line-height:1.45}
   .tos-meta{opacity:.8;margin:.5rem 0 1rem 0}
-  .tos-pill{display:inline-block;margin-left:.5rem;padding:.15rem .5rem;border-radius:999px;border:1px solid #444;font-size:12px;opacity:.9}
   .tos-check{display:flex;gap:.6rem;align-items:flex-start;margin:1rem 0}
   .tos-check input{transform:translateY(2px)}
   .tos-actions{display:flex;flex-wrap:wrap;gap:.8rem;align-items:center}
