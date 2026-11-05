@@ -2,180 +2,107 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Baby Monitor – Receiver Settings</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+  <title>Naptio — Settings</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="Naptio settings for this device: room, alert sounds, display and reset." />
   <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
   <link rel="stylesheet" href="/hungryface/shared/tokens.css">
   <style>
     :root { color-scheme: dark; }
-
-    /* —— Option A: Let the document own the scroll —— */
-    html { height: auto; overflow-y: auto; }
-    html, body { scroll-behavior: smooth; } /* optional nicety */
-    body {
-      margin: 0; min-height: 100%;
-      background: var(--nt-bg, #000); color: #ccc; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
-      touch-action: manipulation;
-      overflow-x: hidden;               /* keep horizontal clipped */
-      overflow-y: visible;              /* no inner scrollers fighting */
-    }
-    #ui, .card { overflow: visible; }   /* avoid nested scrollbars */
-
-    /* UI container (same look/feel as sender) */
-    #ui {
-      position: relative; z-index: 5; min-height: 100svh;
-      display: flex; align-items: center; justify-content: center; padding: 20px;
-    }
-    @media (max-height: 820px) { #ui { align-items: flex-start; padding-top: 0; } }
-    @media (max-height: 740px) { #ui { padding-top: 0; } }
-
-    .card {
-      width: 100%; max-width: 520px; background: var(--nt-bg-soft, #0b0b0b); border: 1px solid #141414; border-radius: 14px;
-      padding: 18px; box-sizing: border-box;
-    }
-    .card h2 { font-size: clamp(16px, 2.6vw, 18px); margin: 0 0 8px 0; }
-
-    /* Touch-friendly rows + consistent label typography */
-    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; min-height: 52px; }
-    .setting-label {
-      font-size: 16px; font-weight: 600; color: var(--nt-text-2, #ddd); line-height: 1.25;
-      flex: 1; /* allows control to align right and label to wrap if needed */
+    html, body {
+      margin: 0; background: var(--nt-bg, #000); color: var(--nt-text, #fff);
+      font-family: var(--nt-font, -apple-system, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
+      -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; overflow-x: hidden;
     }
 
-    input[type="text"], select, input[type="number"] {
-      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--nt-border, #222); background:var(--nt-bg-soft, #0b0b0b); color:var(--nt-text-2, #ddd);
-      -moz-appearance:textfield;
-    }
-    #roomSel { font-size: 18px; padding: 14px 16px; height: 52px; border-radius: 12px; }
-
-    .muted-note { opacity:.7; font-size:13px; }
-    .help-line { opacity:.8; font-size: 13px; margin: 2px 0 0 0; }
-
-    /* Optional small status text under the card title */
-    #status { margin-top: 6px; font-size: 13px; color: #9aa; }
-
-    /* Compact numeric input for cooldown (shorter height) */
-    .num-compact { 
-      width: 7ch !important;        /* 3 digits + padding */
-      text-align: right;
-      flex: 0 0 auto;
-      height: 36px;                  /* reduced height */
-      padding: 6px 10px;             /* tighter padding */
-      border-radius: 10px;
-    }
-
-    /* ================= Danger zone (existing styles) ================ */
-    :root{
-      --danger-bg:#c62828;
-      --danger-bg-hover:#b71c1c;
-      --danger-border:#7f1313;
-      --danger-text:#fff;
-    }
-    .sr-only{
-      position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;
-    }
-    .danger-zone{
-      margin-top:24px;
-      background:#130909;
-      border:1px solid var(--danger-border);
-      border-radius:14px;
-      padding:16px;
-    }
-    .danger-zone h2{
-      margin:0 0 6px 0;
-      font-size:18px;
-    }
-    .danger-note{
-      margin:0 0 12px 0;
-      opacity:.9;
-      font-size:14px;
-    }
-    .btn{
-      appearance:none;
-      border-radius:9999px;
-      padding:12px 16px;
-      font-weight:700;
-      cursor:pointer;
-      border:1px solid transparent;
-      line-height:1;
-      min-height:44px;
-    }
-    .btn-danger{
-      background:var(--danger-bg);
-      border-color:var(--danger-bg);
-      color:var(--danger-text);
-      width:100%;
-    }
-    .btn-danger:hover{ background:var(--danger-bg-hover); border-color:var(--danger-bg-hover); }
-    .btn-danger:focus-visible{ outline:2px solid #fff; outline-offset:2px; box-shadow:0 0 0 3px rgba(198,40,40,.5); }
-    .btn-secondary{
-      background:#101010;
-      border:1px solid #333;
-      color:var(--nt-text-2, #ddd);
-      padding:10px 14px;
-      border-radius:10px;
-    }
-    .btn-secondary:hover{ background:#151515; }
-    /* ======================================================== */
-
-    /* ——— Section headings & separators ——— */
-    .section-title { margin: 16px 0 4px 0; font-size: 16px; font-weight: 700; color: #eee; }
-    .sep { border: 0; border-top: 1px solid #141414; margin: 14px 0; }
-
-    /* iOS-style switch */
-    .switch {
-      position: relative; width: 52px; height: 30px; display: inline-block; flex: 0 0 auto;
-    }
-    .switch input {
-      opacity: 0; width: 0; height: 0; position: absolute;
-    }
-    .slider {
-      position: absolute; inset: 0;
-      background: #222; border: 1px solid #333; border-radius: 9999px;
-      transition: background .18s ease, border-color .18s ease;
-    }
-    .slider:before {
-      content: ""; position: absolute; height: 26px; width: 26px; left: 1px; top: 1px;
-      background: #fff; border-radius: 50%; transition: transform .18s ease;
-      box-shadow: 0 1px 2px rgba(0,0,0,.5);
-    }
-    .switch input:checked + .slider { background: #34C759; border-color: #34C759; }
-    .switch input:checked + .slider:before { transform: translateX(22px); }
-    .switch input:focus-visible + .slider { box-shadow: 0 0 0 3px rgba(52,199,89,.35); }
-  </style>
-
-  <!-- --- Sidebar overlap fix CSS (use padding-left) --- -->
-  <style>
+    /* Layout: centred panel, like Help / Roster / Contact */
     :root {
-      --sidebar-visible: 0px;
-      --sidebar-gutter: 12px;
-      --safe-left: env(safe-area-inset-left, 0px);
-      --menu-hit: 52px;
+      --sidebar-visible: 0px; --sidebar-gutter: 12px; --safe-left: env(safe-area-inset-left, 0px);
       --sidebar-offset: calc(var(--sidebar-visible) + var(--safe-left) + var(--sidebar-gutter));
     }
-    #ui {
-      padding-left: var(--sidebar-offset);
-      transition: padding-left .18s ease;
-      will-change: padding-left;
-    }
-    .card {
-      max-width: min(520px, calc(100vw - var(--sidebar-offset) - 32px));
-    }
-    @media (max-width: 480px) {
-      body.drawer-open-detected #ui { padding-left: 0 !important; }
-      .card { max-width: min(520px, calc(100vw - 32px)); }
-    }
-
-    /* Push shared sidebar content below the notch / status bar on iOS */
+    #ui { position: relative; z-index: 5; min-height: 100svh; display: flex; justify-content: center;
+          padding: 20px 12px; box-sizing: border-box; }
+    @media (min-width: 720px) { #ui { padding: 24px; padding-left: var(--sidebar-offset); } }
+    @media (max-width: 480px) { body.drawer-open-detected #ui { padding-left: 12px !important; } }
     @supports (padding-top: env(safe-area-inset-top)) {
-      .hf-sidebar,
-      #hfSidebar,
-      .sidebar,
-      aside[role="complementary"],
-      nav[aria-label="Sidebar"] {
-        padding-top: env(safe-area-inset-top);
-      }
+      #ui { padding-top: calc(20px + env(safe-area-inset-top)); padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
     }
+    .panel { width: 100%; max-width: 640px; box-sizing: border-box;
+             background: var(--nt-bg-soft, #0b0b0b); border: 1px solid #1b1b1b; border-radius: 16px;
+             box-shadow: 0 0 0 1px #0a0a0a inset, 0 8px 24px rgba(0,0,0,.5); padding: 18px 16px 28px; }
+    @media (min-width: 720px) { .panel { padding: 26px 28px 34px; } }
+    .header { padding: 2px 0 12px 44px; margin-bottom: 8px; border-bottom: 1px solid #141414; }   /* clear the menu button */
+    h1 { margin: 0; font-size: 22px; letter-spacing: .2px; }
+    @media (min-width: 720px) { h1 { font-size: 26px; } }
+    .sub { margin: 4px 0 0; color: var(--nt-text-muted, #aaa); font-size: 15px; }
+
+    /* Grouped settings list (iOS/Android settings pattern) */
+    .group { margin-top: 22px; }
+    .group > h2 { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+                  color: var(--nt-text-muted, #aaa); margin: 0 4px 8px; }
+    .group-desc { margin: -2px 4px 10px; font-size: 14px; color: var(--nt-text-muted, #aaa); }
+    .card { background: var(--nt-surface, #111); border: 1px solid var(--nt-border, #222); border-radius: 14px; overflow: hidden; }
+    .card-danger { border-color: #3a1d1d; }
+    .item { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px; min-height: 36px; }
+    .item + .item { border-top: 1px solid #1c1c1c; }
+    .item-stack { flex-direction: column; align-items: stretch; gap: 8px; }
+    .item-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .item-title { font-size: 16px; font-weight: 600; color: var(--nt-text, #fff); }
+    .item-desc { font-size: 14px; line-height: 1.45; color: var(--nt-text-muted, #aaa); margin: 0; }
+    .item-foot { padding: 0 16px 14px; font-size: 14px; color: var(--nt-text-2, #ddd); }
+    .item-foot:empty { display: none; }
+
+    /* Controls */
+    select, input[type="number"] {
+      font: inherit; font-size: 16px; color: var(--nt-text, #fff); background: var(--nt-bg, #000);
+      border: 1px solid var(--nt-border-strong, #2a2a2a); border-radius: var(--nt-radius, 10px); box-sizing: border-box; }
+    select { width: 100%; padding: 12px 40px 12px 12px; min-height: 48px; appearance: none; -webkit-appearance: none; cursor: pointer;
+             background-image: linear-gradient(45deg, transparent 50%, #aaa 50%), linear-gradient(135deg, #aaa 50%, transparent 50%);
+             background-position: calc(100% - 20px) 50%, calc(100% - 14px) 50%; background-size: 6px 6px; background-repeat: no-repeat; }
+    select:disabled { opacity: .6; cursor: not-allowed; }
+    select:focus, input[type="number"]:focus { border-color: var(--nt-accent, #7aa2ff); outline: none; box-shadow: 0 0 0 3px rgba(122,162,255,.18); }
+    .num-wrap { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+    .num-compact { width: 4.2em; padding: 10px 6px; text-align: center; min-height: 44px; }
+    .unit { font-size: 14px; color: var(--nt-text-muted, #aaa); }
+
+    /* Switch */
+    .switch { position: relative; display: inline-block; width: 52px; height: 32px; flex: 0 0 52px; cursor: pointer; }
+    .switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
+    .slider { position: absolute; inset: 0; border-radius: 999px; background: #3a3a3a; transition: background .2s; }
+    .slider::before { content: ""; position: absolute; left: 3px; top: 3px; width: 26px; height: 26px; border-radius: 50%;
+                      background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.4); transition: transform .2s; }
+    .switch input:checked + .slider { background: var(--nt-ok, #22c55e); }
+    .switch input:checked + .slider::before { transform: translateX(20px); }
+    .switch input:focus-visible + .slider { outline: 2px solid var(--nt-accent, #7aa2ff); outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) { .slider, .slider::before { transition: none; } }
+
+    /* Buttons */
+    .btn { appearance: none; font: inherit; font-size: 16px; font-weight: 600; cursor: pointer; min-height: 48px;
+           padding: 12px 18px; border-radius: var(--nt-radius, 10px); border: 1px solid var(--nt-border-strong, #2a2a2a);
+           background: var(--nt-surface-2, #141414); color: var(--nt-text, #fff); }
+    .btn:hover { background: var(--nt-surface-3, #1a1a1a); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-danger { background: #3b1111; border-color: #5c1a1a; color: #fecaca; }
+    .btn-danger:hover { background: #4a1414; }
+    .item-stack .btn { align-self: flex-start; }
+    @media (max-width: 480px) { .item-stack .btn { align-self: stretch; } }
+
+    /* Confirmation dialog */
+    .modal { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; padding: 16px; }
+    .modal[hidden] { display: none; }
+    .backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.7); }
+    .dialog { position: relative; width: min(520px, 100%); box-sizing: border-box; background: var(--nt-bg-soft, #0b0b0b);
+              border: 1px solid var(--nt-border-strong, #2a2a2a); border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.6); }
+    .dialog h2 { margin: 0 0 10px; font-size: 19px; }
+    .dialog p, .dialog li { font-size: 15px; line-height: 1.5; color: var(--nt-text-2, #ddd); }
+    .dialog p { margin: 0 0 8px; }
+    .dialog ul { margin: 0 0 10px 20px; padding: 0; }
+    .dialog .strong { color: var(--nt-text, #fff); font-weight: 600; }
+    .dialog-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; margin-top: 14px; }
+    @media (max-width: 480px) { .dialog-actions { flex-direction: column-reverse; } .dialog-actions .btn { width: 100%; } }
+    .dialog-status { margin-top: 12px; font-size: 14px; color: var(--nt-text-2, #ddd); }
+    .dialog-status:empty { display: none; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   </style>
     <script defer src="https://cloud.umami.is/script.js" data-website-id="e5feef4a-8ebd-4094-b6ff-36bdc4512e2e" data-exclude-search="true" data-exclude-hash="true" data-domains="hungryfaceai.github.io"></script>
 </head>
@@ -261,84 +188,100 @@
   </script>
 
   <div id="ui">
-    <div class="card">
-      <h2 style="padding-left:3ch">Settings</h2>
+    <main class="panel" role="main">
+      <div class="header">
+        <h1>Settings</h1>
+        <p class="sub">These settings apply to this device only.</p>
+      </div>
 
       <!-- ——— Room ——— -->
-      <section aria-labelledby="roomTitle">
-        <h3 id="roomTitle" class="section-title">Room</h3>
-        <p class="help-line">Pick which room this device listens to.</p>
-
-        <div class="row">
-          <select id="roomSel"></select>
-          <label for="roomSel" class="setting-label" style="cursor:pointer;">Room</label>
-        </div>
-
-        <div id="status" aria-live="polite"></div>
-      </section>
-
-      <hr class="sep" />
-
-      <!-- ——— Sound notifications ——— -->
-      <section aria-labelledby="notifTitle">
-        <h3 id="notifTitle" class="section-title">Sound notifications</h3>
-        <p class="help-line">Choose which events should play a sound.</p>
-
-        <div class="row">
-          <span class="setting-label">Audio</span>
-          <label class="switch" aria-label="Audio notifications">
-            <input id="sw-audio" type="checkbox" role="switch" />
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <div class="row">
-          <span class="setting-label">Motion</span>
-          <label class="switch" aria-label="Motion notifications">
-            <input id="sw-motion" type="checkbox" role="switch" />
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <div class="row">
-          <span class="setting-label">Fence</span>
-          <label class="switch" aria-label="Fence notifications">
-            <input id="sw-fence" type="checkbox" role="switch" />
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <div class="row">
-          <span class="setting-label">Prone</span>
-          <label class="switch" aria-label="Prone notifications">
-            <input id="sw-prone" type="checkbox" role="switch" />
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <!-- Gap between alerts: label left, compact number on the right -->
-        <div class="row">
-          <label for="notifCooldownMin" class="setting-label" style="cursor:pointer;">Gap between alerts (minutes)</label>
-          <input id="notifCooldownMin" class="num-compact" type="number" min="0" max="999" step="1" inputmode="numeric" pattern="[0-9]*" placeholder="1" />
+      <section class="group" aria-labelledby="roomTitle">
+        <h2 id="roomTitle">Room</h2>
+        <div class="card">
+          <div class="item item-stack">
+            <label for="roomSel" class="item-title">Watch this room</label>
+            <p class="item-desc">If you paired more than one Camera, choose which one this device shows.</p>
+            <select id="roomSel"></select>
+          </div>
+          <div id="status" class="item-foot" aria-live="polite"></div>
         </div>
       </section>
 
-      <hr class="sep" />
+      <!-- ——— Alert sounds ——— -->
+      <section class="group" aria-labelledby="notifTitle">
+        <h2 id="notifTitle">Alert sounds</h2>
+        <p class="group-desc">Play a sound on this device when an alert starts.</p>
+        <div class="card">
+          <div class="item">
+            <div class="item-text"><span class="item-title" id="lbl-audio">Crying</span><span class="item-desc">From the Audio screen</span></div>
+            <label class="switch"><input id="sw-audio" type="checkbox" role="switch" aria-labelledby="lbl-audio" /><span class="slider" aria-hidden="true"></span></label>
+          </div>
+          <div class="item">
+            <div class="item-text"><span class="item-title" id="lbl-motion">Movement</span><span class="item-desc">From the Motion screen</span></div>
+            <label class="switch"><input id="sw-motion" type="checkbox" role="switch" aria-labelledby="lbl-motion" /><span class="slider" aria-hidden="true"></span></label>
+          </div>
+          <div class="item">
+            <div class="item-text"><span class="item-title" id="lbl-prone">Face-down</span><span class="item-desc">From the Prone screen</span></div>
+            <label class="switch"><input id="sw-prone" type="checkbox" role="switch" aria-labelledby="lbl-prone" /><span class="slider" aria-hidden="true"></span></label>
+          </div>
+          <div class="item">
+            <div class="item-text"><span class="item-title" id="lbl-fence">Zone</span><span class="item-desc">From the Fence screen</span></div>
+            <label class="switch"><input id="sw-fence" type="checkbox" role="switch" aria-labelledby="lbl-fence" /><span class="slider" aria-hidden="true"></span></label>
+          </div>
+          <div class="item">
+            <div class="item-text">
+              <label for="notifCooldownMin" class="item-title">Wait between sounds</label>
+              <span class="item-desc" id="cooldownHelp">Minutes before the same alert can play a sound again. 0 = every time.</span>
+            </div>
+            <div class="num-wrap"><input id="notifCooldownMin" class="num-compact" type="number" min="0" max="999" step="1" inputmode="numeric" pattern="[0-9]*" placeholder="1" aria-describedby="cooldownHelp" /><span class="unit">min</span></div>
+          </div>
+        </div>
+      </section>
 
       <!-- ——— Mini dashboard ——— -->
-      <section aria-labelledby="miniDashTitle">
-        <h3 id="miniDashTitle" class="section-title">Mini dashboard</h3>
-        <p id="miniDashHelp" class="help-line">Show a small, in-app dashboard overlay on Audio, Motion, Fence and Prone pages.</p>
-
-        <div class="row">
-          <span class="setting-label">In-app dashboard</span>
-          <label class="switch" aria-label="In-app dashboard">
-            <input id="sw-miniDash" type="checkbox" role="switch" aria-describedby="miniDashHelp" />
-            <span class="slider"></span>
-          </label>
+      <section class="group" aria-labelledby="miniDashTitle">
+        <h2 id="miniDashTitle">Display</h2>
+        <div class="card">
+          <div class="item">
+            <div class="item-text"><span class="item-title" id="lbl-mini">Mini dashboard</span><span class="item-desc" id="miniDashHelp">A small summary of recent alerts on the Audio, Motion, Fence and Prone screens.</span></div>
+            <label class="switch"><input id="sw-miniDash" type="checkbox" role="switch" aria-labelledby="lbl-mini" aria-describedby="miniDashHelp" /><span class="slider" aria-hidden="true"></span></label>
+          </div>
         </div>
       </section>
-      <!-- ——— End sections ——— -->
+
+      <!-- ——— Reset ——— -->
+      <section class="group" id="factoryResetSection" aria-labelledby="resetTitle">
+        <h2 id="resetTitle">Reset this device</h2>
+        <div class="card card-danger">
+          <div class="item item-stack">
+            <span class="item-title">Erase Naptio from this device</span>
+            <p class="item-desc" id="eraseHelp">Removes pairing, settings and alert history from this browser. Your other devices aren’t affected. You’ll need to pair again afterwards.</p>
+            <button id="btnFactoryReset" class="btn btn-danger" type="button" aria-describedby="eraseHelp">Erase this device…</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Confirmation dialog -->
+  <div id="factoryResetModal" class="modal" hidden>
+    <div class="backdrop"></div>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="factoryResetTitle" aria-describedby="factoryResetDesc">
+      <h2 id="factoryResetTitle">Erase Naptio from this device?</h2>
+      <div id="factoryResetDesc">
+        <p>This permanently deletes, on this browser only:</p>
+        <ul>
+          <li>Pairing with your other devices</li>
+          <li>Settings, calibrations and alert history</li>
+          <li>Saved files and offline data</li>
+        </ul>
+        <p class="strong">This can’t be undone. Nothing is deleted on your other devices.</p>
+      </div>
+      <div class="dialog-actions">
+        <button id="factoryResetCancel" class="btn btn-secondary" type="button">Cancel</button>
+        <button id="factoryResetConfirm" class="btn btn-danger" type="button">Erase</button>
+      </div>
+      <div id="factoryResetStatus" class="dialog-status" role="status" aria-live="polite"></div>
     </div>
   </div>
 
@@ -381,9 +324,9 @@
 
       roomSel.innerHTML = '';
       if (uniq.size === 0) {
-        roomSel.innerHTML = `<option value="" disabled selected>No PSK rooms</option>`;
+        roomSel.innerHTML = `<option value="" disabled selected>No paired rooms</option>`;
         roomSel.disabled = true;
-        statusEl.textContent = 'No paired rooms found. Pair devices to create a room.';
+        statusEl.textContent = 'This device isn’t paired yet. Use Pair devices to connect it.';
         return;
       }
 
@@ -405,12 +348,12 @@
       try { localStorage.setItem('bm_receiver_room', roomSel.value); } catch {}
       try { localStorage.setItem('naptio:lastRoom', roomSel.value); } catch {}
 
-      statusEl.textContent = `Active room: ${roomSel.value}`;
+      statusEl.textContent = '';
 
       roomSel.addEventListener('change', () => {
         try { localStorage.setItem('bm_receiver_room', roomSel.value); } catch {}
         try { localStorage.setItem('naptio:lastRoom', roomSel.value); } catch {}
-        statusEl.textContent = `Active room: ${roomSel.value}`;
+        statusEl.textContent = 'Saved. Other screens will use this room next time they open.';
       });
     })();
   </script>
@@ -472,47 +415,6 @@
     });
   </script>
   <!-- ——— End: Alerts + In-app dashboard ——— -->
-
-  <!-- ——— Naptio: Factory Reset (this device) ——— -->
-  <section id="factoryResetSection" class="danger-zone">
-    <h2>Danger zone</h2>
-    <button id="btnFactoryReset" class="btn btn-danger" aria-describedby="eraseHelp">
-      Erase all Naptio data on this browser
-    </button>
-    <span id="eraseHelp" class="sr-only">This will permanently delete local preferences, keys, caches and databases in this browser.</span>
-  </section>
-
-  <!-- Lightweight modal (no dependencies) -->
-  <div id="factoryResetModal" hidden
-       style="position:fixed;inset:0;display:none;place-items:center;z-index:9999;">
-    <div class="backdrop" style="position:absolute;inset:0;background:#0008;"></div>
-    <div role="dialog" aria-modal="true" aria-labelledby="factoryResetTitle"
-         style="position:relative;width:min(90vw,560px);background:#0b0b0b;border:1px solid #222;border-radius:16px;padding:18px;box-shadow:0 10px 30px #0009;">
-      <h3 id="factoryResetTitle" style="margin:0 0 8px 0;font-size:18px;">
-        Factory reset Naptio on this device?
-      </h3>
-      <div style="opacity:.9;font-size:14px;line-height:1.5;margin-bottom:10px">
-        This will permanently delete your device-specific data for Naptio in this browser, including:
-        <ul style="margin:8px 0 0 18px;padding:0">
-          <li>Preferences, calibration and alert history</li>
-          <li>Pairing keys / room tokens and saved settings</li>
-          <li>Offline caches and background service workers</li>
-          <li>All local databases (IndexedDB), localStorage and sessionStorage</li>
-        </ul>
-        <div style="margin-top:10px;color:#fff">
-          This action cannot be undone. It does not delete anything on other devices.
-        </div>
-      </div>
-
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-        <button id="factoryResetCancel" class="btn btn-secondary">Cancel</button>
-        <button id="factoryResetConfirm" class="btn btn-danger">Erase & Reset</button>
-      </div>
-
-      <div id="factoryResetStatus" role="status" aria-live="polite"
-           style="margin-top:10px;font-size:13px;opacity:.9"></div>
-    </div>
-  </div>
 
   <script type="module">
     // ——— Factory reset routine (no external deps) ———
@@ -586,19 +488,30 @@
     const btnConfirm = $('#factoryResetConfirm');
     const statusEl = $('#factoryResetStatus');
 
+    let lastFocus = null;
     function openModal() {
+      lastFocus = document.activeElement;
       modal.hidden = false;
-      modal.style.display = 'grid';
       document.body.style.overflow = 'hidden';
       statusEl.textContent = '';
       btnConfirm.disabled = false;
       btnCancel.disabled = false;
+      btnCancel.focus();                       // safe default: Cancel, not Erase
     }
     function closeModal() {
       modal.hidden = true;
-      modal.style.display = 'none';
       document.body.style.overflow = '';
+      if (lastFocus && lastFocus.focus) lastFocus.focus();   // return focus to "Erase this device…"
     }
+    // Keep keyboard focus inside the dialog while it is open
+    modal?.addEventListener('keydown', (e) => {
+      if (e.key !== 'Tab') return;
+      const f = [...modal.querySelectorAll('button:not([disabled])')];
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
 
     btnOpen?.addEventListener('click', openModal);
     btnCancel?.addEventListener('click', closeModal);
@@ -624,8 +537,10 @@
         const errored = summary.indexedDB.some(x => x.status === 'error');
 
         if (!blocked && !errored) {
-          statusEl.innerHTML = '✅&nbsp;Reset complete';
-          btnCancel.disabled = false;
+          // Everything on this device is gone (including pairing): go to pairing so the page
+          // doesn't keep showing settings that no longer exist.
+          statusEl.textContent = 'Done. Taking you to Pair devices…';
+          setTimeout(() => location.replace('/hungryface/webrtc/pairpsk/'), 1200);
         } else if (blocked) {
           statusEl.textContent = 'Almost done — another Naptio tab is still open. Close other Naptio tabs to finish.';
           btnCancel.disabled = false;
