@@ -54,7 +54,7 @@
     wrap.innerHTML =
       '<input name="username" autocomplete="username" value="naptio-admin" hidden>' +   // lets password managers file it
       '<input type="password" name="password" autocomplete="current-password" placeholder="Admin password" aria-label="Admin password" style="max-width:12rem">' +
-      '<label class="admin-remember" style="font-size:12px;display:inline-flex;gap:4px;align-items:center;cursor:pointer">' +
+      '<label class="admin-remember" style="font-size:12px;gap:4px;align-items:center;cursor:pointer">' +
         '<input type="checkbox" checked> Keep me signed in on this device</label>' +
       '<button type="submit">Sign in</button>' +
       '<span class="admin-state" role="status" aria-live="polite" style="font-size:12px;opacity:.85"></span>' +
@@ -78,9 +78,10 @@
     }
     function render(msg) {
       const on = !!session;
-      pw.hidden = signIn.hidden = rememberLabel.hidden = on;
-      signOut.hidden = !on;
-      state.textContent = msg || (on ? 'Signed in until ' + until(session.expiresAt) + (session.remember ? ' on this device' : '') : '');
+      // Set display directly: an inline/page `display` value would override the `hidden` attribute.
+      const show = (el, yes) => { el.hidden = !yes; el.style.display = yes ? '' : 'none'; };
+      show(pw, !on); show(signIn, !on); show(rememberLabel, !on); show(signOut, on);
+      state.textContent = msg || (on ? 'Signed in until ' + until(session.expiresAt) : '');
       scheduleExpiry();
     }
 

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Signaling Rooms – Live Roster</title>
+  <title>Naptio — Roster</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 
   <!-- ⬇️ Add shared sidebar stylesheet -->
@@ -10,462 +10,156 @@
 
   <link rel="stylesheet" href="/hungryface/shared/tokens.css">
   <style>
-    :root { color-scheme: dark; }
-    html, body {
-      margin: 0; height: 100%;
-      background: var(--nt-bg, #000); color: var(--nt-text, #fff);
-      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
-      overflow: hidden;
-    }
-    /* Fullscreen wrapper so video+canvas scale together (unused but kept for consistency) */
-    #stage {
-      position: fixed; inset: 0;
-      width: 100vw; height: 100vh;   /* fallback */
-      width: 100dvw; height: 100dvh; /* dynamic viewport */
-      width: 100svw; height: 100svh; /* small viewport (iOS URL bar safe) */
-      z-index: 1; background: var(--nt-bg, #000);
-    }
-    #stage > video {
-      position: absolute; inset: 0;
-      width: 100%; height: 100%;
-      object-fit: contain; background: var(--nt-bg, #000);
-    }
-    #stage > canvas {
-      position: absolute;
-      z-index: 2; pointer-events: none; background: transparent; display: none;
-    }
-
-    .btn {
-      padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.6);
-      background: transparent; color: var(--nt-text, #fff); font-size: 16px; font-weight: 600;
-      cursor: pointer; box-shadow: none;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
-    }
-    .btn:active { transform: scale(0.99); }
-
-    #controls {
-      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
-      display: flex; align-items: center; gap: 12px; z-index: 6;
-    }
-    #enableAudioBtn, #disableAudioBtn { display: none; }
-
-    .overlay {
-      position: fixed; inset: 0; display: flex;
-      align-items: center; justify-content: center;
-      pointer-events: none; z-index: 5;
-    }
-  </style>
-
-  <style>
+    /* ---------- Roster: same look as the other Naptio pages (shared tokens) ---------- */
     :root {
       color-scheme: dark;
-      --bg: #0b0b0f;
-      --panel: #15151b;
-      --muted: #8b8ca3;
-      --text: #e9eaf2;
-      --ok: #7dd87d;
-      --warn: #ffb84d;
-      --err: #ff6b6b;
-      --sender: #7dd87d;   /* green for sender */
-      --receiver: #6ac4ff; /* cyan   */
-      --chip: #242633;
-      --ring: #2b2e44;
-      --focus: #7aa2ff;
+      --muted: var(--nt-text-muted, #aaa);
+      --ring:  var(--nt-border, #222);
+      --focus: var(--nt-accent, #7aa2ff);
+      --ok:    var(--nt-ok, #22c55e);
+      --warn:  var(--nt-warn, #fbbf24);
+      --err:   var(--nt-danger, #ef4444);
+      --cam:   #22c55e;   /* Camera chips */
+      --view:  #60a5fa;   /* Viewer chips */
     }
     html, body {
-      margin: 0; height: 100%;
-      background: var(--bg); color: var(--text);
-      font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
-      overflow-y: auto;
+      margin: 0; background: var(--nt-bg, #000); color: var(--nt-text, #fff);
+      font-family: var(--nt-font, -apple-system, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
+      -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
     }
+    .mono { font-family: var(--nt-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
 
-    .roster-banner {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 9999; /* ensure above sidebar and content */
-      background: #b91c1c;
-      color: #fee2e2;
-      padding: 6px 12px;
-      padding-top: calc(6px + env(safe-area-inset-top, 0px)); /* iPhone notch / URL bar */
-      font-size: 12px;
-      text-align: center;
-      display: none;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.4);
-      pointer-events: none; /* don't block taps/scroll on iOS */
-    }
-
-    .wrap {
-      max-width: 1100px; margin: 0 auto; padding: 20px;
-      display: grid; grid-template-rows: auto auto 1fr auto auto; gap: 16px;
-    }
-    header {
-      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    }
-    .title { font-size: 22px; font-weight: 700; letter-spacing: 0.2px; }
-    .legend { margin-left: auto; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
-    .pill { display: inline-flex; align-items: center; gap: 8px; background: var(--chip); padding: 6px 10px; border-radius: 999px; font-size: 12px; color: var(--muted); }
-    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
-    .dot.sender { background: var(--sender); }
-    .dot.receiver { background: var(--receiver); }
-
-    .toolbar {
-      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-      background: var(--panel); border: 1px solid var(--ring); border-radius: 12px; padding: 10px;
-    }
-    .toolbar input[type="url"] {
-      flex: 1 1 260px; background: #0f111a; border: 1px solid var(--ring); color: var(--text);
-      padding: 10px 12px; border-radius: 10px; outline: none;
-    }
-    .toolbar input[type="url"]:focus { border-color: var(--focus); }
-    .toolbar button, .toolbar label.btn-inline {
-      background: #1b1d2a; border: 1px solid var(--ring); color: var(--text);
-      padding: 8px 10px; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 12px;
-    }
-    .toolbar button:hover, .toolbar label.btn-inline:hover { background: #202338; }
-    .toolbar .spacer { flex: 1; }
-
-    .toolbar-inline {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-    }
-    .toolbar-inline input[type="checkbox"] {
-      accent-color: var(--focus);
-    }
-    .toolbar-inline input[type="number"] {
-      width: 4.5rem;
-      background: #0f111a;
-      border: 1px solid var(--ring);
-      color: var(--text);
-      padding: 4px 6px;
-      border-radius: 6px;
-      font-size: 12px;
-    }
-
-    .status {
-      display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted);
-    }
-    .status-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #555; /* default / neutral */
-      box-shadow: 0 0 0 2px rgba(0,0,0,0.4);
-    }
-    .status-dot.live {
-      background: var(--ok);      /* green: auto ON + last fetch OK, idle */
-    }
-    .status-dot.error {
-      background: var(--err);     /* red: idle/error/auto off */
-    }
-    /*.status-dot.fetching {
-      background: var(--warn);         /* amber/orange while a live fetch is in progress */
-    }*/
-    .status-dot.fetching {
-      background: var(--nt-bg, #000000);        /* BLACK while a live fetch is in progress */
-      box-shadow: 0 0 0 2px #ffffff33; /* optional: subtle light ring so it stands out */
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 14px;
-      align-content: start;
-    }
-
-    .room {
-      background: var(--panel);
-      border: 1px solid var(--ring);
-      border-radius: 16px;
-      padding: 12px;
-      display: grid; grid-template-rows: auto auto 1fr; gap: 10px;
-      min-height: 160px;
-      min-width: 0;
-    }
-    .room-head {
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      justify-content: space-between;
-      flex-wrap: wrap;   /* allow title + counts to wrap to new lines */
-      min-width: 0;      /* allow flex children to shrink properly */
-    }
-    .room-title {
-      font-weight: 700;
-      font-size: 16px;
-      letter-spacing: .2px;
-      min-width: 0;
-      overflow-wrap: anywhere; /* allow breaking inside long room ids */
-      word-break: break-word;  /* extra safety / older browsers */
-    }
-    .counts {
-      display: inline-flex;
-      gap: 6px;
-      flex-wrap: wrap;   /* counts can wrap instead of pushing out */
-    }
-    .count {
-      font-size: 11px; color: var(--muted);
-      border: 1px dashed var(--ring); padding: 4px 8px; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px;
-    }
-
-    .bubbles {
-      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-      padding: 4px; border-radius: 10px; background: #11131d;
-      min-height: 60px;
-    }
-    .node {
-      display: inline-flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 999px;
-      background: #171926; border: 1px solid var(--ring); font-size: 12px; user-select: text;
-    }
-    .node .badge-role {
-      width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center;
-      font-size: 11px; font-weight: 800; color: #081018;
-    }
-    .node.sender .badge-role { background: var(--sender); }
-    .node.receiver .badge-role { background: var(--receiver); }
-
-    .room-foot {
-      display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--muted);
-      font-size: 12px;
-    }
-    .warnline { color: var(--warn); display: inline-flex; align-items: center; gap: 6px; }
-
-    details.fallback {
-      background: var(--panel); border: 1px dashed var(--ring); border-radius: 12px; padding: 8px 10px;
-      margin-top: 8px;
-    }
-    details.fallback summary { cursor: pointer; color: var(--muted); }
-    textarea {
-      width: 100%; min-height: 120px; margin-top: 8px; background: #0f111a; color: var(--text);
-      border: 1px solid var(--ring); border-radius: 8px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    }
-
-    .footer {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      text-align: left;
-      color: var(--muted); font-size: 12px; padding: 8px 0 0;
-    }
-    .footer-main {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-      align-items: center;
-    }
-    .footer-controls {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      align-items: center;
-      justify-content: flex-end;
-    }
-    .footer-controls label {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 11px;
-    }
-    .footer-controls input[type="checkbox"] {
-      accent-color: var(--focus);
-    }
-    .footer-controls input[type="number"] {
-      width: 4.5rem;
-      background: #0f111a;
-      border: 1px solid var(--ring);
-      color: var(--text);
-      padding: 4px 6px;
-      border-radius: 6px;
-      font-size: 11px;
-    }
-    .footer button {
-      background: #1b1d2a;
-      border: 1px solid var(--ring);
-      color: var(--text);
-      padding: 6px 10px;
-      border-radius: 999px;
-      font-size: 11px;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    .footer button:hover { background: #202338; }
-
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #cbd5ff; }
-
-    /* Log viewer modal */
-    .log-viewer {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.7);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 50;
-    }
-    .log-viewer.open {
-      display: flex;
-    }
-    .log-viewer-inner {
-      background: #0f111a;
-      border: 1px solid var(--ring);
-      border-radius: 12px;
-      max-width: 900px;
-      width: 90vw;
-      max-height: 80vh;
-      display: flex;
-      flex-direction: column;
-    }
-    .log-viewer-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--ring);
-      font-size: 13px;
-      color: var(--muted);
-    }
-    .log-viewer-header button {
-      background: #1b1d2a;
-      border: 1px solid var(--ring);
-      color: var(--text);
-      padding: 4px 8px;
-      border-radius: 999px;
-      font-size: 11px;
-      cursor: pointer;
-    }
-    .log-viewer-header button:hover {
-      background: #202338;
-    }
-    .log-viewer-body {
-      padding: 10px 12px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 11px;
-      white-space: normal;
-      color: #e5e7ff;
-      flex: 1 1 auto;
-      min-height: 0;                 /* allow flexbox scrolling on iOS */
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-    }
-    .log-viewer-body h4 {
-      margin: 0 0 6px 0;
-      font-size: 12px;
-      font-weight: 600;
-      color: #cbd5ff;
-    }
-    .log-viewer-body table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 10px;
-    }
-    .log-viewer-body th,
-    .log-viewer-body td {
-      padding: 4px 6px;
-      border-bottom: 1px solid #2b2e44;
-      text-align: left;
-    }
-    .log-viewer-body th {
-      background: #11131d;
-      position: sticky;
-      top: 0;
-      z-index: 1;
-    }
-    .log-viewer-body th.sortable {
-      cursor: pointer;
-      user-select: none;
-    }
-    .log-viewer-body tr.log-filter-row th {
-      position: static;
-      background: #0f111a;
-    }
-    .log-viewer-body tr.log-filter-row input {
-      width: 100%;
-      box-sizing: border-box;
-      background: #0b0b12;
-      border: 1px solid #2b2e44;
-      color: #e5e7ff;
-      border-radius: 4px;
-      padding: 2px 4px;
-      font-size: 10px;
-    }
-
-    /* Analytics panel */
-    .analytics-section {
-      margin-bottom: 8px;
-      font-size: 11px;
-      color: var(--muted);
-    }
-    .analytics-table th,
-    .analytics-table td {
-      font-size: 11px;
-    }
-    .analytics-bars {
-      margin-top: 6px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    .analytics-bar-row {
-      display: grid;
-      /* give the label a bit more room */
-      grid-template-columns: minmax(0, 140px) 1fr auto;
-      align-items: center;
-      gap: 6px;
-      font-size: 11px;
-    }
-    
-    .analytics-bar-label {
-      color: var(--muted);
-      /* allow wrapping and breaking long room ids like 1c6b...:baby */
-      white-space: normal;
-      overflow-wrap: anywhere;
-    }
-    .analytics-bar-track {
-      position: relative;
-      height: 8px;
-      border-radius: 999px;
-      background: #1b1d2a;
-      overflow: hidden;
-    }
-    .analytics-bar-fill {
-      height: 100%;
-      border-radius: 999px;
-      background: var(--receiver);
-      transition: width 0.2s ease-out;
-    }
-    .analytics-bar-fill.active {
-      background: var(--sender);
-    }
-    .analytics-bar-value {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      color: #e5e7ff;
-      white-space: nowrap;
-      font-size: 11px;
-    }
-    .analytics-status-pill {
-      display: inline-flex;
-      align-items: center;
-      padding: 2px 6px;
-      border-radius: 999px;
-      font-size: 10px;
-      background: #1b1d2a;
-      color: var(--muted);
-    }
-    .analytics-status-pill.active {
-      background: #14532d;
-      color: #bbf7d0;
-    }
+    /* Layout: centred panel, like Help and Settings */
+    #ui { position: relative; z-index: 5; min-height: 100svh; display: flex; justify-content: center;
+          padding: 20px 12px; box-sizing: border-box; }
+    .panel { width: 100%; max-width: 900px; box-sizing: border-box;
+             background: var(--nt-bg-soft, #0b0b0b); border: 1px solid #1b1b1b; border-radius: 16px;
+             box-shadow: 0 0 0 1px #0a0a0a inset, 0 8px 24px rgba(0,0,0,.5); padding: 18px 14px 28px; }
+    @media (min-width: 720px) { #ui { padding: 24px; } .panel { padding: 26px 26px 34px; } }
     @supports (padding-top: env(safe-area-inset-top)) {
-      .wrap {
-        /* original 20px + safe area at the top */
-        padding-top: calc(20px + env(safe-area-inset-top));
-      }
+      #ui { padding-top: calc(20px + env(safe-area-inset-top)); padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
     }
+
+    .header { padding: 2px 0 12px 44px; margin-bottom: 14px; border-bottom: 1px solid #141414; }  /* clear the menu button */
+    h1 { margin: 0; font-size: 22px; letter-spacing: .2px; }
+    @media (min-width: 720px) { h1 { font-size: 26px; } }
+    .sub { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+
+    /* Buttons */
+    .btn { appearance: none; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+           color: var(--nt-text, #fff); background: var(--nt-surface, #111); border: 1px solid var(--nt-border-strong, #2a2a2a);
+           border-radius: var(--nt-radius, 10px); padding: 10px 14px; min-height: 44px; }
+    .btn:hover { background: var(--nt-surface-3, #1a1a1a); }
+    .btn:active { transform: scale(.99); }
+    .btn-primary { background: var(--nt-text, #fff); color: var(--nt-bg, #000); border-color: var(--nt-text, #fff);
+                   font-size: 16px; padding: 12px 22px; min-height: 48px; }
+    .btn-primary:hover { background: var(--nt-text-2, #ddd); }
+    .btn-danger { color: #fca5a5; border-color: #3a1d1d; }
+    .btn-danger:hover { background: #1f1111; }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    /* Toolbar */
+    .toolbar { background: var(--nt-surface, #111); border: 1px solid var(--ring); border-radius: 14px; padding: 12px;
+               display: flex; flex-direction: column; gap: 12px; }
+    .toolbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+    .switch-label { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; color: var(--nt-text-2, #ddd); cursor: pointer; }
+    .switch-label input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--nt-text, #fff); margin: 0; }
+    input[type="number"], input[type="url"], input[type="password"] {
+      font: inherit; font-size: 16px; color: var(--nt-text, #fff); background: var(--nt-bg, #000);
+      border: 1px solid var(--nt-border-strong, #2a2a2a); border-radius: var(--nt-radius, 10px); padding: 9px 10px; box-sizing: border-box; }
+    input[type="number"] { width: 4.2em; text-align: center; }
+    input:focus { border-color: var(--focus); outline: none; }
+    .status { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); margin-left: auto; }
+    #status-msg:empty { display: none; }
+    .status-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); flex: 0 0 12px; }
+    .status-dot.live { background: var(--ok); box-shadow: 0 0 0 4px rgba(34,197,94,.15); }
+    .status-dot.fetching { background: var(--warn); }
+    .status-dot.error { background: var(--err); }
+
+    /* Admin sign-in (rendered by admin-session.js inside .toolbar) */
+    .toolbar form.admin-signin { display: flex !important; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+    .toolbar form.admin-signin input[type="password"] { flex: 1 1 200px; max-width: none !important; }
+    .toolbar form.admin-signin button { appearance: none; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; min-height: 44px;
+      color: var(--nt-text, #fff); background: var(--nt-surface-2, #141414); border: 1px solid var(--nt-border-strong, #2a2a2a);
+      border-radius: var(--nt-radius, 10px); padding: 10px 14px; }
+    .toolbar form.admin-signin button[type="submit"] { background: var(--nt-text, #fff); color: var(--nt-bg, #000); border-color: var(--nt-text, #fff); }
+    .toolbar form.admin-signin .admin-state { font-size: 14px !important; color: var(--nt-text-2, #ddd); opacity: 1 !important; }
+    .toolbar form.admin-signin .admin-remember { font-size: 14px !important; color: var(--nt-text-2, #ddd); }
+
+    /* Room cards */
+    .grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 14px; }
+    @media (min-width: 720px) { .grid { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); } }
+    .room { background: var(--nt-surface, #111); border: 1px solid var(--ring); border-radius: 14px; padding: 14px; min-width: 0; }
+    .room-warn { border-color: #3d3216; }
+    .room-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .room-title { font-size: 19px; font-weight: 700; overflow-wrap: anywhere; }
+    .room-counts { display: flex; gap: 6px; flex-wrap: wrap; }
+    .count { font-size: 13px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--nt-border-strong, #2a2a2a); color: var(--nt-text-2, #ddd); }
+    .count-camera::before, .count-viewer::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+    .count-camera::before { background: var(--cam); }
+    .count-viewer::before { background: var(--view); }
+    .room-id { margin-top: 4px; font-size: 12px; color: #8a8a8a; overflow-wrap: anywhere; }
+    .bubbles { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .node { appearance: none; font: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; min-height: 40px;
+            padding: 6px 12px; border-radius: 999px; background: var(--nt-bg, #000); border: 1px solid var(--nt-border-strong, #2a2a2a);
+            color: var(--nt-text, #fff); }
+    .node:hover { background: var(--nt-surface-3, #1a1a1a); }
+    .node-role { font-size: 13px; font-weight: 700; }
+    .node.sender .node-role { color: var(--cam); }
+    .node.receiver .node-role { color: var(--view); }
+    .node-id { font-size: 12px; color: var(--muted); }
+    .warnline { margin-top: 12px; font-size: 14px; color: var(--warn); }
+    .room-empty { text-align: center; padding: 26px 14px; }
+    .room-hint { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+
+    .updated { margin: 14px 2px 0; font-size: 13px; color: #8a8a8a; }
+    .small { font-size: 13px; color: var(--muted); margin: 8px 0; overflow-wrap: anywhere; }
+    .field-label { display: block; font-size: 14px; color: var(--nt-text-2, #ddd); margin-bottom: 6px; }
+    #endpoint { width: 100%; }
+
+    /* Collapsible "Logs & analytics" and "Server" */
+    details.more { margin-top: 12px; border: 1px solid #1b1b1b; border-radius: 12px; background: #0a0a0a; }
+    details.more > summary { cursor: pointer; list-style: none; padding: 14px 40px 14px 14px; position: relative; font-weight: 600; min-height: 20px; }
+    details.more > summary::-webkit-details-marker { display: none; }
+    details.more > summary::after { content: "+"; position: absolute; right: 14px; top: 50%; transform: translateY(-50%); font-size: 20px; color: var(--muted); }
+    details.more[open] > summary::after { content: "\2212"; }
+    .more-body { padding: 0 14px 14px; }
+    .more-row { display: flex; flex-wrap: wrap; gap: 10px 18px; margin-bottom: 4px; }
+
+    /* Red "roster changed" banner */
+    .roster-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 9999; display: none; pointer-events: none;
+      background: #7f1d1d; color: #fee2e2; font-size: 13px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,.4);
+      padding: 8px 12px; padding-top: calc(8px + env(safe-area-inset-top, 0px)); }
+
+    /* Log + analytics viewers (tables are built by the script) */
+    .log-viewer { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; z-index: 50; padding: 12px; }
+    .log-viewer.open { display: flex; }
+    .log-viewer-inner { background: var(--nt-bg-soft, #0b0b0b); border: 1px solid var(--nt-border-strong, #2a2a2a); border-radius: 14px;
+                        width: min(900px, 100%); max-height: 85vh; display: flex; flex-direction: column; }
+    .log-viewer-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px;
+                         border-bottom: 1px solid var(--ring); font-size: 14px; color: var(--nt-text-2, #ddd); }
+    .log-viewer-body { padding: 10px 12px; font-family: var(--nt-font-mono, ui-monospace, monospace); font-size: 12px; color: var(--nt-text-2, #ddd);
+                       flex: 1 1 auto; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; }
+    .log-viewer-body h4 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--nt-text, #fff); }
+    .log-viewer-body table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+    .log-viewer-body th, .log-viewer-body td { padding: 5px 6px; border-bottom: 1px solid var(--ring); text-align: left; white-space: nowrap; }
+    .log-viewer-body th { background: var(--nt-surface, #111); position: sticky; top: 0; z-index: 1; }
+    .log-viewer-body th.sortable { cursor: pointer; user-select: none; }
+    .log-viewer-body tr.log-filter-row th { position: static; background: var(--nt-bg-soft, #0b0b0b); }
+    .log-viewer-body tr.log-filter-row input { width: 100%; box-sizing: border-box; background: var(--nt-bg, #000); border: 1px solid var(--nt-border-strong, #2a2a2a);
+                                               color: var(--nt-text-2, #ddd); border-radius: 6px; padding: 3px 5px; font-size: 11px; }
+    .analytics-section { margin-bottom: 8px; font-size: 12px; color: var(--muted); }
+    .analytics-table th, .analytics-table td { font-size: 12px; }
+    .analytics-bars { margin-top: 6px; display: flex; flex-direction: column; gap: 5px; }
+    .analytics-bar-row { display: grid; grid-template-columns: minmax(0, 140px) 1fr auto; align-items: center; gap: 6px; font-size: 12px; }
+    .analytics-bar-label { color: var(--muted); white-space: normal; overflow-wrap: anywhere; }
+    .analytics-bar-track { position: relative; height: 8px; border-radius: 999px; background: var(--nt-surface-3, #1a1a1a); overflow: hidden; }
+    .analytics-bar-fill { height: 100%; border-radius: 999px; background: var(--view); transition: width .2s ease-out; }
+    .analytics-bar-fill.active { background: var(--cam); }
+    .analytics-bar-value { font-family: var(--nt-font-mono, ui-monospace, monospace); color: var(--nt-text-2, #ddd); white-space: nowrap; }
+    .analytics-status-pill { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 999px; font-size: 11px;
+                             background: var(--nt-surface-3, #1a1a1a); color: var(--muted); }
+    .analytics-status-pill.active { background: #14532d; color: #bbf7d0; }
 
   </style>
     <script defer src="https://cloud.umami.is/script.js" data-website-id="e5feef4a-8ebd-4094-b6ff-36bdc4512e2e" data-exclude-search="true" data-exclude-hash="true" data-domains="hungryfaceai.github.io"></script>
@@ -478,90 +172,79 @@
   <!-- ⬇️ Inject shared sidebar markup and behavior (kept separate from your code) -->
   <script type="module" src="/hungryface/webrtc/receiver/shared/sidebar-loader.js"></script>
 
-  <div class="wrap">
-    <header>
-      <div style="padding-left:3ch" class="title">Signaling Rooms</div>
-      <div class="legend">
-        <span class="pill"><span class="dot sender"></span> Sender</span>
-        <span class="pill"><span class="dot receiver"></span> Receiver</span>
-      </div>
-    </header>
-
-    <div class="toolbar">
-      <input id="endpoint" type="url" value="https://signaling-server-f5gu.onrender.com/rooms" aria-label="Rooms endpoint">
-      <button id="btn-refresh" type="button">Refresh now</button>
-
-      <div class="toolbar-inline">
-        <label class="btn-inline">
-          <input id="auto" type="checkbox" checked>
-          Auto
-        </label>
-        <span>every</span>
-        <input id="auto-interval" type="number" min="1" value="3" aria-label="Auto refresh interval (seconds)">
-        <span>s</span>
+  <div id="ui">
+    <main class="panel" role="main">
+      <div class="header">
+        <h1>Roster</h1>
+        <p class="sub">Devices connected to the signalling server right now.</p>
       </div>
 
-      <div class="spacer"></div>
-      <div class="status">
-        <span id="status-dot" class="status-dot"></span>
-        <span id="status-msg">Waiting…</span>
+      <div class="toolbar" aria-label="Roster controls">
+        <div class="toolbar-row">
+          <button id="btn-refresh" type="button" class="btn btn-primary">Refresh</button>
+          <label class="switch-label">
+            <input id="auto" type="checkbox" checked>
+            Auto-refresh every
+            <input id="auto-interval" type="number" min="1" value="3" inputmode="numeric" aria-label="Auto-refresh interval in seconds">
+            s
+          </label>
+          <span class="status" aria-live="polite">
+            <span id="status-dot" class="status-dot" aria-hidden="true"></span>
+            <span id="status-msg"></span>
+          </span>
+        </div>
+        <!-- the admin sign-in form is added here by admin-session.js -->
       </div>
-    </div>
 
-    <div id="grid" class="grid" role="list" aria-label="Rooms"></div>
+      <div id="grid" class="grid" role="list" aria-label="Rooms"></div>
 
-    <div class="footer">
-      <div class="footer-main">
-        <span>Last updated: <span id="last-updated">—</span></span>
-        <span>· Endpoint: <span class="mono" id="endpoint-view">—</span></span>
-        <span>· Log size: <span class="mono" id="log-size">0 MB</span></span>
-        <span>· Rows: <span class="mono" id="log-rows">0</span></span>
-      </div>
-      <div class="footer-controls">
-        <label>
-          <input id="log-enabled" type="checkbox" checked>
-          Log auto-refresh
-        </label>
-        <label>
-          Max log
-          <input id="log-limit" type="number" min="0.1" step="0.1" value="1">
-          MB
-        </label>
-        <button id="btn-log-view" type="button">View log</button>
-        <button id="btn-analytics" type="button">Analytics</button>
-        <button id="btn-log-clear" type="button">Clear log</button>
-        <button id="btn-export" type="button">Export CSV</button>
-      </div>
-    </div>
+      <p class="updated">Last updated <span id="last-updated">—</span></p>
 
-    <!-- Manual JSON paste at bottom -->
-    <details class="fallback">
-      <summary>Paste JSON roster manually</summary>
-      <textarea id="paste" placeholder='{"5":[{"id":"...","role":"sender"}]}'></textarea>
-      <div style="display:flex; gap:8px; margin-top:8px;">
-        <button id="btn-apply" type="button">Render pasted JSON</button>
-        <button id="btn-sample" type="button">Load sample</button>
-      </div>
-    </details>
+      <details class="more">
+        <summary>Logs &amp; analytics</summary>
+        <div class="more-body">
+          <div class="more-row">
+            <label class="switch-label"><input id="log-enabled" type="checkbox" checked> Keep a log of each refresh</label>
+            <label class="switch-label">Up to <input id="log-limit" type="number" min="0.1" step="0.1" value="1" inputmode="decimal" aria-label="Maximum log size in MB"> MB</label>
+          </div>
+          <p class="small">Log: <span class="mono" id="log-size">0 MB</span> · <span class="mono" id="log-rows">0</span> rows</p>
+          <div class="btn-row">
+            <button id="btn-log-view" type="button" class="btn">View log</button>
+            <button id="btn-analytics" type="button" class="btn">Analytics</button>
+            <button id="btn-export" type="button" class="btn">Export CSV</button>
+            <button id="btn-log-clear" type="button" class="btn btn-danger">Clear log</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="more">
+        <summary>Server</summary>
+        <div class="more-body">
+          <label class="field-label" for="endpoint">Rooms address</label>
+          <input id="endpoint" type="url" value="https://signaling-server-f5gu.onrender.com/rooms" spellcheck="false" autocomplete="off">
+          <p class="small">Currently reading: <span class="mono" id="endpoint-view">—</span></p>
+        </div>
+      </details>
+    </main>
   </div>
 
-  <!-- Log viewer modal -->
-  <div id="log-viewer" class="log-viewer" aria-hidden="true">
+  <!-- Log viewer -->
+  <div id="log-viewer" class="log-viewer" aria-hidden="true" role="dialog" aria-label="Refresh log">
     <div class="log-viewer-inner">
       <div class="log-viewer-header">
-        <span>Fetch / roster log history (newest first)</span>
-        <button id="btn-log-close" type="button">Close</button>
+        <span>Refresh log (newest first)</span>
+        <button id="btn-log-close" type="button" class="btn">Close</button>
       </div>
       <div id="log-viewer-body" class="log-viewer-body"></div>
     </div>
   </div>
 
-  <!-- Analytics viewer modal -->
-  <div id="analytics-viewer" class="log-viewer" aria-hidden="true">
+  <!-- Analytics viewer -->
+  <div id="analytics-viewer" class="log-viewer" aria-hidden="true" role="dialog" aria-label="Room analytics">
     <div class="log-viewer-inner">
       <div class="log-viewer-header">
         <span>Room analytics</span>
-        <button id="btn-analytics-close" type="button">Close</button>
+        <button id="btn-analytics-close" type="button" class="btn">Close</button>
       </div>
       <div id="analytics-viewer-body" class="log-viewer-body"></div>
     </div>
@@ -586,12 +269,9 @@
       const lastUpdated     = document.getElementById('last-updated');
       const endpointView    = document.getElementById('endpoint-view');
       const btnRefresh      = document.getElementById('btn-refresh');
-      const btnApply        = document.getElementById('btn-apply');
-      const btnSample       = document.getElementById('btn-sample');
       const btnExport       = document.getElementById('btn-export');
       const autoToggle      = document.getElementById('auto');
       const autoIntervalInp = document.getElementById('auto-interval');
-      const pasteArea       = document.getElementById('paste');
 
       const logEnabledCheckbox = document.getElementById('log-enabled');
       const logLimitInput      = document.getElementById('log-limit');
@@ -1418,61 +1098,56 @@
         return id.slice(0, 6) + '…' + id.slice(-6);
       }
 
+      // A room id from the server is "<namespace>:<label>" (the namespace is derived from the
+      // pairing key so rooms can't be guessed). Show the friendly label; keep the full id small.
+      function roomLabel(roomId) {
+        const s = String(roomId); const i = s.lastIndexOf(':');
+        return i > 0 && i < s.length - 1 ? s.slice(i + 1) : s;
+      }
+
       function render(data) {
         grid.innerHTML = '';
-        const roomIds = Object.keys(data || {}).sort((a,b) => {
-          const na = Number(a), nb = Number(b);
-          if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
-          return (''+a).localeCompare(''+b);
-        });
+        const roomIds = Object.keys(data || {}).sort((a, b) => roomLabel(a).localeCompare(roomLabel(b)) || String(a).localeCompare(String(b)));
 
         if (roomIds.length === 0) {
-          grid.innerHTML = `<div class="room" role="listitem"><div class="room-head">
-            <div class="room-title">No rooms</div>
-          </div><div class="bubbles" style="justify-content:center;color:var(--muted)">Roster is empty.</div></div>`;
+          grid.innerHTML = `<div class="room room-empty" role="listitem">
+            <div class="room-title">No active rooms</div>
+            <p class="room-hint">A room appears here while a Camera or Viewer is connected.</p></div>`;
           return;
         }
 
         for (const roomId of roomIds) {
           const members = Array.isArray(data[roomId]) ? data[roomId] : [];
           const { senders, receivers } = summarizeRoom(members);
+          const label = roomLabel(roomId);
 
           const card = document.createElement('div');
-          card.className = 'room';
+          card.className = 'room' + (senders === 0 ? ' room-warn' : '');
           card.setAttribute('role', 'listitem');
           card.innerHTML = `
             <div class="room-head">
-              <div class="room-title">Room ${esc(roomId)}</div>
-              <div class="counts">
-                <span class="count">
-                  <span class="dot sender" style="width:8px;height:8px;border-radius:50%"></span>
-                  ${senders} sender${senders > 1 ? 's' : ''}
-                </span>
-                <span class="count">
-                  <span class="dot receiver" style="width:8px;height:8px;border-radius:50%"></span>
-                  ${receivers} receiver${receivers > 1 ? 's' : ''}
-                </span>
+              <div class="room-title">${esc(label)}</div>
+              <div class="room-counts">
+                <span class="count count-camera">${senders} camera${senders === 1 ? '' : 's'}</span>
+                <span class="count count-viewer">${receivers} viewer${receivers === 1 ? '' : 's'}</span>
               </div>
             </div>
+            ${label !== String(roomId) ? `<div class="room-id mono" title="${esc(roomId)}">${esc(roomId)}</div>` : ''}
             <div class="bubbles"></div>
-            <div class="room-foot">
-              ${senders === 0 ? `<span class="warnline">⚠ No sender in this room</span>` : `<span></span>`}
-              <span>${members.length} participant${members.length > 1 ? 's' : ''}</span>
-            </div>
+            ${senders === 0 ? `<div class="warnline">No camera connected</div>` : ''}
           `;
           const bubbles = card.querySelector('.bubbles');
           for (const m of members) {
-            const role = (m.role || '').toLowerCase() === 'sender' ? 'sender' : 'receiver';
-            const node = document.createElement('div');
-            node.className = `node ${role}`;
-            node.innerHTML = `
-              <span class="badge-role" title="${role === 'sender' ? 'Sender' : 'Receiver'}">${role === 'sender' ? 'S' : 'R'}</span>
-              <span class="mono" title="${esc(m.id || '')}">${esc(shortId(m.id))}</span>
-            `;
-            node.addEventListener('click', () => {
-              if (!m.id) return;
-              navigator.clipboard?.writeText(m.id);
-            }, { passive: true });
+            const isCam = (m.role || '').toLowerCase() === 'sender';
+            const node = document.createElement('button');
+            node.type = 'button';
+            node.className = `node ${isCam ? 'sender' : 'receiver'}`;
+            node.title = 'Copy device ID: ' + (m.id || '');
+            node.innerHTML = `<span class="node-role">${isCam ? 'Camera' : 'Viewer'}</span><span class="mono node-id">${esc(shortId(m.id))}</span>`;
+            node.addEventListener('click', async () => {
+              if (!m.id || !navigator.clipboard) return;
+              try { await navigator.clipboard.writeText(m.id); const t = node.querySelector('.node-id'); const old = t.textContent; t.textContent = 'Copied'; setTimeout(() => { t.textContent = old; }, 1200); } catch {}
+            });
             bubbles.appendChild(node);
           }
 
@@ -1507,7 +1182,7 @@
           lastFetchOk = true;
 
           if (autoToggle.checked) {
-            statusMsg.textContent = 'Auto refresh ON (' + autoIntervalSec + 's).';
+            statusMsg.textContent = '';
           } else {
             statusMsg.textContent = 'Auto refresh OFF – manual updates only.';
           }
@@ -1530,7 +1205,7 @@
       function startAuto() {
         clearInterval(timer);
         if (autoToggle.checked) {
-          statusMsg.textContent = 'Auto refresh ON (' + autoIntervalSec + 's).';
+          statusMsg.textContent = '';
           timer = setInterval(fetchAndRender, autoIntervalSec * 1000);
         } else {
           statusMsg.textContent = 'Auto refresh OFF – data may be out of date.';
@@ -1585,27 +1260,7 @@
         updateLogSizeLabel();
       });
 
-      btnApply.addEventListener('click', () => {
-        try {
-          const json = JSON.parse(pasteArea.value || '{}');
-          render(json);
-          statusMsg.textContent = 'Rendered pasted JSON (local preview).';
-          lastUpdated.textContent = fmtTime();
-        } catch (e) {
-          statusMsg.textContent = 'Could not parse pasted JSON.';
-        }
-      });
 
-      btnSample.addEventListener('click', () => {
-        pasteArea.value = JSON.stringify({
-          "5":[
-            {"id":"72be92bf-1ef8-45b8-8a1c-c36a15c51810","role":"sender"},
-            {"id":"65c8b029-e59e-4ea7-b649-f4a1df770bb4","role":"receiver"},
-            {"id":"35bc66fe-0786-42ce-a805-58ad63c62752","role":"receiver"}
-          ],
-          "6":[{"id":"6599ebc7-db0c-4701-bf7a-d80599e8575b","role":"receiver"}]
-        }, null, 2);
-      });
 
       btnExport.addEventListener('click', () => {
         if (!csvLog.length) {
