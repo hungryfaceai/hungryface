@@ -1,18 +1,27 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-GB">
 <head>
   <meta charset="utf-8" />
   <title>Naptio | Privacy-first AI Baby Monitor (no sign-up, no cloud video)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="description" content="Turn two devices into a private baby monitor. Local connection, on-device AI for cry & motion alerts. No sign-up, no cloud video.">
+  <meta name="description" content="Watch your baby from your phone, privately. Two phones you already own become a baby monitor with smart alerts. No cloud video, no account. Free.">
   <link rel="manifest" href="/hungryface/manifest.webmanifest">
   <link rel="icon" href="/hungryface/pwa/icons/favicon-196.png" sizes="196x196">
   <link rel="apple-touch-icon" href="/hungryface/pwa/icons/apple-icon-180.png">
-  <meta name="theme-color" content="#0b0b0f">
+  <meta name="theme-color" content="#000000">
   <!-- iOS PWA metas -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Naptio">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <!-- Link previews (WhatsApp, iMessage, social) -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Naptio">
+  <meta property="og:url" content="https://hungryfaceai.github.io/hungryface/home/">
+  <meta property="og:title" content="Naptio · Watch your baby, privately">
+  <meta property="og:description" content="Two phones you already own. Smart alerts. No cloud video. Free.">
+  <meta property="og:image" content="https://hungryfaceai.github.io/hungryface/pwa/icons/manifest-icon-512.maskable.png">
+  <meta name="twitter:card" content="summary">
+  <link rel="canonical" href="https://hungryfaceai.github.io/hungryface/home/">
 
   <!-- iOS launch splash screens -->
   <!-- iPhone 14 / 13 / 12 / 12 Pro – 1170 × 2532 px (3x) -->
@@ -53,427 +62,231 @@
 
   <link rel="stylesheet" href="/hungryface/shared/tokens.css">
   <style>
-    :root { color-scheme: dark; }
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--nt-bg, #000); color: var(--nt-text, #fff);
+  font-family: var(--nt-font, -apple-system, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; overflow-x: hidden; }
+img { max-width: 100%; display: block; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--nt-accent, #7aa2ff); outline-offset: 3px; border-radius: 6px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.skip { position: absolute; left: 12px; top: -60px; z-index: 50; background: #fff; color: #000; padding: 10px 14px; border-radius: 10px; font-weight: 600; text-decoration: none; }
+.skip:focus { top: 12px; }
 
-    html, body {
-      height: 100%;
-      margin: 0; background: var(--nt-bg, #000); color: var(--nt-text, #fff);
-      font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-    }
+/* Header */
+.site-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px;
+  max-width: 1120px; margin: 0 auto; padding-top: calc(12px + env(safe-area-inset-top)); }
+.brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; text-decoration: none; min-height: 44px; }
+.brand svg { width: 28px; height: 28px; }
+.header-links { display: flex; align-items: center; gap: 4px; }
+.header-links a, .header-links button { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; border-radius: 10px;
+  font: inherit; font-size: 15px; color: var(--nt-text-2, #ddd); text-decoration: none; background: none; border: 0; cursor: pointer; }
+.header-links a:hover, .header-links button:hover { background: var(--nt-surface-2, #141414); color: #fff; }
+@media (max-width: 480px) { .header-links .hide-xs { display: none; } }
+.header-links a, .header-links button { white-space: nowrap; }
+body.is-paired .first-time-inline { display: none !important; }
 
-    a { color: var(--nt-text, #fff); text-decoration: none; opacity: 0.9; }
-    a:hover, a:focus { text-decoration: underline; opacity: 1; }
+/* Buttons (same as the app's dialogs) */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; padding: 14px 22px;
+  border-radius: var(--nt-radius, 10px); font: inherit; font-size: 17px; font-weight: 600; text-decoration: none; cursor: pointer;
+  background: var(--nt-surface-2, #141414); color: var(--nt-text, #fff); border: 1px solid var(--nt-border-strong, #2a2a2a); }
+.btn:hover { background: var(--nt-surface-3, #1a1a1a); }
+.btn-primary { background: #fff; color: #000; border-color: #fff; }
+.btn-primary:hover { background: #e6e6e6; }
+.btn svg { width: 20px; height: 20px; flex: 0 0 auto; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; }
+@media (max-width: 480px) { .actions .btn { flex: 1 1 100%; } }
 
-    /* Don't underline specific links on hover/focus */
-    .no-underline,
-    .no-underline:hover,
-    .no-underline:focus,
-    .btn-pill,
-    .btn-pill:hover,
-    .btn-pill:focus { text-decoration: none; }
+/* Shared bits */
+.eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--nt-text-2, #ddd);
+  background: var(--nt-surface, #111); border: 1px solid var(--nt-border, #222); border-radius: 999px; padding: 6px 12px; }
+.eyebrow .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--nt-ok, #22c55e); }
+.muted { color: var(--nt-text-muted, #aaa); }
+.safety { font-size: 15px; line-height: 1.5; color: var(--nt-text-2, #ddd); background: #17100f; border: 1px solid #30211b;
+  border-radius: 12px; padding: 12px 14px; }
+.safety strong { color: #fff; }
+.phone { border-radius: 28px; border: 1px solid #2a2a2a; background: #0b0b0b; padding: 8px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+.phone img { border-radius: 20px; width: 100%; height: auto; }
+/* First visit vs paired device. !important: page layouts (grid/flex) must not re-show the hidden block. */
+body:not(.is-paired) .returning { display: none !important; }
+body.is-paired .first-time { display: none !important; }
+.stores { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.stores a { display: inline-flex; min-height: 48px; align-items: center; }
+.stores img { height: 48px; width: auto; }
 
-    /* Visually hidden but accessible text */
-    .sr-only {
-      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
-    }
+/* Footer */
+.site-footer { max-width: 1120px; margin: 0 auto; padding: 28px 16px calc(28px + env(safe-area-inset-bottom));
+  display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; justify-content: space-between;
+  border-top: 1px solid #161616; color: var(--nt-text-muted, #aaa); font-size: 15px; }
+.site-footer nav { display: flex; flex-wrap: wrap; gap: 4px; }
+.site-footer nav a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 10px; text-decoration: none; color: var(--nt-text-2, #ddd); border-radius: 8px; }
+.site-footer nav a:hover { background: var(--nt-surface-2, #141414); }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 
-    /* Utility: hide but keep in DOM for later */
-    .is-hidden { display: none !important; }
+/* ---- Paired screen: big, calm, one-tap ---- */
+.role-btn { display: grid; grid-template-columns: 56px 1fr auto; align-items: center; gap: 16px; text-decoration: none;
+  min-height: 96px; padding: 18px 20px; border-radius: 20px; border: 1px solid var(--nt-border-strong, #2a2a2a);
+  background: var(--nt-surface, #111); color: #fff; }
+.role-btn:hover { background: var(--nt-surface-3, #1a1a1a); }
+.role-btn.is-main { background: #fff; color: #000; border-color: #fff; }
+.role-btn.is-main:hover { background: #e6e6e6; }
+.role-btn .ico { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; background: var(--nt-surface-3, #1a1a1a); }
+.role-btn.is-main .ico { background: #000; color: #fff; }
+.role-btn .ico svg { width: 28px; height: 28px; }
+.role-btn strong { display: block; font-size: 22px; line-height: 1.2; }
+.role-btn .sub { display: block; font-size: 16px; margin-top: 4px; color: var(--nt-text-muted, #aaa); }
+.role-btn.is-main .sub { color: #333; }
+.role-btn .chev { font-size: 26px; opacity: .55; }
+.quiet-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 6px; margin: 0; padding: 0; list-style: none; }
+.quiet-links a, .quiet-links button { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 10px; font: inherit;
+  font-size: 16px; color: var(--nt-text-2, #ddd); background: none; border: 0; cursor: pointer; text-decoration: none; }
+.quiet-links a:hover, .quiet-links button:hover { background: var(--nt-surface-2, #141414); color: #fff; }
+.paired-status { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; color: var(--nt-text-2, #ddd); }
+.paired-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--nt-ok, #22c55e); }
 
-    .page { min-height: 100%; display: flex; flex-direction: column; }
+    /* ================= Home page: first visit ================= */
 
-    header {
-      display: grid;
-      grid-template-columns: 1fr auto 1fr; /* left | center | right (wide screens) */
-      align-items: center;
-      padding: 14px 20px;
-      gap: 12px;
-    }
-    /* Safe-area insets on the sides */
-    header { padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); }
-
-    .nav-left, .nav-center, .nav-right {
-      display: flex; gap: 18px; align-items: center;
-      font-size: 0.95rem; white-space: nowrap;
-    }
-    .nav-left  { justify-self: start; }
-    .nav-center{ justify-self: center; gap: 12px; flex-wrap: nowrap; min-width: 0; }
-    .nav-right { justify-self: end; display:flex; gap:12px; flex-wrap: nowrap; }
-
-    /* Home icon link (uses shared sprite) */
-    .home-link { display: inline-flex; align-items: center; line-height: 1; }
-    .home-link:hover, .home-link:focus { text-decoration: none; }
-
-    /* Reusable icon sizing */
-    .icon { width: var(--icon-size, 24px); height: var(--icon-size, 24px); display: block; }
-    .icon-home { --icon-size: 26px; } /* Bigger Home icon */
-
-    /* Center buttons (modes) */
-    .nav-center a {
-      color: #000; background: #fff; border-radius: 9999px; border: 1px solid #fff;
-      opacity: 1; font-weight: 600; line-height: 1; display: inline-block; white-space: nowrap;
-      font-size: clamp(0.78rem, 2.6vw, 0.95rem);
-      padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
-    }
-    .nav-center a:hover { background: #eaeaea; }
-
-    /* Prevent underline on Camera / Viewer buttons */
-    .nav-center a:hover,
-    .nav-center a:focus { text-decoration: none; }
-    .nav-center a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
-
-    /* Right-side pill buttons (pair/share) */
-    .btn-pill {
-      color: var(--nt-text, #fff); background: var(--nt-bg, #000); border: 1px solid #fff; border-radius: 9999px;
-      font-weight: 600; line-height: 1; display: inline-block; opacity: 1; white-space: nowrap;
-      font-size: clamp(0.78rem, 2.6vw, 0.95rem);
-      padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
-      transition: background-color .15s ease, box-shadow .15s ease;
-    }
-    .btn-pill:hover,
-    .btn-pill:focus {
-      background: var(--nt-surface-2, #141414);
-      border-color: #e6e6e6;
-      box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16);
-    }
-    .btn-pill:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
-
-    main { flex: 1; display: grid; place-items: center; padding: 24px; text-align: center; }
-    .hero { max-width: 900px; }
-    .brand {
-      font-size: clamp(2.5rem, 6vw, 5rem);
-      line-height: 1.05; letter-spacing: -0.012em; margin: 0 0 12px;
-      font-weight: 900;
-      text-rendering: optimizeLegibility;
-      -webkit-font-smoothing: antialiased;
-    }
-    .tagline { font-size: clamp(1.05rem, 2.5vw, 1.5rem); margin: 0 0 12px; opacity: 0.95; }
-
-    /* ---- Free badge under tagline ---- */
-    .badge-free {
-      display: inline-flex; align-items: center; gap: 8px;
-      margin-top: 8px; padding: 6px 10px;
-      border-radius: 9999px; border: 1px solid #242424;
-      background: #0a0a0a; color: #d9d9d9;
-      font-size: 0.85rem; opacity: 0.95;
-    }
-    .badge-free .dot {
-      width: 6px; height: 6px; border-radius: 50%; background: #5cf078;
-    }
-    @media (max-width:560px){ .badge-free{ font-size:.9rem; } }
-
-    .subcopy { font-size: clamp(0.98rem, 2vw, 1.15rem); margin: 0 auto; opacity: 0.9; }
-
-    /* Safety note (smaller, centered) */
-    .safety-note { font-size: 0.8rem; opacity: 0.8; margin-top: 24px; text-align: center; }
-
-    /* Store badges row (App Store / Google Play) */
-    .store-badges {
-      margin-top: 20px;
-      display: flex;
-      justify-content: center;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-
-    .store-badge {
-      display: inline-flex;
-      align-items: center;
-      padding: 8px 10px;                /* keeps tap target ≈44px high even with small image */
-      border-radius: 9999px;            /* subtle pill hit area */
-    }
-
-    .store-badge img {
-      display: block;
-      height: clamp(20px, 2.6vw, 26px); /* smaller, more “secondary” than main CTAs */
-    }
-
-    /* --- HERO CTAs --- */
-    .hero-ctas {
-      display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;
-      margin-top: 16px;
-    }
-    .btn {
-      appearance: none; border: 0; border-radius: 9999px; padding: 12px 16px;
-      font-size: 16px; cursor: pointer; line-height: 1; font-weight: 600;
-    }
-    .btn-primary {
-      background: #fff; color: #000;
-    }
-    .btn-primary:focus-visible { outline: 2px solid var(--nt-accent, #7aa2ff); outline-offset: 2px; }
-    .btn-ghost {
-      background: rgba(255,255,255,0.12); color: var(--nt-text, #fff); border: 1px solid rgba(255,255,255,0.25);
-    }
-    .btn-ghost:focus-visible { outline: 2px solid var(--nt-accent, #7aa2ff); outline-offset: 2px; }
-
-    /* Hero "Pair devices" should mirror Camera (no underline + light grey on hover) */
-    .hero-ctas .btn {
-      display: inline-block;                  /* matches .nav-center a layout */
-      transition: background-color .15s ease; /* subtle feedback */
-    }
-    .hero-ctas .btn,
-    .hero-ctas .btn:hover,
-    .hero-ctas .btn:focus { text-decoration: none; }
-    
-    .hero-ctas .btn-primary { 
-      border: 1px solid #fff;                 /* optional: visually match Camera pill */
-    }
-    .hero-ctas .btn-primary:hover {
-      background: #eaeaea;                    /* same grey as Camera pill */
-      color: #000;
-    }
-    
-    /* Footer */
-    footer {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 16px 20px; font-size: 0.9rem; opacity: 0.85;
-    }
-    /* Safe-area insets on the sides */
-    footer { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
-
-    .footer-note {
-      font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-      font-size: 0.75rem; color: var(--nt-text, #fff); opacity: 0.85; text-decoration: none;
-    }
-    .footer-note:hover, .footer-note:focus { text-decoration: none; opacity: 0.85; }
-
-    /* Dedication (footer) */
-    .dedication{ opacity:.65; font-size:.85em; margin-left:.5rem; letter-spacing:.2px; user-select:none; }
-    @media (hover:hover){ .dedication:hover{ opacity:.9; } }
-
-    /* ---------------- Small screens: force modes BELOW pair/share + make modes bigger ---------------- */
-    @media (max-width: 560px) {
-      header {
-        grid-template-columns: 1fr 1fr;
-        grid-auto-rows: minmax(0, auto);
-        row-gap: 10px;
-      }
-      .nav-left  { grid-column: 1; grid-row: 1; justify-self: start; }
-      .nav-right { grid-column: 2; grid-row: 1; justify-self: end; gap: 10px; }
-      .nav-center{
-        grid-column: 1 / -1; /* span both columns */
-        grid-row: 2;         /* second row */
-        justify-content: center;
-        gap: 12px;
-        width: 100%;
-      }
-      /* Make center (mode) buttons larger than right-side pills on small screens */
-      .nav-center a {
-        font-size: clamp(0.92rem, 3.8vw, 1.12rem);
-        padding: clamp(8px, 2.2vw, 12px) clamp(14px, 4.5vw, 18px);
-      }
-      /* Keep right-side pills compact so they don't collide */
-      .btn-pill {
-        font-size: clamp(0.78rem, 3.0vw, 0.92rem);
-        padding: clamp(6px, 1.8vw, 8px) clamp(10px, 3.0vw, 14px);
-      }
-    }
-
-    /* iPhone 12 mini (~360px): spacing tweaks */
-    @media (max-width: 380px) {
-      .nav-left a, .nav-right a { font-size: 0.82rem; }
-      .nav-left, .nav-right { gap: 10px; }
-      .nav-center { gap: 10px; }
-      header { padding: 12px 14px; }
-    }
-
-
-    /* ---- Scroll-aware header Pair CTA ---- */
-    .header-pair { display: none; }
-    .header-pair.is-sticky { display: inline-block; }
-
-    /* Reduced-motion: neutralize transitions/animations */
-    @media (prefers-reduced-motion: reduce){
-      .btn-pill, .yt-modal, .yt-player, .hero-ctas .btn { transition: none !important; animation: none !important; }
-      html:focus-within { scroll-behavior: auto; }
-    }
-
-    @supports (padding-top: env(safe-area-inset-top)) {
-      header {
-        /* push the nav below the notch/status bar, but keep your original 14px on non-notch devices */
-        padding-top: max(14px, env(safe-area-inset-top));
-      }
-      footer {
-        /* keep footer clear of the home indicator */
-        padding-bottom: max(16px, env(safe-area-inset-bottom));
-      }
-    }
-
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+    /* ---------- First visit ---------- */
+    .hero { display: grid; gap: 22px; padding: 16px 0 36px; align-items: center; }
+    @media (min-width: 860px) { .hero { grid-template-columns: 1fr 1fr; gap: 48px; padding: 40px 0 56px; } }
+    h1 { font-size: clamp(34px, 8vw, 54px); line-height: 1.06; letter-spacing: -.02em; margin: 0 0 12px; }
+    .lead { font-size: 19px; line-height: 1.5; color: var(--nt-text-2, #ddd); margin: 0 0 20px; }
+    .facts { list-style: none; margin: 0 0 22px; padding: 0; display: grid; gap: 10px; }
+    .facts li { display: grid; grid-template-columns: 40px 1fr; gap: 12px; align-items: center; font-size: 17px; line-height: 1.4; color: var(--nt-text-2, #ddd); }
+    .facts li strong { color: #fff; }
+    .facts .ico { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--nt-surface-3, #1a1a1a); }
+    .facts .ico svg { width: 20px; height: 20px; }
+    .shot { justify-self: center; width: min(260px, 64vw); }
+    @media (max-width: 859px) { .shot { order: 2; } }
+    .quiet { margin: 14px 0 0; font-size: 15px; color: var(--nt-text-muted, #aaa); }
+    .bottom { padding: 32px 0 24px; border-top: 1px solid #141414; text-align: center; }
+    .bottom .stores { justify-content: center; }
+    .safety { max-width: 620px; margin: 22px auto 0; text-align: left; }
+    /* ---------- Paired ---------- */
+    .paired { max-width: 520px; margin: 0 auto; padding: 12px 16px 32px; min-height: calc(100svh - 160px); display: flex; flex-direction: column; }
+    .paired h1 { font-size: 26px; margin: 8px 0 4px; }
+    .paired .paired-status { margin-bottom: 22px; }
+    .paired .roles { display: grid; gap: 12px; }
+    .paired .quiet-links { margin-top: auto; padding-top: 28px; }
   </style>
-    <script defer src="https://cloud.umami.is/script.js" data-website-id="e5feef4a-8ebd-4094-b6ff-36bdc4512e2e" data-exclude-search="true" data-exclude-hash="true" data-domains="hungryfaceai.github.io"></script>
+  <script defer src="https://cloud.umami.is/script.js" data-website-id="e5feef4a-8ebd-4094-b6ff-36bdc4512e2e" data-exclude-search="true" data-exclude-hash="true" data-domains="hungryfaceai.github.io"></script>
+  <script src="/hungryface/shared/invite.js" defer></script>
 </head>
 <body>
-  <div class="page">
-    <header>
-      <nav class="nav-left" aria-label="Primary">
-        <a href="https://hungryfaceai.github.io/hungryface/home" class="home-link" aria-label="Home" title="Home">
-          <svg class="icon icon-home" aria-hidden="true" focusable="false">
-            <use href="/hungryface/assets/icons.svg#icon-cradle-ai" xlink:href="/hungryface/assets/icons.svg#icon-cradle-ai"></use>
-          </svg>
-          <span class="sr-only">Home</span>
-        </a>
-        <a class="no-underline" href="https://hungryfaceai.github.io/hungryface/about">About</a>
-      </nav>
+  <a class="skip" href="#main">Skip to content</a>
 
-      <nav class="nav-center" aria-label="Modes">
-        <a href="https://hungryfaceai.github.io/hungryface/webrtc/sender/secure/" aria-label="Camera (Baby) — sender">
-          Camera (Baby)
-        </a>
-        <a href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/video/secure/" aria-label="Viewer (Parent) — receiver">
-          Viewer (Parent)
-        </a>
-      </nav>
+  <header class="site-header">
+    <a class="brand" href="/hungryface/home/" aria-label="Naptio home"><svg aria-hidden="true"><use href="/hungryface/assets/icons.svg#icon-cradle-ai"></use></svg>Naptio</a>
+    <nav class="header-links" aria-label="Main">
+      <!-- New visitors only; paired phones have these links under the Viewer / Camera buttons. -->
+      <a class="hide-xs first-time-inline" href="/hungryface/webrtc/receiver/help/#setup">How it works</a>
+      <a class="first-time-inline" href="/hungryface/about/">About</a>
+      <button class="first-time-inline" type="button" data-naptio-invite data-invite-title="Share Naptio" aria-haspopup="dialog">Share</button>
+    </nav>
+  </header>
 
-      <nav class="nav-right" aria-label="Quick actions">
-
-        <a class="btn-pill header-pair" href="https://hungryfaceai.github.io/hungryface/webrtc/pairpsk/" aria-label="Pair devices — quick pairing">
-          Pair devices
-        </a>
-
-        <a id="menu-invite" class="btn-pill" href="#" aria-haspopup="dialog" data-invite-title="Share Naptio" role="button">
-          Share
-        </a>
-      </nav>
-    </header>
-
-    <main>
-      <section class="hero" aria-labelledby="brand">
-        <h1 id="brand" class="brand">Naptio</h1>
-        <p class="tagline">AI that lets you switch off.</p>
-
-        <!-- NEW: Free badge -->
-        <p class="badge-free" aria-label="Free to use, no sign-up required">
-          <span class="dot" aria-hidden="true"></span>
-          Free to use, no sign-up required
-        </p>
-
-        <p class="subcopy">
-          Turn two devices into a secure baby monitor.<br>
-          On-device AI spots cues and motion, so you get timely, private alerts.<br>
-          No cloud video, no extra hardware, no login.
-        </p>
-
-        <!-- HERO CTAs -->
-        <div class="hero-ctas" role="group" aria-label="Get started">
-          <a class="btn btn-primary" href="https://hungryfaceai.github.io/hungryface/webrtc/pairpsk/">Pair devices</a>
-          <a class="btn btn-ghost" href="/hungryface/home/demo/" aria-label="Watch demo">
-            ▶ Watch demo
-          </a>
-        </div>
-
-        <!-- Helper text under CTAs -->
-        <p class="safety-note" style="margin-top:10px;opacity:.85">
-          First time? Tap <strong>Pair devices</strong>. Already paired? Open <strong>Camera</strong> or <strong>Viewer</strong>.
-        </p>
-
-        <p class="safety-note">
-          Naptio provides informational insights and is not a medical device. <br>
-          Always supervise your baby.
-        </p>
-
-        <!-- Official store badges (below safety note) -->
-        <div id="store-badges" class="store-badges" aria-label="Download Naptio">
-        <!-- Apple App Store badge -->
-        <a class="store-badge"
-           href="https://apps.apple.com/us/app/naptio/id6756505573"
-           target="_blank" rel="noopener"
-           aria-label="Download Naptio on the App Store">
-          <img src="/hungryface/assets/badges/app-store-badge.svg"
-               alt="Download on the App Store">
-        </a>
-
-          <!-- Google Play badge -->
-          <a class="store-badge"
-             href="https://play.google.com/store/apps/details?id=io.github.hungryfaceai.twa"
-             aria-label="Get it on Google Play">
-            <img src="/hungryface/assets/badges/google-play-badge.svg"
-                 alt="Get it on Google Play">
-          </a>
+  <main id="main">
+    <!-- ================= FIRST VISIT ================= -->
+    <div class="first-time">
+      <div class="wrap">
+        <section class="hero" aria-labelledby="h">
+          <div>
+            <h1 id="h">Watch your baby, privately</h1>
+            <p class="lead">Two phones you already own become a baby monitor with smart alerts.</p>
+            <ul class="facts">
+              <li><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg></span>
+                <span><strong>Private.</strong> Video goes phone to phone. No cloud, no account.</span></li>
+              <li><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg></span>
+                <span><strong>Smart alerts.</strong> Crying, movement, leaving the cot, face-down.</span></li>
+              <li><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+                <span><strong>Ready in 5 minutes.</strong></span></li>
+            </ul>
+            <div class="actions"><a class="btn btn-primary" href="/hungryface/webrtc/pairpsk/">Get started, it’s free</a><a class="btn" href="/hungryface/home/demo/">Watch the demo</a></div>
+            <p class="quiet">Works in your browser on iPhone, Android and tablets.</p>
+          </div>
+          <div class="shot"><div class="phone"><img src="/hungryface/home/img/camera-720.webp" srcset="/hungryface/home/img/camera-360.webp 360w, /hungryface/home/img/camera-720.webp 720w" sizes="(min-width: 860px) 260px, 64vw" width="720" height="1278" alt="The Naptio Camera screen showing a baby, with face and body tracking drawn over the video" fetchpriority="high"></div></div>
+        </section>
+      </div>
+      <section class="bottom" aria-label="Get Naptio">
+        <div class="wrap">
+          <div class="stores" aria-label="Also in app stores">
+            <a href="https://apps.apple.com/us/app/naptio/id6756505573" target="_blank" rel="noopener"><img src="/hungryface/assets/badges/app-store-badge.svg" alt="Download on the App Store" width="144" height="48"></a>
+            <a href="https://play.google.com/store/apps/details?id=io.github.hungryfaceai.twa" target="_blank" rel="noopener"><img src="/hungryface/assets/badges/google-play-badge.svg" alt="Get it on Google Play" width="162" height="48"></a>
+          </div>
+          <p class="safety" role="note"><strong>Naptio is not a medical device.</strong> Always follow safe-sleep advice and keep an adult responsible for your baby.</p>
         </div>
       </section>
-    </main>
+    </div>
 
-    <footer role="contentinfo">
-      <span class="footer-left footer-note">© 2026 Naptio <span class="dedication" aria-label="Dedicated to Émile">• For Émile</span></span>
-      <a class="footer-right footer-note" href="https://hungryfaceai.github.io/hungryface/legal">Legal</a>
-    </footer>
-  </div>
+    <!-- ================= PAIRED ================= -->
+    <div class="returning">
+      <div class="paired">
+        <h1>What is this device?</h1>
+        <p class="paired-status"><span class="dot" aria-hidden="true"></span>Paired · Room <b data-room-name></b></p>
+        <div class="roles" data-role-slot>
+          <a class="role-btn is-main" href="/hungryface/webrtc/receiver/video/secure/" data-needs-pairing data-role="viewer">
+            <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/></svg></span>
+            <span><strong>Viewer</strong><span class="sub">Watch your baby</span></span><span class="chev" aria-hidden="true">›</span></a>
+          <a class="role-btn" href="/hungryface/webrtc/sender/secure/" data-needs-pairing data-role="camera">
+            <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 8h3l2-3h8l2 3h3v11H3z"/><circle cx="12" cy="13" r="3.5"/></svg></span>
+            <span><strong>Camera</strong><span class="sub">This device stays with your baby</span></span><span class="chev" aria-hidden="true">›</span></a>
+        </div>
+        <ul class="quiet-links" aria-label="More">
+          <li><a href="/hungryface/webrtc/receiver/help/#setup">How it works</a></li>
+          <li><a href="/hungryface/about/">About</a></li>
+          <li><button type="button" data-naptio-invite data-invite-title="Share Naptio" aria-haspopup="dialog">Share</button></li>
+          <li><a href="/hungryface/webrtc/pairpsk/">Pair another device</a></li>
+        </ul>
+      </div>
+    </div>
+  </main>
 
-  <!-- "Share" window: same as the menu's "Invite a friend" (QR drawn on this device) -->
-  <script src="/hungryface/shared/invite.js" defer></script>
+  <footer class="site-footer first-time">
+    <span>© 2026 Naptio · For Émile</span>
+    <nav aria-label="Footer"><a href="/hungryface/contact/">Contact us</a><a href="/hungryface/legal/">Legal &amp; privacy</a></nav>
+  </footer>
 
-  <!-- Scroll-aware header Pair CTA (hide over hero, show after scroll) -->
-  <script>
-    (() => {
-      const hero = document.querySelector('.hero');
-      const headerPair = document.querySelector('.header-pair');
-      if (!hero || !headerPair || !('IntersectionObserver' in window)) return;
-
-      const io = new IntersectionObserver(([entry]) => {
-        const heroInView = entry.isIntersecting && entry.intersectionRatio > 0;
-        headerPair.classList.toggle('is-sticky', !heroInView);
-      }, { threshold: 0.2 });
-
-      io.observe(hero);
-    })();
-  </script>
-
-  <!-- Set aria-current on About when that page is active (header reused across pages) -->
-  <script>
-    (() => {
-      const aboutLink = document.querySelector('nav.nav-left a[href*="/about"]');
-      if (!aboutLink) return;
-      try {
-        const loc = location.pathname.replace(/\/+$/, '');
-        if (loc.endsWith('/about')) aboutLink.setAttribute('aria-current','page');
-      } catch {}
-    })();
-  </script>
-
+  <!-- First visit vs paired device; remembers whether this device is usually the Viewer or the Camera. -->
   <script type="module">
-    import { installLandingPairGate } from '/hungryface/home/landing-pair-gate.js';
-    installLandingPairGate({
-      cameraSelector: 'nav.nav-center a[href*="/webrtc/sender/secure/"]',
-      viewerSelector: 'nav.nav-center a[href*="/webrtc/receiver/video/secure/"]',
-      pairRoute: '/hungryface/webrtc/pairpsk/',
+    import { listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
+    let rooms = [];
+    try { rooms = listValidPskRooms(); } catch {}
+    const paired = rooms.length > 0;
+    document.body.classList.toggle('is-paired', paired);
+    // Unpaired devices never reach Camera/Viewer without pairing first.
+    if (!paired) document.querySelectorAll('a[data-needs-pairing]').forEach(a => { a.href = '/hungryface/webrtc/pairpsk/'; });
+    document.querySelectorAll('[data-room-name]').forEach(el => { el.textContent = rooms[0] || ''; });
+
+    const ROLE_KEY = 'naptio:homeRole';
+    let role = null; try { role = localStorage.getItem(ROLE_KEY); } catch {}
+    document.querySelectorAll('a[data-role]').forEach(a => a.addEventListener('click', () => {
+      try { localStorage.setItem(ROLE_KEY, a.dataset.role); } catch {}
+    }));
+    if (role === 'camera') document.querySelectorAll('[data-role-slot]').forEach(slot => {
+      const cam = slot.querySelector('a[data-role="camera"]'), view = slot.querySelector('a[data-role="viewer"]');
+      if (!cam || !view) return;
+      slot.insertBefore(cam, view); cam.classList.add('is-main'); view.classList.remove('is-main');
     });
   </script>
 
-
+  <!-- Installed app (home-screen web app or store app): hide the store badges. -->
   <script>
-  (() => {
-    const el = document.getElementById('store-badges');
-    if (!el) return;
-  
-    const Cap = window.Capacitor;
-    const isNative = !!Cap?.isNativePlatform?.();
-    const platform = Cap?.getPlatform?.(); // 'ios' | 'android' | 'web'
-  
-    // In the App Store iOS build: remove the entire store row.
-    if (isNative && platform === 'ios') {
-      el.remove();
-      return;
-    }
-  
-    // Optional polish: on iOS Safari (web), hide Google Play badge
-    /*const ua = navigator.userAgent || "";
-    const isIOSWeb = /iPhone|iPad|iPod/i.test(ua) && !isNative;
-    if (isIOSWeb) {
-      el.querySelector('a[href*="play.google.com"]')?.remove();
-    }*/
-  })();
+    (() => {
+      const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true || !!window.Capacitor?.isNativePlatform?.();
+      if (standalone) document.querySelectorAll('.stores').forEach(el => el.remove());
+    })();
   </script>
 
-<script type="module">
-  import { installReviewNudge } from '/hungryface/home/review-nudge.js';
-
-  installReviewNudge({
-    // Optional overrides; defaults already match your current store links
-    appStoreUrl: 'https://apps.apple.com/us/app/naptio/id6756505573',
-    playStoreUrl: 'https://play.google.com/store/apps/details?id=io.github.hungryfaceai.twa',
-  });
-</script>
-  
+  <!-- Review prompt (native apps only), shown on Home when returning from Camera/Viewer. -->
+  <script type="module">
+    import { installReviewNudge } from '/hungryface/home/review-nudge.js';
+    installReviewNudge({
+      appStoreUrl: 'https://apps.apple.com/us/app/naptio/id6756505573',
+      playStoreUrl: 'https://play.google.com/store/apps/details?id=io.github.hungryfaceai.twa',
+      insertAfterSelector: '.roles',   // under the Viewer / Camera buttons (paired screen)
+    });
+  </script>
 </body>
 </html>

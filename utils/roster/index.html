@@ -63,6 +63,8 @@
     .toolbar { background: var(--nt-surface, #111); border: 1px solid var(--ring); border-radius: 14px; padding: 12px;
                display: flex; flex-direction: column; gap: 12px; }
     .toolbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+    .btn-icon { display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none;
+                box-sizing: border-box; height: 48px; min-height: 48px; padding: 0 18px; line-height: 1; }
     .switch-label { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; color: var(--nt-text-2, #ddd); cursor: pointer; }
     .switch-label input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--nt-text, #fff); margin: 0; }
     input[type="number"], input[type="url"], input[type="password"] {
@@ -72,8 +74,8 @@
     input:focus { border-color: var(--focus); outline: none; }
     .status { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); margin-left: auto; }
     #status-msg:empty { display: none; }
-    .status-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); flex: 0 0 12px; }
-    .status-dot.live { background: var(--ok); box-shadow: 0 0 0 4px rgba(34,197,94,.15); }
+    .status-dot { width: 16px; height: 16px; border-radius: 50%; background: var(--muted); flex: 0 0 16px; }
+    .status-dot.live { background: var(--ok); box-shadow: 0 0 0 5px rgba(34,197,94,.15); }
     .status-dot.fetching { background: var(--warn); }
     .status-dot.error { background: var(--err); }
 
@@ -204,6 +206,7 @@
       <div class="toolbar" aria-label="Roster controls">
         <div class="toolbar-row admin-only">
           <button id="btn-refresh" type="button" class="btn btn-primary">Refresh</button>
+          <a id="btn-umami" class="btn btn-icon" href="https://cloud.umami.is/" target="_blank" rel="noopener noreferrer" aria-label="Analytics (opens Umami Cloud in a new tab)" title="Umami Cloud analytics"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Analytics</span></a>
           <label class="switch-label">
             <input id="auto" type="checkbox" checked>
             Auto-refresh every
@@ -404,17 +407,21 @@
         }
       }
 
+      // Red roster-change banner: visible for 1 s (never more than 3 s), or until the first tap / click anywhere.
+      // The tap listener is passive and in the capture phase, so it never blocks or changes what was tapped.
+      const BANNER_VISIBLE_MS = 1000;
+      function hideRosterBanner() {
+        clearTimeout(bannerTimer); bannerTimer = null;
+        if (rosterBanner) rosterBanner.style.display = 'none';
+        document.removeEventListener('pointerdown', hideRosterBanner, true);
+      }
       function showRosterBanner(message) {
         if (!rosterBanner) return;
-        if (bannerTimer) {
-          clearTimeout(bannerTimer);
-          bannerTimer = null;
-        }
+        clearTimeout(bannerTimer);
         rosterBanner.textContent = message;
         rosterBanner.style.display = 'block';
-        bannerTimer = setTimeout(() => {
-          rosterBanner.style.display = 'none';
-        }, 10000); // 10s
+        bannerTimer = setTimeout(hideRosterBanner, BANNER_VISIBLE_MS);
+        document.addEventListener('pointerdown', hideRosterBanner, { capture: true, passive: true });
       }
 
       function updateLogSizeLabel() {

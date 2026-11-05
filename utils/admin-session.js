@@ -95,9 +95,12 @@
       fitError();
       errBox.classList.remove('shake'); void errBox.offsetWidth; errBox.classList.add('shake');   // replay on each failure
       clearTimeout(errTimer); errTimer = setTimeout(clearError, ERROR_VISIBLE_MS);              // brief: vanishes after 1 s
+      // ...or straight away on the next tap / click anywhere (passive, capture: never blocks what was tapped)
+      setTimeout(() => { if (!errBox.hidden) document.addEventListener('pointerdown', clearError, { capture: true, passive: true }); }, 0);
     }
     function clearError() {
-      clearTimeout(errTimer);
+      clearTimeout(errTimer); errTimer = null;
+      document.removeEventListener('pointerdown', clearError, true);
       errBox.hidden = true; errText.textContent = '';
       pw.removeAttribute('aria-invalid');
     }
@@ -118,7 +121,7 @@
       const show = (el, yes) => { el.hidden = !yes; el.style.display = yes ? '' : 'none'; };
       show(pw, !on); show(signIn, !on); show(rememberLabel, !on); show(signOut, on);
       if (on) clearError();
-      state.textContent = msg || (on ? 'Signed in until ' + until(session.expiresAt) : '');
+      state.textContent = msg || '';   // no "signed in" text: the Sign out button says it
       scheduleExpiry();
     }
 
