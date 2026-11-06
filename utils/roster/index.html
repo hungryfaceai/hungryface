@@ -192,6 +192,21 @@
     .ra-empty, .ra-error { padding: 24px 12px; text-align: center; color: var(--muted); line-height: 1.6; }
     .ra-error { color: #fecaca; }
     .ra-foot { margin: 10px 2px 0; font-size: 14px; color: var(--muted); }
+    /* Map */
+    .map-body { display: flex; flex-direction: column; }
+    .map-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+    .map-controls .switch-label { min-height: 44px; }
+    .map-key { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; color: var(--nt-text-2, #ddd); }
+    .map-key span:last-child { font-variant-numeric: tabular-nums; color: var(--nt-text, #fff); font-weight: 600; }
+    .key-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #000; box-shadow: 0 0 0 1px #fff; }
+    .key-live { background: #22c55e; }
+    .key-past { background: #3b82f6; }
+    .map-help { margin: 8px 0 12px; }
+    .map { width: 100%; height: min(62svh, 560px); min-height: 320px; border-radius: 12px; border: 1px solid var(--ring); background: #0b0b0b; }
+    .leaflet-container { font: inherit; background: #2b2f33; }   /* same tone as the dimmed sea, so empty space blends in */
+    .map-tiles-dark { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.5); }
+    .leaflet-popup-content { font-size: 14px; line-height: 1.45; margin: 10px 12px; }
+    .leaflet-control-attribution { font-size: 12px; }
     /* Phones: one card per room instead of a wide table */
     @media (max-width: 640px) {
       .ra-table-wrap { border: 0; overflow: visible; }
@@ -253,7 +268,9 @@
       <div class="toolbar" aria-label="Roster controls">
         <div class="toolbar-row admin-only">
           <button id="btn-refresh" type="button" class="btn btn-primary">Refresh</button>
-          <a id="btn-umami" class="btn btn-icon" href="https://cloud.umami.is/analytics/eu/websites/e5feef4a-8ebd-4094-b6ff-36bdc4512e2e" target="_blank" rel="noopener noreferrer" aria-label="Analytics (opens Umami Cloud in a new tab)" title="Umami Cloud analytics"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Analytics</span></a>
+          <a id="btn-umami" class="btn btn-icon" href="https://cloud.umami.is/analytics/eu/websites/e5feef4a-8ebd-4094-b6ff-36bdc4512e2e" target="_blank" rel="noopener noreferrer" aria-label="Website analytics (opens Umami Cloud in a new tab)" title="Website visits (Umami Cloud)"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Website analytics</span></a>
+          <button id="btn-room-analytics" type="button" class="btn btn-icon" aria-haspopup="dialog"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15v-3M12 15V9M17 15v-5"/></svg><span>Room analytics</span></button>
+          <button id="btn-map" type="button" class="btn btn-icon" aria-haspopup="dialog"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg><span>Map</span></button>
           <label class="switch-label">
             <input id="auto" type="checkbox" checked>
             Auto-refresh every
@@ -286,36 +303,14 @@
 
       <p class="updated admin-only">Last updated <span id="last-updated">—</span></p>
 
-      <details class="more admin-only">
-        <summary>Logs &amp; analytics</summary>
-        <div class="more-body">
-          <div class="more-row">
-            <label class="switch-label"><input id="log-enabled" type="checkbox" checked> Keep a log of each refresh</label>
-            <label class="switch-label">Up to <input id="log-limit" type="number" min="0.1" step="0.1" value="1" inputmode="decimal" aria-label="Maximum log size in MB"> MB</label>
-          </div>
-          <div class="btn-row" style="margin-bottom:6px">
-            <button id="btn-room-analytics" type="button" class="btn btn-primary">Room analytics</button>
-          </div>
-          <p class="small">Time each room had a Camera and a Viewer connected together, from the server’s full activity history.</p>
-          <h3 class="more-h">This browser’s log</h3>
-          <p class="small">Only covers times when this Roster page was open. Log: <span class="mono" id="log-size">0 MB</span> · <span class="mono" id="log-rows">0</span> rows</p>
-          <div class="btn-row">
-            <button id="btn-log-view" type="button" class="btn">View log</button>
-            <button id="btn-analytics" type="button" class="btn">Log summary</button>
-            <button id="btn-export" type="button" class="btn">Export CSV</button>
-            <button id="btn-log-clear" type="button" class="btn btn-danger">Clear log</button>
-          </div>
-        </div>
-      </details>
-
-      <details class="more admin-only">
-        <summary>Server</summary>
-        <div class="more-body">
-          <label class="field-label" for="endpoint">Rooms address</label>
-          <input id="endpoint" type="url" value="https://signaling-server-f5gu.onrender.com/rooms" spellcheck="false" autocomplete="off">
-          <p class="small">Currently reading: <span class="mono" id="endpoint-view">—</span></p>
-        </div>
-      </details>
+      <!-- Retired controls kept hidden so older code paths stay safe (browser log replaced by the server history). -->
+      <div hidden aria-hidden="true">
+        <input id="log-enabled" type="checkbox"><input id="log-limit" type="number" value="1">
+        <span id="log-size"></span><span id="log-rows"></span><span id="endpoint-view"></span>
+        <input id="endpoint" type="url" value="https://signaling-server-f5gu.onrender.com/rooms">
+        <button id="btn-log-view" type="button"></button><button id="btn-analytics" type="button"></button>
+        <button id="btn-export" type="button"></button><button id="btn-log-clear" type="button"></button>
+      </div>
     </main>
   </div>
 
@@ -344,9 +339,31 @@
           <button type="button" class="seg" data-days="7" aria-pressed="true">7 days</button>
           <button type="button" class="seg" data-days="30" aria-pressed="false">30 days</button>
           <button type="button" class="seg" data-days="90" aria-pressed="false">90 days</button>
+          <button type="button" class="seg" data-days="all" aria-pressed="false">All time</button>
         </div>
-        <p class="ra-help">A <strong>session</strong> is a period when a room has at least one Camera <strong>and</strong> one Viewer connected at the same time. Rooms with only a Camera or only a Viewer are not counted.</p>
+        <p class="ra-help">A <strong>session</strong> is a period when a room has at least one Camera <strong>and</strong> one Viewer connected at the same time. Rooms with only a Camera or only a Viewer are not counted. A short drop-out (a phone locking its screen, Wi-Fi changing) is part of the same session.</p>
         <div id="ra-content" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Map of connections (server history; locations are approximate, from IP addresses) -->
+  <div id="map-viewer" class="log-viewer" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="map-title">
+    <div class="log-viewer-inner ra-inner">
+      <div class="log-viewer-header">
+        <h2 id="map-title" class="ra-title">Map of connections</h2>
+        <button id="btn-map-close" type="button" class="btn">Close</button>
+      </div>
+      <div class="ra-body map-body">
+        <div class="map-controls">
+          <label class="switch-label"><input id="map-past" type="checkbox"> Show past connections</label>
+          <span class="map-key"><span class="key-dot key-live" aria-hidden="true"></span>Active now <span id="map-n-live">0</span></span>
+          <span class="map-key" id="map-key-past" hidden><span class="key-dot key-past" aria-hidden="true"></span>Past <span id="map-n-past">0</span></span>
+        </div>
+        <p class="ra-help map-help">Each line joins a room’s Camera and Viewer. Locations are approximate (city level), worked out on our server from IP addresses.</p>
+        <div id="map" class="map" role="region" aria-label="Map of camera and viewer locations"></div>
+        <p id="map-status" class="ra-foot" aria-live="polite"></p>
+        <ul id="map-list" class="sr-only" aria-label="Connections"></ul>
       </div>
     </div>
   </div>
@@ -1335,7 +1352,7 @@
         }
 
         if (lastFetchOk && data) {
-          const shouldLog = autoToggle.checked && logEnabledCheckbox.checked;
+          const shouldLog = false;   // browser log retired: the server keeps the full activity history
           appendSnapshotToLog(data, shouldLog);
         }
 
@@ -1509,8 +1526,10 @@
       }
       function analyticsUrl() {
         const base = new URL('/admin/analytics/rooms', endpointInput.value || 'https://signaling-server-f5gu.onrender.com/');
-        const to = new Date(), from = new Date(to.getTime() - raDays * 86400e3);
-        base.searchParams.set('from', from.toISOString()); base.searchParams.set('to', to.toISOString());
+        const to = new Date();
+        if (raDays === 'all') base.searchParams.set('all', '1');
+        else base.searchParams.set('from', new Date(to.getTime() - raDays * 86400e3).toISOString());
+        base.searchParams.set('to', to.toISOString());
         return base.href;
       }
       async function loadRoomAnalytics() {
@@ -1544,7 +1563,7 @@
         const max = Math.max(...rooms.map(r => r.totalSeconds), 1);
         const cols = [['room', 'Room'], ['totalSeconds', 'Time with Camera + Viewer'], ['sessions', 'Sessions'], ['avgSeconds', 'Average'], ['longestSeconds', 'Longest'], ['lastActive', 'Last active']];
         const period = raViewer.querySelector('.seg[aria-pressed="true"]').textContent;
-        html += '<div class="ra-table-wrap"><table class="ra-table"><caption class="sr-only">Sessions per room, last ' + esc(period) + '</caption><thead><tr>';
+        html += '<div class="ra-table-wrap"><table class="ra-table"><caption class="sr-only">Sessions per room, ' + esc(raDays === 'all' ? 'all time' : 'last ' + period) + '</caption><thead><tr>';
         for (const [k, label] of cols) {
           const on = raSort.key === k, aria = on ? (raSort.dir < 0 ? 'descending' : 'ascending') : 'none';
           html += '<th scope="col" aria-sort="' + aria + '"><button type="button" data-sort="' + k + '">' + label + (on ? (raSort.dir < 0 ? ' ▼' : ' ▲') : '') + '</button></th>';
@@ -1561,7 +1580,8 @@
                   '<td class="num" data-label="Last active">' + (r.activeNow ? 'now' : whenAgo(r.lastActive)) + '</td></tr>';
         }
         html += '</tbody></table></div>';
-        html += '<p class="ra-foot">' + esc(new Date(raData.from).toLocaleString()) + ' – ' + esc(new Date(raData.to).toLocaleString()) + ' · includes sessions still running.</p>';
+        html += '<p class="ra-foot">' + (raData.allTime ? 'Since the first recorded activity, ' + esc(new Date(raData.from).toLocaleDateString()) : esc(new Date(raData.from).toLocaleString()) + ' – ' + esc(new Date(raData.to).toLocaleString())) +
+                ' · includes sessions still running · gaps under ' + Math.round((raData.sessionGapSeconds || 120) / 60) + ' min (phone locking, Wi-Fi changes) count as one session.</p>';
         raContent.innerHTML = html;
         raContent.querySelectorAll('th button[data-sort]').forEach(b => b.addEventListener('click', () => {
           const k = b.dataset.sort;
@@ -1593,10 +1613,114 @@
       });
       raViewer.querySelectorAll('.seg').forEach(b => b.addEventListener('click', () => {
         raViewer.querySelectorAll('.seg').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-        raDays = Number(b.dataset.days); loadRoomAnalytics();
+        raDays = b.dataset.days === 'all' ? 'all' : Number(b.dataset.days); loadRoomAnalytics();
       }));
 
+
+      // ---- Map of connections ----
+      const mapViewer = document.getElementById('map-viewer');
+      const mapStatus = document.getElementById('map-status');
+      const mapPast = document.getElementById('map-past');
+      let leafletReady = null, map = null, layerLive = null, layerPast = null, mapLastFocus = null;
+      const LIVE = '#22c55e', PAST = '#3b82f6';
+
+      function loadLeaflet() {
+        if (window.L) return Promise.resolve();
+        return leafletReady || (leafletReady = new Promise((resolve, reject) => {
+          const css = document.createElement('link');
+          css.rel = 'stylesheet'; css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+          css.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY='; css.crossOrigin = '';
+          document.head.appendChild(css);
+          const js = document.createElement('script');
+          js.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+          js.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo='; js.crossOrigin = '';
+          js.onload = resolve; js.onerror = () => { leafletReady = null; reject(new Error('map library failed to load')); };
+          document.head.appendChild(js);
+        }));
+      }
+      function placeName(l) { return [l.city, l.country].filter(Boolean).join(', ') || 'Unknown place'; }
+      function addRoom(layer, r, color) {
+        const name = esc(roomLabel(r.room));
+        const mk = (l, role) => L.circleMarker([l.lat, l.lon], { radius: 8, color: '#000', weight: 2, fillColor: color, fillOpacity: 1 })
+          .bindPopup('<strong>' + name + '</strong><br>' + role + ' · ' + esc(placeName(l)) + (r.activeNow ? '<br>Connected now' : ''))
+          .addTo(layer);
+        for (const c of r.cameras) for (const v of r.viewers)
+          L.polyline([[c.lat, c.lon], [v.lat, v.lon]], { color, weight: 2, opacity: .8, dashArray: r.activeNow ? null : '4 6' }).addTo(layer);
+        r.cameras.forEach(l => mk(l, 'Camera')); r.viewers.forEach(l => mk(l, 'Viewer'));
+      }
+      function fitTo(layers) {
+        const pts = [];
+        layers.forEach(g => g.eachLayer(x => { if (x.getLatLng) pts.push(x.getLatLng()); }));
+        if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.3), { maxZoom: 9 });
+        else map.setView([30, 0], 2);
+      }
+      async function loadMap() {
+        mapStatus.textContent = 'Loading…';
+        try {
+          await loadLeaflet();
+          if (!map) {
+            map = L.map('map', { worldCopyJump: true, attributionControl: true, minZoom: 1, maxBounds: [[-85, -540], [85, 540]], maxBoundsViscosity: 1 }).setView([30, 0], 2);
+            // OpenStreetMap's standard tiles (free for light use like this admin page; credit required).
+            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+              maxZoom: 18, className: 'map-tiles-dark',
+              attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · <a href="https://db-ip.com">IP Geolocation by DB-IP</a>',
+            }).addTo(map);
+            layerLive = L.layerGroup().addTo(map); layerPast = L.layerGroup();
+          }
+          const url = new URL('/admin/analytics/map', endpointInput.value || 'https://signaling-server-f5gu.onrender.com/');
+          url.searchParams.set('all', '1'); url.searchParams.set('to', new Date().toISOString());
+          const r = await fetch(url.href, { headers: adminHeaders(), cache: 'no-store', mode: 'cors' });
+          if (r.status === 401) { mapStatus.textContent = 'Your sign-in has expired. Sign in again to see the map.'; return; }
+          if (r.status === 503 || r.status === 404) { mapStatus.textContent = 'The map isn’t switched on yet: the server has no activity database configured.'; return; }
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const data = await r.json();
+          layerLive.clearLayers(); layerPast.clearLayers();
+          const live = data.rooms.filter(x => x.activeNow), past = data.rooms.filter(x => !x.activeNow);
+          live.forEach(x => addRoom(layerLive, x, LIVE)); past.forEach(x => addRoom(layerPast, x, PAST));
+          document.getElementById('map-n-live').textContent = live.length;
+          document.getElementById('map-n-past').textContent = past.length;
+          document.getElementById('map-list').innerHTML = data.rooms.map(x => '<li>' + esc(roomLabel(x.room)) + (x.activeNow ? ' (active now)' : ' (past)') +
+            ': Camera in ' + esc(x.cameras.map(placeName).join(', ') || 'unknown') + '; Viewer in ' + esc(x.viewers.map(placeName).join(', ') || 'unknown') + '</li>').join('');
+          applyPast();
+          mapStatus.textContent = !data.geoReady ? 'Locations aren’t available yet (the server is still loading its location database). Try again in a minute.'
+            : live.length ? live.length + ' room' + (live.length > 1 ? 's' : '') + ' connected now.'
+            : 'No room is connected right now.' + (past.length ? ' Tick “Show past connections” to see earlier ones.' : '');
+          setTimeout(() => map.invalidateSize(), 50);
+        } catch (e) { mapStatus.textContent = 'Couldn’t load the map (' + e.message + '). Check the connection and try again.'; }
+      }
+      function applyPast() {
+        if (!map) return;
+        const on = mapPast.checked;
+        document.getElementById('map-key-past').hidden = !on;
+        if (on) layerPast.addTo(map); else map.removeLayer(layerPast);
+        fitTo(on ? [layerLive, layerPast] : [layerLive]);
+      }
+      mapPast.addEventListener('change', applyPast);
+      function openMap() {
+        mapLastFocus = document.activeElement;
+        mapViewer.classList.add('open'); mapViewer.setAttribute('aria-hidden', 'false');
+        document.getElementById('btn-map-close').focus();
+        loadMap();
+      }
+      function closeMap() {
+        mapViewer.classList.remove('open'); mapViewer.setAttribute('aria-hidden', 'true');
+        if (mapLastFocus && mapLastFocus.focus) mapLastFocus.focus();
+      }
+      document.getElementById('btn-map').addEventListener('click', openMap);
+      document.getElementById('btn-map-close').addEventListener('click', closeMap);
+      mapViewer.addEventListener('click', e => { if (e.target === mapViewer) closeMap(); });
+      mapViewer.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { e.preventDefault(); closeMap(); return; }
+        if (e.key !== 'Tab') return;
+        const f = [...mapViewer.querySelectorAll('button, input, a[href]')].filter(b => b.offsetParent);
+        if (!f.length) return;
+        if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+        else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+      });
+
       // ---- Kick off ----
+      // The browser log is retired (replaced by the server history): free what it stored here.
+      try { [STORAGE_KEY_LOG, STORAGE_KEY_SUMMARY, STORAGE_KEY_LOG_ON, STORAGE_KEY_LOG_MB].forEach(k => localStorage.removeItem(k)); } catch {}
       loadSettings();
       loadLogFromStorage();
       lastFetchOk = false;
