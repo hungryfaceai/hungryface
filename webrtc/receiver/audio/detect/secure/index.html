@@ -330,7 +330,7 @@
     }
 
     const wrtc = { core:null, dc:null, stream:null, ctx:null, src:null, sink:null, node:null,
-                   audioEnabled:true, where:'sender', connected:false };
+                   audioEnabled:true, where:(localStorage.getItem('cryInferWhere') === 'receiver' ? 'receiver' : 'sender'), connected:false };
 
     /* ========= Helpers & UI ========= */
     const EL = id => document.getElementById(id);
@@ -513,7 +513,8 @@
           return _yamTask;
         }
       })();
-      try { return await _yamTaskPromise; } finally { _yamTaskPromise = null; }
+      try { return await _yamTaskPromise; }
+      catch (e) { _yamTaskPromise = null; throw e; }   // keep the promise while it succeeds: one load shared by every caller
     }
 
     async function classifyMP(task, w, sr) {
@@ -961,6 +962,10 @@
     const _pending = [];
     let _draining = false, _droppedChunks = 0;
     function classifyChunk(chunk, deviceSr){
+      if (!_yamTask) {                                   // model not ready yet: start loading it, skip this chunk
+        ensureAudioTask(Number(els.MAX_RESULTS.value) || 25).catch(e => log('err', 'Model load failed: ' + (e?.message || e)));
+        return;
+      }
       _pending.push([chunk, deviceSr]);
       const maxPending = Math.ceil((deviceSr || 48000) * 4 / Math.max(1, chunk.length));
       while (_pending.length > maxPending) { _pending.shift(); _droppedChunks++; }
@@ -1113,6 +1118,16 @@
     }
 
     /* ========= WebRTC integration ========= */
+    // Detection is "on" (state.mode === 'detect') from page load. When this device does the inference, it can only
+    // start listening once BOTH the Camera's audio stream and its "infer here" mode have arrived — in either order.
+    // Call this whenever one of them changes; it starts the audio tap only if it isn't running yet.
+    function ensureListening() {
+      if (els.TRAIN_SRC.value !== 'sender' || state.mode !== 'detect') return;
+      if (wrtc.where === 'receiver' && wrtc.audioEnabled && wrtc.stream && !wrtc.ctx) {
+        log('info', '[RUN] Stream and mode ready: starting remote audio tap (receiver infer).');
+        startRemoteAudioTap().catch(e => log('err', '[RUN] could not start audio tap: ' + (e?.message || e)));
+      }
+    }
     // Kick detection on first incoming sender score if auto-start raced.
     function kickDetectIfIdle() {
       if (els.TRAIN_SRC.value !== 'sender') return;      // only when using Sender as source
@@ -1124,11 +1139,7 @@
         return;
       }
     
-      // If we're supposed to infer at receiver and the audio tap isn't running yet, start it.
-      if (wrtc.where === 'receiver' && wrtc.stream && !wrtc.ctx) {
-        log('info', '[RUN] Starting remote audio tap (receiver infer).');
-        try { startRemoteAudioTap(); } catch {}
-      }
+      ensureListening();
     }
 
     function ensureCoreStarted(){
@@ -1160,11 +1171,10 @@
             setStatus('Connected to sender');
             log('info', `[RTC] audio-mode: enabled=${wrtc.audioEnabled} where=${wrtc.where}`);
     
-            if (!wrtc.audioEnabled) {
-              stopRemoteAudioTap();
-            } else if (wrtc.where === 'receiver' && wrtc.stream && state.mode === 'detect') {
-              startRemoteAudioTap();
+            if (!wrtc.audioEnabled || wrtc.where !== 'receiver') {
+              stopRemoteAudioTap();      // inference moved to the Camera (scores arrive by data channel)
             }
+            ensureListening();
     
           } else if (msg.type === 'ai-modes' && msg.audio) {
             wrtc.audioEnabled = !!msg.audio.enabled;
@@ -1173,11 +1183,10 @@
             setStatus('Connected to sender');
             log('info', `[RTC] ai-modes: enabled=${wrtc.audioEnabled} where=${wrtc.where}`);
     
-            if (!wrtc.audioEnabled) {
-              stopRemoteAudioTap();
-            } else if (wrtc.where === 'receiver' && wrtc.stream && state.mode === 'detect') {
-              startRemoteAudioTap();
+            if (!wrtc.audioEnabled || wrtc.where !== 'receiver') {
+              stopRemoteAudioTap();      // inference moved to the Camera (scores arrive by data channel)
             }
+            ensureListening();
     
           } else if (msg.type === 'audio') {
               // Force sender mode on first score and make sure detection is actually running.
@@ -1204,9 +1213,7 @@
           if (EL('remote').srcObject !== stream) EL('remote').srcObject = stream;
           wrtc.stream = stream;
           log('ok', `[RTC] Remote stream: tracks=${stream.getTracks().map(t=>t.kind).join(',')}`);
-          if (state.mode === 'detect' && wrtc.audioEnabled && wrtc.where === 'receiver') {
-            startRemoteAudioTap().catch(()=>{});
-          }
+          ensureListening();
         },
         onIceState: (s) => log('info', `[RTC] ICE: ${s}`),
         onCreatePC: (pc) => {
@@ -1278,9 +1285,10 @@
         await startMic();
       } else if (src === 'sender') {
         ensureCoreStarted();
-        if (wrtc.where === 'receiver' && wrtc.stream) await startRemoteAudioTap();
         state.mode = 'detect';
+        ensureListening();               // starts now if the stream + mode are already here, otherwise when they arrive
         if (wrtc.where === 'sender') setStatus('Detection started (sender).');
+        else if (!wrtc.ctx) setStatus('Detection on — waiting for the Camera’s audio…');
       }
     }
 
@@ -1392,6 +1400,8 @@
 
       updateSourceUI();
 
+      // Load the cry model straight away, so detection works the moment audio arrives (no Stop/Start needed).
+      ensureAudioTask(Number(els.MAX_RESULTS.value) || 25).catch(e => log('err', 'Model load failed: ' + (e?.message || e)));
       setStatus('Ready. Detection will auto-start…');
       // === AUTO-START DETECTION ===
       startDetectBasedOnSource().then(updateDetectButtonUI).catch(()=>{});
