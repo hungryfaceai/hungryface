@@ -193,7 +193,14 @@
     .ra-error { color: #fecaca; }
     .ra-foot { margin: 10px 2px 0; font-size: 14px; color: var(--muted); }
     /* Map */
-    .map-body { display: flex; flex-direction: column; }
+    /* Map window: the whole screen; the map fills whatever space the header and controls leave */
+    .log-viewer.map-viewer { padding: 0; align-items: stretch; justify-content: stretch; }
+    .log-viewer.map-viewer .log-viewer-inner.map-inner {
+      width: 100vw; max-width: none; height: 100vh; height: 100dvh; max-height: none; border-radius: 0; border: 0;
+      padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); box-sizing: border-box; }
+    .map-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; max-height: none; overflow: hidden; }
+    .map-body .map { flex: 1 1 auto; height: auto; min-height: 240px; }
+    .map-body .map-unlocated { flex: 0 0 auto; max-height: 30%; overflow: auto; }
     .map-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
     .map-controls .switch-label { min-height: 44px; }
     .map-key { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; color: var(--nt-text-2, #ddd); }
@@ -353,8 +360,8 @@
   </div>
 
   <!-- Map of connections (server history; locations are approximate, from IP addresses) -->
-  <div id="map-viewer" class="log-viewer" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="map-title">
-    <div class="log-viewer-inner ra-inner">
+  <div id="map-viewer" class="log-viewer map-viewer" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="map-title">
+    <div class="log-viewer-inner map-inner">
       <div class="log-viewer-header">
         <h2 id="map-title" class="ra-title">Map of connections</h2>
         <button id="btn-map-close" type="button" class="btn">Close</button>
@@ -365,7 +372,7 @@
           <span class="map-key"><span class="key-dot key-live" aria-hidden="true"></span>Active now <span id="map-n-live">0</span></span>
           <span class="map-key" id="map-key-past" hidden><span class="key-dot key-past" aria-hidden="true"></span>Past <span id="map-n-past">0</span></span>
         </div>
-        <p class="ra-help map-help">Each line joins a room’s Camera and Viewer. Locations are approximate (city level), worked out on our server from IP addresses.</p>
+        <p class="ra-help map-help">Each line joins a room’s Camera and Viewer. Locations are approximate, worked out on our server from IP addresses.</p>
         <div id="map" class="map" role="region" aria-label="Map of camera and viewer locations"></div>
         <p id="map-status" class="ra-foot" aria-live="polite"></p>
         <ul id="map-unlocated" class="map-unlocated" aria-label="Rooms without a known location" hidden></ul>
@@ -1586,8 +1593,7 @@
                   '<td class="num" data-label="Last active">' + (r.activeNow ? 'now' : whenAgo(r.lastActive)) + '</td></tr>';
         }
         html += '</tbody></table></div>';
-        html += '<p class="ra-foot">' + (raData.allTime ? 'Since the first recorded activity, ' + esc(new Date(raData.from).toLocaleDateString()) : esc(new Date(raData.from).toLocaleString()) + ' – ' + esc(new Date(raData.to).toLocaleString())) +
-                ' · includes sessions still running · gaps under ' + Math.round((raData.sessionGapSeconds || 120) / 60) + ' min (phone locking, Wi-Fi changes) count as one session.</p>';
+        html += '<p class="ra-foot">' + (raData.allTime ? 'Since the first recorded activity, ' + esc(new Date(raData.from).toLocaleDateString()) : esc(new Date(raData.from).toLocaleString()) + ' – ' + esc(new Date(raData.to).toLocaleString())) + '</p>';
         raContent.innerHTML = html;
         raContent.querySelectorAll('th button[data-sort]').forEach(b => b.addEventListener('click', () => {
           const k = b.dataset.sort;
