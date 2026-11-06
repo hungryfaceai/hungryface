@@ -248,6 +248,7 @@
   <script type="module">
     import { ensureTermsAccepted } from '/hungryface/legal/require-terms.js';
     import { ensurePskForRoom, getPsk } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+    import { adoptPairedRoom } from '/hungryface/webrtc/shared/psk/adopt-room.js';
 
     await ensureTermsAccepted({ role: 'pair' });
 
@@ -745,11 +746,11 @@
       try {
         await startQRScanner((scanned) => {
           const { room, psk } = parseScanned(scanned);
-          const fallbackRoom = currentRoom() || 'Baby';
-          const targetRoom = (room || fallbackRoom).trim();
+          // The room comes from the other device's code; never guess (it would pair the wrong room).
+          const targetRoom = (room || '').trim();
 
           if (!targetRoom) {
-            showToast('No room name in QR');
+            showToast('This QR code has no room name. Show the Pair devices code from the other device.');
             return;
           }
 
@@ -763,6 +764,7 @@
             localStorage.setItem(PSK_PREFIX + targetRoom, JSON.stringify(payload));
           } catch {}
 
+          adoptPairedRoom(targetRoom);   // the room just paired is this device's current room everywhere
           rememberRoom(targetRoom);
           rebuildRoomSelect({ initial: false });
           if (hasOption(roomSel, targetRoom)) {
@@ -770,7 +772,7 @@
           }
           AUTO_CREATE = false; // we already have the imported key
           (async () => { await refresh(); })();
-          showToast('Key imported', 3000, 'success');
+          showToast('Paired · room ' + targetRoom, 3000, 'success');
         });
       } catch (err) {
         showToast('Camera error');

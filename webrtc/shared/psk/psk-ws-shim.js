@@ -69,9 +69,11 @@ export async function ensurePskForRoom(room, role='receiver') {
   if (token) {
     const r = (fragRoom || room || 'Baby');
     if (!/^[A-Za-z0-9\-_]{16,}$/.test(token)) throw new Error('Invalid token in fragment');
-    setStored(r, { tokenB64u: token, createdAt: Date.now() });
+    setStored(r, { tokenB64u: token, createdAt: Date.now(), installedFrom: 'url' });
     // If fragment specified a different room, keep it; callers may read it back via getPsk()
     if (r !== room) room = r;
+    // A key received from another device: that room becomes this device's current room everywhere.
+    try { (await import('/hungryface/webrtc/shared/psk/adopt-room.js')).adoptPairedRoom(r); } catch {}
     scrubFragment();
   }
   // 2) ensure present (sender may auto-create; receiver shouldn’t)

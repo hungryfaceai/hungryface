@@ -180,6 +180,8 @@
 
   <script type="module">
     import { getPsk } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+    import { adoptPairedRoom } from '/hungryface/webrtc/shared/psk/adopt-room.js';
+    import { ensureTermsAccepted } from '/hungryface/legal/require-terms.js';
     // ---- Durations (ms)
     const DURATIONS = Object.freeze({
       pairedFlash: 3000,
@@ -261,6 +263,16 @@
       } catch { return false; }
     }
     
+    // Camera / Viewer buttons open the room shown on this page.
+    function pointModeLinksAt(room) {
+      for (const a of [linkSender, linkViewer]) {
+        if (!a) continue;
+        const u = new URL(a.getAttribute('href'), location.href);
+        if (room) u.searchParams.set('room', room); else u.searchParams.delete('room');
+        a.href = u.toString();
+      }
+    }
+
     function setModeLinksEnabled(enabled) {
       const links = [linkSender, linkViewer];
       links.forEach(a => {
@@ -280,7 +292,7 @@
     function parseHash() {
       const hash = (location.hash && location.hash.startsWith('#')) ? location.hash.slice(1) : '';
       const qs = new URLSearchParams(hash);
-      const room = (qs.get('room') || 'Baby').trim();
+      const room = (qs.get('room') || '').trim();
       const psk = (qs.get('psk') || '').trim();
       return { hadHash: !!hash, room, psk };
     }
@@ -320,6 +332,9 @@
       const valid = isValidPsk(pskValue);
       setModeLinksEnabled(valid);
       if (valid) {
+        const { removedDefault } = adoptPairedRoom(room);   // paired room = current room on Home, Camera, Viewer, Settings
+        pointModeLinksAt(room);
+        if (removedDefault) console.log('[pair-install] removed the unused default room created moments ago');
         showPairedFlash();
       } else {
         // ensure the pill is not visible if we previously showed it
@@ -393,18 +408,35 @@
       currentPSK = savedPSK;
       setMaskedChip(savedPSK || '');
       setModeLinksEnabled(isValidPsk(savedPSK || ''));
+      pointModeLinksAt(isValidPsk(savedPSK || '') ? room : '');
       // do not flash here; only flash on successful save or QR install with valid key
       pairedOk.classList.remove('show');
     });
 
     // Boot: install PSK from QR (if present) → auto-persist; only flash if valid; else grey pills
-    (function boot() {
+    (async function boot() {
       const intent = parseHash();
       hadFragment = intent.hadHash;
+      const incoming = normalizeUrlToken(intent.psk || '');
+
+      // A pairing link without a room name can't be installed safely (it would land in the wrong room).
+      if (incoming && !intent.room) {
+        if (intent.hadHash) scrubUrl();
+        roomEl.value = '';
+        setMaskedChip('');
+        setModeLinksEnabled(false);
+        showToast('This pairing link has no room name. Ask for a new QR code.');
+        return;
+      }
 
       roomEl.value = intent.room || 'Baby';
 
-      const incoming = normalizeUrlToken(intent.psk || ''); //const incoming = normalizeToken(intent.psk || '');
+      // Terms of use first, as on Pair devices. The key is only saved once they are accepted.
+      if (incoming) {
+        try { await ensureTermsAccepted({ role: 'pair' }); }
+        catch { if (intent.hadHash) scrubUrl(); return; }
+      }
+
       if (incoming) {
         persistPSK(incoming, 'url');      // handles validity + greying + conditional flash
         setMaskedChip(incoming);
@@ -417,6 +449,7 @@
         currentPSK = savedPSK;
         setMaskedChip(savedPSK || '');
         setModeLinksEnabled(isValidPsk(savedPSK || ''));
+        pointModeLinksAt(isValidPsk(savedPSK || '') ? room : '');
       }
     })();
   </script>
