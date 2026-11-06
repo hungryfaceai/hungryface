@@ -1121,9 +1121,12 @@
     // Detection is "on" (state.mode === 'detect') from page load. When this device does the inference, it can only
     // start listening once BOTH the Camera's audio stream and its "infer here" mode have arrived — in either order.
     // Call this whenever one of them changes; it starts the audio tap only if it isn't running yet.
+    // The Camera analyses the sound itself only when its "Audio" box is ticked AND set to run on the Camera.
+    // In every other case (box unticked, or set to run on the Viewer) this page analyses the streamed sound.
+    function cameraInfers() { return !!wrtc.audioEnabled && wrtc.where === 'sender'; }
     function ensureListening() {
       if (els.TRAIN_SRC.value !== 'sender' || state.mode !== 'detect') return;
-      if (wrtc.where === 'receiver' && wrtc.audioEnabled && wrtc.stream && !wrtc.ctx) {
+      if (!cameraInfers() && wrtc.stream && !wrtc.ctx) {
         log('info', '[RUN] Stream and mode ready: starting remote audio tap (receiver infer).');
         startRemoteAudioTap().catch(e => log('err', '[RUN] could not start audio tap: ' + (e?.message || e)));
       }
@@ -1171,9 +1174,7 @@
             setStatus('Connected to sender');
             log('info', `[RTC] audio-mode: enabled=${wrtc.audioEnabled} where=${wrtc.where}`);
     
-            if (!wrtc.audioEnabled || wrtc.where !== 'receiver') {
-              stopRemoteAudioTap();      // inference moved to the Camera (scores arrive by data channel)
-            }
+            if (cameraInfers()) stopRemoteAudioTap();   // the Camera analyses; its scores arrive by data channel
             ensureListening();
     
           } else if (msg.type === 'ai-modes' && msg.audio) {
@@ -1183,9 +1184,7 @@
             setStatus('Connected to sender');
             log('info', `[RTC] ai-modes: enabled=${wrtc.audioEnabled} where=${wrtc.where}`);
     
-            if (!wrtc.audioEnabled || wrtc.where !== 'receiver') {
-              stopRemoteAudioTap();      // inference moved to the Camera (scores arrive by data channel)
-            }
+            if (cameraInfers()) stopRemoteAudioTap();   // the Camera analyses; its scores arrive by data channel
             ensureListening();
     
           } else if (msg.type === 'audio') {
