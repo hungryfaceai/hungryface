@@ -85,7 +85,7 @@ a { color: inherit; }
 .header-links a:hover, .header-links button:hover { background: var(--nt-surface-2, #141414); color: #fff; }
 @media (max-width: 480px) { .header-links .hide-xs { display: none; } }
 .header-links a, .header-links button { white-space: nowrap; }
-body.is-paired .first-time-inline { display: none !important; }
+html.is-paired .first-time-inline { display: none !important; }
 
 /* Buttons (same as the app's dialogs) */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; padding: 14px 22px;
@@ -109,8 +109,8 @@ body.is-paired .first-time-inline { display: none !important; }
 .phone { border-radius: 28px; border: 1px solid #2a2a2a; background: #0b0b0b; padding: 8px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
 .phone img { border-radius: 20px; width: 100%; height: auto; }
 /* First visit vs paired device. !important: page layouts (grid/flex) must not re-show the hidden block. */
-body:not(.is-paired) .returning { display: none !important; }
-body.is-paired .first-time { display: none !important; }
+html:not(.is-paired) .returning { display: none !important; }
+html.is-paired .first-time { display: none !important; }
 .stores { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 .stores a { display: inline-flex; min-height: 48px; align-items: center; }
 .stores img { height: 48px; width: auto; }
@@ -199,6 +199,22 @@ body.is-paired .first-time { display: none !important; }
   </style>
   <script defer src="https://cloud.umami.is/script.js" data-website-id="e5feef4a-8ebd-4094-b6ff-36bdc4512e2e" data-exclude-search="true" data-exclude-hash="true" data-domains="hungryfaceai.github.io"></script>
   <script src="/hungryface/shared/invite.js" defer></script>
+  <!-- Paired or not, decided BEFORE the page is drawn (no flash of the first-visit screen on a paired phone).
+       Same rule as listValidPskRooms(): any psk:<room> holding a key of at least 16 bytes. -->
+  <script>
+    (() => {
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (!k || !k.startsWith('psk:')) continue;
+          const t = (JSON.parse(localStorage.getItem(k)) || {}).tokenB64u;
+          if (typeof t !== 'string' || !t) continue;
+          const b = t.replace(/-/g, '+').replace(/_/g, '/');
+          if (atob(b + '===='.slice(0, (4 - b.length % 4) % 4)).length >= 16) { document.documentElement.classList.add('is-paired'); return; }
+        }
+      } catch {}
+    })();
+  </script>
   <!-- Store badges, by device:
        laptop/desktop browser → both · iPhone/iPad browser → App Store · Android browser → Google Play
        inside the installed app (iOS App Store app, Android TWA, or any home-screen web app) → none -->
@@ -309,7 +325,7 @@ body.is-paired .first-time { display: none !important; }
     let rooms = [];
     try { rooms = listValidPskRooms(); } catch {}
     const paired = rooms.length > 0;
-    document.body.classList.toggle('is-paired', paired);
+    document.documentElement.classList.toggle('is-paired', paired);   // confirms the early check in <head>
     // Unpaired devices never reach Camera/Viewer without pairing first.
     if (!paired) document.querySelectorAll('a[data-needs-pairing]').forEach(a => { a.href = '/hungryface/webrtc/pairpsk/'; });
     // Show the room the Viewer / Camera will actually open: the same order they use
