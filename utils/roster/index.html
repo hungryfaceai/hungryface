@@ -197,6 +197,7 @@
     .map-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
     .map-controls .switch-label { min-height: 44px; }
     .map-key { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; color: var(--nt-text-2, #ddd); }
+    .map-key[hidden] { display: none; }
     .map-key span:last-child { font-variant-numeric: tabular-nums; color: var(--nt-text, #fff); font-weight: 600; }
     .key-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #000; box-shadow: 0 0 0 1px #fff; }
     .key-live { background: #22c55e; }
@@ -207,6 +208,10 @@
     .map-tiles-dark { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.5); }
     .leaflet-popup-content { font-size: 14px; line-height: 1.45; margin: 10px 12px; }
     .leaflet-control-attribution { font-size: 12px; }
+    .map-unlocated { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+    .map-unlocated li { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--nt-text-2, #ddd);
+                        background: var(--nt-surface, #111); border: 1px solid var(--ring); border-radius: 999px; padding: 6px 12px; }
+    .map-unlocated li .key-dot { width: 10px; height: 10px; }
     /* Phones: one card per room instead of a wide table */
     @media (max-width: 640px) {
       .ra-table-wrap { border: 0; overflow: visible; }
@@ -363,6 +368,7 @@
         <p class="ra-help map-help">Each line joins a room’s Camera and Viewer. Locations are approximate (city level), worked out on our server from IP addresses.</p>
         <div id="map" class="map" role="region" aria-label="Map of camera and viewer locations"></div>
         <p id="map-status" class="ra-foot" aria-live="polite"></p>
+        <ul id="map-unlocated" class="map-unlocated" aria-label="Rooms without a known location" hidden></ul>
         <ul id="map-list" class="sr-only" aria-label="Connections"></ul>
       </div>
     </div>
@@ -1638,7 +1644,8 @@
           document.head.appendChild(js);
         }));
       }
-      function placeName(l) { return [l.city, l.country].filter(Boolean).join(', ') || 'Unknown place'; }
+      const regionNames = (() => { try { return new Intl.DisplayNames(undefined, { type: 'region' }); } catch { return null; } })();
+      function placeName(l) { const c = l.country ? (regionNames?.of(l.country) || l.country) : ''; return [l.city, c].filter(Boolean).join(', ') || 'Unknown place'; }
       function addRoom(layer, r, color) {
         const name = esc(roomLabel(r.room));
         const mk = (l, role) => L.circleMarker([l.lat, l.lon], { radius: 8, color: '#000', weight: 2, fillColor: color, fillOpacity: 1 })
@@ -1677,18 +1684,33 @@
           layerLive.clearLayers(); layerPast.clearLayers();
           const live = data.rooms.filter(x => x.activeNow), past = data.rooms.filter(x => !x.activeNow);
           live.forEach(x => addRoom(layerLive, x, LIVE)); past.forEach(x => addRoom(layerPast, x, PAST));
-          document.getElementById('map-n-live').textContent = live.length;
+          document.getElementById('map-n-live').textContent = live.length;      // every connected room, located or not
           document.getElementById('map-n-past').textContent = past.length;
+          renderUnlocated(data.rooms);
           document.getElementById('map-list').innerHTML = data.rooms.map(x => '<li>' + esc(roomLabel(x.room)) + (x.activeNow ? ' (active now)' : ' (past)') +
             ': Camera in ' + esc(x.cameras.map(placeName).join(', ') || 'unknown') + '; Viewer in ' + esc(x.viewers.map(placeName).join(', ') || 'unknown') + '</li>').join('');
           applyPast();
-          mapStatus.textContent = !data.geoReady ? 'Locations aren’t available yet (the server is still loading its location database). Try again in a minute.'
-            : live.length ? live.length + ' room' + (live.length > 1 ? 's' : '') + ' connected now.'
-            : 'No room is connected right now.' + (past.length ? ' Tick “Show past connections” to see earlier ones.' : '');
+          const connected = live.length ? live.length + ' room' + (live.length > 1 ? 's' : '') + ' connected now.' : 'No room is connected right now.';
+          mapStatus.textContent =
+            data.geoEnabled === false ? connected + ' Locations are switched off on the server, so rooms are listed below instead of on the map.'
+            : !data.geoReady ? connected + ' Locations aren’t available yet (the server is still loading its location data). Try again in a few minutes.'
+            : connected + (!live.length && past.length ? ' Tick “Show past connections” to see earlier ones.' : '');
           setTimeout(() => map.invalidateSize(), 50);
         } catch (e) { mapStatus.textContent = 'Couldn’t load the map (' + e.message + '). Check the connection and try again.'; }
       }
+      // Rooms with no known location (locations off, private network, or unknown address): listed under the map.
+      let lastRooms = [];
+      function renderUnlocated(rooms) {
+        lastRooms = rooms || lastRooms;
+        const showPast = mapPast.checked;
+        const list = lastRooms.filter(x => !x.located && (x.activeNow || showPast));
+        const ul = document.getElementById('map-unlocated');
+        ul.innerHTML = list.map(x => '<li><span class="key-dot ' + (x.activeNow ? 'key-live' : 'key-past') + '" aria-hidden="true"></span>' +
+          esc(roomLabel(x.room)) + ' · ' + (x.activeNow ? 'connected now' : 'past') + ' · location unknown</li>').join('');
+        ul.hidden = !list.length;
+      }
       function applyPast() {
+        renderUnlocated();
         if (!map) return;
         const on = mapPast.checked;
         document.getElementById('map-key-past').hidden = !on;
