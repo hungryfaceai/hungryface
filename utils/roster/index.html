@@ -42,6 +42,14 @@
     }
 
     .header { padding: 2px 0 12px 44px; margin-bottom: 14px; border-bottom: 1px solid #141414; }  /* clear the menu button */
+    .header-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .signout-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 4px; font-size: 15px; font-weight: 500;
+                    color: var(--nt-text-2, #ddd); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: #666; white-space: nowrap; }
+    .signout-link:hover { color: #fff; text-decoration-color: currentColor; }
+    .signout-link:focus-visible { outline: 2px solid var(--nt-accent, #7aa2ff); outline-offset: 2px; border-radius: 4px; }
+    /* the in-form Sign out button is replaced by the header link on this page */
+    .toolbar form.admin-signin .admin-signout { display: none !important; }
+    .refresh-row #btn-refresh[hidden] { display: none; }
     h1 { margin: 0; font-size: 22px; letter-spacing: .2px; }
     @media (min-width: 720px) { h1 { font-size: 26px; } }
     .sub { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
@@ -273,22 +281,27 @@
   <div id="ui">
     <main class="panel" role="main">
       <div class="header">
-        <h1>Roster</h1>
+        <div class="header-top">
+          <h1>Roster</h1>
+          <a href="#" id="signout-link" class="signout-link admin-only" role="button">Sign out</a>
+        </div>
         <p class="sub admin-only">Devices connected to the signalling server right now.</p>
       </div>
 
       <div class="toolbar" aria-label="Roster controls">
         <div class="toolbar-row admin-only">
-          <button id="btn-refresh" type="button" class="btn btn-primary">Refresh</button>
           <a id="btn-umami" class="btn btn-icon" href="https://cloud.umami.is/analytics/eu/websites/e5feef4a-8ebd-4094-b6ff-36bdc4512e2e" target="_blank" rel="noopener noreferrer" aria-label="Website analytics (opens Umami Cloud in a new tab)" title="Website visits (Umami Cloud)"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Website analytics</span></a>
           <button id="btn-room-analytics" type="button" class="btn btn-icon" aria-haspopup="dialog"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15v-3M12 15V9M17 15v-5"/></svg><span>Room analytics</span></button>
           <button id="btn-map" type="button" class="btn btn-icon" aria-haspopup="dialog"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg><span>Map</span></button>
+        </div>
+        <div class="toolbar-row refresh-row admin-only">
           <label class="switch-label">
             <input id="auto" type="checkbox" checked>
             Auto-refresh every
             <input id="auto-interval" type="number" min="1" value="3" inputmode="numeric" aria-label="Auto-refresh interval in seconds">
             s
           </label>
+          <button id="btn-refresh" type="button" class="btn btn-icon" hidden><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg><span>Refresh</span></button>
           <span class="status" aria-live="polite">
             <span id="status-dot" class="status-dot" aria-hidden="true"></span>
             <span id="status-msg"></span>
@@ -1351,11 +1364,7 @@
 
           lastFetchOk = true;
 
-          if (autoToggle.checked) {
-            statusMsg.textContent = '';
-          } else {
-            statusMsg.textContent = 'Auto refresh OFF – manual updates only.';
-          }
+          statusMsg.textContent = '';
 
           lastUpdated.textContent = fmtTime();
         } catch (err) {
@@ -1374,17 +1383,18 @@
 
       function startAuto() {
         clearInterval(timer);
-        if (autoToggle.checked) {
-          statusMsg.textContent = '';
-          timer = setInterval(fetchAndRender, autoIntervalSec * 1000);
-        } else {
-          statusMsg.textContent = 'Auto refresh OFF – data may be out of date.';
-        }
+        statusMsg.textContent = '';
+        if (autoToggle.checked) timer = setInterval(fetchAndRender, autoIntervalSec * 1000);
+        btnRefresh.hidden = autoToggle.checked;   // manual Refresh only makes sense when auto-refresh is off
         updateLiveDot();
       }
 
       // ---- UI wiring ----
       btnRefresh.addEventListener('click', fetchAndRender);
+      document.getElementById('signout-link').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.querySelector('.toolbar form.admin-signin .admin-signout')?.click();   // same sign-out as before
+      });
       endpointInput.addEventListener('change', fetchAndRender);
 
       autoToggle.addEventListener('change', () => {
