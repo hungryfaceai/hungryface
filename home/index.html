@@ -304,7 +304,19 @@ body.is-paired .first-time { display: none !important; }
     document.body.classList.toggle('is-paired', paired);
     // Unpaired devices never reach Camera/Viewer without pairing first.
     if (!paired) document.querySelectorAll('a[data-needs-pairing]').forEach(a => { a.href = '/hungryface/webrtc/pairpsk/'; });
-    document.querySelectorAll('[data-room-name]').forEach(el => { el.textContent = rooms[0] || ''; });
+    // Show the room the Viewer / Camera will actually open: the same order they use
+    // (last room chosen anywhere → this device's saved Viewer/Camera room → first paired room).
+    function currentRoom() {
+      let list = []; try { list = listValidPskRooms(); } catch {}
+      const get = k => { try { return (localStorage.getItem(k) || '').trim(); } catch { return ''; } };
+      return [get('naptio:lastRoom'), get('bm_receiver_room'), get('bm_sender_room')].find(r => r && list.includes(r)) || list[0] || '';
+    }
+    const showRoom = () => document.querySelectorAll('[data-room-name]').forEach(el => { el.textContent = currentRoom(); });
+    showRoom();
+    // Coming back to Home (Back button, switching tabs/apps, or a room changed in another tab): refresh it.
+    addEventListener('pageshow', showRoom);
+    addEventListener('storage', e => { if (!e.key || /room/i.test(e.key)) showRoom(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) showRoom(); });
 
     const ROLE_KEY = 'naptio:homeRole';
     let role = null; try { role = localStorage.getItem(ROLE_KEY); } catch {}
