@@ -162,7 +162,9 @@ body.is-paired .first-time { display: none !important; }
     @media (max-width: 859px) { .shot { order: 2; } }
     .quiet { margin: 14px 0 0; font-size: 15px; color: var(--nt-text-muted, #aaa); }
     .bottom { padding: 32px 0 24px; border-top: 1px solid #141414; text-align: center; }
-    .bottom .stores { justify-content: center; }
+    .hero .stores { margin-top: 18px; }
+    @media (max-width: 480px) { .hero .stores { justify-content: center; } }
+    .stores [hidden] { display: none !important; }
     .safety { max-width: 620px; margin: 22px auto 0; text-align: left; }
     /* ---------- Paired ---------- */
     .paired { max-width: 520px; margin: 0 auto; padding: 12px 16px 32px; min-height: calc(100svh - 160px); display: flex; flex-direction: column; }
@@ -173,6 +175,28 @@ body.is-paired .first-time { display: none !important; }
   </style>
   <script defer src="https://cloud.umami.is/script.js" data-website-id="e5feef4a-8ebd-4094-b6ff-36bdc4512e2e" data-exclude-search="true" data-exclude-hash="true" data-domains="hungryfaceai.github.io"></script>
   <script src="/hungryface/shared/invite.js" defer></script>
+  <!-- Store badges, by device:
+       laptop/desktop browser → both · iPhone/iPad browser → App Store · Android browser → Google Play
+       inside the installed app (iOS App Store app, Android TWA, or any home-screen web app) → none -->
+  <script>
+    (() => {
+      const ua = navigator.userAgent || '';
+      // iPadOS reports "Macintosh"; a real iPad also has a touch screen as its main pointer, a Mac never does.
+      const isIOS = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1 && matchMedia('(pointer: coarse)').matches);
+      const isAndroid = /Android/i.test(ua);
+      const installed = !!window.Capacitor?.isNativePlatform?.() || navigator.standalone === true ||
+        ['standalone', 'fullscreen', 'minimal-ui'].some(m => matchMedia('(display-mode: ' + m + ')').matches) ||
+        document.referrer.startsWith('android-app://');          // Android TWA
+      const show = installed ? 'none' : isIOS ? 'apple' : isAndroid ? 'google' : 'both';
+      document.documentElement.dataset.stores = show;
+      const apply = () => document.querySelectorAll('.stores').forEach(box => {
+        if (show === 'none') { box.remove(); return; }
+        box.querySelectorAll('[data-store]').forEach(a => { a.hidden = show !== 'both' && a.dataset.store !== show; });
+      });
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', apply, { once: true }); else apply();
+    })();
+  </script>
+  <style>html[data-stores="none"] .stores { display: none !important; }</style>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -204,17 +228,17 @@ body.is-paired .first-time { display: none !important; }
                 <span><strong>Ready in 5 minutes.</strong></span></li>
             </ul>
             <div class="actions"><a class="btn btn-primary" href="/hungryface/webrtc/pairpsk/">Get started, it’s free</a><a class="btn" href="/hungryface/home/demo/">Watch the demo</a></div>
-            <p class="quiet">Works in your browser on iPhone, Android and tablets.</p>
+            <!-- Store badges: which ones show depends on the device (see the script at the end) -->
+            <div class="stores" aria-label="Also in app stores">
+              <a data-store="apple" href="https://apps.apple.com/us/app/naptio/id6756505573" target="_blank" rel="noopener"><img src="/hungryface/assets/badges/app-store-badge.svg" alt="Download on the App Store" width="144" height="48"></a>
+              <a data-store="google" href="https://play.google.com/store/apps/details?id=io.github.hungryfaceai.twa" target="_blank" rel="noopener"><img src="/hungryface/assets/badges/google-play-badge.svg" alt="Get it on Google Play" width="162" height="48"></a>
+            </div>
           </div>
           <div class="shot"><div class="phone"><img src="/hungryface/home/img/camera-720.webp" srcset="/hungryface/home/img/camera-360.webp 360w, /hungryface/home/img/camera-720.webp 720w" sizes="(min-width: 860px) 260px, 64vw" width="720" height="1278" alt="The Naptio Camera screen showing a baby, with face and body tracking drawn over the video" fetchpriority="high"></div></div>
         </section>
       </div>
       <section class="bottom" aria-label="Get Naptio">
         <div class="wrap">
-          <div class="stores" aria-label="Also in app stores">
-            <a href="https://apps.apple.com/us/app/naptio/id6756505573" target="_blank" rel="noopener"><img src="/hungryface/assets/badges/app-store-badge.svg" alt="Download on the App Store" width="144" height="48"></a>
-            <a href="https://play.google.com/store/apps/details?id=io.github.hungryfaceai.twa" target="_blank" rel="noopener"><img src="/hungryface/assets/badges/google-play-badge.svg" alt="Get it on Google Play" width="162" height="48"></a>
-          </div>
           <p class="safety" role="note"><strong>Naptio is not a medical device.</strong> Always follow safe-sleep advice and keep an adult responsible for your baby.</p>
         </div>
       </section>
@@ -269,14 +293,6 @@ body.is-paired .first-time { display: none !important; }
       if (!cam || !view) return;
       slot.insertBefore(cam, view); cam.classList.add('is-main'); view.classList.remove('is-main');
     });
-  </script>
-
-  <!-- Installed app (home-screen web app or store app): hide the store badges. -->
-  <script>
-    (() => {
-      const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true || !!window.Capacitor?.isNativePlatform?.();
-      if (standalone) document.querySelectorAll('.stores').forEach(el => el.remove());
-    })();
   </script>
 
   <!-- Review prompt (native apps only), shown on Home when returning from Camera/Viewer. -->
