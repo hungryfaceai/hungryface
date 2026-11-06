@@ -1,16 +1,112 @@
-<!-- /hungryface/webrtc/receiver/prone/help-sheet.html -->
+<!-- /hungryface/webrtc/receiver/prone/help-sheet.html — loaded by help-sheet.js into the Prone page -->
 <div id="helpBackdrop" class="help-backdrop"></div>
 <aside id="helpSheet" class="help-sheet" aria-labelledby="helpTitle" aria-modal="true" role="dialog">
   <div class="help-header">
     <h3 id="helpTitle">Prone detection – Help</h3>
-    <button id="helpClose" class="close" title="Close" aria-label="Close">×</button>
+    <button id="helpClose" class="close" title="Close" aria-label="Close help">×</button>
   </div>
 
   <div class="help-body" id="helpBody">
-    <p><b>Goal.</b> Detect sustained face-down (prone) posture by combining face visibility and head pitch from MediaPipe Face Landmarker.</p>
-    <p><b>Calibrate supine.</b> With the baby face-up, press <i>Start</i> for a few seconds. The average pitch is saved as the baseline.</p>
-    <p><b>Risk bar.</b> Shows risk as a percentage of the app’s max occlusion-only risk (0.6). Colors: green (low), orange (elevated), red (alert).</p>
-    <p><b>Hysteresis.</b> Alert latches after risk &gt; <i>thr on</i> for <i>dwell on</i> seconds; clears after risk &lt; <i>thr off</i> for <i>dwell off</i> seconds.</p>
-    <p class="muted">This tool is not a medical device. Use as an assistive cue only.</p>
+    <nav class="help-toc" aria-label="Contents">
+      <a href="#pr-what">What it does</a>
+      <a href="#pr-start">Set up</a>
+      <a href="#pr-screen">Reading the screen</a>
+      <a href="#pr-settings">Settings</a>
+      <a href="#pr-fix">Fix a problem</a>
+      <a href="#pr-how">How it works</a>
+    </nav>
+
+    <p class="help-callout help-safety"><strong>Not a medical device.</strong> Prone detection can miss a face-down position or raise false alerts. It doesn’t replace safe-sleep practice: always put your baby to sleep on their back, and keep an adult responsible for your baby.</p>
+
+    <section id="pr-what" class="help-section">
+      <h4>What it does</h4>
+      <p>Prone detection watches your baby’s face on the Camera and alerts you if your baby may be lying <strong>face down</strong>. It uses two independent checks. Either one can raise the alert:</p>
+      <ul>
+        <li><strong>Head tilt</strong>: the head is tipped forward much more than when your baby lies on their back.</li>
+        <li><strong>Face hidden</strong>: the face can no longer be seen, for example face down in the mattress or covered by a blanket.</li>
+      </ul>
+      <p>The video is analysed on this device. Nothing is uploaded.</p>
+    </section>
+
+    <section id="pr-start" class="help-section">
+      <h4>Set up (about 1 minute)</h4>
+      <ol>
+        <li><strong>Place the Camera</strong> above or at the side of the cot, so your baby’s face is clearly in view. Good, even light helps.</li>
+        <li><strong>Calibrate</strong> while your baby is lying calmly <strong>on their back</strong>: open <strong>Settings</strong>, then under <em>Calibration (supine baseline)</em> press <strong>Start</strong> and wait for the timer (10 seconds by default). This saves how the head looks when your baby is face up. It is saved for this room.</li>
+        <li><strong>Leave the other settings on their defaults</strong>. Adjust them only if you get false alerts or missed ones (see <a href="#pr-fix">Fix a problem</a>).</li>
+      </ol>
+      <p>Calibrate again if you move the Camera or change the room.</p>
+    </section>
+
+    <section id="pr-screen" class="help-section">
+      <h4>Reading the screen</h4>
+      <table class="help-kv">
+        <tr><th>Risk bar</th><td>How likely a face-down position is right now, from 0 to 100%. It shows the higher of the two checks (head tilt or face hidden), smoothed over a couple of seconds. Green below 50%, orange from 50%, red at 100%.</td></tr>
+        <tr><th>Tick marks</th><td>The levels at which the head-tilt check starts and clears an alert.</td></tr>
+        <tr><th>Alert</th><td>Shown, with a sound if enabled in Settings, only once the risk has stayed high for a set time. It clears once the risk has stayed low for a set time. This avoids alerts from a brief turn of the head.</td></tr>
+        <tr><th>Face markers</th><td>Dots on the face and an arrow showing which way the head points. They confirm the face is being tracked.</td></tr>
+      </table>
+    </section>
+
+    <section id="pr-settings" class="help-section">
+      <h4>Settings</h4>
+      <p class="help-muted">Defaults in brackets. Changes are saved on this device.</p>
+
+      <h5>General</h5>
+      <table class="help-kv">
+        <tr><th>Enable prone detection</th><td>Turns the checks and alerts on or off (on).</td></tr>
+        <tr><th>Show landmarks</th><td>Draws the face dots on the video (on).</td></tr>
+        <tr><th>Show orientation arrow</th><td>Draws an arrow showing where the head points (on).</td></tr>
+        <tr><th>Show 3D axes</th><td>Draws the head’s three axes, useful to check tracking (on).</td></tr>
+        <tr><th>Arrow length</th><td>Size of the arrow on screen (×1.8). Display only.</td></tr>
+        <tr><th>Flip pitch sign</th><td>Tick this if the bar <em>rises</em> when your baby is face up and <em>falls</em> face down: some Camera positions reverse the tilt direction (off).</td></tr>
+      </table>
+
+      <h5>Calibration (supine baseline)</h5>
+      <table class="help-kv">
+        <tr><th>Duration</th><td>How long to measure your baby on their back (10 s).</td></tr>
+        <tr><th>Start / Reset</th><td>Start measuring, or forget the saved baseline.</td></tr>
+        <tr><th>Supine baseline</th><td>The head angle saved by calibration. “–” means not calibrated yet: the head-tilt check needs this.</td></tr>
+      </table>
+
+      <h5>Smoothing &amp; thresholds</h5>
+      <table class="help-kv">
+        <tr><th>EMA τ</th><td>Smoothing time (2 s). Higher = steadier but slower to react.</td></tr>
+        <tr><th>Pitch θ on</th><td>How far (in degrees) the head must tip forward from the face-up baseline before it counts as face down (55°). Lower = more sensitive.</td></tr>
+        <tr><th>Pose thr on / off</th><td>Head-tilt risk needed to start (0.70) and to clear (0.40) an alert. Keep <em>off</em> below <em>on</em> to avoid flicker.</td></tr>
+        <tr><th>Pose dwell on / off</th><td>Seconds the head-tilt risk must stay above <em>on</em> before alerting (12 s), and below <em>off</em> before clearing (5 s).</td></tr>
+        <tr><th>Occlusion thr on / off</th><td>How hidden the face must be to start (0.75) and to clear (0.45) an alert. 1 = face not seen at all.</td></tr>
+        <tr><th>Occlusion dwell on / off</th><td>Seconds the face must stay hidden before alerting (10 s), and visible again before clearing (3 s).</td></tr>
+      </table>
+
+      <h5>Face tracking (advanced)</h5>
+      <table class="help-kv">
+        <tr><th>minFaceDetectionConfidence</th><td>How sure the model must be to find a face (0.5). Higher = fewer false faces, but faces may be missed in dim light.</td></tr>
+        <tr><th>minTrackingConfidence</th><td>How sure it must be to keep following a face between frames (0.5).</td></tr>
+        <tr><th>minFacePresenceConfidence</th><td>How sure it must be that a face is still there (0.5). Higher makes “face hidden” trigger sooner.</td></tr>
+        <tr><th>Apply to model</th><td>Applies the three values above. They have no effect until pressed.</td></tr>
+        <tr><th>Reset all defaults</th><td>Restores every setting above. The calibration baseline is kept; use <em>Reset</em> under Calibration to clear it.</td></tr>
+      </table>
+    </section>
+
+    <section id="pr-fix" class="help-section">
+      <h4>Fix a problem</h4>
+      <table class="help-kv">
+        <tr><th>Alerts when my baby turns their head or wriggles</th><td>Increase <em>Pose dwell on</em> and <em>Occlusion dwell on</em> (for example to 20 s), or raise <em>Pitch θ on</em>. Re-calibrate if the Camera moved.</td></tr>
+        <tr><th>No alert when it should</th><td>Check the face dots appear on the video. Lower <em>Pitch θ on</em> or the <em>on</em> thresholds slightly, and make sure you calibrated with your baby on their back.</td></tr>
+        <tr><th>Bar goes up when face up, down when face down</th><td>Tick <em>Flip pitch sign</em>, then calibrate again.</td></tr>
+        <tr><th>Constant “face hidden” alerts</th><td>Light is too low or the face is out of view. Improve lighting, move the Camera, or lower <em>minFacePresenceConfidence</em> and press <em>Apply to model</em>.</td></tr>
+        <tr><th>Supine baseline shows “–”</th><td>Calibration hasn’t run. Open Settings and press <em>Start</em> under Calibration while your baby is face up.</td></tr>
+        <tr><th>No face dots at all</th><td>The video isn’t arriving or the face isn’t visible. Check the Camera is streaming and its view of the face is clear.</td></tr>
+      </table>
+    </section>
+
+    <details id="pr-how" class="learn-more help-section">
+      <summary>How it works</summary>
+      <p><strong>Face tracking.</strong> Each video frame goes through Google’s MediaPipe Face Landmarker, which finds the face and estimates the head’s angles. <em>Pitch</em> is the forward/back tilt.</p>
+      <p><strong>Head-tilt check.</strong> The pitch is compared with the face-up baseline from calibration. The instant risk starts rising 10° before the head reaches <em>Pitch θ on</em> and is at its maximum 20° past it. The risk is smoothed (EMA τ). An alert starts when it stays above <em>Pose thr on</em> for <em>Pose dwell on</em> seconds, and clears when it stays below <em>Pose thr off</em> for <em>Pose dwell off</em> seconds.</p>
+      <p><strong>Face-hidden check.</strong> Each frame counts as 1 when no face is found and 0 when it is. That value is smoothed the same way. An alert starts when it stays above <em>Occlusion thr on</em> for <em>Occlusion dwell on</em> seconds, and clears below <em>Occlusion thr off</em> after <em>Occlusion dwell off</em> seconds.</p>
+      <p><strong>Two thresholds and two waits</strong> (“hysteresis”) stop the alert flickering on and off around a single value. The alert cause (head tilt, face hidden, or both) is recorded in the Dashboard.</p>
+    </details>
   </div>
 </aside>
