@@ -158,6 +158,53 @@
     /* Log + analytics viewers (tables are built by the script) */
     .log-viewer { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; z-index: 50; padding: 12px; }
     .log-viewer.open { display: flex; }
+    .more-h { margin: 18px 0 4px; font-size: 15px; font-weight: 600; color: var(--nt-text, #fff); }
+    /* Room analytics */
+    .ra-inner { width: min(980px, 100%); }
+    .ra-title { margin: 0; font-size: 18px; }
+    .ra-body { padding: 14px 16px 18px; overflow: auto; max-height: calc(90svh - 64px); color: var(--nt-text-2, #ddd); font-size: 15px; }
+    .ra-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .ra-label { font-size: 14px; color: var(--muted); margin-right: 4px; }
+    .seg { appearance: none; font: inherit; font-size: 15px; min-height: 44px; padding: 0 14px; border-radius: 999px; cursor: pointer;
+           background: var(--nt-surface, #111); color: var(--nt-text, #fff); border: 1px solid var(--nt-border-strong, #2a2a2a); }
+    .seg[aria-pressed="true"] { background: #fff; color: #000; border-color: #fff; font-weight: 600; }
+    .ra-help { margin: 12px 0 16px; font-size: 14px; line-height: 1.5; color: var(--muted); }
+    .ra-help strong { color: var(--nt-text-2, #ddd); }
+    .ra-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
+    @media (min-width: 700px) { .ra-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+    .ra-kpis .tile-value { font-size: 26px; }
+    .ra-kpis .tile-label { font-size: 14px; }
+    .ra-table-wrap { overflow-x: auto; border: 1px solid var(--ring); border-radius: 12px; }
+    table.ra-table { width: 100%; border-collapse: collapse; font-size: 15px; }
+    .ra-table th, .ra-table td { padding: 10px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--ring); }
+    .ra-table th:first-child, .ra-table td:first-child { text-align: left; }
+    .ra-table thead th { position: sticky; top: 0; background: var(--nt-surface, #111); font-size: 14px; font-weight: 600; color: var(--muted); }
+    .ra-table thead th button { all: unset; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; min-height: 44px; }
+    .ra-table thead th button:focus-visible { outline: 2px solid var(--nt-accent, #7aa2ff); outline-offset: 2px; border-radius: 4px; }
+    .ra-table tbody tr:last-child td { border-bottom: 0; }
+    .ra-table td.num { font-variant-numeric: tabular-nums; }
+    .ra-room { font-weight: 600; color: var(--nt-text, #fff); }
+    .ra-code { display: block; font-family: var(--nt-font-mono, ui-monospace, monospace); font-size: 14px; color: var(--muted); font-weight: 400; }
+    .ra-bar { display: inline-block; vertical-align: middle; width: 120px; height: 8px; border-radius: 4px; background: #1c1c1c; margin-right: 10px; overflow: hidden; }
+    .ra-bar > span { display: block; height: 100%; border-radius: 4px; background: var(--nt-text-2, #ddd); }
+    .ra-live { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--nt-text, #fff); }
+    .ra-live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+    .ra-empty, .ra-error { padding: 24px 12px; text-align: center; color: var(--muted); line-height: 1.6; }
+    .ra-error { color: #fecaca; }
+    .ra-foot { margin: 10px 2px 0; font-size: 14px; color: var(--muted); }
+    /* Phones: one card per room instead of a wide table */
+    @media (max-width: 640px) {
+      .ra-table-wrap { border: 0; overflow: visible; }
+      .ra-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+      .ra-table, .ra-table tbody, .ra-table tr, .ra-table td { display: block; width: auto; }
+      .ra-table tr { border: 1px solid var(--ring); border-radius: 12px; background: var(--nt-surface, #111); padding: 4px 0; margin-bottom: 10px; }
+      .ra-table td { display: flex; justify-content: space-between; align-items: center; gap: 12px; text-align: right; white-space: normal; border-bottom: 0; padding: 6px 14px; }
+      .ra-table td::before { content: attr(data-label); color: var(--muted); font-size: 14px; text-align: left; }
+      .ra-table td:first-child { display: block; text-align: left; padding: 10px 14px 8px; border-bottom: 1px solid var(--ring); margin-bottom: 4px; }
+      .ra-table td:first-child::before { content: none; }
+      .ra-table td.ra-total { flex-wrap: wrap; }
+      .ra-table td.ra-total .ra-bar { order: 3; flex: 1 0 100%; width: auto; margin: 4px 0 2px; }
+    }
     .log-viewer-inner { background: var(--nt-bg-soft, #0b0b0b); border: 1px solid var(--nt-border-strong, #2a2a2a); border-radius: 14px;
                         width: min(900px, 100%); max-height: 85vh; display: flex; flex-direction: column; }
     .log-viewer-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px;
@@ -246,10 +293,15 @@
             <label class="switch-label"><input id="log-enabled" type="checkbox" checked> Keep a log of each refresh</label>
             <label class="switch-label">Up to <input id="log-limit" type="number" min="0.1" step="0.1" value="1" inputmode="decimal" aria-label="Maximum log size in MB"> MB</label>
           </div>
-          <p class="small">Log: <span class="mono" id="log-size">0 MB</span> · <span class="mono" id="log-rows">0</span> rows</p>
+          <div class="btn-row" style="margin-bottom:6px">
+            <button id="btn-room-analytics" type="button" class="btn btn-primary">Room analytics</button>
+          </div>
+          <p class="small">Time each room had a Camera and a Viewer connected together, from the server’s full activity history.</p>
+          <h3 class="more-h">This browser’s log</h3>
+          <p class="small">Only covers times when this Roster page was open. Log: <span class="mono" id="log-size">0 MB</span> · <span class="mono" id="log-rows">0</span> rows</p>
           <div class="btn-row">
             <button id="btn-log-view" type="button" class="btn">View log</button>
-            <button id="btn-analytics" type="button" class="btn">Analytics</button>
+            <button id="btn-analytics" type="button" class="btn">Log summary</button>
             <button id="btn-export" type="button" class="btn">Export CSV</button>
             <button id="btn-log-clear" type="button" class="btn btn-danger">Clear log</button>
           </div>
@@ -278,11 +330,32 @@
     </div>
   </div>
 
-  <!-- Analytics viewer -->
-  <div id="analytics-viewer" class="log-viewer" aria-hidden="true" role="dialog" aria-label="Room analytics">
+  <!-- Room analytics (server history) -->
+  <div id="ra-viewer" class="log-viewer" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="ra-title">
+    <div class="log-viewer-inner ra-inner">
+      <div class="log-viewer-header">
+        <h2 id="ra-title" class="ra-title">Room analytics</h2>
+        <button id="btn-ra-close" type="button" class="btn">Close</button>
+      </div>
+      <div class="ra-body">
+        <div class="ra-controls" role="group" aria-label="Period">
+          <span class="ra-label">Period</span>
+          <button type="button" class="seg" data-days="1" aria-pressed="false">24 h</button>
+          <button type="button" class="seg" data-days="7" aria-pressed="true">7 days</button>
+          <button type="button" class="seg" data-days="30" aria-pressed="false">30 days</button>
+          <button type="button" class="seg" data-days="90" aria-pressed="false">90 days</button>
+        </div>
+        <p class="ra-help">A <strong>session</strong> is a period when a room has at least one Camera <strong>and</strong> one Viewer connected at the same time. Rooms with only a Camera or only a Viewer are not counted.</p>
+        <div id="ra-content" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Log summary (this browser's log) -->
+  <div id="analytics-viewer" class="log-viewer" aria-hidden="true" role="dialog" aria-label="Log summary">
     <div class="log-viewer-inner">
       <div class="log-viewer-header">
-        <span>Room analytics</span>
+        <span>Log summary · this browser only</span>
         <button id="btn-analytics-close" type="button" class="btn">Close</button>
       </div>
       <div id="analytics-viewer-body" class="log-viewer-body"></div>
@@ -1412,6 +1485,116 @@
           analyticsViewer.setAttribute('aria-hidden', 'true');
         }
       });
+
+      // ---- Room analytics (server activity history) ----
+      const raViewer = document.getElementById('ra-viewer');
+      const raContent = document.getElementById('ra-content');
+      let raDays = 7, raSort = { key: 'totalSeconds', dir: -1 }, raData = null, raLastFocus = null;
+
+      function dur(sec) {
+        sec = Math.max(0, Math.round(sec || 0));
+        const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+        if (d) return d + ' d ' + h + ' h';
+        if (h) return h + ' h ' + String(m).padStart(2, '0') + ' min';
+        if (m) return m + ' min';
+        return sec ? sec + ' s' : '0';
+      }
+      function whenAgo(iso) {
+        if (!iso) return '—';
+        const t = new Date(iso), diff = Date.now() - t.getTime();
+        if (diff < 60e3) return 'just now';
+        if (diff < 3600e3) return Math.round(diff / 60e3) + ' min ago';
+        if (diff < 86400e3) return Math.round(diff / 3600e3) + ' h ago';
+        return t.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' ' + t.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      }
+      function analyticsUrl() {
+        const base = new URL('/admin/analytics/rooms', endpointInput.value || 'https://signaling-server-f5gu.onrender.com/');
+        const to = new Date(), from = new Date(to.getTime() - raDays * 86400e3);
+        base.searchParams.set('from', from.toISOString()); base.searchParams.set('to', to.toISOString());
+        return base.href;
+      }
+      async function loadRoomAnalytics() {
+        raContent.innerHTML = '<p class="ra-empty">Loading…</p>';
+        try {
+          const r = await fetch(analyticsUrl(), { headers: adminHeaders(), cache: 'no-store', mode: 'cors' });
+          if (r.status === 401) { raContent.innerHTML = '<p class="ra-error">Your sign-in has expired. Sign in again to see room analytics.</p>'; return; }
+          if (r.status === 503 || r.status === 404) { raContent.innerHTML = '<p class="ra-empty">Room analytics isn’t switched on yet: the server has no activity database configured.</p>'; return; }
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          raData = await r.json();
+          renderRoomAnalytics();
+        } catch (e) {
+          raContent.innerHTML = '<p class="ra-error">Couldn’t load room analytics (' + esc(e.message) + '). Check the connection and try again.</p>';
+        }
+      }
+      function renderRoomAnalytics() {
+        const rooms = (raData && raData.rooms) || [];
+        if (!rooms.length) {
+          raContent.innerHTML = '<p class="ra-empty">No sessions in this period.<br>A session starts when a room has a Camera and a Viewer connected at the same time.</p>';
+          return;
+        }
+        const total = rooms.reduce((a, r) => a + r.totalSeconds, 0);
+        const sessions = rooms.reduce((a, r) => a + r.sessions, 0);
+        const live = rooms.filter(r => r.activeNow).length;
+        const kpi = (label, value) => '<div class="tile"><div class="tile-label">' + label + '</div><div class="tile-value">' + value + '</div></div>';
+        let html = '<div class="ra-kpis">' +
+          kpi('Rooms used', rooms.length.toLocaleString()) + kpi('Total time', dur(total)) +
+          kpi('Sessions', sessions.toLocaleString()) + kpi('In use now', live.toLocaleString()) + '</div>';
+        const val = (r, k) => k === 'room' ? roomLabel(r.room).toLowerCase() : k === 'lastActive' ? (r.activeNow ? Infinity : Date.parse(r.lastActive || 0)) : r[k];
+        const sorted = rooms.slice().sort((a, b) => { const va = val(a, raSort.key), vb = val(b, raSort.key); return (va > vb ? 1 : va < vb ? -1 : 0) * raSort.dir; });
+        const max = Math.max(...rooms.map(r => r.totalSeconds), 1);
+        const cols = [['room', 'Room'], ['totalSeconds', 'Time with Camera + Viewer'], ['sessions', 'Sessions'], ['avgSeconds', 'Average'], ['longestSeconds', 'Longest'], ['lastActive', 'Last active']];
+        const period = raViewer.querySelector('.seg[aria-pressed="true"]').textContent;
+        html += '<div class="ra-table-wrap"><table class="ra-table"><caption class="sr-only">Sessions per room, last ' + esc(period) + '</caption><thead><tr>';
+        for (const [k, label] of cols) {
+          const on = raSort.key === k, aria = on ? (raSort.dir < 0 ? 'descending' : 'ascending') : 'none';
+          html += '<th scope="col" aria-sort="' + aria + '"><button type="button" data-sort="' + k + '">' + label + (on ? (raSort.dir < 0 ? ' ▼' : ' ▲') : '') + '</button></th>';
+        }
+        html += '</tr></thead><tbody>';
+        for (const r of sorted) {
+          const pct = Math.max(2, Math.round(r.totalSeconds / max * 100));
+          html += '<tr><td><span class="ra-room">' + esc(roomLabel(r.room)) + '</span>' + (r.activeNow ? ' <span class="ra-live">In use now</span>' : '') +
+                  '<span class="ra-code" title="Full room id">' + esc(r.room) + '</span></td>' +
+                  '<td class="num ra-total" data-label="Time with Camera + Viewer"><span class="ra-bar" aria-hidden="true"><span style="width:' + pct + '%"></span></span>' + dur(r.totalSeconds) + '</td>' +
+                  '<td class="num" data-label="Sessions">' + r.sessions.toLocaleString() + '</td>' +
+                  '<td class="num" data-label="Average">' + dur(r.avgSeconds) + '</td>' +
+                  '<td class="num" data-label="Longest">' + dur(r.longestSeconds) + '</td>' +
+                  '<td class="num" data-label="Last active">' + (r.activeNow ? 'now' : whenAgo(r.lastActive)) + '</td></tr>';
+        }
+        html += '</tbody></table></div>';
+        html += '<p class="ra-foot">' + esc(new Date(raData.from).toLocaleString()) + ' – ' + esc(new Date(raData.to).toLocaleString()) + ' · includes sessions still running.</p>';
+        raContent.innerHTML = html;
+        raContent.querySelectorAll('th button[data-sort]').forEach(b => b.addEventListener('click', () => {
+          const k = b.dataset.sort;
+          raSort = raSort.key === k ? { key: k, dir: -raSort.dir } : { key: k, dir: k === 'room' ? 1 : -1 };
+          renderRoomAnalytics();
+          raContent.querySelector('th button[data-sort="' + k + '"]')?.focus();
+        }));
+      }
+      function openRoomAnalytics() {
+        raLastFocus = document.activeElement;
+        raViewer.classList.add('open'); raViewer.setAttribute('aria-hidden', 'false');
+        document.getElementById('btn-ra-close').focus();
+        loadRoomAnalytics();
+      }
+      function closeRoomAnalytics() {
+        raViewer.classList.remove('open'); raViewer.setAttribute('aria-hidden', 'true');
+        if (raLastFocus && raLastFocus.focus) raLastFocus.focus();
+      }
+      document.getElementById('btn-room-analytics').addEventListener('click', openRoomAnalytics);
+      document.getElementById('btn-ra-close').addEventListener('click', closeRoomAnalytics);
+      raViewer.addEventListener('click', e => { if (e.target === raViewer) closeRoomAnalytics(); });
+      raViewer.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { e.preventDefault(); closeRoomAnalytics(); return; }
+        if (e.key !== 'Tab') return;
+        const f = [...raViewer.querySelectorAll('button')].filter(b => b.offsetParent);
+        if (!f.length) return;
+        if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+        else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+      });
+      raViewer.querySelectorAll('.seg').forEach(b => b.addEventListener('click', () => {
+        raViewer.querySelectorAll('.seg').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+        raDays = Number(b.dataset.days); loadRoomAnalytics();
+      }));
 
       // ---- Kick off ----
       loadSettings();
