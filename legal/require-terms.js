@@ -4,7 +4,7 @@
 // Acceptance is remembered in localStorage under naptio:terms:<TERMS_VERSION>, so bumping TERMS_VERSION
 // asks everyone again. Declining (or Escape) navigates back to the home page.
 // /webrtc/shared/terms/require-terms.js
-export const TERMS_VERSION = '2025-10-11'; // match the "Effective" pill on your Legal page
+export const TERMS_VERSION = '2026-11-04'; // match the "Effective" pill on your Legal page
 const STORAGE_KEY = `naptio:terms:${TERMS_VERSION}`;
 
 /** True if the current TERMS_VERSION has already been accepted on this device. */
