@@ -751,8 +751,33 @@
 
         const out = landmarks && landmarks.length ? anyLandmarkOutside(landmarks) : false;
         zoneAlert.style.display = out ? 'block' : 'none';
-        updateFenceAlert(!!out);
+        frameFence(!!out);
       }
+      // Per-frame result. Going outside alerts at once; the alert ends only after 2 s back inside (or without a
+      // body), so one dropped or odd frame doesn't split one episode into several alerts. Explicit stops
+      // (detection off, zone redrawn, Camera stopped) still end it immediately via updateFenceAlert(false).
+      let fenceInsideSince = 0;
+      function frameFence(outside) {
+        lastFencePoseMs = Date.now();
+        if (outside) {
+          fenceInsideSince = 0;
+          updateFenceAlert(true);
+          return;
+        }
+        if (!fenceAlertOn) return;
+        if (!fenceInsideSince) fenceInsideSince = Date.now();
+        else if (Date.now() - fenceInsideSince >= 2000) {
+          fenceInsideSince = 0;
+          updateFenceAlert(false);
+        }
+      }
+      // Camera does the analysis and only sends results while it sees a body: no result for 10 s ends the alert
+      // (the baby left the picture), as on the Motion page.
+      let lastFencePoseMs = 0;
+      setInterval(() => {
+        if (fenceAlertOn && poseWhere === 'sender' && lastFencePoseMs && Date.now() - lastFencePoseMs > 10000)
+          finalizeOpenFenceAlert('No body seen for 10 s');
+      }, 1000);
       let _loopGen = 0,
         _loopStarting = false;
       // Run pose detection on the Viewer for every video frame; _loopGen retires stale loops.
@@ -763,6 +788,17 @@
         try {
           await ensurePoseTask();
           await waitForVideoFrame(remoteVideo);
+        } catch (e) {
+          // The detection model failed to load (e.g. a flaky mobile network): say so and try again, instead of
+          // leaving monitoring silently off.
+          console.warn('[detect] model failed to load', e);
+          try {
+            showStatus('Detection model failed to load – retrying in 15 s');
+          } catch {}
+          setTimeout(() => {
+            if (gen === _loopGen && poseEnabled && poseWhere === 'receiver') startReceiverPoseLoop();
+          }, 15000);
+          return;
         } finally {
           _loopStarting = false;
         }
@@ -778,7 +814,7 @@
           if (!videoHasFrame(remoteVideo)) {
             poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
             zoneAlert.style.display = 'none';
-            updateFenceAlert(false);
+            frameFence(false);
             scheduleNext();
             return;
           }
@@ -792,7 +828,7 @@
               poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
               drawPolygonOverlay(poseCtx);
               zoneAlert.style.display = 'none';
-              updateFenceAlert(false);
+              frameFence(false);
             }
           } catch {
           } finally {
@@ -838,9 +874,9 @@
           }
         },
         onIceState: (state) => {
-          if (state === 'failed' || state === 'disconnected' || state === 'closed') {
-            clearOverlayDrawing();
-          }
+          // "disconnected" is often a brief blip the connection recovers from: keep an open alert then.
+          if (state === 'failed' || state === 'closed') clearOverlayDrawing();
+          else if (state === 'disconnected') clearOverlayDrawing(true);
         },
         onBye: () => {
           clearOverlayDrawing();
@@ -889,7 +925,7 @@
         if (!stream) return;
         stream.getVideoTracks().forEach((t) => {
           t.addEventListener('ended', clearOverlayDrawing);
-          t.addEventListener('mute', clearOverlayDrawing);
+          t.addEventListener('mute', () => clearOverlayDrawing(true)); // short network stall: keep the alert
         });
         stream.addEventListener('removetrack', (e) => {
           if (e.track?.kind === 'video') clearOverlayDrawing();

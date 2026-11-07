@@ -1441,6 +1441,7 @@
       }
 
       let _faceTaskP = null;
+      let _lastFaceReloadTry = 0; // see onFrame: retry a failed reload of the face model
       // Lazily create the FaceLandmarker once; concurrent callers share one promise.
       function ensureFaceTask() {
         if (faceTask) return Promise.resolve(faceTask);
@@ -1471,12 +1472,18 @@
         return faceTask;
       }
       // Dispose and rebuild the FaceLandmarker (e.g. after confidence settings change).
+      // Reload the face model with the current settings. A failed load is reported here; the frame loop retries.
       async function recreateFaceTask() {
         try {
           await faceTask?.close?.();
         } catch {}
         faceTask = null;
-        await ensureFaceTask();
+        try {
+          await ensureFaceTask();
+        } catch (e) {
+          console.warn('[FACE] reload failed', e);
+          showStatus('Detection model failed to load – retrying in 15 s');
+        }
       }
 
       // True once the video element has decoded at least one frame (needed before detectForVideo).
@@ -1948,6 +1955,17 @@
         try {
           await ensureFaceTask();
           await waitForVideoFrame(remoteVideo);
+        } catch (e) {
+          // The detection model failed to load (e.g. a flaky mobile network): say so and try again, instead of
+          // leaving monitoring silently off.
+          console.warn('[detect] model failed to load', e);
+          try {
+            showStatus('Detection model failed to load – retrying in 15 s');
+          } catch {}
+          setTimeout(() => {
+            if (gen === _loopGen && faceEnabled && faceWhere === 'receiver') startReceiverFaceLoop();
+          }, 15000);
+          return;
         } finally {
           _loopStarting = false;
         }
@@ -1978,8 +1996,13 @@
           const dt = lastTs ? Math.min(1, (ts - lastTs) / 1000) : 0.016;
           lastTs = ts;
 
-          // Face model being reloaded (Apply to model / Reset defaults): skip this frame, try the next.
+          // Face model being reloaded (Apply to model / Reset defaults): skip this frame, try the next. If the
+          // reload failed, try loading again (at most every 15 s) rather than skipping frames for ever.
           if (!faceTask) {
+            if (!_faceTaskP && performance.now() - _lastFaceReloadTry > 15000) {
+              _lastFaceReloadTry = performance.now();
+              ensureFaceTask().catch(() => showStatus('Detection model failed to load – retrying in 15 s'));
+            }
             scheduleNext();
             return;
           }

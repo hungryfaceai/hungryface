@@ -59,7 +59,9 @@ function ensureCtx() {
   return audioCtx;
 }
 
-// Browsers (notably iOS) keep audio suspended until a user gesture; resume the context on the first one.
+// Browsers (notably iOS) keep audio suspended until a user gesture. Every tap resumes the context if it isn't
+// running: iOS can stop it again later (a phone call, Siri, another app = state "interrupted"), and a one-time
+// listener would leave alert sounds off until the page is reloaded.
 function unlockOnFirstGesture() {
   const once = async (ev) => {
     const ac = ensureCtx();
@@ -67,20 +69,22 @@ function unlockOnFirstGesture() {
       dwarn('No AudioContext on gesture');
       return;
     }
+    if (ac.state === 'running') return;
     const before = ac.state;
     try {
       await ac.resume();
     } catch {}
     dlog('Gesture unlock', ev?.type, 'state:', before, '→', ac.state);
   };
-  ['pointerdown', 'touchend', 'keydown', 'click'].forEach((ev) =>
-    window.addEventListener(ev, once, { once: true, passive: true })
-  );
+  ['pointerdown', 'touchend', 'keydown', 'click'].forEach((ev) => window.addEventListener(ev, once, { passive: true }));
 }
 
 // Backgrounded tabs can leave the context suspended; resume when the tab becomes visible again.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && audioCtx?.state === 'suspended') {
+  if (
+    document.visibilityState === 'visible' &&
+    (audioCtx?.state === 'suspended' || audioCtx?.state === 'interrupted')
+  ) {
     dlog('Tab visible; resuming suspended AudioContext…');
     audioCtx
       .resume()
@@ -98,7 +102,7 @@ async function playDashboardPips() {
     return false;
   }
 
-  if (ac.state === 'suspended') {
+  if (ac.state === 'suspended' || ac.state === 'interrupted') {
     // Without a recent tap the browser keeps the context suspended and resume() never settles: wait 300 ms at most.
     try {
       await Promise.race([ac.resume(), new Promise((r) => setTimeout(r, 300))]);
@@ -202,7 +206,9 @@ export function installAlertSound(opts = {}) {
     }
 
     const now = Date.now();
-    if (inMinutesCooldown(now)) {
+    // Face-down (prone) is the alert that must never be missed: it always sounds, even within the wait after
+    // another alert's sound (it still starts the wait for the others).
+    if (type !== 'prone' && inMinutesCooldown(now)) {
       dlog('Blocked by minutes cooldown.');
       return false;
     }
