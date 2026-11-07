@@ -313,16 +313,23 @@ export class ReceiverCore {
     }
 
     if (msg.type === 'peer-joined' && msg.role === 'sender' && msg.id) {
+      const wasConnectedToOther = this.remoteDescriptionSet && this.targetSenderId && this.targetSenderId !== msg.id;
       this.senderId = msg.id;
       this.targetSenderId = msg.id;   // the Camera re-joined with a new id: talk to the new one
+      // Our connection belongs to the Camera's previous session: start a fresh one now instead of
+      // waiting for the old one to time out.
+      if (wasConnectedToOther) { this.#restartPC().catch(() => {}); return; }
       await this.#sendCurrentOffer();
       return;
     }
 
     if (msg.type === 'bye') {
+      if (msg.from && this.targetSenderId && msg.from !== this.targetSenderId) return;   // another device
       this.remoteDescriptionSet = false;
       this.#stopOfferResendLoop();
       this.onBye?.(msg);
+      // The Camera stopped: get a fresh connection ready so it reconnects as soon as the Camera starts.
+      this.#restartPC().catch(() => {});
       return;
     }
 

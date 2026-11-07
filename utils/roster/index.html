@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Roster</title>
+  <title>Admin</title>
   <link rel="icon" href="/hungryface/pwa/icons/favicon-196.png" sizes="196x196">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 
@@ -282,7 +282,7 @@
     <main class="panel" role="main">
       <div class="header">
         <div class="header-top">
-          <h1>Roster</h1>
+          <h1>Admin</h1>
           <a href="#" id="signout-link" class="signout-link admin-only" role="button">Sign out</a>
         </div>
         <p class="sub admin-only">Devices connected to the signalling server right now.</p>
@@ -1338,7 +1338,14 @@
         }
       }
 
-      async function fetchAndRender() {
+      // One refresh at a time: on a slow (cold) server, timer ticks must not pile up requests or let an
+      // older answer overwrite a newer one.
+      let refreshing = null;
+      function fetchAndRender() {
+        if (!refreshing) refreshing = fetchAndRenderNow().finally(() => { refreshing = null; });
+        return refreshing;
+      }
+      async function fetchAndRenderNow() {
         const url = endpointInput.value.trim();
         endpointView.textContent = url || '—';
 

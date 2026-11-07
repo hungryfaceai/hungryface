@@ -890,7 +890,10 @@
       }
 
       const model = loadModel();
-      const weights = model.weights || {"Baby cry, infant cry":1};
+      // A model saved without any weights would score 0 for ever (never alert): use the default cry weight.
+      const hasWeights = model.weights && Object.keys(model.weights).length > 0;
+      if (!hasWeights && !state.warnedNoWeights) { state.warnedNoWeights = true; log('warn', 'This model has no trained weights yet: using the default “Baby cry” weight.'); }
+      const weights = hasWeights ? model.weights : {"Baby cry, infant cry":1};
       const { raw, sm } = fusedScoreFromCategories(cats, weights, HOP_S);
 
       /*const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');

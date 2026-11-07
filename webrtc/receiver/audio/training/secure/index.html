@@ -1340,12 +1340,19 @@
       }
     }
 
+    // A new session starts with an empty buffer, so no sound from the previous one is counted.
+    function resetAudioBuffers() {
+      state.ring = new Float32Array(0); state.lastPos = 0;
+      resetResampler(); resetChunkQueue();
+    }
+
     /* ========= Mic control ========= */
     async function startMic(mode) {
       await stopFolderTraining();
       await stopFilePlayback();
       await stopRemoteAudioTap(); // ensure remote tap is off
       await stopMicOnly();
+      resetAudioBuffers();
       setStatus(mode==='detect' ? 'Starting microphone (detect)…' : 'Starting microphone (train)…');
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
       state.micCtx = ctx;
@@ -1460,6 +1467,7 @@
       resetResampler(); // don't carry filter state from the previous file
       if (trainBlobUrl) { try { URL.revokeObjectURL(trainBlobUrl); } catch {} }
       trainBlobUrl = URL.createObjectURL(file);
+      resetAudioBuffers();
       els.trainAudio.src = trainBlobUrl;
       els.trainAudio.loop = false;
     }
@@ -1951,6 +1959,7 @@
     async function startRemoteAudioTap(mode){
       if (!wrtc.stream) { log('warn','[RTC] No remote stream yet.'); return; }
       await stopRemoteAudioTap();
+      resetAudioBuffers();
       const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
       wrtc.ctx = ctx; await ctx.resume().catch(()=>{});
       const src = ctx.createMediaStreamSource(wrtc.stream);

@@ -275,7 +275,14 @@
         }
       }
 
-      async function fetchAndRender() {
+      // One refresh at a time: on a slow (cold) server, timer ticks must not pile up requests or let an
+      // older answer overwrite a newer one.
+      let refreshing = null;
+      function fetchAndRender() {
+        if (!refreshing) refreshing = fetchAndRenderNow().finally(() => { refreshing = null; });
+        return refreshing;
+      }
+      async function fetchAndRenderNow() {
         const url = endpointInput.value.trim();
         endpointView.textContent = url || '—';
 
