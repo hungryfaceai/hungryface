@@ -649,8 +649,45 @@
         color: var(--nt-text, #fff);
       }
       /* Room analytics */
-      .ra-inner {
-        width: min(980px, 100%);
+      /* Analytics window: the whole screen, like the map; only the body scrolls */
+      .log-viewer.ra-viewer {
+        padding: 0;
+        align-items: stretch;
+        justify-content: stretch;
+      }
+      .log-viewer.ra-viewer .log-viewer-inner.ra-inner {
+        width: 100vw;
+        max-width: none;
+        height: 100vh;
+        height: 100dvh;
+        max-height: none;
+        border-radius: 0;
+        border: 0;
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        box-sizing: border-box;
+      }
+      .ra-viewer .ra-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        max-height: none;
+      }
+      /* Location column: one line per place (most-seen first) */
+      .ra-places {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        text-align: left;
+      }
+      .ra-place {
+        white-space: nowrap;
+      }
+      /* Full-width table: the Location column takes the spare width, not the Room column */
+      .ra-viewer .ra-table td.ra-loc {
+        width: 40%;
+      }
+      .ra-place-none {
+        color: var(--muted);
       }
       .ra-title {
         margin: 0;
@@ -739,7 +776,9 @@
         border-bottom: 1px solid var(--ring);
       }
       .ra-table th:first-child,
-      .ra-table td:first-child {
+      .ra-table td:first-child,
+      .ra-table th:nth-child(2),
+      .ra-table td.ra-loc {
         text-align: left;
       }
       .ra-table thead th {
@@ -1009,6 +1048,13 @@
         }
         .ra-table td.ra-total {
           flex-wrap: wrap;
+        }
+        .ra-table td.ra-loc .ra-places {
+          text-align: right;
+          align-items: flex-end;
+        }
+        .ra-place {
+          white-space: normal;
         }
         .ra-table td.ra-total .ra-bar {
           order: 3;
@@ -1326,7 +1372,7 @@
     <!-- Room analytics (server history) -->
     <div
       id="ra-viewer"
-      class="log-viewer"
+      class="log-viewer ra-viewer"
       aria-hidden="true"
       role="dialog"
       aria-modal="true"
@@ -2774,6 +2820,36 @@
           }
         }
         // Builds the per-room analytics table/cards from the loaded history.
+        // Country name in the browser's language ("GB" -> "United Kingdom"); falls back to the code.
+        const countryNames =
+          typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames(undefined, { type: 'region' }) : null;
+        const countryName = (cc) => {
+          try {
+            return (countryNames && countryNames.of(cc)) || cc;
+          } catch {
+            return cc;
+          }
+        };
+        // "City, Country" for one place (either part may be missing).
+        const placeText = (p) => (p ? [p.city, p.country && countryName(p.country)].filter(Boolean).join(', ') : '');
+        // Location cell: one line per place, most-seen first (Cameras and Viewers may be in different places).
+        function placesHtml(places) {
+          if (!places || !places.length)
+            return (
+              '<span class="ra-place-none">' +
+              (raData && raData.geoReady === false ? 'Not available' : 'Unknown') +
+              '</span>'
+            );
+          return (
+            '<span class="ra-places">' +
+            places
+              .slice(0, 3)
+              .map((p) => '<span class="ra-place">' + esc(placeText(p)) + '</span>')
+              .join('') +
+            (places.length > 3 ? '<span class="ra-place ra-place-none">+' + (places.length - 3) + ' more</span>' : '') +
+            '</span>'
+          );
+        }
         function renderRoomAnalytics() {
           const rooms = (raData && raData.rooms) || [];
           if (!rooms.length) {
@@ -2803,11 +2879,13 @@
           const val = (r, k) =>
             k === 'room'
               ? roomLabel(r.room).toLowerCase()
-              : k === 'lastActive'
-                ? r.activeNow
-                  ? Infinity
-                  : Date.parse(r.lastActive || 0)
-                : r[k];
+              : k === 'place'
+                ? placeText((r.places || [])[0]).toLowerCase() || '￿' // unknown places sort last
+                : k === 'lastActive'
+                  ? r.activeNow
+                    ? Infinity
+                    : Date.parse(r.lastActive || 0)
+                  : r[k];
           // Sort by the chosen column and direction.
           const sorted = rooms.slice().sort((a, b) => {
             const va = val(a, raSort.key),
@@ -2818,6 +2896,7 @@
           const max = Math.max(...rooms.map((r) => r.totalSeconds), 1);
           const cols = [
             ['room', 'Room'],
+            ['place', 'Location'],
             ['totalSeconds', 'Time with Camera + Viewer'],
             ['sessions', 'Sessions'],
             ['avgSeconds', 'Average'],
@@ -2855,6 +2934,9 @@
               '<span class="ra-code" title="Full room id">' +
               esc(r.room) +
               '</span></td>' +
+              '<td class="ra-loc" data-label="Location">' +
+              placesHtml(r.places) +
+              '</td>' +
               '<td class="num ra-total" data-label="Time with Camera + Viewer"><span class="ra-bar" aria-hidden="true"><span style="width:' +
               pct +
               '%"></span></span>' +
