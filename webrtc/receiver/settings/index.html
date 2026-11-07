@@ -786,12 +786,13 @@
         el.addEventListener('change', () => setOnOff(key, el.checked ? 'on' : 'off'));
       }
 
-      /* Default ON for all switches (including In-app dashboard) */
+      /* Alert sounds default ON. The in-app dashboard defaults OFF: that is what the Viewer pages do when
+         nothing is saved (mini-dash.js), so the switch must show the same state. */
       wireSwitch('sw-audio', KEYS.audio, 'on');
       wireSwitch('sw-motion', KEYS.motion, 'on');
       wireSwitch('sw-fence', KEYS.fence, 'on');
       wireSwitch('sw-prone', KEYS.prone, 'on');
-      wireSwitch('sw-miniDash', KEYS.miniDash, 'on');
+      wireSwitch('sw-miniDash', KEYS.miniDash, 'off');
 
       // Cooldown (minutes) — default to 1 if nothing saved
       const cooldownInput = document.getElementById('notifCooldownMin');
@@ -953,7 +954,8 @@
         try {
           const summary = await factoryResetNaptio({
             includeSessionStorage: true,
-            knownDbNames: ['naptio-audio', 'naptio-video', 'naptio-settings', 'naptio'],
+            // naptioAlerts = the alert history (shared/alerts/store.js); listed for browsers without databases()
+            knownDbNames: ['naptioAlerts', 'naptio-audio', 'naptio-video', 'naptio-settings', 'naptio'],
           });
 
           const blocked = summary.indexedDB.some((x) => x.status === 'blocked');

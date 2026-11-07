@@ -166,8 +166,9 @@ async function playPing() {
   if (!soundsEnabled) return;
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === 'suspended') {
+    // Without a recent tap resume() never settles: don't wait for ever.
     try {
-      await audioCtx.resume();
+      await Promise.race([audioCtx.resume(), new Promise((r) => setTimeout(r, 300))]);
     } catch {}
   }
   if (audioCtx.state !== 'running') return;
@@ -204,6 +205,7 @@ async function playPing() {
 // True when fresh rows contain entries newer than the previously rendered top row (used to decide on a ping).
 function hasNewSince(fresh, prev) {
   if (!prev || !prev.length) return false; // don't ping on first paint
+  if (!fresh || !fresh.length) return false; // history cleared: nothing new to announce
   const prevTopId = prev[0]?.id;
   const i = fresh.findIndex((r) => r.id === prevTopId);
   return i > 0 || i === -1; // new rows unshifted at front or entirely new set
@@ -257,7 +259,8 @@ function download(name, type, text) {
   a.href = URL.createObjectURL(blob);
   a.download = name;
   a.click();
-  URL.revokeObjectURL(a.href);
+  // Revoking at once can cancel the download in Safari; release the blob a moment later.
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 let rollTimer = null;
@@ -269,6 +272,8 @@ function startPaintTick() {
   // Repaint the timeline frequently for a "live" feel (no DB fetch).
   paintTimer = setInterval(() => {
     if (!state.rolling) return;
+    // A drag-to-zoom in progress would lose its overlay (and pointer capture) if the chart were rebuilt now.
+    if (state.brushing) return;
     // keep same span, slide to now, and re-render
     const span = Math.max(60_000, state.windowEndMs - state.windowStartMs || state.windowHours * 3600_000);
     state.windowEndMs = Date.now();
@@ -938,7 +943,13 @@ els.btnClear?.addEventListener('click', async () => {
 
 // Fallback CSV
 function rowsToCSV(rows) {
-  const esc = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
+  // CSV cell: quoted; a value starting with = + - @ (or tab/CR) gets a leading ' so spreadsheets show it as text
+  // instead of running it as a formula.
+  const esc = (s) => {
+    let v = String(s ?? '');
+    if (/^[=+\-@\t\r]/.test(v)) v = "'" + v;
+    return `"${v.replace(/"/g, '""')}"`;
+  };
   const header = ['startAt', 'endAt', 'durationSec', 'avgScore', 'type', 'message'];
   const lines = [header.join(',')];
   for (const r of rows) {

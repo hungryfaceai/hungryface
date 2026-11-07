@@ -63,6 +63,11 @@ export function openDB() {
         _db = null;
         _dbP = null;
       };
+      // The browser can close the connection itself (storage cleared, low disk): open a new one next time.
+      _db.onclose = () => {
+        _db = null;
+        _dbP = null;
+      };
       resolve(_db);
     };
     req.onerror = () => {
@@ -160,7 +165,13 @@ export async function clearAllAlerts() {
 /** Build a CSV string from alert rows. */
 // Fields are always quoted with doubled inner quotes; durationSec is blank if the alert is still open.
 function _rowsToCSV(rows) {
-  const esc = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
+  // CSV cell: quoted; a value starting with = + - @ (or tab/CR) gets a leading ' so spreadsheets show it as text
+  // instead of running it as a formula.
+  const esc = (s) => {
+    let v = String(s ?? '');
+    if (/^[=+\-@\t\r]/.test(v)) v = "'" + v;
+    return `"${v.replace(/"/g, '""')}"`;
+  };
   const header = ['startAt', 'endAt', 'durationSec', 'avgScore', 'type', 'message'];
   const lines = [header.join(',')];
 

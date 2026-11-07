@@ -66,7 +66,7 @@ export async function ensureTermsAccepted(opts = {}) {
   style.textContent = `
   #tos-overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center}
   .tos-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.6);backdrop-filter:saturate(120%) blur(2px)}
-  .tos-dialog{position:relative;max-width:min(92vw,520px);margin:16px;border-radius:16px;background:#111;color:#fff;box-shadow:0 10px 30px rgba(0,0,0,.5);outline:none}
+  .tos-dialog{position:relative;max-width:min(92vw,520px);max-height:calc(100dvh - 32px);overflow:auto;margin:16px;border-radius:16px;background:#111;color:#fff;box-shadow:0 10px 30px rgba(0,0,0,.5);outline:none}
   .tos-body{padding:20px}
   .tos-lead{opacity:.95;line-height:1.45}
   .tos-meta{opacity:.8;margin:.5rem 0 1rem 0}

@@ -864,6 +864,13 @@
       let aiMicStream = null;
       let aiTapTrack = null; // retained for cleanup compatibility
       let audioStarting = false;
+      let audioGen = 0; // bumps on every start/stop of the audio AI (see startSenderAudioLoop)
+      let talkbackPeer = null; // peer id of the Viewer whose talkback/lullaby is playing
+      // Same for the pose and face loops: Stop during a model load must not leave a loop flag set.
+      let poseGen = 0,
+        poseStarting = false,
+        faceGen = 0,
+        faceStarting = false;
 
       // --------- Audio helpers ----------
       // Append two Float32Array buffers (used to accumulate samples until a full clip is available).
@@ -1087,6 +1094,12 @@
       // Mic ON/OFF switch: lazily acquire the audio track if needed, then just enable/disable it.
       async function applyAudioToggle() {
         const want = audioOn.checked;
+        // Not streaming: only remember the choice (Start reads the box). Opening the mic now would leave it on
+        // with nothing using it.
+        if (!started) {
+          setStatus(want ? 'Audio will be ON' : 'Audio will be OFF');
+          return;
+        }
         try {
           if (want) {
             const t = await ensureSenderHasAudioTrack();
@@ -1247,6 +1260,7 @@
               const ms = ev.streams?.[0] || new MediaStream([ev.track]);
               // If you support multiple receivers, you could mix or keep a map per peer.
               talkbackAudio.srcObject = ms;
+              talkbackPeer = peerId; // which Viewer this audio comes from (see cleanupPeer)
               talkbackAudio.muted = false;
               talkbackAudio.volume = 1.0;
               talkbackAudio.play().catch(() => {});
@@ -1432,13 +1446,13 @@
         try {
           rec.pc.close();
         } catch {}
-        // If this peer’s stream is what the audio element is playing, clear it
+        // Silence the speaker only if the audio playing came from THIS Viewer: another Viewer (e.g. a Motion or
+        // Prone page) leaving must not cut off the parent who is talking or playing a lullaby.
         try {
-          const ms = talkbackAudio.srcObject;
-          if (ms && ms.getAudioTracks().length && rec.pc) {
-            // crude: if we only ever had one inbound stream, just clear
+          if (talkbackPeer === peerId && talkbackAudio.srcObject) {
             talkbackAudio.pause();
             talkbackAudio.srcObject = null;
+            talkbackPeer = null;
           }
         } catch {}
         peers.delete(peerId);
@@ -1672,7 +1686,20 @@
 
           updateMirrorClass();
           const uiRoom = currentUiRoom(); // <-- UI label
+          // Never stream without this room's key (forgotten in another tab, or the browser cleared site data):
+          // the connection would be unsigned and open to anyone who knows the room id.
+          if (!listValidPskRooms().includes(uiRoom)) {
+            roomSel.disabled = false;
+            startBtn.disabled = false;
+            setStatus('This device is no longer paired in room “' + uiRoom + '”. Pair the devices again.');
+            alert('This device is no longer paired in room “' + uiRoom + '”.\n\nOpen Pair devices to pair it again.');
+            return;
+          }
           setStatus('Starting camera…');
+          // Anything left from before (shouldn't happen) is released first, so no camera/mic stays on unseen.
+          try {
+            localStream?.getTracks().forEach((t) => t.stop());
+          } catch {}
           localStream = await getMedia();
           localVideo.srcObject = localStream;
           try {
@@ -1682,7 +1709,9 @@
           }
           beginViewportSettle();
 
-          beginPreviewWindow(Number(previewMinsInput.value) || 1);
+          // 0 = no preview (screen dark from the start); empty/invalid = 1 minute; at most a day.
+          const mins = parseFloat(previewMinsInput.value);
+          beginPreviewWindow(Number.isFinite(mins) ? Math.min(1440, Math.max(0, mins)) : 1);
           // Make sure the PSK shim is installed for the selected room before signaling
           if (typeof window.__installPskForRoom === 'function') {
             window.__installPskForRoom(uiRoom);
@@ -1851,7 +1880,12 @@
       }
 
       // Create (once) the pose landmarker: lite model, VIDEO mode, one person.
-      async function ensurePoseTask() {
+      let poseTaskP = null; // one load shared by every caller (no duplicate models while the first loads)
+      function ensurePoseTask() {
+        if (poseTask) return Promise.resolve(poseTask);
+        return (poseTaskP ??= ensurePoseTaskImpl().finally(() => (poseTaskP = null)));
+      }
+      async function ensurePoseTaskImpl() {
         await ensureTasksLoaded();
         if (poseTask) return poseTask;
         const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
@@ -1872,7 +1906,12 @@
       }
 
       // Create (once) the face landmarker using the current FACE_OPTS thresholds.
-      async function ensureFaceTask() {
+      let faceTaskP = null; // one load shared by every caller
+      function ensureFaceTask() {
+        if (faceTask) return Promise.resolve(faceTask);
+        return (faceTaskP ??= ensureFaceTaskImpl().finally(() => (faceTaskP = null)));
+      }
+      async function ensureFaceTaskImpl() {
         await ensureTasksLoaded();
         if (faceTask) return faceTask;
         const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
@@ -1992,8 +2031,17 @@
       // Run pose detection on the local video every animation frame while the mode is set to run on the sender.
       async function startSenderPoseLoop() {
         if (!started || !poseOn.checked || poseWhere.value !== 'sender') return;
-        if (poseLoopRunning) return;
-        const task = await ensurePoseTask();
+        if (poseLoopRunning || poseStarting) return;
+        poseStarting = true;
+        const gen = ++poseGen;
+        let task;
+        try {
+          task = await ensurePoseTask();
+        } finally {
+          poseStarting = false;
+        }
+        // Stopped (or switched off) while the model was loading: don't start, so the next Start can.
+        if (gen !== poseGen || !started || !poseOn.checked || poseWhere.value !== 'sender') return;
 
         poseLoopRunning = true;
         if (poseRAF) cancelAnimationFrame(poseRAF);
@@ -2027,6 +2075,8 @@
       }
       // Stop the pose loop and clear its animation-frame handle.
       function stopSenderPoseLoop() {
+        poseGen++; // a start still loading its model is now stale
+        lastPosePayload = null; // never replay an old result to the next Viewer
         if (!poseLoopRunning) return;
         poseLoopRunning = false;
         if (poseRAF) {
@@ -2244,20 +2294,32 @@
         if (audioLoopRunning || audioStarting) return;
 
         audioStarting = true; // lock
+        // Stop can be pressed while this is still waiting (model download, mic prompt): each start gets a
+        // number, Stop changes it, and a start that is no longer current releases what it opened and gives up.
+        const gen = ++audioGen;
+        const stale = () => gen !== audioGen || !started || !audioAiOn?.checked || audioAiWhere?.value !== 'sender';
         let task;
         try {
           task = await ensureAudioTask();
         } catch (e) {
-          audioStarting = false;
+          if (gen === audioGen) audioStarting = false;
           console.warn('[AUDIO][sender] model init failed:', e);
           setStatus('Audio model load failed');
           return;
         }
+        if (stale()) return;
 
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const ctxHere = new (window.AudioContext || window.webkitAudioContext)();
+        audioCtx = ctxHere;
         try {
           await audioCtx.resume();
         } catch {}
+        if (stale()) {
+          try {
+            if (ctxHere.state !== 'closed') ctxHere.close().catch(() => {});
+          } catch {}
+          return;
+        }
 
         // ----- CAPTURE SELECTION (separate RAW mic by default; fallback to tap) -----
         const streamedTrack = getLocalAudioTrack();
@@ -2287,10 +2349,19 @@
         // Only open a second capture when we are NOT already sending audio
         if (!preferTap) {
           try {
-            aiMicStream = await navigator.mediaDevices.getUserMedia({
+            const mic = await navigator.mediaDevices.getUserMedia({
               audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
               video: false,
             });
+            if (stale()) {
+              // Stopped while the mic was opening: close it again at once.
+              mic.getTracks().forEach((t) => t.stop());
+              try {
+                if (ctxHere.state !== 'closed') ctxHere.close().catch(() => {});
+              } catch {}
+              return;
+            }
+            aiMicStream = mic;
             audioSource = audioCtx.createMediaStreamSource(aiMicStream);
             openedSeparate = true;
             tapUsed = false;
@@ -2415,14 +2486,8 @@
         // Per audio chunk: silence watchdog, resample to 16 kHz, collect into clips, classify, send to Viewers.
         const onChunk = async (frameFloat32) => {
           if (!audioLoopRunning || !started || !audioAiOn.checked || audioAiWhere.value !== 'sender') {
-            try {
-              audioProcessor?.disconnect();
-              audioSource?.disconnect?.();
-              monProcessor?.disconnect?.();
-              monSource?.disconnect?.();
-              await audioCtx?.close?.();
-            } catch {}
-            audioCtx = audioSource = audioProcessor = monSource = monProcessor = null;
+            // Full stop (also closes the separate AI microphone and the tapped track, not just the graph).
+            stopSenderAudioLoop();
             return;
           }
 
@@ -2603,6 +2668,8 @@
 
       // Stop and release the audio graph and any extra mic capture.
       function stopSenderAudioLoop() {
+        audioGen++; // any start still waiting is now stale
+        lastAudioPayload = null; // a new Viewer must not get a score from an earlier session
         audioLoopRunning = false;
         audioStarting = false;
         try {
@@ -2610,7 +2677,7 @@
           audioSource && audioSource.disconnect?.();
           monProcessor && monProcessor.disconnect?.();
           monSource && monSource.disconnect?.();
-          audioCtx && audioCtx.close();
+          if (audioCtx && audioCtx.state !== 'closed') audioCtx.close().catch(() => {});
         } catch {}
         audioCtx = audioSource = audioProcessor = monSource = monProcessor = null;
 
@@ -2644,8 +2711,16 @@
       // Run face landmark detection every frame; send landmarks plus head pose (yaw/pitch/roll) to Viewers.
       async function startSenderFaceLoop() {
         if (!started || !faceOn?.checked || faceWhere?.value !== 'sender') return;
-        if (faceLoopRunning) return;
-        const task = await ensureFaceTask();
+        if (faceLoopRunning || faceStarting) return;
+        faceStarting = true;
+        const gen = ++faceGen;
+        let task;
+        try {
+          task = await ensureFaceTask();
+        } finally {
+          faceStarting = false;
+        }
+        if (gen !== faceGen || !started || !faceOn?.checked || faceWhere?.value !== 'sender') return;
         faceLoopRunning = true;
         if (faceRAF) cancelAnimationFrame(faceRAF);
 
@@ -2727,6 +2802,8 @@
 
       // Stop the face loop and clear its animation-frame handle.
       function stopSenderFaceLoop() {
+        faceGen++;
+        lastFacePayload = null;
         if (!faceLoopRunning) return;
         faceLoopRunning = false;
         if (faceRAF) {

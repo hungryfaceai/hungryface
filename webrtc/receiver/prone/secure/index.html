@@ -1445,9 +1445,8 @@
       function ensureFaceTask() {
         if (faceTask) return Promise.resolve(faceTask);
         if (!_faceTaskP)
-          _faceTaskP = _ensureFaceTaskImpl().catch((e) => {
-            _faceTaskP = null;
-            throw e;
+          _faceTaskP = _ensureFaceTaskImpl().finally(() => {
+            _faceTaskP = null; // settled: a later recreate (closed task) must load again, not reuse this
           });
         return _faceTaskP;
       }
@@ -1745,8 +1744,13 @@
             // Ramp from 0 at 10 degrees before thetaOn up to POSE_RANGE at 20 degrees past it.
             rPoseInst = POSE_RANGE * clamp((over + 10) / 30, 0, 1); // 0..POSE_RANGE
           }
-          poseRiskEma = emaUpdate(poseRiskEma, rPoseInst, S.emaTau, dt);
-          pitchEma = emaUpdate(pitchEma, pitchDownNow, S.emaTau, dt);
+          // No face this frame means "no new head-pose information", not "face up": hold the pose risk instead of
+          // feeding 0, or a baby who turns face-down and then hides the face would get a false "Recovered" before
+          // the face-hidden check takes over (and then a second alert).
+          if (present && Number.isFinite(pitchDownNow)) {
+            poseRiskEma = emaUpdate(poseRiskEma, rPoseInst, S.emaTau, dt);
+            pitchEma = emaUpdate(pitchEma, pitchDownNow, S.emaTau, dt);
+          }
 
           // Dwell logic: a path must exceed its ON threshold for dwellOn s to alert, and stay below OFF for dwellOff
           // s to clear. While the condition fails, the timer drains at half speed instead of resetting.
@@ -1867,28 +1871,7 @@
           riskEma = emaUpdate(riskEma, fusedInst, S.emaTau, dt);
         } else {
           // Disabled: close an open alert episode, then reset FSM + UI
-          if (alert) {
-            const id = _proneAlertId;
-            _proneAlertId = null;
-            if (id != null)
-              finishAlert(id, {
-                avgScore: Number(((_proneCount > 0 ? _proneSum / _proneCount : riskEma) || 0).toFixed(4)),
-                message: 'Prone detection turned off',
-              }).catch(() => {});
-            _proneStartMs = 0;
-            _proneSum = 0;
-            _proneCount = 0;
-            try {
-              hideAlertBanner();
-            } catch {}
-          }
-          poseAlert = false;
-          occAlert = false;
-          alert = false;
-          poseAboveT = poseBelowT = 0;
-          occAboveT = occBelowT = 0;
-          riskEma = 0;
-          pitchEma = NaN;
+          endProneEpisode('Prone detection turned off');
         }
 
         // Draw overlay + HUD/pill (works for both paths)
@@ -1995,6 +1978,11 @@
           const dt = lastTs ? Math.min(1, (ts - lastTs) / 1000) : 0.016;
           lastTs = ts;
 
+          // Face model being reloaded (Apply to model / Reset defaults): skip this frame, try the next.
+          if (!faceTask) {
+            scheduleNext();
+            return;
+          }
           try {
             const result = faceTask.detectForVideo(remoteVideo, ts);
             const present = !!result?.faceLandmarks?.length;
@@ -2054,14 +2042,45 @@
       }
 
       // Apply Camera face-mode: run locally ("receiver"), consume Camera landmarks ("sender"), or off.
+      // Close an open prone episode (with its end time and average risk) and reset the detector, e.g. when the
+      // Camera stops, the connection is lost or detection is switched off: no more frames would arrive to end it.
+      function endProneEpisode(message) {
+        if (alert) {
+          const id = _proneAlertId;
+          _proneAlertId = null;
+          if (id != null)
+            finishAlert(id, {
+              avgScore: Number(((_proneCount > 0 ? _proneSum / _proneCount : riskEma) || 0).toFixed(4)),
+              message,
+            }).catch(() => {});
+          _proneStartMs = 0;
+          _proneSum = 0;
+          _proneCount = 0;
+          try {
+            hideAlertBanner();
+          } catch {}
+        }
+        poseAlert = false;
+        occAlert = false;
+        alert = false;
+        poseAboveT = poseBelowT = 0;
+        occAboveT = occBelowT = 0;
+        riskEma = 0;
+        poseRiskEma = 0;
+        occEma = 0;
+        pitchEma = NaN;
+      }
+
       function applyFaceMode() {
         setOverlayVisible(faceEnabled);
         if (!faceEnabled) {
           stopReceiverFaceLoop();
+          endProneEpisode('Prone detection turned off');
           return;
         }
         if (faceWhere === 'receiver') startReceiverFaceLoop();
-        else stopReceiverFaceLoop();
+        // Camera does the analysis: stop our own loop only if it runs (a repeated message must not reset anything).
+        else if (faceLoopRunning || _loopStarting) stopReceiverFaceLoop();
       }
 
       /* ---------- ReceiverCore hookup ---------- */
@@ -2087,17 +2106,22 @@
             showStatus('Connected');
           } else if (state === 'failed') {
             clearOverlayDrawing();
+            endProneEpisode('Connection lost');
             showStatus('ICE: failed – retrying…');
           } else if (state === 'disconnected') {
             clearOverlayDrawing();
             showStatus('ICE: disconnected');
           } else if (state === 'closed') {
             clearOverlayDrawing();
+            endProneEpisode('Connection closed');
             showStatus('ICE: closed');
           } else {
             showStatus('ICE: ' + state);
           }
         },
+
+        // Camera stopped streaming: end an open episode (no more frames will arrive to end it).
+        onBye: () => endProneEpisode('Camera stopped'),
 
         // The Viewer creates the "pose" data channel: carries ai-modes/face-mode, face results and config requests.
         onCreatePC: (pc) => {

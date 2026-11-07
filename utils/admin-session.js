@@ -136,7 +136,8 @@
       void errBox.offsetWidth;
       errBox.classList.add('shake'); // replay on each failure
       clearTimeout(errTimer);
-      errTimer = setTimeout(clearError, ERROR_VISIBLE_MS); // brief: vanishes after 1 s
+      // "Wrong password" is brief (1 s); longer messages (rate limit, server unreachable) need time to be read.
+      errTimer = setTimeout(clearError, msg === 'Wrong password.' ? ERROR_VISIBLE_MS : 6000);
       // ...or straight away on the next tap / click anywhere (passive, capture: never blocks what was tapped)
       setTimeout(() => {
         if (!errBox.hidden) document.addEventListener('pointerdown', clearError, { capture: true, passive: true });
@@ -241,9 +242,16 @@
       signedIn() {
         return !!session;
       },
-      /** Call when the server answers 401: the token was revoked (password or secret changed). */
-      expired() {
-        if (session) end('Session ended — sign in again');
+      /**
+       * Call when the server answers 401: the token was revoked (password or secret changed).
+       * Pass the headers the request was sent with: a request sent before signing in (no token) or with an older
+       * token must not end the session that is current now.
+       */
+      expired(sentHeaders) {
+        if (!session) return;
+        const sent = sentHeaders && sentHeaders.Authorization;
+        if (sentHeaders && sent !== 'Bearer ' + session.token) return;
+        end('Session ended — sign in again');
       },
     };
   }

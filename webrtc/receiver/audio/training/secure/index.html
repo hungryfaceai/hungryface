@@ -1105,7 +1105,20 @@
       function log(kind, msg, extraHtml, data) {
         const p = document.createElement('div');
         p.className = `log-line log-kind-${kind}`;
-        p.innerHTML = `<span class="log-time">[${ts()}]</span> ${msg}${extraHtml ? extraHtml : ''}`;
+        // Never parse log content as HTML: messages and details carry data (class names sent by the Camera,
+        // model names, calibration JSON). A "log-code" block becomes a real element holding plain text.
+        const time = document.createElement('span');
+        time.className = 'log-time';
+        time.textContent = `[${ts()}]`;
+        p.append(time, ' ' + String(msg ?? ''));
+        if (extraHtml) {
+          const m = /^\s*<div class="log-code">([\s\S]*)<\/div>\s*$/.exec(String(extraHtml));
+          const code = document.createElement('div');
+          if (m) code.className = 'log-code';
+          // inner markup (e.g. <strong>Top 5</strong>) is dropped; only its text is kept
+          code.textContent = (m ? m[1] : String(extraHtml)).replace(/<\/?[a-z][^>]*>/gi, '');
+          p.append(code);
+        }
         LOGS.body.appendChild(p);
         LOGS.lines++;
         LOGS.records.push({ t: Date.now(), ts: new Date().toISOString(), kind, msg, data: data ?? null });
@@ -1328,9 +1341,11 @@
       }
 
       // Load the YAMNet audio classifier once; the in-flight promise is shared by all callers.
+      let _yamRetryAt = 0; // after a failed load, wait before trying again (not on every audio chunk)
       async function ensureAudioTask(maxResults = 25) {
         if (_yamTask) return _yamTask;
         if (_yamTaskPromise) return _yamTaskPromise;
+        if (Date.now() < _yamRetryAt) throw new Error('model unavailable (retrying shortly)');
         _yamTaskPromise = (async () => {
           if (!AudioClassifier || !FilesetResolver) throw new Error('MediaPipe not available');
           log('info', 'Loading YAMNet model…');
@@ -1358,6 +1373,9 @@
         })();
         try {
           return await _yamTaskPromise;
+        } catch (e) {
+          _yamRetryAt = Date.now() + 10000;
+          throw e;
         } finally {
           _yamTaskPromise = null;
         }
@@ -1414,6 +1432,20 @@
       }
 
       // Load the saved model for the active name, or a new one seeded with starter cry-class weights.
+      // Saved calibration for the active model, or null if missing/corrupt. Thresholds must be numbers with
+      // 0 <= thr_off <= thr_on <= 1 (a bad value would break the threshold fields and the alert logic).
+      function readCalib() {
+        try {
+          const c = readCalib();
+          if (!c || typeof c !== 'object') return null;
+          const on = Number(c.thr_on),
+            off = Number(c.thr_off);
+          if (!Number.isFinite(on) || !Number.isFinite(off) || on < 0 || on > 1 || off < 0 || off > on) return null;
+          return { ...c, thr_on: on, thr_off: off };
+        } catch {
+          return null;
+        }
+      }
       function loadModel() {
         const name = getModelName();
         const raw = localStorage.getItem(MODEL_KEY());
@@ -1422,10 +1454,15 @@
         if (raw) {
           try {
             const m = JSON.parse(raw);
-            if (name === 'default' && (!m.weights || !Object.keys(m.weights).length)) {
-              m.weights = STARTER; // seed starter if default was saved empty
+            // A corrupt record (not an object, or missing its tables) falls through to a fresh one.
+            if (m && typeof m === 'object' && !Array.isArray(m)) {
+              if (!m.classes || typeof m.classes !== 'object') m.classes = {};
+              if (!m.weights || typeof m.weights !== 'object') m.weights = {};
+              if (name === 'default' && !Object.keys(m.weights).length) {
+                m.weights = STARTER; // seed starter if default was saved empty
+              }
+              return m;
             }
-            return m;
           } catch {}
         }
         // no saved record → bootstrap
@@ -1958,11 +1995,21 @@
       // Returns the clamped raw score and its EMA-smoothed value.
       function fusedScoreFromCategories(categories, weights, dt) {
         const a = alphaForTau(dt, Number(els.CLASS_EMA_TAU_S.value) || 0.8);
+        const seen = new Set();
         for (const c of categories) {
           const name = c.categoryName;
           if (!name) continue;
+          seen.add(name);
           const prev = state.perClassEma.get(name) || 0;
           state.perClassEma.set(name, emaStep(prev, c.score || 0, a));
+        }
+        // A class missing from this frame's results (it fell out of the top N, e.g. the crying stopped) scored ~0:
+        // let it fade instead of keeping its last value, which would hold the cry score and the alert up.
+        for (const [name, prev] of state.perClassEma) {
+          if (seen.has(name)) continue;
+          const next = emaStep(prev, 0, a);
+          if (next < 1e-4) state.perClassEma.delete(name);
+          else state.perClassEma.set(name, next);
         }
         ensurePerClassEma(weights);
         let fused = 0;
@@ -2015,7 +2062,7 @@
       }
       // Save the current thresholds in the calibration record of the active model.
       function persistThresholds(extra = {}) {
-        const prev = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null') || {};
+        const prev = readCalib() || {};
         const payload = {
           ...prev,
           version: 1,
@@ -2121,7 +2168,7 @@
           // Follow the saved calibration, except while calibrating (provisional thresholds are shown) or
           // while the user is dragging a threshold slider (their value is saved when they let go).
           if (!state.calActive && !state.thrDragging) {
-            const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+            const calib = readCalib();
             if (calib) {
               state.thrOn = calib.thr_on;
               state.thrOff = calib.thr_off;
@@ -2358,8 +2405,10 @@
         const x16 = resampleStream(chunk, deviceSr, SR_TARGET);
         state.ring = concatFloat32(state.ring, x16);
         // YAMNet analyses 0.975 s windows (15600 samples at 16 kHz).
-        const fram = Math.round((Number(els.FRAME_LEN_S.value) || 0.975) * SR_TARGET); // same window as detection
-        const hop = Math.round(HOP_S * SR_TARGET);
+        // Bounded so a mistyped setting can't stall the page: a window of 0.2–3 s, and a hop of at least
+        // 0.05 s (a hop of 0 would classify the same window for ever).
+        const fram = Math.round(Math.min(3, Math.max(0.2, Number(els.FRAME_LEN_S.value) || 0.975)) * SR_TARGET);
+        const hop = Math.max(1, Math.round(Math.max(0.05, HOP_S) * SR_TARGET));
 
         const now = performance.now();
         if (now - state.asmLastLogTs >= ASM_LOG_MS) {
@@ -2415,10 +2464,19 @@
         await ctx.resume();
         log('info', `Mic AudioContext sampleRate=${ctx.sampleRate} Hz`);
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-          video: false,
-        });
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+            video: false,
+          });
+        } catch (e) {
+          // Permission refused or no microphone: release the audio context and say why.
+          await stopMicOnly();
+          setStatus('Microphone unavailable: allow microphone access for this site, then try again.');
+          log('err', 'Microphone unavailable: ' + (e?.message || e));
+          throw e;
+        }
         state.micStream = stream; // kept so stopMicOnly() can release the mic
         const src = ctx.createMediaStreamSource(stream);
         const sink = ctx.createGain();
@@ -2850,7 +2908,12 @@
 
         // Start training
         if (src === 'mic') {
-          await startMic('train');
+          try {
+            await startMic('train');
+          } catch {
+            updateToggleButtonsUI(); // the message is already shown; leave the button in its idle state
+            return;
+          }
         } else if (src === 'file') {
           const f = els.fileInp.files?.[0];
           if (!f) {
@@ -2938,7 +3001,7 @@
           const m2 = loadModel();
           setWeightsChart(state.barSavedW, m2.weights || {});
           setWeightsChart(state.barDynW, computeWeightsPreview(m2));
-          const calib2 = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+          const calib2 = readCalib();
           if (calib2) {
             state.thrOn = calib2.thr_on;
             state.thrOff = calib2.thr_off;
@@ -2959,7 +3022,7 @@
           const m = loadModel();
           setWeightsChart(state.barSavedW, m.weights || {});
           setWeightsChart(state.barDynW, computeWeightsPreview(m));
-          const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+          const calib = readCalib();
           if (calib) {
             state.thrOn = calib.thr_on;
             state.thrOff = calib.thr_off;
@@ -3292,7 +3355,7 @@
         setupAllBars();
         els.chart.getContext && setupChart();
 
-        const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+        const calib = readCalib();
         if (calib) {
           state.thrOn = calib.thr_on;
           state.thrOff = calib.thr_off;

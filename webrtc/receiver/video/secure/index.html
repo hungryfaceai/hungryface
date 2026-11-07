@@ -445,7 +445,12 @@
 
         // Open the microphone once; the track starts disabled and is only enabled while talking.
         async function ensureTalkStream() {
-          if (talkStream && talkTrack) return;
+          // A microphone that ended (iOS interruption, a phone call, permission revoked) is opened again.
+          if (talkStream && talkTrack && talkTrack.readyState === 'live') return;
+          if (talkTrack && talkTrack.readyState !== 'live') {
+            talkStream = null;
+            talkTrack = null;
+          }
           talkStream = await navigator.mediaDevices.getUserMedia({
             audio: {
               channelCount: 1,
@@ -810,8 +815,18 @@
           console.log('[RX] lullaby stopped → back to', talkTrack ? 'mic' : 'silence (no mic permission yet)');
         }
 
+        let lullabyBusy = false; // starting/stopping takes a moment (fetching the playlist): ignore taps meanwhile
         lullabyBtn.addEventListener('click', async (e) => {
           e?.preventDefault?.();
+          if (lullabyBusy) return;
+          lullabyBusy = true;
+          try {
+            await toggleLullaby();
+          } finally {
+            lullabyBusy = false;
+          }
+        });
+        async function toggleLullaby() {
           if (sendingLullaby) {
             await stopLullaby();
           } else {
@@ -824,7 +839,7 @@
             if (!talkSender && talkTx?.sender) talkSender = talkTx.sender;
             await startLullaby();
           }
-        });
+        }
 
         // Cleanup on unload
         window.addEventListener('beforeunload', () => {

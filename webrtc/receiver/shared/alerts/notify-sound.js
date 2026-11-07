@@ -95,23 +95,24 @@ async function playDashboardPips() {
   const ac = ensureCtx();
   if (!ac) {
     dwarn('No AudioContext; cannot play');
-    return;
+    return false;
   }
 
   if (ac.state === 'suspended') {
+    // Without a recent tap the browser keeps the context suspended and resume() never settles: wait 300 ms at most.
     try {
-      await ac.resume();
+      await Promise.race([ac.resume(), new Promise((r) => setTimeout(r, 300))]);
     } catch {}
   }
   if (ac.state !== 'running') {
     dwarn('AudioContext not running; abort. state=', ac.state);
-    return;
+    return false;
   }
 
   const nowPerf = performance.now();
   if (nowPerf - lastBeepWallNow < 1000) {
     dlog('1s rate-limit; skip');
-    return;
+    return true; // a pip just played: counts as played
   }
   lastBeepWallNow = nowPerf;
 
@@ -135,6 +136,7 @@ async function playDashboardPips() {
   pip(t0);
   pip(t0 + 0.18);
   pip(t0 + 0.36);
+  return true;
 }
 
 // True while the last played sound (shared across tabs via localStorage) is within the cooldown.
@@ -205,7 +207,10 @@ export function installAlertSound(opts = {}) {
       return false;
     }
 
-    await playDashboardPips();
+    // Start the cooldown only if the sound actually played. If the browser hasn't allowed sound yet (no tap
+    // since the page loaded), a silent "play" must not suppress the next alerts for minutes.
+    const played = await playDashboardPips();
+    if (!played) return false;
     stampPlayed(now);
     return true;
   }

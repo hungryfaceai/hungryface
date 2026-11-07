@@ -360,6 +360,8 @@
           ).href,
           onChange: (on) => {
             if (on) setTimeout(() => document.getElementById('btn-refresh')?.click(), 0);
+            // Signed out or session ended: don't leave room names and device ids on screen.
+            else setTimeout(() => (document.getElementById('grid').innerHTML = ''), 0);
           },
         });
         // Authorization header for the current admin session (empty when signed out).
@@ -505,6 +507,9 @@
         async function fetchAndRenderNow() {
           const url = endpointInput.value.trim();
           endpointView.textContent = url || '—';
+          // Signed out: nothing to fetch (the server would only answer 401).
+          if (!adminSession.signedIn()) return;
+          let sentHeaders = null; // the headers this request carries (see adminSession.expired)
 
           if (!url) {
             setBadge('warn', 'NO URL');
@@ -516,9 +521,15 @@
           statusMsg.textContent = 'Fetching roster…';
 
           try {
-            const resp = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store', headers: adminHeaders() });
+            const resp = await fetch(url, {
+              method: 'GET',
+              mode: 'cors',
+              cache: 'no-store',
+              headers: (sentHeaders = adminHeaders()),
+              signal: AbortSignal.timeout(15000), // a server that never answers must not freeze refreshing
+            });
             if (resp.status === 401) {
-              adminSession.expired();
+              adminSession.expired(sentHeaders);
               throw new Error('Not signed in — enter the admin password');
             }
             if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);

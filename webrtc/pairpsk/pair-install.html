@@ -706,7 +706,24 @@
         if (incoming) {
           const saved = getPsk(currentRoom()) || {};
           savedPSK = saved.tokenB64u || '';
-          if (persistPSK(incoming, 'url') !== false) {
+          // The room already has a different working key here (an old link after a rotation, or someone else's
+          // link): replacing it would silently disconnect it, so ask first.
+          const keepOld =
+            isValidPsk(savedPSK) &&
+            savedPSK !== incoming &&
+            isValidPsk(incoming) &&
+            !confirm(
+              `This device is already paired in room “${currentRoom()}” with a different key.
+
+` + 'Replace it with the key from this link? Devices still using the old key will stop connecting.'
+            );
+          if (keepOld) {
+            setMaskedChip(savedPSK);
+            currentPSK = savedPSK;
+            setModeLinksEnabled(true);
+            pointModeLinksAt(currentRoom());
+            showToast('Kept the existing key for ' + currentRoom());
+          } else if (persistPSK(incoming, 'url') !== false) {
             setMaskedChip(incoming);
             currentPSK = incoming;
           } else {

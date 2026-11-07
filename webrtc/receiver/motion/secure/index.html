@@ -1630,7 +1630,11 @@
         // ==== /Alerts integration ====
 
         // Only adapt the baseline while still, so slow posture changes are absorbed but real movement is not.
-        if (!moving && baseLm) {
+        // The "still" position follows the body while it is still. It also follows while only drift is high but the
+        // quick and sustained detectors are quiet: the baby has settled in a new position, so that position becomes
+        // the new still one (otherwise drift could never fall and the movement alert would never end).
+        const settled = moveEma <= MOVE.OFF && intScore <= MOVE.INT_OFF;
+        if (baseLm && (!moving || settled)) {
           const a = 1 - Math.exp(-dt / MOVE.DRIFT_TAU);
           baseLm = blendLm(baseLm, lm, a);
         }
@@ -1851,9 +1855,8 @@
       function ensurePoseTask() {
         if (poseTask) return Promise.resolve(poseTask);
         if (!_poseTaskP)
-          _poseTaskP = _ensurePoseTaskImpl().catch((e) => {
-            _poseTaskP = null;
-            throw e;
+          _poseTaskP = _ensurePoseTaskImpl().finally(() => {
+            _poseTaskP = null; // settled: a later recreate (closed task) must load again, not reuse this
           });
         return _poseTaskP;
       }
@@ -1975,7 +1978,9 @@
           return;
         }
         if (poseWhere === 'receiver') startReceiverPoseLoop();
-        else stopReceiverPoseLoop();
+        // Camera does the analysis: stop our own loop only if it is running. The Camera repeats this message
+        // whenever another Viewer joins; that must not end an open alert (and then raise a duplicate).
+        else if (poseLoopRunning || _loopStarting) stopReceiverPoseLoop();
       }
 
       /* ---------- Shared WebRTC core ---------- */

@@ -692,9 +692,8 @@
       function ensurePoseTask() {
         if (poseTask) return Promise.resolve(poseTask);
         if (!_poseTaskP)
-          _poseTaskP = _ensurePoseTaskImpl().catch((e) => {
-            _poseTaskP = null;
-            throw e;
+          _poseTaskP = _ensurePoseTaskImpl().finally(() => {
+            _poseTaskP = null; // settled: a later recreate (closed task) must load again, not reuse this
           });
         return _poseTaskP;
       }
@@ -821,7 +820,9 @@
           return;
         }
         if (poseWhere === 'receiver') startReceiverPoseLoop();
-        else stopReceiverPoseLoop();
+        // Camera does the analysis: stop our own loop only if it is running. The Camera repeats this message
+        // whenever another Viewer joins; that must not end an open alert (and then raise a duplicate).
+        else if (poseLoopRunning || _loopStarting) stopReceiverPoseLoop();
       }
 
       /* ---------- Shared WebRTC core ---------- */

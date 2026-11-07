@@ -656,6 +656,9 @@
             await new Promise((res, rej) => {
               const s = document.createElement('script');
               s.src = 'https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js';
+              // Pinned to the exact file: this page shows pairing keys, so a changed CDN file must not run.
+              s.integrity = 'sha384-Dr98ddmUw2QkdCarNQ+OL7xLty7cSxgR0T7v1tq4UErS/qLV0132sBYTolRAFuOV';
+              s.crossOrigin = 'anonymous';
               s.onload = res;
               s.onerror = rej;
               document.head.appendChild(s);
@@ -772,6 +775,15 @@
           showToast('No room selected');
           return;
         }
+        // Next to Forget: a mis-tap would disconnect every paired device without warning.
+        if (
+          !confirm(
+            `Make a new key for room “${room}”?
+
+Devices paired with the current key stop connecting until you pair them again with the new code.`
+          )
+        )
+          return;
         AUTO_CREATE = true;
         let old = null;
         try {
@@ -801,6 +813,12 @@
           showToast('No room to forget');
           return;
         }
+        if (
+          !confirm(`Forget room “${room}” on this device?
+
+This device stops connecting to it until you pair again.`)
+        )
+          return;
         AUTO_CREATE = false; // do not auto recreate immediately
         try {
           localStorage.removeItem(PSK_PREFIX + room);
@@ -924,6 +942,7 @@
         await new Promise((res, rej) => {
           const s = document.createElement('script');
           s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
+          s.integrity = 'sha384-b5Ya4Bq3qCyz39m2ISh+4DxjAIljdeFwK/BsXLuj9gugaNwAcj/ia15fxNZL9Nlx'; // pinned (see above)
           s.crossOrigin = 'anonymous';
           s.onload = res;
           s.onerror = rej;
@@ -994,8 +1013,9 @@
             const codes = await qrDetector.detect(qrVideo);
             if (codes?.length) {
               navigator.vibrate?.(8);
-              onResult(codes[0].rawValue || codes[0].rawValueText || '');
-              stopQRScanner();
+              const value = codes[0].rawValue || codes[0].rawValueText || '';
+              stopQRScanner(); // camera off before handling the code (which may ask a question)
+              onResult(value);
               return;
             }
           } catch {}
@@ -1018,8 +1038,8 @@
             const code = jsQR(img.data, vw, vh, { inversionAttempts: 'dontInvert' });
             if (code?.data) {
               navigator.vibrate?.(8);
+              stopQRScanner(); // camera off before handling the code (which may ask a question)
               onResult(code.data);
-              stopQRScanner();
               return;
             }
           }
@@ -1071,10 +1091,30 @@
               return;
             }
 
+            // This room already has a different working key on this device (e.g. an old code after the other
+            // device rotated it, or someone else's code): replacing it would silently disconnect it, so ask.
+            let existing = null;
+            try {
+              existing = JSON.parse(localStorage.getItem(PSK_PREFIX + targetRoom) || 'null');
+            } catch {}
+            if (existing && looksBase64Url(existing.tokenB64u) && existing.tokenB64u !== psk) {
+              const ok = confirm(
+                `This device is already paired in room “${targetRoom}” with a different key.
+
+` + 'Replace it with the key from this code? Devices still using the old key will stop connecting.'
+              );
+              if (!ok) {
+                showToast('Kept the existing key for ' + targetRoom);
+                return;
+              }
+            }
             try {
               const payload = { tokenB64u: psk, installedFrom: 'qr', ts: new Date().toISOString() };
               localStorage.setItem(PSK_PREFIX + targetRoom, JSON.stringify(payload));
-            } catch {}
+            } catch {
+              showToast('Couldn’t save the key on this device (storage is blocked or full).');
+              return;
+            }
 
             adoptPairedRoom(targetRoom); // the room just paired is this device's current room everywhere
             rememberRoom(targetRoom);
@@ -1089,7 +1129,13 @@
             showToast('Paired · room ' + targetRoom, 3000, 'success');
           });
         } catch (err) {
-          showToast('Camera error');
+          // Close the scanner (it would otherwise stay on screen, above the message, with the camera running).
+          stopQRScanner();
+          showToast(
+            err && err.name === 'NotAllowedError'
+              ? 'Camera access was refused. Allow the camera for this site to scan a code.'
+              : 'Couldn’t start the camera to scan.'
+          );
         }
       });
 

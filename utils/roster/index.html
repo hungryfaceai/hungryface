@@ -1049,6 +1049,9 @@
         .ra-table td.ra-total {
           flex-wrap: wrap;
         }
+        .ra-viewer .ra-table td.ra-loc {
+          width: auto; /* the desktop 40% column width doesn't apply to the phone cards */
+        }
         .ra-table td.ra-loc .ra-places {
           text-align: right;
           align-items: flex-end;
@@ -1467,6 +1470,7 @@
           onChange: (on) => {
             setSignedIn(on);
             if (on) setTimeout(() => document.getElementById('btn-refresh')?.click(), 0);
+            else setTimeout(forgetAdminData, 0); // signed out or session ended: don't leave admin data on screen
           },
         });
         // Authorization header for the current admin session (empty when signed out).
@@ -2452,9 +2456,15 @@
         }
 
         // Renders the room cards, sorted by friendly label.
+        let lastGridKey = null;
         function render(data) {
           renderSummary(data);
-          // Rebuilt from scratch on every fetch; the roster is small.
+          // Unchanged since the last refresh: keep the cards as they are (keyboard focus, text selection and a
+          // "Copied" note would be lost if they were rebuilt every 3 s).
+          const gridKey = JSON.stringify(data || {});
+          if (gridKey === lastGridKey && grid.childElementCount) return;
+          lastGridKey = gridKey;
+          // Rebuilt from scratch when something changed; the roster is small.
           grid.innerHTML = '';
           const roomIds = Object.keys(data || {}).sort(
             (a, b) => roomLabel(a).localeCompare(roomLabel(b)) || String(a).localeCompare(String(b))
@@ -2533,6 +2543,9 @@
         async function fetchAndRenderNow() {
           const url = endpointInput.value.trim();
           endpointView.textContent = url || '—';
+          // Signed out: nothing to fetch (the server would only answer 401).
+          if (!adminSession.signedIn()) return;
+          let sentHeaders = null; // the headers this request carries (see adminSession.expired)
 
           if (!url) {
             lastFetchOk = false;
@@ -2551,10 +2564,16 @@
           try {
             // Bearer token; cache disabled so the roster is always live.
             // no-store: the browser must never serve a cached roster.
-            const resp = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store', headers: adminHeaders() });
+            const resp = await fetch(url, {
+              method: 'GET',
+              mode: 'cors',
+              cache: 'no-store',
+              headers: (sentHeaders = adminHeaders()),
+              signal: AbortSignal.timeout(15000), // a server that never answers must not freeze refreshing
+            });
             // Expired or missing session: drop back to the signed-out view.
             if (resp.status === 401) {
-              adminSession.expired();
+              adminSession.expired(sentHeaders);
               throw new Error('Not signed in — enter the admin password');
             }
             if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
@@ -2765,8 +2784,8 @@
           const t = new Date(iso),
             diff = Date.now() - t.getTime();
           if (diff < 60e3) return 'just now';
-          if (diff < 3600e3) return Math.round(diff / 60e3) + ' min ago';
-          if (diff < 86400e3) return Math.round(diff / 3600e3) + ' h ago';
+          if (diff < 3600e3) return Math.floor(diff / 60e3) + ' min ago'; // floor: 59.6 min is not "60 min ago"
+          if (diff < 86400e3) return Math.floor(diff / 3600e3) + ' h ago';
           return (
             t.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) +
             ' ' +
@@ -2788,22 +2807,37 @@
         }
         // Request counter: a slow response for an older period must not overwrite a newer one.
         let raReq = 0;
+        // 404, or 503 "not configured": the feature is off. Any other 503 is a temporary database problem.
+        async function notConfigured(r) {
+          if (r.status === 404) return true;
+          try {
+            return /not configured/i.test((await r.json()).error || '');
+          } catch {
+            return false;
+          }
+        }
         // Fetches the server history for the selected period and renders it.
         async function loadRoomAnalytics() {
           // Compare request ids after each await so late replies are ignored.
           const my = ++raReq; // only the latest period chosen may fill the table
           raContent.innerHTML = '<p class="ra-empty">Loading…</p>';
           try {
-            const r = await fetch(analyticsUrl(), { headers: adminHeaders(), cache: 'no-store', mode: 'cors' });
+            const sent = adminHeaders();
+            const r = await fetch(analyticsUrl(), {
+              headers: sent,
+              cache: 'no-store',
+              mode: 'cors',
+              signal: AbortSignal.timeout(30000),
+            });
             if (my !== raReq) return;
             if (r.status === 401) {
-              raContent.innerHTML =
-                '<p class="ra-error">Your sign-in has expired. Sign in again to see room analytics.</p>';
+              adminSession.expired(sent); // closes this window and shows the sign-in form again
               return;
             }
             if (r.status === 503 || r.status === 404) {
-              raContent.innerHTML =
-                '<p class="ra-empty">Room analytics isn’t switched on yet: the server has no activity database configured.</p>';
+              raContent.innerHTML = (await notConfigured(r))
+                ? '<p class="ra-empty">Room analytics isn’t switched on yet: the server has no activity database configured.</p>'
+                : '<p class="ra-error">Room analytics is temporarily unavailable (the history database didn’t answer). Try again in a moment.</p>';
               return;
             }
             if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -2967,7 +3001,10 @@
           raContent.querySelectorAll('th button[data-sort]').forEach((b) =>
             b.addEventListener('click', () => {
               const k = b.dataset.sort;
-              raSort = raSort.key === k ? { key: k, dir: -raSort.dir } : { key: k, dir: k === 'room' ? 1 : -1 };
+              raSort =
+                raSort.key === k
+                  ? { key: k, dir: -raSort.dir }
+                  : { key: k, dir: k === 'room' || k === 'place' ? 1 : -1 }; // text: A→Z first
               renderRoomAnalytics();
               raContent.querySelector('th button[data-sort="' + k + '"]')?.focus();
             })
@@ -3061,6 +3098,8 @@
               // Reset the cached promise on failure so a later open can retry.
               js.onerror = () => {
                 leafletReady = null;
+                css.remove(); // a retry adds them again: don't pile up tags
+                js.remove();
                 reject(new Error('map library failed to load'));
               };
               document.head.appendChild(js);
@@ -3157,13 +3196,21 @@
             // all=1: every recorded connection, not only a time window.
             url.searchParams.set('all', '1');
             url.searchParams.set('to', new Date().toISOString());
-            const r = await fetch(url.href, { headers: adminHeaders(), cache: 'no-store', mode: 'cors' });
+            const sent = adminHeaders();
+            const r = await fetch(url.href, {
+              headers: sent,
+              cache: 'no-store',
+              mode: 'cors',
+              signal: AbortSignal.timeout(30000),
+            });
             if (r.status === 401) {
-              mapStatus.textContent = 'Your sign-in has expired. Sign in again to see the map.';
+              adminSession.expired(sent);
               return;
             }
             if (r.status === 503 || r.status === 404) {
-              mapStatus.textContent = 'The map isn’t switched on yet: the server has no activity database configured.';
+              mapStatus.textContent = (await notConfigured(r))
+                ? 'The map isn’t switched on yet: the server has no activity database configured.'
+                : 'The map is temporarily unavailable (the history database didn’t answer). Try again in a moment.';
               return;
             }
             if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -3256,6 +3303,28 @@
           mapViewer.classList.remove('open');
           mapViewer.setAttribute('aria-hidden', 'true');
           if (mapLastFocus && mapLastFocus.focus) mapLastFocus.focus();
+        }
+        // Signed out / session ended: close the full-screen windows and drop everything they showed, plus the
+        // roster snapshot kept on this device.
+        function forgetAdminData() {
+          if (raViewer.classList.contains('open')) closeRoomAnalytics();
+          if (mapViewer.classList.contains('open')) closeMap();
+          raData = null;
+          raReq++; // a request still in flight must not fill the table afterwards
+          raContent.innerHTML = '';
+          lastRooms = [];
+          lastGridKey = null;
+          grid.innerHTML = '';
+          if (layerLive) layerLive.clearLayers();
+          if (layerPast) layerPast.clearLayers();
+          for (const id of ['map-list', 'map-unlocated']) {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = '';
+          }
+          mapStatus.textContent = '';
+          try {
+            localStorage.removeItem(STORAGE_KEY_LAST_CANON);
+          } catch {}
         }
         // Same dialog behaviour as the analytics window: backdrop click, Escape and a Tab focus trap.
         document.getElementById('btn-map').addEventListener('click', openMap);

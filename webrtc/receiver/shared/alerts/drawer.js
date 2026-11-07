@@ -202,7 +202,13 @@ export function setupAlertsDrawer({ openBtnEl, badgeEl, hostId = 'alertsModalHos
 
   // Toolbar actions
   els.btnClear?.addEventListener('click', async () => {
-    await clearAllAlerts();
+    // One tap next to Close must not wipe the whole history (the Dashboard asks too).
+    if (!confirm('Delete all alerts on this device? This can’t be undone.')) return;
+    try {
+      await clearAllAlerts();
+    } catch (e) {
+      console.warn('[alerts] could not clear the history', e);
+    }
     await renderTable();
     await refreshAlertsBadge();
   });
@@ -227,7 +233,8 @@ function downloadBlob(name, mime, text) {
   a.href = URL.createObjectURL(blob);
   a.download = name;
   a.click();
-  URL.revokeObjectURL(a.href);
+  // Revoking at once can cancel the download in Safari; release the blob a moment later.
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 // Updates the count badge on the Alerts button from the store.
@@ -246,7 +253,13 @@ async function dumpJSON() {
 }
 async function dumpCSV() {
   const rows = await getAllAlerts();
-  const esc = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
+  // CSV cell: quoted; a value starting with = + - @ (or tab/CR) gets a leading ' so spreadsheets show it as text
+  // instead of running it as a formula.
+  const esc = (s) => {
+    let v = String(s ?? '');
+    if (/^[=+\-@\t\r]/.test(v)) v = "'" + v;
+    return `"${v.replace(/"/g, '""')}"`;
+  };
   const header = ['startAt', 'endAt', 'durationSec', 'avgScore', 'type', 'message'];
   const lines = [header.join(',')];
   for (const r of rows) {
