@@ -322,7 +322,6 @@ async function fetchIfChanged() {
 
     const changed =
       fresh.length !== prev.length || fresh[0]?.id !== prev[0]?.id || fresh[0]?.startAt !== prev[0]?.startAt;
-    console.log('[poll] +', Math.round(performance.now() - t0), 'ms; changed:', changed);
     if (changed) {
       state.rowsAll = fresh;
       renderAll();

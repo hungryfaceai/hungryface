@@ -2029,6 +2029,12 @@
       }
 
       // Keep thrOn >= thrOff so the hysteresis band never inverts (both sliders).
+      // Mark a drag in progress so detection doesn't reload the saved thresholds underneath it.
+      for (const sl of [els.THR_OFF_SLIDER, els.THR_ON_SLIDER]) {
+        sl.addEventListener('pointerdown', () => (state.thrDragging = true));
+        sl.addEventListener('change', () => (state.thrDragging = false));
+        sl.addEventListener('blur', () => (state.thrDragging = false));
+      }
       els.THR_OFF_SLIDER.addEventListener('input', () => {
         state.thrOff = clamp01(parseFloat(els.THR_OFF_SLIDER.value) || 0);
         if (state.thrOn < state.thrOff) state.thrOn = state.thrOff;
@@ -2112,13 +2118,17 @@
           const weights = model.weights || { 'Baby cry, infant cry': 1 };
           const { raw, sm } = fusedScoreFromCategories(cats, weights, HOP_S);
 
-          const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
-          if (calib) {
-            state.thrOn = calib.thr_on;
-            state.thrOff = calib.thr_off;
-          } else {
-            state.thrOn = 0.35;
-            state.thrOff = state.thrOn - (Number(els.ALERT_OFF_DELTA.value) || 0.1);
+          // Follow the saved calibration, except while calibrating (provisional thresholds are shown) or
+          // while the user is dragging a threshold slider (their value is saved when they let go).
+          if (!state.calActive && !state.thrDragging) {
+            const calib = JSON.parse(localStorage.getItem(CALIB_KEY()) || 'null');
+            if (calib) {
+              state.thrOn = calib.thr_on;
+              state.thrOff = calib.thr_off;
+            } else {
+              state.thrOn = 0.35;
+              state.thrOff = state.thrOn - (Number(els.ALERT_OFF_DELTA.value) || 0.1);
+            }
           }
 
           pushChart(Date.now(), raw, sm);
@@ -2348,7 +2358,7 @@
         const x16 = resampleStream(chunk, deviceSr, SR_TARGET);
         state.ring = concatFloat32(state.ring, x16);
         // YAMNet analyses 0.975 s windows (15600 samples at 16 kHz).
-        const fram = Math.round(0.975 * SR_TARGET);
+        const fram = Math.round((Number(els.FRAME_LEN_S.value) || 0.975) * SR_TARGET); // same window as detection
         const hop = Math.round(HOP_S * SR_TARGET);
 
         const now = performance.now();
@@ -3081,7 +3091,7 @@
               } else if (tapWanted()) {
                 startRemoteAudioTap(state.mode);
               }
-            // 'audio' carries the Camera's own class scores (inference on the Camera).
+              // 'audio' carries the Camera's own class scores (inference on the Camera).
             } else if (msg.type === 'audio') {
               // Sender is pushing categories (inference @ sender)
               setInferWhere('sender'); // keep UI suffix consistent
