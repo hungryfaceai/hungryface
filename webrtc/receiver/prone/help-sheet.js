@@ -1,4 +1,7 @@
 // /hungryface/webrtc/receiver/prone/help-sheet.js
+// Loads prone/help-sheet.html and injects the Help side-sheet (#helpSheet, #helpBackdrop) into the page,
+// plus the shared help-sheet.css. Fires a 'help:ready' event on document once the markup is in the DOM, so the
+// Prone page can wire up open/close handlers. Does nothing if the sheet was already injected.
 (async () => {
   if (document.getElementById('helpSheet') || document.getElementById('helpBackdrop')) return;
   try {

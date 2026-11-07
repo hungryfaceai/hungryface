@@ -1,4 +1,20 @@
 <!doctype html>
+<!--
+  Naptio audio (cry) detection viewer page (secure variant, PSK-signed signalling).
+
+  What it does: listens to the Camera's audio and raises a "Crying detected" alert. Two inference modes:
+    - Camera infers: YAMNet scores arrive over the WebRTC data channel (msg type 'audio').
+    - Viewer infers: the Camera's audio track is tapped here and classified with MediaPipe YAMNet.
+    - Source "mic" classifies this device's own microphone instead (testing).
+  Class scores are fused with per-model weights (trained on the training page), smoothed (EMA), and compared to
+  ON/OFF thresholds with hysteresis; episodes are stored through shared/alerts (IndexedDB).
+
+  Main pieces: settings modal, live fused-score chart (Chart.js), top-class bars, saved-weights bars, log panel,
+  help sheet (help-sheet.js), shared sidebar and alerts drawer.
+  Dependencies: shared/psk/bootstrap.js, receiver-core.js (WebRTC), audio-resampler.js, alerts/index.js,
+  MediaPipe tasks-audio (CDN). localStorage keys: cryActiveModelName, cryModelV1_<name>, cryCalibV1_<name>,
+  cryPenalty_<name>, cryInferWhere, bm_receiver_room.
+-->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -13,9 +29,15 @@
 
     <link rel="stylesheet" href="/hungryface/shared/tokens.css" />
     <style>
+      /*
+        Page styles: dark panel layout, buttons/cards, level meter, chart containers, help drawer, settings modal and
+        log panel. Colours fall back to the shared tokens.css variables (--nt-*).
+      */
+      /* --- Theme variables --- */
       :root {
         color-scheme: dark;
       }
+      /* --- Page base --- */
       html,
       body {
         margin: 0;
@@ -42,6 +64,7 @@
         }
       }
 
+      /* --- Panels, top bar, headings and rows --- */
       .panel {
         width: min(100%, 1100px);
         background: var(--nt-bg-soft, #0b0b0b);
@@ -71,6 +94,7 @@
         gap: 10px;
         align-items: center;
       }
+      /* --- Buttons --- */
       .btn {
         padding: 10px 12px;
         border-radius: 10px;
@@ -100,6 +124,7 @@
           0 0 12px rgba(255, 82, 82, 0.35);
       }
 
+      /* --- Level meter and state pill --- */
       .status-row {
         display: flex;
         align-items: center;
@@ -133,6 +158,7 @@
         margin-top: 6px;
       }
 
+      /* --- Cards, inputs and sliders --- */
       .card {
         background: #0a0a0a;
         border: 1px solid #171717;
@@ -178,6 +204,7 @@
         gap: 10px;
       }
 
+      /* --- Charts --- */
       .chart-wrap {
         position: relative;
       }
@@ -199,6 +226,7 @@
       .h320 {
         height: 320px;
       }
+      /* --- Chart legend and colour keys --- */
       .legend {
         margin-top: 6px;
         display: flex;
@@ -233,6 +261,7 @@
         position: relative;
       }
 
+      /* --- Phone layout (narrow screens) --- */
       @media (max-width: 560px) {
         .subgroup {
           flex-direction: column;
@@ -272,6 +301,7 @@
         opacity: 1;
         pointer-events: auto;
       }
+      /* --- Help side-sheet --- */
       .help-sheet {
         position: fixed;
         right: 0;
@@ -331,6 +361,7 @@
         padding-bottom: 8px;
         border-bottom: 1px dashed rgba(255, 255, 255, 0.15);
       }
+      /* --- Settings modal --- */
       .modal {
         position: fixed;
         inset: 0;
@@ -691,6 +722,9 @@
     <script type="module" src="./help-sheet.js"></script>
 
     <script type="module">
+      // Main page module: alerts, WebRTC receive, YAMNet inference, fusion scoring, charts and UI wiring.
+      // Sections: helpers/UI, MediaPipe, model persistence, fusion + hysteresis, classify loop, mic/remote tap,
+      // WebRTC integration, boot (auto-starts detection).
       /* ========= Shared alerts (same as motion page) ========= */
       import {
         initAlertsUI,
@@ -710,6 +744,7 @@
 
       const DEFAULT_ROOM = 'Baby';
       // UI label (e.g. "Baby") vs PSK-scoped signaling ID
+      // Room name shown to the user: explicit UI room, PSK room, saved receiver room, then default.
       function getUiRoomLabel() {
         return (
           (window.__uiRoom && String(window.__uiRoom).trim()) ||
@@ -718,11 +753,13 @@
           DEFAULT_ROOM
         );
       }
+      // Room id used for signalling: the UI label scoped by the key-derived namespace (room-scope.js), if loaded.
       function getSignalRoom() {
         const ui = getUiRoomLabel();
         return typeof window.__scopeRoom === 'function' ? window.__scopeRoom(ui) : ui;
       }
 
+      // WebRTC/audio-tap state. `where` = who runs inference ('sender' = Camera sends scores, 'receiver' = this page).
       const wrtc = {
         core: null,
         dc: null,
@@ -738,6 +775,7 @@
 
       /* ========= Helpers & UI ========= */
       const EL = (id) => document.getElementById(id);
+      // Minimum interval (ms) between repeated log lines for audio assembly and score frames.
       const ASM_LOG_MS = 2000,
         SCORE_LOG_MS = 800;
 
@@ -815,6 +853,7 @@
         btnToggleLogs.textContent = visible ? 'Display logs' : 'Hide logs';
       };
 
+      // Log panel state; keeps at most maxLines DOM lines and records (records are exported as JSON).
       const LOGS = {
         body: EL('logBody'),
         enable: EL('LOG_ENABLE'),
@@ -830,6 +869,7 @@
       function ts() {
         return new Date().toLocaleTimeString(undefined, { hour12: false });
       }
+      // Append a line to the log panel (kind: info/ok/warn/err/inf). msg and extraHtml are inserted as HTML.
       function log(kind, msg, extraHtml, data) {
         const p = document.createElement('div');
         p.className = `log-line log-kind-${kind}`;
@@ -865,6 +905,7 @@
         log('ok', 'Exported logs JSON');
       };
 
+      // Cached DOM elements by id.
       const els = ((id) =>
         Object.fromEntries(
           [
@@ -897,6 +938,7 @@
           ].map((x) => [x, document.getElementById(x)])
         ))();
 
+      // Remember where inference runs (shared with the Camera's audio-mode messages).
       function setInferWhere(where) {
         localStorage.setItem('cryInferWhere', where === 'receiver' ? 'receiver' : 'sender');
       }
@@ -904,6 +946,7 @@
         return localStorage.getItem('cryInferWhere') || 'sender';
       }
 
+      // Update the status text (with an inference-location tag when using the Camera source) and log it.
       function setStatus(s) {
         let msg = s;
         if (els.TRAIN_SRC?.value === 'sender') {
@@ -918,24 +961,30 @@
         log('info', msg);
       }
 
+      // Limit a number to the range 0..1.
       function clamp01(x) {
         return Math.max(0, Math.min(1, x));
       }
+      // One exponential-moving-average step: move prev toward x by factor a.
       function emaStep(prev, x, a) {
         return prev + a * (x - prev);
       }
+      // Map an RMS level to 0..1 for the meter: dB scale from -85 dBFS (empty) to 0 dBFS (full).
       function rmsToMeter(rms) {
         const db = 20 * Math.log10(Math.max(1e-8, rms));
         const FLOOR_DB = -85;
         const norm = (db - FLOOR_DB) / (0 - FLOOR_DB);
         return clamp01(norm);
       }
+      // EMA smoothing factor for a step of dt seconds and time constant tau seconds.
       function alphaForTau(dt, tau) {
         return 1 - Math.exp(-dt / Math.max(1e-3, tau));
       }
+      // Update the level meter width from an RMS value.
       function setRMS(x) {
         els.rmsFill.style.width = Math.round(rmsToMeter(x) * 100) + '%';
       }
+      // One-shot linear-interpolation resampler (not used by the streaming path).
       function resampleLinear(x, fromSr, toSr) {
         if (fromSr === toSr) return x;
         const ratio = toSr / fromSr,
@@ -953,6 +1002,7 @@
       }
 
       /* ========= Chart.js helper (percent labels for weights only) ========= */
+      // Chart.js plugin: draws the value as a percent label next to each bar (only when options.enabled).
       const pctLabelPlugin = {
         id: 'pctLabel',
         afterDatasetsDraw(chart, args, options) {
@@ -998,6 +1048,8 @@
         console.error(e);
       }
 
+      // Load the YAMNet audio classifier once. The in-flight promise is shared by all callers; if loading from the URL
+      // fails, retry by fetching the model bytes with a cache-busting query.
       async function ensureAudioTask(maxResults = 25) {
         if (_yamTask) return _yamTask;
         if (_yamTaskPromise) return _yamTaskPromise;
@@ -1034,6 +1086,7 @@
         } // keep the promise while it succeeds: one load shared by every caller
       }
 
+      // Run the classifier; tries the (data, rate) signature first, then the options-object form of the API.
       async function classifyMP(task, w, sr) {
         try {
           return await task.classify(w, sr);
@@ -1046,6 +1099,7 @@
           }
         }
       }
+      // Flatten a MediaPipe result into [{ score, categoryName }] (handles array and wrapped result shapes).
       function extractCategories(result) {
         if (!result) return [];
         const r = Array.isArray(result) ? result[0] : result;
@@ -1059,13 +1113,16 @@
 
       /* ========= Model persistence ========= */
       const ACTIVE_MODEL_NAME_KEY = 'cryActiveModelName';
+      // Name of the active model (dropdown value, else last saved, else 'default').
       function getModelName() {
         return els.MODEL_SELECT?.value || localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default';
       }
+      // Remember the active model name and reflect it in the dropdown.
       function setModelName(name) {
         localStorage.setItem(ACTIVE_MODEL_NAME_KEY, name);
         if (els.MODEL_SELECT) els.MODEL_SELECT.value = name;
       }
+      // localStorage keys are per model name so several models can coexist.
       function MODEL_KEY() {
         return `cryModelV1_${getModelName()}`;
       }
@@ -1076,6 +1133,7 @@
         return `cryPenalty_${getModelName()}`;
       }
 
+      // Load the saved model (class weights + display options) for the active name, or built-in cry defaults.
       function loadModel() {
         const raw = localStorage.getItem(MODEL_KEY());
         if (raw) {
@@ -1096,6 +1154,7 @@
         };
       }
 
+      // Names of all saved models (from localStorage keys), always including 'default'.
       function listModelNames() {
         const names = [];
         for (let i = 0; i < localStorage.length; i++) {
@@ -1121,6 +1180,7 @@
       }
 
       /* ========= Penalty map ========= */
+      // Parse the penalty text "token:weight,..." into { lowercase token: weight in [-1, 0] } (default -0.3).
       function getPenaltyMap() {
         const s = (els.PENALTY_MAP?.value ?? localStorage.getItem(PENALTY_KEY()) ?? '').trim();
         const map = {};
@@ -1145,6 +1205,7 @@
       });
 
       /* ========= Detection state & charts ========= */
+      // Runtime detection state: audio ring buffer, EMAs, alert/hysteresis state, thresholds and chart buffers.
       const state = {
         running: false,
         mode: 'idle',
@@ -1177,28 +1238,34 @@
       };
 
       // Live chart vis toggles
+      // Whether the user opened the optional charts (hidden by default to save work on phones).
       let liveBarsUserVisible = false;
       let savedWUserVisible = false;
       // ===== Alerts episode state (Audio) =====
       let _audioAlertId = null;
       let _audioSum = 0,
         _audioCount = 0;
+      // Fire-and-forget wrapper: alert storage errors must never break the audio loop.
       const runAsync = (p) => Promise.resolve(p).catch(() => {});
 
       // Charts
+      // Format a timestamp as HH:MM:SS (24 h) for chart labels.
       function hhmmss(tMs) {
         const d = new Date(tMs);
         return d.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
       }
+      // Number of chart points that fit the time window (window seconds / hop seconds, at least 10).
       function computeChartCap() {
         return Math.max(10, Math.round(state.chartWindowSec / Math.max(0.01, state.hopSec)));
       }
+      // Reset the rolling chart arrays to empty slots of the current capacity.
       function initChartBuffers() {
         state.chartCap = computeChartCap();
         state.labels = new Array(state.chartCap).fill('');
         state.fusedRaw = new Array(state.chartCap).fill(null);
         state.fusedSm = new Array(state.chartCap).fill(null);
       }
+      // (Re)create the live chart: raw fused score as bars, smoothed score and ON/OFF threshold lines as lines.
       function setupChart() {
         state.chart?.destroy?.();
         const ctx = els.chart.getContext('2d');
@@ -1262,6 +1329,7 @@
           },
         });
       }
+      // Push one score into the rolling chart window; rebuilds time labels and auto-scales the Y axis (max 1.5).
       function pushChart(nowMs, raw, sm) {
         const capNow = computeChartCap();
         if (capNow !== state.chartCap) {
@@ -1302,15 +1370,18 @@
       }
 
       // Bars
+      // Reveal the live bars; resize on the next tick because Chart.js measures 0 while hidden.
       function showLiveBars() {
         els.liveBarsWrap.style.display = '';
         setTimeout(() => {
           state.barChart?.resize?.();
         }, 0);
       }
+      // Hide the live top-class bars.
       function hideLiveBars() {
         els.liveBarsWrap.style.display = 'none';
       }
+      // Create the live top-class bar chart and the saved-weights bar chart if they do not exist yet.
       function setupBars() {
         if (!state.barChart && els.bars) {
           state.barChart = new Chart(els.bars.getContext('2d'), {
@@ -1378,6 +1449,7 @@
           });
         }
       }
+      // Empty the live top-class bars.
       function clearTopBars() {
         if (!state.barChart) {
           hideLiveBars();
@@ -1390,6 +1462,7 @@
         state.barChart.update();
         hideLiveBars();
       }
+      // Show the K highest-scoring YAMNet classes (K from the active model) in the live bar chart.
       function updateTopBars(cats) {
         if (!els.bars) return;
         setupBars();
@@ -1406,6 +1479,7 @@
         state.barChart.update();
         if (display.length > 0 && liveBarsUserVisible) showLiveBars();
       }
+      // Fill the saved-weights bar chart from a { class: weight } map, highest weight first.
       function setWeightsChart(weightsDict) {
         setupBars();
         const entries = Object.entries(weightsDict || {}).sort((a, b) => b[1] - a[1]);
@@ -1415,6 +1489,8 @@
       }
 
       /* ========= Fusion scoring ========= */
+      // Fuse per-class scores into one cry score: EMA each class, weighted sum, then subtract penalty-token classes.
+      // Returns the clamped raw score and its EMA-smoothed value.
       function fusedScoreFromCategories(categories, weights, dt) {
         const a = alphaForTau(dt, Number(els.CLASS_EMA_TAU_S.value) || 0.8);
         for (const c of categories) {
@@ -1441,6 +1517,7 @@
         state.fusedEma = emaStep(state.fusedEma, fused, alphaForTau(dt, Number(els.FUSED_EMA_TAU_S.value) || 0.8));
         return { raw: fused, sm: state.fusedEma };
       }
+      // Alert on/off with hysteresis: turn ON at thrOn (and hold for ALERT_HOLD_MS), turn OFF once below thrOff.
       function applyHysteresis(sm, nowMs) {
         const hold = Number(els.ALERT_HOLD_MS.value) || 0;
         if (state.alertOn) {
@@ -1492,6 +1569,7 @@
        - Enforce thrOn >= thrOff in state; if we change the *other* threshold, reflect it in its field (safe; not focused).
        - On 'change'/'blur': clamp [0,1], round to 2dp, write back, persist. */
 
+      // Live typing in the OFF field: keep thrOn >= thrOff and mirror the change into the other field if needed.
       els.THR_OFF_SLIDER.addEventListener('input', () => {
         const v = parseFloat(els.THR_OFF_SLIDER.value);
         if (!Number.isFinite(v)) return; // let the user keep typing
@@ -1506,6 +1584,7 @@
         updateChartThresholdLines();
       });
 
+      // Same for the ON field: lowering it below thrOff pulls thrOff down with it.
       els.THR_ON_SLIDER.addEventListener('input', () => {
         const v = parseFloat(els.THR_ON_SLIDER.value);
         if (!Number.isFinite(v)) return;
@@ -1519,6 +1598,7 @@
         updateChartThresholdLines();
       });
 
+      // On commit (change/blur): clamp, round to 2 decimals, write back and save to the calibration record.
       ['change', 'blur'].forEach((evt) => {
         els.THR_OFF_SLIDER.addEventListener(evt, () => {
           let v = parseFloat(els.THR_OFF_SLIDER.value);
@@ -1550,6 +1630,8 @@
       });
 
       /* ========= Common categories handler ========= */
+      // Handle one set of class scores (from local inference or the Camera): update bars, chart and the alert state
+      // machine (begin/finish an alert episode in shared alerts, banner and sound on OFF -> ON).
       function onCategories(cats) {
         const HOP_S = Number(els.HOP_S.value) || 0.48;
         updateTopBars(cats);
@@ -1623,6 +1705,7 @@
         }
         // ON -> OFF
         if (!on && state.alertOn) {
+          // Mean smoothed score over the episode is stored with the alert for later review.
           const avg = _audioCount > 0 ? _audioSum / _audioCount : sm;
           const id = _audioAlertId;
           _audioAlertId = null;
@@ -1642,6 +1725,7 @@
       }
 
       /* ========= Classify loop ========= */
+      // Append two Float32Array buffers.
       function concatFloat32(a, b) {
         const out = new Float32Array(a.length + b.length);
         out.set(a, 0);
@@ -1655,6 +1739,7 @@
         if (!_rs || _rs.fromSr !== fromSr || _rs.toSr !== toSr) _rs = createStreamingResampler(fromSr, toSr);
         return _rs.process(chunk);
       }
+      // Discard the resampler state (new source or rate).
       function resetResampler() {
         _rs = null;
       }
@@ -1665,6 +1750,7 @@
       const _pending = [];
       let _draining = false,
         _droppedChunks = 0;
+      // Queue an audio chunk for classification; drops the oldest chunks when the backlog exceeds ~4 s.
       function classifyChunk(chunk, deviceSr) {
         if (!_yamTask) {
           // model not ready yet: start loading it, skip this chunk
@@ -1674,6 +1760,7 @@
           return;
         }
         _pending.push([chunk, deviceSr]);
+        // Chunks needed to cover about 4 s of audio at this device rate.
         const maxPending = Math.ceil(((deviceSr || 48000) * 4) / Math.max(1, chunk.length));
         while (_pending.length > maxPending) {
           _pending.shift();
@@ -1700,11 +1787,14 @@
           _draining = false;
         }
       }
+      // Drop all queued chunks (on stop or source change).
       function resetChunkQueue() {
         _pending.length = 0;
         _droppedChunks = 0;
       }
 
+      // Resample to SR_TARGET, append to the ring buffer and classify each full hop (window of FRAME_LEN_S ending at
+      // the hop), feeding results to onCategories(). Pads the first, short window with zeros.
       async function _classifyChunk(chunk, deviceSr) {
         if (state.mode !== 'detect') return;
 
@@ -1723,6 +1813,7 @@
 
         const x16 = resampleStream(chunk, deviceSr, SR_TARGET);
         state.ring = concatFloat32(state.ring, x16);
+        // Window of FRAME_LEN_S seconds (YAMNet native 0.975 s = 15600 samples at 16 kHz); hop = step between windows.
         const fram = Math.round((Number(els.FRAME_LEN_S.value) || 0.975) * SR_TARGET);
         const hop = Math.round(HOP_S * SR_TARGET);
 
@@ -1748,6 +1839,7 @@
 
           onCategories(cats);
           state.lastPos += hop;
+          // Trim consumed audio so the ring buffer does not grow without bound, keeping one window of context.
           if (state.lastPos > fram * 4) {
             const cut = state.lastPos - fram;
             state.ring = state.ring.slice(cut);
@@ -1757,9 +1849,12 @@
       }
 
       /* ========= Mic control ========= */
+      // Start detection from this device's microphone (raw audio: echo cancellation / AGC off). Prefers an
+      // AudioWorklet tap, falling back to a ScriptProcessor.
       async function startMic() {
         await stopAll();
         setStatus('Starting microphone (detect)…');
+        // Device-native sample rate; chunks are resampled to SR_TARGET before classification.
         const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
         state.micCtx = ctx;
         await ctx.resume();
@@ -1780,6 +1875,7 @@
         }
         state.micStream = stream; // kept so stopMicOnly() can release the mic
         const src = ctx.createMediaStreamSource(stream);
+        // Silent sink: the graph must reach the destination to be pulled, but nothing should be audible.
         const sink = ctx.createGain();
         sink.gain.value = 0;
         sink.connect(ctx.destination);
@@ -1802,6 +1898,7 @@
           state.procNode = node;
           log('info', 'AudioWorklet active @ ' + ctx.sampleRate + ' Hz');
         } catch (e) {
+          // Fallback for browsers without AudioWorklet: ScriptProcessor with a 4096-sample buffer.
           const node = ctx.createScriptProcessor(4096, 1, 1);
           node.onaudioprocess = (ev) =>
             classifyChunk(new Float32Array(ev.inputBuffer.getChannelData(0)), ctx.sampleRate);
@@ -1817,6 +1914,7 @@
         setStatus('Detection started (mic).');
       }
 
+      // Tear down the microphone graph and release the mic.
       async function stopMicOnly() {
         try {
           state.procNode?.disconnect();
@@ -1857,7 +1955,9 @@
         } catch {}
       }
 
+      // Stop everything: close any open alert, release mic/remote tap, reset buffers, EMAs and charts.
       async function stopAll() {
+        // (Closing the episode here keeps the alert history consistent when detection is stopped manually.)
         // finalize open alert if any
         if (state.alertOn && _audioAlertId != null) {
           const avg = _audioCount > 0 ? _audioSum / _audioCount : 0;
@@ -1878,6 +1978,7 @@
           _audioCount = 0;
         }
 
+        // Only log "Stopped" if something was actually running.
         const wasRunning = state.running || state.mode !== 'idle';
         state.running = false;
         state.mode = 'idle';
@@ -1905,9 +2006,11 @@
       // Call this whenever one of them changes; it starts the audio tap only if it isn't running yet.
       // The Camera analyses the sound itself only when its "Audio" box is ticked AND set to run on the Camera.
       // In every other case (box unticked, or set to run on the Viewer) this page analyses the streamed sound.
+      // True when the Camera sends its own scores, so this page must not analyse the streamed sound as well.
       function cameraInfers() {
         return !!wrtc.audioEnabled && wrtc.where === 'sender';
       }
+      // (Idempotent: does nothing while the tap already exists.)
       function ensureListening() {
         if (els.TRAIN_SRC.value !== 'sender' || state.mode !== 'detect') return;
         if (!cameraInfers() && wrtc.stream && !wrtc.ctx) {
@@ -1933,17 +2036,21 @@
         ensureListening();
       }
 
+      // Create the ReceiverCore (WebRTC) connection once and wire its data channel: audio-mode / ai-modes messages
+      // tell us where inference runs, 'audio' messages carry the Camera's scores.
       function ensureCoreStarted() {
         if (wrtc.core) return;
 
         const uiRoom = getUiRoomLabel();
         const room = getSignalRoom();
 
+        // Attach handlers to the data channel (whichever side created it) and ask the Camera for its modes.
         function wireDC(ch) {
           if (!ch) return;
           if (wrtc.dc && wrtc.dc === ch) return;
           wrtc.dc = ch;
 
+          // 'need-modes' makes the Camera reply with audio-mode / ai-modes so we know where inference runs.
           ch.onopen = () => {
             log('ok', '[RTC] DC open');
             try {
@@ -1962,6 +2069,7 @@
             }
             if (!msg || !msg.type) return;
 
+            // 'audio-mode' (Camera -> Viewer): where tells who runs inference; cameraInfers() decides about the tap.
             if (msg.type === 'audio-mode') {
               wrtc.audioEnabled = !!msg.enabled;
               wrtc.where = msg.where || 'sender';
@@ -1980,6 +2088,7 @@
 
               if (cameraInfers()) stopRemoteAudioTap(); // the Camera analyses; its scores arrive by data channel
               ensureListening();
+            // 'audio' carries the Camera's own class scores (inference on the Camera).
             } else if (msg.type === 'audio') {
               // Force sender mode on first score and make sure detection is actually running.
               setInferWhere('sender');
@@ -2041,12 +2150,15 @@
           .catch((e) => log('err', `[RTC] start error: ${e?.message || e}`));
       }
 
+      // Tap the Camera's audio track (muted sink) and classify it locally; same worklet/ScriptProcessor approach
+      // as startMic().
       async function startRemoteAudioTap() {
         if (!wrtc.stream) {
           log('warn', '[RTC] No remote stream yet.');
           return;
         }
         await stopRemoteAudioTap();
+        // Separate AudioContext for the remote tap, silent via a zero-gain sink.
         const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
         wrtc.ctx = ctx;
         await ctx.resume().catch(() => {});
@@ -2079,6 +2191,7 @@
           wrtc.node = node;
           log('info', '[RTC] Remote tap (worklet) active.');
         } catch (e) {
+          // Same ScriptProcessor fallback as for the microphone.
           const node = ctx.createScriptProcessor(4096, 1, 1);
           node.onaudioprocess = (ev) =>
             classifyChunk(new Float32Array(ev.inputBuffer.getChannelData(0)), ctx.sampleRate);
@@ -2112,6 +2225,7 @@
       }
 
       /* ========= Mode selection ========= */
+      // Start detection for the selected source: 'mic' starts the microphone, 'sender' joins the Camera's room.
       async function startDetectBasedOnSource() {
         const src = els.TRAIN_SRC.value;
         if (src === 'mic') {
@@ -2126,12 +2240,14 @@
       }
 
       /* ========= Detect toggle button ========= */
+      // Sync the Start/Stop button label and pressed state with the detection mode.
       function updateDetectButtonUI() {
         const active = state.mode === 'detect';
         els.btnDetect.textContent = active ? 'Stop' : 'Start';
         els.btnDetect.classList.toggle('live', active);
         els.btnDetect.setAttribute('aria-pressed', active ? 'true' : 'false');
       }
+      // Start/Stop toggle; Stop also sets userStopped so incoming Camera scores do not restart detection.
       els.btnDetect.onclick = async () => {
         const active = state.mode === 'detect';
         if (!active) {
@@ -2146,6 +2262,7 @@
       };
 
       // Live bars / Saved weights toggles
+      // Show/hide the live top-class chart on demand.
       els.btnToggleLiveBars.addEventListener('click', () => {
         liveBarsUserVisible = !liveBarsUserVisible;
         els.btnToggleLiveBars.textContent = liveBarsUserVisible ? 'Hide chart' : 'Show chart';
@@ -2167,6 +2284,7 @@
         }
       });
 
+      // Current analysis parameters (also included in the log export).
       function getParams() {
         return {
           SR_TARGET: Number(els.SR_TARGET.value) || 16000,
@@ -2194,6 +2312,7 @@
       els.TRAIN_SRC.addEventListener('change', updateSourceUI);
 
       // Chart window control
+      // Clamp the chart window to at least 5 s (default 30) and rebuild the chart for the new capacity.
       els.CHART_WINDOW_S.addEventListener('change', () => {
         const v = Math.max(5, Number(els.CHART_WINDOW_S.value) || 30);
         els.CHART_WINDOW_S.value = String(v);
@@ -2203,6 +2322,7 @@
       });
 
       // Model switch
+      // Switching models reloads that model's weights, thresholds and penalty map.
       els.MODEL_SELECT.addEventListener('change', () => {
         const v = els.MODEL_SELECT.value;
         setModelName(v);
@@ -2222,6 +2342,7 @@
       });
 
       /* ========= Boot ========= */
+      // Page start-up: restore model, thresholds and penalties, hide optional charts, then auto-start detection.
       (function boot() {
         // Inject shared Alerts UI (adds drawer into #alertsModalHost)
         initAlertsUI({ drawerHostId: 'alertsModalHost' });

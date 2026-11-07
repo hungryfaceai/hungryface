@@ -7,6 +7,11 @@
 //   naptio:miniDash:size -> { w, h } (px)
 //   naptio:miniDash:zoom -> number (0.25–1.25)
 
+// opts: { src, defaultSrc, featureKey }. Builds a floating, draggable, resizable window that
+// embeds the alerts
+// dashboard in an iframe (built lazily on first show). Returns the controller from build():
+// show/hide/toggle/
+// setSrc/resetState. It is auto-installed at the bottom of this file when the module is imported.
 export function installMiniDashboard(opts = {}) {
   const SRC_DEFAULT =
     opts.defaultSrc || 'https://hungryfaceai.github.io/hungryface/webrtc/receiver/shared/alerts/dashboard/';
@@ -150,6 +155,8 @@ export function installMiniDashboard(opts = {}) {
     document.head.appendChild(s);
   }
 
+  // Geometry helpers. --miniDash-safe-* are CSS variables holding the device safe-area insets
+  // (notch, home bar).
   // Clamp such that the whole window stays on-screen horizontally
   // and at least the TITLEBAR_H remains visible vertically.
   function clampPositionForTitle(box, left, top) {
@@ -177,6 +184,7 @@ export function installMiniDashboard(opts = {}) {
     };
   }
 
+  // Keep the window between a 220x140 minimum and the viewport size minus margins.
   function clampSize(box, w, h) {
     const vw = document.documentElement.clientWidth;
     const vh = document.documentElement.clientHeight;
@@ -201,6 +209,7 @@ export function installMiniDashboard(opts = {}) {
     save(KEYS.pos, { mode: 'absolute', left: r.left, top: r.top });
   }
 
+  // Zoom is clamped to 0.25-1.25 and stored under naptio:miniDash:zoom.
   function setZoom(root, z, slider, label) {
     z = Math.max(0.25, Math.min(1.25, z));
     root.style.setProperty('--miniDash-zoom', z);

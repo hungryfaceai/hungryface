@@ -1,4 +1,10 @@
 <!doctype html>
+<!--
+  Rooms (utils/rooms): simpler, older admin view of the signalling server's room roster.
+  Requires the admin sign-in (utils/admin-session.js); polls the roster endpoint with a Bearer token and shows
+  one card per room with its cameras (senders) and viewers (receivers). The richer page is utils/roster.
+  Static page, no build step; all logic is in the inline script at the bottom.
+-->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -7,6 +13,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="stylesheet" href="/hungryface/shared/tokens.css" />
     <style>
+      /* Rooms page styles: dark theme on the shared tokens, toolbar with sign-in, status badge, room cards. */
       :root {
         color-scheme: dark;
         --bg: #0b0b0f;
@@ -340,6 +347,7 @@
 
     <script src="/hungryface/utils/admin-session.js"></script>
     <script>
+      // Rooms page logic: sign-in, roster polling and rendering.
       (() => {
         const endpointInput = document.getElementById('endpoint');
         // Admin key: kept only for this tab (sessionStorage), sent as a Bearer header, never in the URL.
@@ -354,6 +362,7 @@
             if (on) setTimeout(() => document.getElementById('btn-refresh')?.click(), 0);
           },
         });
+        // Authorization header for the current admin session (empty when signed out).
         function adminHeaders() {
           return adminSession.headers();
         }
@@ -371,6 +380,7 @@
 
         let timer = null;
 
+        // Connection badge: kind is a CSS class suffix (e.g. 'warn').
         function setBadge(kind, text) {
           badge.className = 'badge ' + kind;
           badge.textContent = text;
@@ -393,6 +403,7 @@
           );
         }
 
+        // Counts senders (cameras) and receivers (viewers) in a room.
         function summarizeRoom(list) {
           let senders = 0,
             receivers = 0;
@@ -490,6 +501,7 @@
             });
           return refreshing;
         }
+        // Fetches the roster once and renders it, updating the badge and status text.
         async function fetchAndRenderNow() {
           const url = endpointInput.value.trim();
           endpointView.textContent = url || '—';
@@ -523,6 +535,7 @@
           }
         }
 
+        // (Re)starts the auto-refresh timer.
         function startAuto() {
           clearInterval(timer);
           if (autoToggle.checked) {

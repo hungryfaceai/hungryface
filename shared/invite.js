@@ -19,13 +19,16 @@
   const SHARE_TEXT = 'Naptio turns two phones into a private baby monitor. Take a look:';
   const DEFAULT_TITLE = 'Invite a friend';
 
+  // Lazily built DOM references; qrReady caches the QRious load promise, drawnFor the URL currently drawn.
   let modal, canvas, urlText, btnCopy, btnShare, btnClose, statusEl, titleEl;
   let lastFocus = null,
     qrReady = null,
     drawnFor = null;
 
+  // Link to share: page override (window.HF_INVITE_URL or body data-invite-url), else the public home page.
   const inviteUrl = () => window.HF_INVITE_URL || document.body?.dataset?.inviteUrl || DEFAULT_URL;
 
+  // The stylesheet is injected on demand so pages only need the one script tag.
   function ensureCss() {
     if (document.querySelector('link[data-naptio-invite-css]')) return;
     const l = document.createElement('link');
@@ -35,6 +38,7 @@
     document.head.appendChild(l);
   }
 
+  // Create the dialog markup once and wire its buttons (click on the backdrop also closes).
   function build() {
     if (modal) return;
     ensureCss();
@@ -84,6 +88,7 @@
     });
   }
 
+  // Load the QR library on first use only, pinned with a subresource-integrity hash; a failed load can be retried.
   function loadQRious() {
     if (window.QRious) return Promise.resolve();
     return (
@@ -102,6 +107,7 @@
       }))
     );
   }
+  // Render the QR code for url into the canvas; on failure mark the canvas so CSS shows the fallback.
   async function drawQR(url) {
     if (drawnFor === url) return;
     try {
@@ -124,6 +130,7 @@
     }
   }
 
+  // Show a short status message in the live region, cleared after 2.5 s.
   function say(msg) {
     statusEl.textContent = msg;
     clearTimeout(say.t);
@@ -132,6 +139,7 @@
     }, 2500);
   }
 
+  // Focus trap: keep Tab/Shift+Tab inside the dialog and close on Escape.
   function focusables() {
     return [...modal.querySelectorAll('button:not([hidden])')].filter((b) => b.offsetParent !== null);
   }
@@ -158,6 +166,7 @@
     }
   }
 
+  // Open the dialog; trigger (if given) supplies the title and gets focus back on close.
   function open(trigger) {
     build();
     const url = inviteUrl();
@@ -183,6 +192,7 @@
     if (lastFocus && lastFocus.focus && document.contains(lastFocus)) lastFocus.focus();
   }
 
+  // Copy the link; where the clipboard API is blocked, select the text so the user can copy it manually.
   async function copyLink() {
     try {
       await navigator.clipboard.writeText(inviteUrl());
@@ -201,6 +211,7 @@
     }
   }
 
+  // Bind a trigger element once (the flag prevents double-binding when scan() runs again).
   function attach(el) {
     if (!el || el.dataset.naptioInviteBound) return;
     el.dataset.naptioInviteBound = '1';

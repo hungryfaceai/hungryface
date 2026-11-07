@@ -15,6 +15,7 @@
 //   fetch(url, { headers: admin.headers() })
 
 (function () {
+  // Session record is JSON { token, expiresAt }. LEGACY_KEY held the old static admin key and is wiped.
   const KEY = 'naptio:adminSession';
   const LEGACY_KEY = 'naptio:adminKey';
   const MAX_TIMER_MS = 2147483647; // setTimeout limit (~24.8 days); longer delays fire immediately
@@ -22,6 +23,7 @@
     sessionStorage.removeItem(LEGACY_KEY);
   } catch {} // old static key: no longer kept
 
+  // Available web storages (either can throw in private modes), localStorage first.
   const stores = () =>
     [
       (() => {
@@ -39,6 +41,7 @@
         }
       })(),
     ].filter(Boolean);
+  // Returns the stored, unexpired session or null; expired entries are removed.
   function load() {
     for (const st of stores()) {
       try {
@@ -49,6 +52,7 @@
     }
     return null;
   }
+  // Replaces the stored session: clears both storages, then writes to local or session storage per s.remember.
   function save(s) {
     for (const st of stores()) {
       try {
@@ -60,6 +64,7 @@
       (s.remember ? localStorage : sessionStorage).setItem(KEY, JSON.stringify(s));
     } catch {}
   }
+  // Expiry text for the UI: a clock time if under 24 h away (864e5 ms), else a date.
   function until(expiresAt) {
     const d = new Date(expiresAt),
       soon = d - Date.now() < 864e5;
@@ -68,6 +73,11 @@
       : d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
   }
 
+  /**
+   * Adds the sign-in form to the toolbar.
+   * @param {{toolbar: HTMLElement, loginUrl: string, onChange?: (signedIn: boolean) => void}} opts
+   * @returns {{headers: Function, signedIn: Function, expired: Function}}
+   */
   function mount({ toolbar, loginUrl, onChange = () => {} }) {
     let session = load();
     let expiryTimer = null;
@@ -142,12 +152,14 @@
     }
     pw.addEventListener('input', clearError); // start typing again -> error goes away
 
+    // Forgets the session on this device and notifies the page.
     function end(msg) {
       session = null;
       save(null);
       render(msg);
       onChange(false);
     }
+    // Signs out automatically when the session expires.
     function scheduleExpiry() {
       clearTimeout(expiryTimer);
       if (!session) return;
@@ -156,6 +168,7 @@
       // Long sessions: re-check periodically instead of one huge (overflowing) timeout.
       expiryTimer = setTimeout(scheduleExpiry, Math.min(left, MAX_TIMER_MS));
     }
+    // Shows the form when signed out, the Sign out button when signed in.
     function render(msg) {
       const on = !!session;
       // Set display directly: an inline/page `display` value would override the `hidden` attribute.
@@ -172,6 +185,7 @@
       scheduleExpiry();
     }
 
+    // POST the password once to loginUrl; on success keep only the returned token.
     wrap.addEventListener('submit', async (e) => {
       e.preventDefault();
       const password = pw.value;

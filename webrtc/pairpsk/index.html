@@ -1,4 +1,11 @@
 <!doctype html>
+<!--
+  webrtc/pairpsk/index.html — "Pair devices": create or pick a room and its pre-shared key (PSK), then pair a phone.
+  The PSK (stored in localStorage as psk:<room>) signs the signalling messages for that room. The other device is
+  paired by scanning the QR code (or opening the shared link) that points to pair-install.html with #room&psk in the
+  URL fragment, so the key is never sent to a server. This page can also scan such a code with the camera.
+  Gated by legal/require-terms.js. Depends on webrtc/shared/psk/psk-ws-shim.js and adopt-room.js; QR via QRious/jsQR.
+-->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -8,6 +15,10 @@
     <link rel="icon" href="/hungryface/pwa/icons/favicon-196.png" sizes="196x196" />
     <link rel="stylesheet" href="/hungryface/shared/tokens.css" />
     <style>
+      /*
+       * Pair devices styles: hero card, room selector, PSK chip, QR canvas, mode pills, scanner
+       * overlay, toast.
+       */
       :root {
         color-scheme: dark;
       }
@@ -475,6 +486,8 @@
     </section>
 
     <script type="module">
+      // Pair devices logic: room list, PSK creation/rotation, QR and share link, QR scanner for
+      // importing a key.
       import { ensureTermsAccepted } from '/hungryface/legal/require-terms.js';
       import { ensurePskForRoom, getPsk } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
       import { adoptPairedRoom } from '/hungryface/webrtc/shared/psk/adopt-room.js';
@@ -506,6 +519,8 @@
       let AUTO_CREATE = true;
       let everHadRooms = false; // becomes true once we detect any PSK-backed rooms
 
+      // localStorage keys used here: psk:<room> (the key record), naptio:lastRoom and bm_sender_room
+      // (room choice).
       // Helpers
       function showToast(msg, ms = 1600, variant = '') {
         toastEl.textContent = msg;
@@ -633,6 +648,8 @@
       }
 
       // QR
+      // Draw the QR with QRious (loaded on demand); if the library cannot load, print the text on the
+      // canvas instead.
       async function drawQR(canvas, text) {
         try {
           if (!window.QRious) {
@@ -671,6 +688,8 @@
         ctx.fillText(line, x, y);
       }
 
+      // Link for the other device. The room and key go in the URL fragment (#), which browsers never
+      // send to a server.
       function makeInstallUrl(room, tokenB64u) {
         const url = new URL(INSTALLER_URL, location.href);
         url.hash = new URLSearchParams({ room, psk: tokenB64u }).toString();
@@ -884,6 +903,8 @@
       rebuildRoomSelect({ initial: true });
       await refresh();
 
+      // Scanner: uses the native BarcodeDetector when available, otherwise jsQR on frames drawn to a
+      // canvas.
       // ===== Cross-platform in-app QR scanner (imports external key) =====
       const scanBtn = document.getElementById('scanQR');
       const qrShell = document.getElementById('qr-shell');

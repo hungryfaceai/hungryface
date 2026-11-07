@@ -16,6 +16,7 @@ const LAST = 'naptio:lastRoom',
 const DEFAULT_ROOM = 'Baby';
 const FRESH_MS = 30 * 60 * 1000;
 
+// Safe localStorage helpers (storage may be blocked in private modes).
 function read(k) {
   try {
     return localStorage.getItem(k);

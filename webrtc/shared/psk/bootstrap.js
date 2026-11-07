@@ -13,6 +13,7 @@ import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
 import { requirePskOrRedirect, listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
 import { installRoomScope } from '/hungryface/webrtc/shared/psk/room-scope.js';
 
+// Defaults and small localStorage/global helpers.
 const DEFAULT_ROOM = 'Baby';
 
 function readLS(key) {

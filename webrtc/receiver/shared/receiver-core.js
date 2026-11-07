@@ -1,6 +1,13 @@
 // receiver-core.js — shared signaling + WebRTC for receivers (targets a specific sender)
 import { ICE_SERVERS } from '/hungryface/webrtc/shared/config.js';
 
+/**
+ * Viewer-side signalling + WebRTC connection to one Camera in a room.
+ * Opens the signalling WebSocket, joins the room, creates a recvonly RTCPeerConnection, sends offers
+ * (re-sent every 2 s until answered), applies the answer and ICE candidates, and reconnects with backoff.
+ * Pages react through the optional on* callbacks in cfg (onStream, onIceState, onStatus, onRoster, ...).
+ * Messages go through the PSK WebSocket shim when it is installed, so signing is transparent here.
+ */
 export class ReceiverCore {
   constructor(cfg) {
     this.wsEndpoint = cfg.wsEndpoint; // wss://.../ws
@@ -29,6 +36,7 @@ export class ReceiverCore {
     this.wsConnectTimeoutMs = cfg.wsConnectTimeoutMs || 10000; // WS open timeout
     this.iceDisconnectGraceMs = cfg.iceDisconnectGraceMs || 9000; // ICE disconnected grace
 
+    // Runtime state (ws/pc handles, timers, offer/answer bookkeeping).
     // Internals
     this.ws = null;
     this.wsKeepalive = null;
@@ -55,6 +63,7 @@ export class ReceiverCore {
   }
 
   /* ---------- Public API ---------- */
+  // Connect signalling, build the peer connection and send an offer. Concurrent calls share one run.
   async start() {
     this.closed = false;
     // Single-flight: concurrent callers share one in-progress start
@@ -71,6 +80,7 @@ export class ReceiverCore {
     }
   }
 
+  // Permanently stop: cancel timers and close the socket and peer connection (no auto-reconnect afterwards).
   close() {
     this.closed = true;
     if (this.reconnectTimer) {
@@ -98,6 +108,7 @@ export class ReceiverCore {
   }
 
   /* ---------- Internals ---------- */
+  // Open the signalling socket and join the room; resolves on open, rejects on timeout or early close.
   async #ensureWS() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
     if (this.closed) throw new Error('ReceiverCore closed');
@@ -164,6 +175,7 @@ export class ReceiverCore {
     }
   }
 
+  // Reconnect with exponential backoff (doubling up to reconnectMaxMs) and jitter.
   #scheduleReconnect() {
     if (this.closed || this.reconnectTimer) return; // one pending reconnect at a time
     const base = Math.min(this.wsRetryMs, this.reconnectMaxMs);
@@ -186,6 +198,7 @@ export class ReceiverCore {
     }
   }
 
+  // Tear down and rebuild the peer connection, then send a fresh offer.
   async #restartPC() {
     if (this.closed) return;
     this.#clearIceGraceTimer();
@@ -194,6 +207,7 @@ export class ReceiverCore {
     await this.#negotiate();
   }
 
+  // Send JSON on the socket; offers and candidates are addressed to the chosen Camera via "to".
   #send(obj) {
     try {
       if (this.ws?.readyState !== WebSocket.OPEN) return;
@@ -202,6 +216,7 @@ export class ReceiverCore {
     } catch {}
   }
 
+  // Create the RTCPeerConnection (recvonly video + audio). force=true replaces an existing one.
   async #ensurePC(force = false) {
     if (this.pc && !force) return;
 
@@ -283,6 +298,7 @@ export class ReceiverCore {
     };
   }
 
+  // Create and send the initial offer, then keep re-sending it until the Camera answers.
   async #negotiate() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) await this.#ensureWS();
     if (!this.pc) await this.#ensurePC();
@@ -294,6 +310,7 @@ export class ReceiverCore {
     //this.#status('Offer sent, waiting for answer…');
   }
 
+  // (Re)send the current local offer, addressed to the known Camera if there is one.
   async #sendCurrentOffer() {
     if (this.pc?.localDescription?.type === 'offer') {
       const payload = { type: this.pc.localDescription.type, sdp: this.pc.localDescription.sdp };
@@ -314,6 +331,7 @@ export class ReceiverCore {
     this.offerResendTimer = null;
   }
 
+  // Handle one inbound signalling message: roster, hello, need-offer, peer-joined, bye, answer, candidate.
   async #onSignal(evt) {
     let msg;
     try {
@@ -406,6 +424,7 @@ export class ReceiverCore {
       this.candidateQueue.length = 0;
       return;*/
 
+      // Serialise answer handling so duplicate answers cannot race setRemoteDescription.
       if (this.processingAnswer) return; // drop concurrent duplicate
       this.processingAnswer = true;
       try {
@@ -450,6 +469,7 @@ export class ReceiverCore {
       if (!this.targetSenderId && msg.from) this.targetSenderId = msg.from;
       if (msg.from && this.targetSenderId && msg.from !== this.targetSenderId) return;
 
+      // Candidates arriving before the answer is applied are queued and added afterwards.
       const cand = new RTCIceCandidate(msg.candidate);
       if (this.remoteDescriptionSet) {
         try {

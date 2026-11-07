@@ -2,6 +2,7 @@
 // Triple-pip alert sound (same as dashboard) with per-type switches + global cooldown.
 // Debug: installAlertSound({debug:true}) OR ?notifyDebug=1 OR localStorage 'naptio:notify:debug'='1'
 
+// localStorage keys: per-type on/off switches ('on'/'off'), cooldown in minutes, last-played stamp.
 const KEYS = {
   audio: 'naptio:notify:audio',
   motion: 'naptio:notify:motion',
@@ -12,6 +13,7 @@ const KEYS = {
   tsPing: 'naptio:notify:ts',
 };
 
+// Guesses the alert type from the page URL (audio/motion/prone/fence); defaults to audio.
 function inferTypeFromPath(p = location.pathname) {
   if (/\/audio\//i.test(p)) return 'audio';
   if (/\/motion\//i.test(p)) return 'motion';
@@ -20,16 +22,19 @@ function inferTypeFromPath(p = location.pathname) {
   return 'audio';
 }
 
+// True when the stored switch equals 'on' (a missing value uses def).
 function settingIsOn(key, def = 'on') {
   const v = (localStorage.getItem(key) || def).toLowerCase();
   return v === 'on';
 }
+// Global cooldown between sounds in ms (setting is in minutes, default 2).
 function getCooldownMs() {
   const n = parseInt(localStorage.getItem(KEYS.cooldown), 10);
   const minutes = Number.isFinite(n) ? n : 2;
   return Math.max(0, minutes) * 60_000;
 }
 
+// Lazily created shared AudioContext.
 let audioCtx = null;
 let lastBeepWallNow = 0; // 1s safety limit (separate from minutes cooldown)
 let DEBUG = false;
@@ -41,6 +46,7 @@ const dwarn = (...a) => {
   if (DEBUG) console.warn('[notify-sound]', ...a);
 };
 
+// Creates the AudioContext on first use; returns null if the browser refuses.
 function ensureCtx() {
   if (!audioCtx) {
     try {
@@ -53,6 +59,7 @@ function ensureCtx() {
   return audioCtx;
 }
 
+// Browsers (notably iOS) keep audio suspended until a user gesture; resume the context on the first one.
 function unlockOnFirstGesture() {
   const once = async (ev) => {
     const ac = ensureCtx();
@@ -71,6 +78,7 @@ function unlockOnFirstGesture() {
   );
 }
 
+// Backgrounded tabs can leave the context suspended; resume when the tab becomes visible again.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && audioCtx?.state === 'suspended') {
     dlog('Tab visible; resuming suspended AudioContext…');
@@ -82,6 +90,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ----- Triple pip (1.7k → 2.6k), three pips ~0.18s apart -----
+// Plays three short sine pips; same sound as the alerts dashboard.
 async function playDashboardPips() {
   const ac = ensureCtx();
   if (!ac) {
@@ -128,12 +137,14 @@ async function playDashboardPips() {
   pip(t0 + 0.36);
 }
 
+// True while the last played sound (shared across tabs via localStorage) is within the cooldown.
 function inMinutesCooldown(nowMs = Date.now()) {
   const last = parseInt(localStorage.getItem(KEYS.lastTs), 10) || 0;
   const inCd = nowMs - last < getCooldownMs();
   dlog('Cooldown check:', { nowMs, lastTs: last, cooldownMs: getCooldownMs(), inCooldown: inCd });
   return inCd;
 }
+// Records the play time so other tabs/pages respect the same cooldown.
 function stampPlayed(nowMs = Date.now()) {
   try {
     localStorage.setItem(KEYS.lastTs, String(nowMs));
@@ -141,6 +152,7 @@ function stampPlayed(nowMs = Date.now()) {
   } catch {}
 }
 
+// Current gate state (switch, cooldown, context state) for debug logging.
 function gateSnapshot(type) {
   return {
     type,
@@ -151,6 +163,11 @@ function gateSnapshot(type) {
   };
 }
 
+/**
+ * Listens for window 'naptio:alert' events ({detail:{type}}) and plays the pips when the type's switch is on
+ * and the cooldown has passed.
+ * @returns {{trigger: Function, emit: Function, destroy: Function}} controls, plus _debug helpers
+ */
 export function installAlertSound(opts = {}) {
   const pageType = opts.type || inferTypeFromPath();
 

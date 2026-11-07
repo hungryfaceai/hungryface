@@ -41,6 +41,7 @@ const sortState = { key: 'startAt', dir: 'desc' };
 function $(id) {
   return document.getElementById(id);
 }
+// Local date-time with seconds; an em dash for missing or invalid input.
 function fmtDT(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -55,6 +56,7 @@ function fmtDT(iso) {
     second: '2-digit',
   });
 }
+// Duration as 'Xm Ys'; an em dash when unknown or negative.
 function fmtDur(ms) {
   if (ms == null || !isFinite(ms) || ms < 0) return '—';
   const s = Math.round(ms / 1000);
@@ -63,6 +65,10 @@ function fmtDur(ms) {
   return `${mm}m ${ss}s`;
 }
 
+/**
+ * Builds the Alerts history modal (search, type filters, sortable columns, clear) and binds it to the open button.
+ * Re-renders when 'alerts:changed' fires.
+ */
 export function setupAlertsDrawer({ openBtnEl, badgeEl, hostId = 'alertsModalHost' } = {}) {
   // Create host if missing
   let host = document.getElementById(hostId);
@@ -210,9 +216,11 @@ export function setupAlertsDrawer({ openBtnEl, badgeEl, hostId = 'alertsModalHos
   });
 }
 
+// Timestamped export file name with ':' and '.' replaced so it is valid on all file systems.
 function makeName(ext) {
   return `alerts_${new Date().toISOString().replace(/[:.]/g, '-')}.${ext}`;
 }
+// Triggers a browser download of the text via a temporary object URL.
 function downloadBlob(name, mime, text) {
   const blob = new Blob([text], { type: mime });
   const a = document.createElement('a');
@@ -222,6 +230,7 @@ function downloadBlob(name, mime, text) {
   URL.revokeObjectURL(a.href);
 }
 
+// Updates the count badge on the Alerts button from the store.
 export async function refreshAlertsBadge() {
   try {
     const rows = await getAllAlerts();
@@ -251,6 +260,7 @@ async function dumpCSV() {
   return lines.join('\n');
 }
 
+// Re-reads the store, applies the type/search filters and sort state, and rebuilds the table body.
 async function renderTable() {
   const rows = await getAllAlerts();
   const tb = els.tbody;
@@ -312,6 +322,7 @@ async function renderTable() {
   }
 }
 
+// Escapes text before it goes into innerHTML.
 function escHtml(v) {
   return String(v ?? '').replace(
     /[&<>"']/g,

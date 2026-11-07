@@ -28,6 +28,10 @@ function designLowpass(taps, cutoff) {
   return h;
 }
 
+/**
+ * Create a stateful resampler (low-pass + linear interpolation) from fromSr to toSr.
+ * @returns {{process(chunk: Float32Array): Float32Array, reset(): void, fromSr: number, toSr: number}}
+ */
 export function createStreamingResampler(fromSr, toSr, { taps = 63 } = {}) {
   fromSr = Number(fromSr) || toSr;
   const step = fromSr / toSr; // input samples per output sample
@@ -46,6 +50,7 @@ export function createStreamingResampler(fromSr, toSr, { taps = 63 } = {}) {
   let pos = 0;
   // Initial group delay compensation is unnecessary for classification; we accept it.
 
+  // FIR convolution of one chunk, using saved history so chunk borders are seamless.
   function lowpass(chunk) {
     if (!fir) return chunk;
     const n = chunk.length;

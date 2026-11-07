@@ -9,6 +9,7 @@
 const te = new TextEncoder();
 const td = new TextDecoder();
 
+// --- small encoding/crypto/storage helpers ---
 function b64uToBytes(b64u) {
   const b64 = b64u.replace(/-/g, '+').replace(/_/g, '/');
   const pad = '='.repeat((4 - (b64.length % 4)) % 4);
@@ -57,6 +58,7 @@ function scrubFragment() {
   }
 }
 
+// Constant-time byte comparison so MAC checks do not leak timing information.
 function timingSafeEq(a, b) {
   if (!a || !b || a.length !== b.length) return false;
   let v = 0;
@@ -64,6 +66,7 @@ function timingSafeEq(a, b) {
   return v === 0;
 }
 
+// The signed view covers only routing/SDP/ICE fields (not the whole message), so server-added fields do not break MACs.
 // Build the compact view we sign/verify (stable field order)
 function viewFor(obj, ctr) {
   return {
@@ -80,6 +83,11 @@ function viewFor(obj, ctr) {
 const PASSTHRU = new Set(['hello', 'roster', 'peer-joined', 'peer-left', 'keepalive']); // never require psk
 
 // ---- Public helpers ----
+/**
+ * Make sure a PSK exists for `room`. Imports a token from the URL fragment if present (then scrubs it);
+ * a sender with no stored key creates a random 128-bit one, a receiver never does.
+ * @returns {Promise<{room: string, tokenB64u: string|null}>} room may differ if the fragment named another one.
+ */
 export async function ensurePskForRoom(room, role = 'receiver') {
   // 1) import from #fragment if present (and scrub)
   const { room: fragRoom, token } = parseFragment();
@@ -106,11 +114,13 @@ export async function ensurePskForRoom(room, role = 'receiver') {
   return { room, tokenB64u: st?.tokenB64u || null };
 }
 
+// Read the stored key record for a room (tokenB64u is null if none).
 export function getPsk(room) {
   const st = getStored(room);
   return { room, tokenB64u: st?.tokenB64u || null };
 }
 
+// Build a pairing link carrying room and token in the URL fragment (fragments are not sent to servers).
 export function makeShareUrl({ baseUrl, room }) {
   const { tokenB64u } = getPsk(room);
   const u = new URL(baseUrl, location.origin);
@@ -122,6 +132,11 @@ export function makeShareUrl({ baseUrl, room }) {
 }
 
 // ---- Install a global WebSocket proxy for this room ----
+/**
+ * Replace window.WebSocket with a wrapper that signs outbound and verifies inbound signalling JSON using the
+ * room's PSK (HMAC-SHA256 + per-sender counter for replay protection). With no stored key it passes data through.
+ * @returns {function(): void} undo function restoring the previous WebSocket.
+ */
 export function installPskShim({ room }) {
   const st = getStored(room);
   const tokenB64u = st?.tokenB64u || null;
@@ -133,6 +148,7 @@ export function installPskShim({ room }) {
   if (!NativeWS) throw new Error('WebSocket not available');
   if (NativeWS.__pskWrapped) return () => {}; // already wrapped
 
+  // Drop-in WebSocket replacement; mirrors the native API (events, on* handlers, readyState, send, close).
   class PskWS {
     constructor(url, protocols) {
       this._inner = new NativeWS(url, protocols);

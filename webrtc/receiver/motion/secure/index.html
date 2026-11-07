@@ -1,4 +1,14 @@
 <!doctype html>
+<!--
+  Naptio Viewer: Movement detection (webrtc/receiver/motion/secure/index.html).
+  Shows the Camera phone live video and flags body movement. Pose landmarks come either from the Camera (sent over the
+  "pose" data channel) or are computed here with MediaPipe PoseLandmarker; this page scores them and raises alerts.
+  Main pieces: video stage + pose canvas overlay, settings/calibration panel (#movePanel), Help side-sheet,
+  shared Alerts UI (banner + history drawer), optional alert sound and mini dashboard.
+  Dependencies: shared/receiver-core.js (WebRTC + signalling), psk/bootstrap.js (room key and scoped room),
+  shared/alerts/* (IndexedDB alert store), shared/vision-task.js, motion/help-sheet.js.
+  localStorage: naptio-move-config-v6 (thresholds), naptio:miniDash:enabled (mini dashboard preference).
+-->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -13,6 +23,8 @@
 
     <link rel="stylesheet" href="/hungryface/shared/tokens.css" />
     <style>
+      /* Motion page styles: video stage, pose canvas overlay, controls bar and the movement settings panel. */
+      /* --- Theme and page base --- */
       :root {
         color-scheme: dark;
       }
@@ -30,6 +42,7 @@
           sans-serif;
         overflow: hidden;
       }
+      /* --- Video stage and pose canvas overlay --- */
       #stage {
         position: fixed;
         inset: 0;
@@ -58,6 +71,7 @@
         display: none;
       }
 
+      /* --- Buttons and spinner --- */
       .btn {
         padding: 12px 14px;
         border-radius: 12px;
@@ -95,6 +109,7 @@
         }
       }
 
+      /* --- Bottom controls bar --- */
       #controls {
         position: fixed;
         left: 50%;
@@ -112,6 +127,7 @@
         display: none;
       }
 
+      /* --- Connection status overlay --- */
       .overlay {
         position: fixed;
         inset: 0;
@@ -176,6 +192,7 @@
         }
       }
 
+      /* --- Movement panel contents: header, rows, sliders --- */
       #movePanel.hidden {
         display: none;
       }
@@ -228,6 +245,7 @@
         color: var(--nt-text-muted, #aaa);
         font-size: 12px;
       }
+      /* --- Movement panel state pills and groups --- */
       #movePanel .stateRow {
         display: flex;
         justify-content: space-between;
@@ -268,6 +286,7 @@
 
       /* Center controls rows with buttons */
       #calActions,
+      /* --- Panel action buttons --- */
       #bottomActions {
         display: flex;
         gap: 8px;
@@ -282,6 +301,7 @@
       }
 
       /* Calibration bits */
+      /* --- Calibration progress and status colours --- */
       #calProgRow {
         display: none;
       }
@@ -319,6 +339,7 @@
         opacity: 1;
         pointer-events: auto;
       }
+      /* --- Help sheet --- */
       .help-sheet {
         position: fixed;
         right: 0;
@@ -370,6 +391,7 @@
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
       }
+      /* --- Help table of contents and sections --- */
       .help-toc {
         display: flex;
         gap: 8px;
@@ -425,6 +447,7 @@
       .help-kv td {
         color: var(--nt-text-2, #ddd);
       }
+      /* --- Help callouts, learn-more and code blocks --- */
       .help-callout {
         background: rgba(255, 255, 255, 0.06);
         border: 1px solid rgba(255, 255, 255, 0.12);
@@ -655,6 +678,8 @@
     </script>
 
     <script type="module">
+      // Motion viewer logic. Pose landmarks -> movement scores (EMA, integrator, drift) -> hysteresis -> Motion alerts.
+      // Also: calibration of thresholds, settings panel persistence and Help sheet wiring.
       import {
         DrawingUtils,
         PoseLandmarker,
@@ -670,6 +695,7 @@
       } from '/hungryface/webrtc/receiver/shared/alerts/index.js';
       import { installAlertSound } from '/hungryface/webrtc/receiver/shared/alerts/notify-sound.js';
 
+      // Wrapper for listeners: tolerates a missing element so optional controls never throw.
       /* --------- tiny safe addEventListener helper --------- */
       const on = (el, ev, fn, opts) => {
         if (el && el.addEventListener) el.addEventListener(ev, fn, opts);
@@ -680,12 +706,18 @@
       import { createVisionTask } from '/hungryface/webrtc/shared/vision-task.js';
       const uiRoom = window.__uiRoom || window.__pskRoom || 'Baby';
       const room = window.__scopedRoom || uiRoom;
+      // How long the "Connected" status stays visible, in ms.
       const STATUS_HIDE_AFTER_CONNECTED_MS = 10000;
 
       // live-pose gating
       const LIVE_POSE_TIMEOUT_MS = 2000; // consider "live" if a landmark arrived in the last 2s
+      // Time of the last landmark frame (performance.now() ms); 0 = never.
       let lastPoseTs = 0;
 
+      // Detection settings. Scores are normalised by torso size, so thresholds are unitless.
+      // VIS_MIN/PRES_MIN: minimum landmark visibility/presence to be used.
+      // EMA_*: per-frame movement, exponentially smoothed; INT_*: leaky integrator (time constant INT_TAU, s);
+      // DRIFT_*: distance from a slowly adapting baseline pose. *_ON/*_OFF form hysteresis (OFF_HOLD_MS holds it on).
       const MOVE_DEFAULTS = {
         VIS_MIN: 0.8,
         PRES_MIN: 0.9,
@@ -708,13 +740,16 @@
         CAL_LIVE: true,
         SHOW_BASELINE: false,
       };
+      // Bump the suffix when MOVE_DEFAULTS changes meaning, so stale saved settings are ignored.
       const LS_KEY = 'naptio-move-config-v6';
       const MOVE = { ...MOVE_DEFAULTS, ...loadMoveConfig() };
 
+      // MediaPipe assets: WASM runtime and the lite pose model (float16).
       const TASKS_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0';
       const WASM_DIR = TASKS_URL + '/wasm';
       const POSE_MODEL_URL =
         'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+      // HTMLMediaElement.HAVE_CURRENT_DATA: a frame is available to read.
       const HAVE_CURRENT_DATA = 2;
       // Sound for Motion alerts (per-type toggle + cooldown; independent of dashboard gate)
       const alertSound = installAlertSound({
@@ -722,7 +757,9 @@
         // debug: true, // optional while testing
       });
 
+      // Cached DOM references: video stage, status overlay, buttons, settings panel inputs and readouts.
       /* ---------- DOM ---------- */
+      // Video stage, pose overlay canvas and top-level controls.
       const stage = document.getElementById('stage');
       const remoteVideo = document.getElementById('remote');
       const poseCanvas = document.getElementById('poseCanvas');
@@ -737,6 +774,7 @@
       const calQuickBtn = document.getElementById('calQuickBtn');
       let calQuickBtnActive = false;
 
+      // Settings panel and its live score readouts.
       const moveBtn = document.getElementById('moveBtn');
       const movePanel = document.getElementById('movePanel');
       const moveClose = document.getElementById('moveClose');
@@ -748,6 +786,7 @@
       const intScoreTxt = document.getElementById('intScoreTxt');
       const driftScoreTxt = document.getElementById('driftScoreTxt');
 
+      // Detector sliders and their numeric outputs: visibility, EMA, integrator and drift groups.
       const visMin = document.getElementById('visMin');
       const visOut = document.getElementById('visOut');
       const presMin = document.getElementById('presMin');
@@ -776,6 +815,7 @@
       const driftTorsoRel = document.getElementById('driftTorsoRel');
       const driftReset = document.getElementById('driftReset');
 
+      // Detector enable checkboxes, baseline debug toggle and calibration controls.
       const useEma = document.getElementById('useEma');
       const useInt = document.getElementById('useInt');
       const useDrift = document.getElementById('useDrift');
@@ -796,6 +836,7 @@
       const calN = document.getElementById('calN');
 
       /* ---------- State ---------- */
+      // Pose data channel and where detection runs: 'sender' (Camera sends landmarks) or 'receiver' (this Viewer).
       let hideStatusTimer = null;
 
       let poseDC = null;
@@ -804,6 +845,7 @@
       let poseTask = null;
       let poseLoopRunning = false;
 
+      // Detection state: previous landmarks, baseline pose, the three scores, and the moving flag with hold timestamps.
       let prevLm = null;
       let baseLm = null;
       let moveEma = 0;
@@ -816,30 +858,38 @@
       let lastDriftHitTs = 0;
       let lastTs = 0;
 
+      // Calibration state: active flag, start/end times (ms) and collected raw scores.
       let calActive = false,
         calStartMs = 0,
         calEndMs = 0;
       let calSamples = [];
       let lastGoodLm = null;
       let lastCalUIRedraw = 0;
+      // Minimum interval (ms) between live updates of the calibration statistics.
       const CAL_RECAL_MS = 250;
 
+      // Whether each OFF threshold follows its ON threshold (set during calibration, cleared when the user edits OFF).
       let offLink = { ema: false, int: false, drift: false };
       // ===== Alerts episode state (Motion) =====
+      // Alert episode state: id of the open Motion alert, the pending creation promise, and a running score sum.
       let _motionAlertId = null;
       let _motionAlertP = null; // pending beginAlert()
       let _motionSum = 0,
         _motionCount = 0;
+      // Runs a promise to completion and swallows errors so alert storage failures never break detection.
       const runAsync = (p) => Promise.resolve(p).catch(() => {});
 
       /* ---------- Utils for live pose gating ---------- */
+      // True while landmarks keep arriving; calibration and the state row need a body in view.
       const hasLivePose = () => performance.now() - lastPoseTs < LIVE_POSE_TIMEOUT_MS;
 
+      // Show the state row only while pose data is flowing.
       function updateStateRowVisibility() {
         if (!stateRow) return;
         stateRow.style.display = hasLivePose() ? '' : 'none';
       }
 
+      // Enable the calibration buttons only when live pose data is flowing and no calibration is running.
       function updateCalibrationAvailability() {
         const live = hasLivePose();
         if (calQuickBtn) calQuickBtn.disabled = !live || !!calActive;
@@ -876,7 +926,9 @@
         }
         updateCalQuickUI(false);
       }
+      // Close an episode if no pose arrives for this long (ms).
       const NO_POSE_END_MS = 10000;
+      // Housekeeping every 500 ms: refresh button state, end stale episodes, cancel stuck calibration.
       setInterval(() => {
         updateCalibrationAvailability();
         const quiet = performance.now() - lastPoseTs;
@@ -886,6 +938,7 @@
       }, 500);
 
       /* ---------- Status overlay ---------- */
+      // Show a status message; after "Connected" it fades out following a short delay.
       function showStatus(msg) {
         if (statusEl && overlay) {
           statusEl.textContent = msg;
@@ -903,6 +956,7 @@
       }
 
       /* ---------- Audio UI ---------- */
+      // Show Enable audio while the video is muted, otherwise Disable audio.
       function updateAudioButtons() {
         if (!enableAudioBtn || !disableAudioBtn) return;
         if (remoteVideo?.muted) {
@@ -913,7 +967,9 @@
           disableAudioBtn.style.display = 'block';
         }
       }
+      // Autoplay policies require muted start; the user unmutes with a tap.
       if (enableAudioBtn) enableAudioBtn.style.display = 'block';
+      // Start playback muted (allowed without a gesture); unmuting needs the button click.
       async function tryStartMuted() {
         try {
           if (remoteVideo) {
@@ -926,6 +982,7 @@
         }
         updateAudioButtons();
       }
+      // Unmute inside the click handler so the browser accepts play() with sound.
       on(enableAudioBtn, 'click', async (e) => {
         e?.stopPropagation?.();
         e?.preventDefault?.();
@@ -940,6 +997,7 @@
         }
         updateAudioButtons();
       });
+      // Mute again.
       on(disableAudioBtn, 'click', (e) => {
         e?.stopPropagation?.();
         e?.preventDefault?.();
@@ -948,6 +1006,7 @@
       });
 
       /* ---------- Fullscreen ---------- */
+      // Re-aligns the canvas every frame for about durationMs, because layout (fullscreen, rotation) settles over time.
       const beginViewportSettle = (durationMs = 1200) => {
         let settleRAF = 0,
           settleUntil = performance.now() + durationMs;
@@ -963,6 +1022,7 @@
         };
         tick();
       };
+      // Toggle fullscreen on the stage; the label also follows fullscreenchange for Esc / system exits.
       on(fsBtn, 'click', async (e) => {
         e?.stopPropagation?.();
         try {
@@ -983,6 +1043,7 @@
         beginViewportSettle();
       });
 
+      // Video size changes also need a new canvas alignment.
       on(remoteVideo, 'loadedmetadata', () => {
         beginViewportSettle();
       });
@@ -993,12 +1054,14 @@
       on(remoteVideo, 'resize', beginViewportSettle);
 
       /* ---------- Canvas alignment ---------- */
+      // Rectangle of the video content when letterboxed ("contain") inside its container.
       function containRect(containerW, containerH, contentW, contentH) {
         const scale = Math.min(containerW / (contentW || 1), containerH / (contentH || 1));
         const w = Math.round(contentW * scale);
         const h = Math.round(contentH * scale);
         return { width: w, height: h, left: Math.floor((containerW - w) / 2), top: Math.floor((containerH - h) / 2) };
       }
+      // Size and position the pose canvas exactly over the displayed video (accounting for device pixel ratio).
       function alignCanvasToVideo() {
         if (!stage || !remoteVideo || !poseCanvas) return;
         const stageBox = stage.getBoundingClientRect();
@@ -1023,6 +1086,7 @@
         }
         poseCtx.setTransform(1, 0, 0, 1, 0, 0);
       }
+      // Re-align on viewport changes, including the visual viewport (mobile browser bars, pinch zoom).
       ['resize', 'orientationchange', 'scroll'].forEach((ev) =>
         window.addEventListener(ev, () => beginViewportSettle(), { passive: true })
       );
@@ -1034,6 +1098,7 @@
         if (!document.hidden) beginViewportSettle();
       });
 
+      // Show or hide the pose overlay; hiding clears what was drawn.
       function setOverlayVisible(v) {
         if (!poseCanvas) return;
         poseCanvas.style.display = v ? 'block' : 'none';
@@ -1042,14 +1107,19 @@
       }
 
       /* ---------- Movement math helpers ---------- */
+      // MediaPipe pose landmark indices used for the torso.
       const L = { L_SHOULDER: 11, R_SHOULDER: 12, L_HIP: 23, R_HIP: 24 };
+      // A landmark counts only if its visibility / presence meet the user thresholds (missing values pass).
       const lmOk = (p) =>
         p &&
         (p.visibility == null || p.visibility >= MOVE.VIS_MIN) &&
         (p.presence == null || p.presence >= MOVE.PRES_MIN);
 
+      // Euclidean distance between two normalised landmarks (despite the name, not squared).
       const dist2 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
+      // Torso centre (mean of shoulder and hip midpoints); falls back to all visible points, then image centre.
+      // Prefer pairs of landmarks so one hidden side does not skew the centre.
       function torsoCenter(lm) {
         const ls = lm[L.L_SHOULDER],
           rs = lm[L.R_SHOULDER],
@@ -1079,6 +1149,8 @@
         return n ? { x: sx / n, y: sy / n } : { x: 0.5, y: 0.5 };
       }
 
+      // Body size for normalising scores: widest shoulder/hip span, else bbox diagonal, floored at MIN_SCALE.
+      // Shoulder or hip width is stable under rotation; the bounding-box diagonal is the fallback.
       function scaleFromTorso(lm) {
         const ls = lm[L.L_SHOULDER],
           rs = lm[L.R_SHOULDER];
@@ -1106,6 +1178,8 @@
         return Math.max(s, MOVE.MIN_SCALE);
       }
 
+      // Mean per-landmark displacement between consecutive frames, divided by body scale.
+      // Per-frame movement is normalised by body size so distance to the camera does not matter.
       function rawMovementScore(lm, prev) {
         if (!lm || !prev || lm.length !== prev.length) return 0;
         const n = lm.length;
@@ -1122,6 +1196,8 @@
         return cnt ? sum / cnt / scale : 0;
       }
 
+      // Mean landmark distance from the baseline pose; torsoRel cancels whole-body translation (torso-centred).
+      // Compare the pose with the slowly adapting baseline to catch slow, sustained position changes.
       function computeDriftScore(lm, base, torsoRel = true) {
         if (!lm || !base || lm.length !== base.length) return 0;
         const n = lm.length;
@@ -1150,12 +1226,14 @@
         return cnt ? sum / cnt / scale : 0;
       }
 
+      // Deep-copy a landmark array (only the fields we use).
       function cloneLm(lm) {
         return (
           lm?.map((p) => (p ? { x: p.x, y: p.y, z: p.z, visibility: p.visibility, presence: p.presence } : null)) ||
           null
         );
       }
+      // Move the baseline dst toward src by factor a (exponential blend), landmark by landmark.
       function blendLm(dst, src, a) {
         if (!src) return dst;
         if (!dst || dst.length !== src.length) dst = cloneLm(src);
@@ -1177,9 +1255,11 @@
       }
 
       /* ---------- Baseline overlay (ghost + vectors) ---------- */
+      // Convert normalised landmark coordinates to canvas pixels.
       function lmToPx(p) {
         return { x: p.x * poseCanvas.width, y: p.y * poseCanvas.height };
       }
+      // Baseline re-centred (and optionally rescaled) onto the current torso so it can be drawn as a ghost.
       function alignedBaseline(base, curr, torsoRel = true, scaleMatch = true) {
         if (!base || !curr || base.length !== curr.length) return null;
         if (!torsoRel)
@@ -1201,6 +1281,8 @@
         });
       }
 
+      // Debug overlay: draw the baseline pose and vectors from it to the current pose (SHOW_BASELINE).
+      // Colour of each vector: grey below 90% of the DRIFT_ON threshold, amber from 90%, red at or above 100%.
       function drawBaselineGhostAndVectors(currLm) {
         if (!MOVE.SHOW_BASELINE || !baseLm || !currLm || currLm.length !== baseLm.length) return;
 
@@ -1221,6 +1303,7 @@
         utilsGhost.drawConnectors(baseAligned, PoseLandmarker.POSE_CONNECTIONS);
 
         ctx.setLineDash([]);
+        // Joint dot radius in canvas pixels.
         const JOINT_R = 2 * dpr;
         for (let i = 0; i < baseAligned.length; i++) {
           const p = baseAligned[i];
@@ -1245,6 +1328,7 @@
           const dx = c.x - b.x,
             dy = c.y - b.y;
           const dNorm = Math.hypot(dx, dy) / scaleNow;
+          // Ratio of this landmark's drift to the DRIFT_ON threshold decides the colour and opacity.
           const ratio = dNorm / onThresh;
           const alpha = Math.max(minAlpha, Math.min(maxAlpha, ratio));
 
@@ -1268,6 +1352,7 @@
       }
 
       /* ---------- Badge drawing ---------- */
+      // Draw the on-canvas badge with the movement state and the three live scores.
       function drawMovementBadge(movingState, emaVal, intVal, driftVal) {
         if (!poseCtx) return;
         const ctx = poseCtx;
@@ -1291,6 +1376,7 @@
         const BAR_W = Math.round(190 * dpr);
         const BAR_H = Math.round(8 * dpr);
 
+        // Rounded rectangle path helper for the state pill.
         function roundRectPath(ctx, x, y, w, h, r) {
           const rr = Math.min(r, w / 2, h / 2);
           ctx.beginPath();
@@ -1304,8 +1390,10 @@
 
         ctx.save();
 
+        // All sizes are multiplied by the device pixel ratio so the badge looks the same on every screen.
         ctx.font = `${Math.round(12 * dpr)}px -apple-system,system-ui,Segoe UI,Roboto,sans-serif`;
         const stateTxt = movingState ? '• MOVING' : '• STILL';
+        // Pill width is measured from the text so it fits any font.
         const pillPadX = Math.round(10 * dpr);
         const pillW = Math.round(ctx.measureText(stateTxt).width + pillPadX * 2);
         const pillH = Math.round(20 * dpr);
@@ -1353,6 +1441,7 @@
         for (let i = 0; i < metrics.length; i++) {
           const m = metrics[i];
           const rowY = baseY + i * ROW_H;
+// Each row: label, a bar filled to the share of its ON threshold, and a percentage (100%+ once triggered).
 
           ctx.globalAlpha = m.enabled ? 1.0 : 0.35;
           ctx.fillStyle = TXT_DIM;
@@ -1395,6 +1484,7 @@
       }
 
       /* ---------- Panel state reflect ---------- */
+      // Mirror the live scores into the settings panel readouts.
       function reflectPanel() {
         if (emaScoreTxt) emaScoreTxt.textContent = moveEma.toFixed(3);
         if (intScoreTxt) intScoreTxt.textContent = intScore.toFixed(3);
@@ -1419,6 +1509,7 @@
         });
       }
 
+      // Update the main-page quick-calibration button (label and countdown) while calibration runs.
       function updateCalQuickUI(active, secsLeft = null) {
         if (!calQuickBtn) return;
         if (!active) {
@@ -1433,6 +1524,7 @@
       }
 
       /* ---------- Main draw for live pose ---------- */
+      // Draw skeleton and points with MediaPipe DrawingUtils on the overlay canvas.
       function drawPoseLandmarks(landmarks) {
         if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
         const utils = new DrawingUtils(poseCtx);
@@ -1451,12 +1543,19 @@
       }
 
       /* ---------- Movement update ---------- */
+      /**
+       * Process one pose frame: update the three scores, apply hysteresis, open/close Motion alert episodes, feed
+       * calibration, redraw the badge and (when computed locally) report the state to the Camera over the data channel.
+       * @param {Array} lm  landmarks of the first detected person
+       * @param {boolean} canSend  false when the pose came from the Camera, so no result is echoed back
+       */
       function updateMovementFromLandmarks(lm, canSend = true) {
         const now = performance.now();
         lastPoseTs = now;
         updateCalibrationAvailability();
 
         if (!lastTs) lastTs = now;
+        // Frame interval in seconds, clamped so stalls or bursts cannot distort the filters.
         const dt = Math.max(1 / 120, Math.min(0.2, (now - lastTs) / 1000));
         lastTs = now;
 
@@ -1467,6 +1566,8 @@
         const shortTrigger = moveEma >= MOVE.ON;
         const shortHoldOk = moveEma > MOVE.OFF || now - lastAboveOnTs < MOVE.OFF_HOLD_MS;
 
+        // Leaky integrator: older movement decays with time constant INT_TAU.
+        // Exponential decay factor for this frame's dt.
         const decay = Math.exp(-dt / MOVE.INT_TAU);
         intScore = intScore * decay + raw * dt;
         const longTrigger = intScore >= MOVE.INT_ON;
@@ -1479,6 +1580,8 @@
         if (driftTrigger) lastDriftHitTs = now;
         const driftHoldOk = driftScore > MOVE.DRIFT_OFF || now - lastDriftHitTs < MOVE.OFF_HOLD_MS;
 
+        // Each enabled detector uses its ON threshold to start and its OFF threshold (+ hold) to stay on.
+        // Hysteresis: once moving, a detector keeps the state until its OFF condition and hold time pass.
         let wantMoving = false;
         if (MOVE.USE_EMA) wantMoving ||= moving ? shortHoldOk : shortTrigger;
         if (MOVE.USE_INT) wantMoving ||= moving ? longHoldOk : longTrigger;
@@ -1495,6 +1598,7 @@
             _motionCount = 0;
 
             // Start a Motion alert + show the red top banner (matches audio page)
+            // beginAlert may fail or be slow; the promise is stored so an early end can still close the alert.
             const p = (_motionAlertP = Promise.resolve(
               beginAlert({
                 type: AlertTypes?.Motion ?? 'motion',
@@ -1509,6 +1613,7 @@
                 if (moving) showAlertBanner(Date.now(), 'Motion detected');
               })
             );
+            // Per-type sound toggle and cooldown are handled inside alertSound.
             void alertSound.trigger();
           } else if (prev) {
             // Finish the Motion alert with an average score (use integrator as sustained proxy)
@@ -1524,11 +1629,13 @@
         }
         // ==== /Alerts integration ====
 
+        // Only adapt the baseline while still, so slow posture changes are absorbed but real movement is not.
         if (!moving && baseLm) {
           const a = 1 - Math.exp(-dt / MOVE.DRIFT_TAU);
           baseLm = blendLm(baseLm, lm, a);
         }
 
+        // While calibrating, store raw scores and update the progress bar and countdown.
         if (calActive) {
           calSamples.push(raw);
           lastGoodLm = cloneLm(lm);
@@ -1545,6 +1652,7 @@
 
           if (now - lastCalUIRedraw >= CAL_RECAL_MS) {
             lastCalUIRedraw = now;
+            // Live preview of thresholds every CAL_RECAL_MS once at least 20 samples exist.
             const m = quantile(calSamples, 0.5);
             const p95 = quantile(calSamples, 0.95);
             const n = calSamples.length;
@@ -1562,6 +1670,7 @@
           if (now >= calEndMs) finishCalibration();
         }
 
+        // Draw the badge inside save/restore so a drawing error cannot leak canvas state.
         poseCtx.save();
         try {
           drawMovementBadge(moving, moveEma, intScore, driftScore);
@@ -1574,6 +1683,7 @@
         }
         reflectPanel();
 
+        // Report the locally computed state to the Camera (data channel message type 'movement').
         if (canSend && poseWhere === 'receiver' && poseDC?.readyState === 'open') {
           poseDC.send(
             JSON.stringify({
@@ -1590,6 +1700,7 @@
       }
 
       /* ---------- Calibration helpers ---------- */
+      // Linear-interpolated quantile (q in 0..1) of a numeric array.
       function quantile(arr, q) {
         if (!arr.length) return 0;
         const a = arr.slice().sort((x, y) => x - y);
@@ -1601,6 +1712,9 @@
         return a[i] * (1 - w) + a[j] * w;
       }
 
+      // Multipliers (3.5x median, 1.2x p95, ...) are empirical margins above the still-baby noise level.
+      // Derive ON thresholds from calibration statistics of a still baby (m = median, p95 = 95th percentile of the raw
+      // score). OFF thresholds follow ON when linked or when final; the sliders are updated to match.
       function applyThresholdsFromStats(m, p95, isFinal) {
         if (!onTh || !offTh || !intOnEl || !intOff || !driftOnEl || !driftOff) return;
         const emaOn = Math.max(3.5 * m, 1.2 * p95, 0.01);
@@ -1641,6 +1755,8 @@
         applyOnCaps();
       }
 
+      // Calibration length is limited to 5..60 s.
+      // Begin a timed calibration (CAL_SECS clamped to 5..60 s) collecting raw scores while the baby is still.
       function startCalibration() {
         if (calActive) return;
         calActive = true;
@@ -1664,6 +1780,7 @@
         offLink = { ema: true, int: true, drift: true };
       }
 
+      // End calibration: needs at least 20 samples, applies final thresholds, resets baseline and saves settings.
       function finishCalibration() {
         if (calSamples.length < 20) {
           abortCalibration('Calibration cancelled: not enough body points measured. Try again.');
@@ -1707,12 +1824,14 @@
         }
       }
 
+      // Wipe the overlay canvas (used when the stream stops or the connection drops).
       function clearOverlayDrawing() {
         try {
           poseCtx.setTransform(1, 0, 0, 1, 0, 0);
           poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
         } catch {}
       }
+      // Clear the overlay when the video track ends or mutes, or is removed from the stream.
       function attachStreamEndHandlers(stream) {
         if (!stream) return;
         stream.getVideoTracks().forEach((t) => {
@@ -1725,8 +1844,10 @@
       }
 
       /* ---------- MediaPipe on RECEIVER ---------- */
+      // Pose detection on the Viewer: ensurePoseTask builds the model, startReceiverPoseLoop runs it per video frame.
       let useRVFC = false;
       let _poseTaskP = null;
+      // Lazily create the PoseLandmarker once; concurrent callers share one promise, reset on failure to allow retry.
       function ensurePoseTask() {
         if (poseTask) return Promise.resolve(poseTask);
         if (!_poseTaskP)
@@ -1736,6 +1857,7 @@
           });
         return _poseTaskP;
       }
+      // Loads the WASM files and creates the PoseLandmarker in VIDEO mode (one person).
       async function _ensurePoseTaskImpl() {
         if (poseTask) return poseTask;
         const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
@@ -1751,7 +1873,9 @@
         );
         return poseTask;
       }
+      // True once the video has decoded dimensions and current data.
       const videoHasFrame = (v) => v && v.readyState >= HAVE_CURRENT_DATA && v.videoWidth > 0 && v.videoHeight > 0;
+      // Resolve once the video has decoded at least one frame.
       function waitForVideoFrame(video) {
         if (videoHasFrame(video)) return Promise.resolve();
         return new Promise((resolve) => {
@@ -1771,8 +1895,10 @@
           video.addEventListener('resize', check);
         });
       }
+      // Loop generation counter and a guard against concurrent starts.
       let _loopGen = 0,
         _loopStarting = false;
+      // Run pose detection on the Viewer for every video frame. The generation counter (_loopGen) retires stale loops.
       async function startReceiverPoseLoop() {
         if (poseLoopRunning || _loopStarting) return;
         _loopStarting = true;
@@ -1785,9 +1911,11 @@
         }
         if (gen !== _loopGen) return; // stopped meanwhile
 
+        // requestVideoFrameCallback fires per decoded frame; requestAnimationFrame is the fallback.
         useRVFC = 'requestVideoFrameCallback' in (remoteVideo || {});
         poseLoopRunning = true;
 
+        // One detection step: runs the model, draws, updates movement and mirrors landmarks to the Camera.
         const onFrame = () => {
           if (gen !== _loopGen) return; // an older loop: let it end
           if (!poseLoopRunning || !poseEnabled || poseWhere !== 'receiver') return;
@@ -1818,12 +1946,14 @@
             scheduleNext();
           }
         };
+        // Queue the next frame callback.
         const scheduleNext = () => {
           if (useRVFC) remoteVideo.requestVideoFrameCallback(onFrame);
           else requestAnimationFrame(onFrame);
         };
         scheduleNext();
       }
+      // Stop local detection, close any open episode and reset the filters.
       function stopReceiverPoseLoop() {
         poseLoopRunning = false;
         _loopGen++;
@@ -1837,6 +1967,7 @@
         reflectPanel();
         updateCalibrationAvailability();
       }
+      // React to the Camera "pose-mode" message: run locally ("receiver"), consume Camera landmarks ("sender"), or off.
       function applyPoseMode() {
         setOverlayVisible(poseEnabled);
         if (!poseEnabled) {
@@ -1848,10 +1979,12 @@
       }
 
       /* ---------- Shared WebRTC core ---------- */
+      // ReceiverCore handles signalling and the peer connection; the callbacks below wire it to this page.
       const core = new ReceiverCore({
         wsEndpoint: WS_ENDPOINT,
         room,
         onStatus: showStatus,
+        // Attach the stream once; muted autoplay first.
         onStream: (stream) => {
           if (remoteVideo && remoteVideo.srcObject !== stream) {
             remoteVideo.srcObject = stream;
@@ -1859,6 +1992,7 @@
             attachStreamEndHandlers(stream);
           }
         },
+        // Connection problems end the open episode and cancel calibration.
         onIceState: (state) => {
           if (state === 'failed' || state === 'disconnected' || state === 'closed') {
             clearOverlayDrawing();
@@ -1868,6 +2002,7 @@
             abortCalibration('Calibration cancelled: connection lost.');
           }
         },
+        // The Camera sent "bye" (stopped).
         onBye: () => {
           clearOverlayDrawing();
           lastPoseTs = 0;
@@ -1875,11 +2010,13 @@
           endMotionEpisode('Camera stopped');
           abortCalibration('Calibration cancelled: Camera stopped.');
         },
+        // The Viewer creates the "pose" data channel: carries pose-mode, pose landmarks and movement results.
         onCreatePC: (pc) => {
           const ch = pc.createDataChannel('pose');
           ch.onopen = () => {};
           ch.onclose = () => {};
           ch.onerror = () => {};
+          // Messages: 'pose-mode' (enabled + where) switches detection; 'pose' carries Camera-computed landmarks.
           ch.onmessage = (ev) => {
             try {
               const msg = JSON.parse(ev.data);
@@ -1911,6 +2048,7 @@
       initAlertsUI({ drawerHostId: 'alertsModalHost' });
 
       /* ---------- Panel logic ---------- */
+      // Load saved settings, keeping only keys whose stored type matches the defaults.
       function loadMoveConfig() {
         try {
           const raw = localStorage.getItem(LS_KEY);
@@ -1925,19 +2063,24 @@
           return {};
         }
       }
+      // Persist the settings in localStorage under LS_KEY.
       function saveMoveConfig() {
         try {
           localStorage.setItem(LS_KEY, JSON.stringify(MOVE));
         } catch {}
       }
+      // Small helpers: clamp a value; fixed-decimal text.
       const clampUi = (v, min, max) => Math.max(min, Math.min(max, v));
       const fmt = (n, d = 3) => Number(n).toFixed(d);
 
+      // Keep slider maxima and values consistent: OFF never above ON, and ON ranges widen to fit calibrated values.
       function applyOnCaps() {
         if (!onTh || !offTh || !driftOnEl || !driftOff || !intOnEl || !intOff) return;
+        // Slider ranges never exceed MAX_SAFE; HEADROOM leaves room above the calibrated value.
         const HEADROOM = 1.2,
           MAX_SAFE = 10.0;
 
+        // Raises a slider's max to 1.2x the calibrated value (capped at 10) so calibrated thresholds fit.
         const setMaxWithHeadroom = (inputEl, baseCap, calibratedVal) => {
           const need = Math.min(MAX_SAFE, Math.max(baseCap, calibratedVal * HEADROOM));
           inputEl.max = Number.isFinite(need)
@@ -1978,6 +2121,7 @@
         if (driftOffOut) driftOffOut.textContent = fmt(MOVE.DRIFT_OFF);
       }
 
+      // Bind the settings panel controls to MOVE (initial values, input handlers, persistence).
       function initMovePanel() {
         if (!movePanel) return;
 
@@ -2049,15 +2193,18 @@
         requestAnimationFrame(matchButtonSizes);
       }
 
+      // Show the settings panel and equalise button widths after layout.
       function openMovePanel() {
         if (!movePanel) return;
         movePanel.classList.remove('hidden');
         requestAnimationFrame(() => requestAnimationFrame(matchButtonSizes));
       }
+      // Hide the settings panel.
       const closeMovePanel = () => {
         if (movePanel) movePanel.classList.add('hidden');
       };
 
+      // Toggle button.
       on(moveBtn, 'click', (e) => {
         e?.stopPropagation?.();
         if (!movePanel) return;
@@ -2076,6 +2223,7 @@
         closeMovePanel();
       });
 
+      // Slider and checkbox handlers: each updates MOVE, its readout and saves immediately.
       on(visMin, 'input', () => {
         MOVE.VIS_MIN = clampUi(parseFloat(visMin.value), 0, 0.99);
         if (visOut) visOut.textContent = fmt(MOVE.VIS_MIN, 2);
@@ -2105,6 +2253,7 @@
         saveMoveConfig();
       });
 
+      // ON/OFF sliders keep OFF at or below ON; moving OFF manually unlinks it from ON.
       on(ema, 'input', () => {
         MOVE.EMA_ALPHA = clampUi(parseFloat(ema.value), 0.01, 0.9);
         if (emaOut) emaOut.textContent = fmt(MOVE.EMA_ALPHA, 2);
@@ -2191,6 +2340,7 @@
         saveMoveConfig();
       });
 
+      // Forget the baseline pose; it is re-learned from the next frame.
       on(driftReset, 'click', () => {
         baseLm = null;
         if (calStatus) {
@@ -2199,6 +2349,7 @@
         }
       });
 
+      // Calibration length slider; extends a running calibration.
       on(calSecs, 'input', () => {
         MOVE.CAL_SECS = Math.max(5, Math.min(60, parseInt(calSecs.value, 10) || 15));
         if (calSecsOut) calSecsOut.textContent = `${MOVE.CAL_SECS} s`;
@@ -2211,6 +2362,7 @@
         saveMoveConfig();
       });
 
+      // Settings Start button: opens the panel and starts calibration if pose data is live.
       // Settings Start
       on(calStartBtn, 'click', (e) => {
         e?.stopPropagation?.();
@@ -2235,6 +2387,7 @@
         startCalibration();
       });
 
+      // Restore factory settings, clear saved config and restart detection state.
       function resetToDefaults() {
         Object.keys(MOVE).forEach((k) => delete MOVE[k]);
         Object.assign(MOVE, MOVE_DEFAULTS);
@@ -2269,11 +2422,13 @@
           calStats.style.display = 'none';
         }
       }
+      // Reset button.
       on(moveReset, 'click', (e) => {
         e?.stopPropagation?.();
         resetToDefaults();
       });
 
+      // Initial panel state, plus resize handling and cleanup hooks below.
       initMovePanel();
       updateCalibrationAvailability();
       window.addEventListener('load', matchButtonSizes);
@@ -2283,6 +2438,7 @@
         if (!movePanel?.classList.contains('hidden')) matchButtonSizes();
       });
 
+      // Playback stopping means no fresh pose data: clear the overlay and calibration availability.
       ['pause', 'ended', 'emptied', 'stalled', 'suspend', 'waiting'].forEach((ev) => {
         on(remoteVideo, ev, () => {
           clearOverlayDrawing();
@@ -2291,6 +2447,7 @@
         });
       });
 
+      // Record the end of any open alert and release resources when the page closes.
       window.addEventListener('beforeunload', () => {
         endMotionEpisode('Page closed'); // tab closing during an alert: record its end now
         try {
@@ -2300,6 +2457,7 @@
         stopReceiverPoseLoop();
       });
 
+      // Misspelled alias of beginViewportSettle, apparently kept for older call sites.
       function beginViewportSetle() {
         beginViewportSettle();
       }
@@ -2315,6 +2473,7 @@
         if (!sheet || sheet.dataset.wired === '1') return;
         sheet.dataset.wired = '1';
 
+        // Open and close the help drawer (Escape also closes).
         const openHelp = () => {
           sheet.classList.add('show');
           backdrop?.classList.add('show');
@@ -2326,6 +2485,7 @@
           document.body.classList.remove('help-open');
         };
 
+        // Button wiring.
         helpBtn?.addEventListener('click', (e) => {
           e.stopPropagation();
           openHelp();
@@ -2352,6 +2512,7 @@
           true
         );
 
+        // Keep the settings panel open when interacting with the help drawer (outside-click would close it).
         // Keep settings panel open when interacting with the help drawer
         document.addEventListener(
           'click',

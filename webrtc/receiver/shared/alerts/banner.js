@@ -5,14 +5,17 @@
 const DEFAULT_SNOOZE_MIN = 10; // <— default 10 minutes
 const LS_KEY_SNOOZE_MIN = 'naptio-alerts-snooze-mins';
 
+// Cached DOM nodes of the banner, filled in by setupAlertBanner().
 let bannerEl = null;
 let timeEl = null;
 let labelEl = null;
 let dismissBtn = null;
 let minsInput = null;
 
+// Epoch ms until which showAlertBanner() is ignored (set by the Dismiss button).
 let suppressUntil = 0;
 
+// Adds a <style> element once per page, keyed by id.
 function injectStyleOnce(id, css) {
   if (document.getElementById(id)) return;
   const s = document.createElement('style');
@@ -21,10 +24,12 @@ function injectStyleOnce(id, css) {
   document.head.appendChild(s);
 }
 
+// Formats an epoch-ms timestamp as a short local HH:MM string.
 function fmtHM(ms) {
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// Snooze length persisted in localStorage; falls back to the default when missing or invalid.
 function getSavedSnoozeMinutes() {
   let raw = null;
   try {
@@ -41,6 +46,7 @@ function setSavedSnoozeMinutes(mins) {
   return m;
 }
 
+// Injects the banner CSS and markup (idempotent callers: showAlertBanner lazily calls this) and wires the controls.
 export function setupAlertBanner() {
   // Styles copied to match audio banner look & feel
   injectStyleOnce(
@@ -121,6 +127,7 @@ export function setupAlertBanner() {
   });
 }
 
+// Shows the banner with the alert time and optional label, unless the user snoozed it.
 export function showAlertBanner(whenMs = Date.now(), text) {
   if (!bannerEl) setupAlertBanner();
   if (Date.now() < suppressUntil) return; // snoozed

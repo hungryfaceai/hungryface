@@ -9,6 +9,7 @@ const _bc = 'BroadcastChannel' in self ? new BroadcastChannel('alerts-bc') : nul
 // (another BroadcastChannel object in the same tab DOES receive them).
 export const TAB_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
+// Broadcasts a change to this tab (document event 'alerts:changed') and to other tabs (BroadcastChannel).
 function _notify(action, payload = {}) {
   try {
     // Local (same-tab) listeners
@@ -39,6 +40,7 @@ if (_bc) {
 // Open (or create) the DB + object store
 let _db = null,
   _dbP = null; // one shared open (parallel first calls must not open twice)
+// Opens the IndexedDB once (v1: autoincrement 'id', indexes on type and startAt).
 export function openDB() {
   if (_db) return Promise.resolve(_db);
   if (_dbP) return _dbP;
@@ -156,6 +158,7 @@ export async function clearAllAlerts() {
 // ===== Export helpers (JSON/CSV) =====
 
 /** Build a CSV string from alert rows. */
+// Fields are always quoted with doubled inner quotes; durationSec is blank if the alert is still open.
 function _rowsToCSV(rows) {
   const esc = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
   const header = ['startAt', 'endAt', 'durationSec', 'avgScore', 'type', 'message'];

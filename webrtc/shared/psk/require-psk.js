@@ -3,6 +3,7 @@
 
 import { getPsk } from './psk-ws-shim.js';
 
+/** Scan localStorage ("psk:<room>" records) and return a sorted list of rooms holding a usable token. */
 export function listValidPskRooms() {
   const out = [];
   try {
@@ -19,6 +20,12 @@ export function listValidPskRooms() {
   return out.sort();
 }
 
+/**
+ * Resolve the room to use and make sure it has a valid PSK; otherwise navigate to the Pair Devices page.
+ * Room choice: preferRoom, else the last used room (naptio:lastRoom), else fallbackRoom.
+ * @returns {Promise<{room: string, tokenB64u: string, redirected: boolean}>} redirected=true means the page
+ *   is navigating away and the caller should stop.
+ */
 export async function requirePskOrRedirect({
   intent = 'unknown', // 'sender' | 'viewer'
   pairRoute = '/hungryface/webrtc/pairpsk/',
@@ -71,6 +78,7 @@ function chooseRoom(prefer, fallback) {
   return fallback;
 }
 
+// A token is valid if it decodes to at least 16 bytes (128 bits).
 function isValidToken(b64u) {
   if (!b64u || typeof b64u !== 'string') return false;
   try {

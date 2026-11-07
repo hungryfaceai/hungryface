@@ -1,3 +1,10 @@
+// webrtc/receiver/shared/sidebar.js — behaviour of the shared receiver sidebar (drawer +
+// hamburger).
+// Runs after sidebar-loader.js has injected sidebar.html; does nothing if #sidebar / #hamburger
+// are missing.
+// Pieces: open/close with auto-hide, fading hamburger, current-page highlight from the URL, and
+// the lazy
+// loader for the Invite window (shared/invite.js).
 (() => {
   // Initialize after DOM is ready (works whether markup was injected or inline)
   if (document.readyState === 'loading') {
@@ -21,6 +28,8 @@
     const SIDEBAR_AUTOHIDE_MS = 10000;
     let sidebarTimer = null;
 
+    // The drawer closes itself after SIDEBAR_AUTOHIDE_MS of inactivity (timer restarted on open and
+    // on menu clicks).
     function hideSidebar() {
       sidebar.classList.remove('visible');
       hamburger.classList.remove('hidden'); // show button when drawer closes
@@ -134,9 +143,12 @@
     }
 
     // Auto-highlight based on current URL (longest matching path prefix)
+    // Normalise a path so /x/index.html, /x and /x/ compare equal.
     function norm(p) {
       return new URL(p, location.href).pathname.replace(/index\.html$/, '').replace(/\/+$/, '/') || '/';
     }
+    // Highlight the nav item whose href is the longest prefix of the current path; returns false if
+    // none matches.
     function setActiveFromUrl() {
       const here = norm(location.pathname);
       const anchors = Array.from(sidebar.querySelectorAll('.nav-item[href]'));

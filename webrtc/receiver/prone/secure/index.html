@@ -1,4 +1,15 @@
 <!doctype html>
+<!--
+  Naptio Viewer: Prone (face-down) detection (webrtc/receiver/prone/secure/index.html).
+  Shows the Camera phone live video and warns when the baby may be sleeping face-down. Two independent signals:
+  pose (head pitch relative to a calibrated face-up baseline) and occlusion (face not visible). Either one raises
+  a Prone alert. Face landmarks come from the Camera over the "pose" data channel or from a local MediaPipe
+  FaceLandmarker on this page.
+  Main pieces: video stage + face canvas overlay, HUD with risk bar and alert pill, settings drawer (with
+  supine calibration), Help side-sheet, shared Alerts UI (banner + history drawer), alert sound.
+  Dependencies: shared/receiver-core.js, psk/bootstrap.js, shared/alerts/*, shared/vision-task.js.
+  localStorage: naptio:face-prone-settings:v1.2 (settings), naptio:face-prone-supine:<room> (baseline pitch).
+-->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -14,9 +25,12 @@
 
     <link rel="stylesheet" href="/hungryface/shared/tokens.css" />
     <style>
+      /* Prone page styles: video stage, face overlay canvas, HUD (risk bar, alert pill) and the settings drawer. */
+      /* --- Theme variables --- */
       :root {
         color-scheme: dark;
       }
+      /* --- Page base --- */
       html,
       body {
         margin: 0;
@@ -33,6 +47,7 @@
       }
 
       /* Fullscreen stage so video + canvas scale together */
+      /* --- Video stage and face overlay canvas --- */
       #stage {
         position: fixed;
         inset: 0;
@@ -64,6 +79,7 @@
       }
 
       /* Buttons */
+      /* --- Buttons and bottom controls --- */
       .btn {
         padding: 12px 14px;
         border-radius: 12px;
@@ -131,6 +147,7 @@
         display: none;
       }
 
+      /* --- Status overlay --- */
       .overlay {
         position: fixed;
         inset: 0;
@@ -275,6 +292,7 @@
       }
 
       /* Settings drawer — match motion app transparency */
+      /* --- Settings drawer --- */
       #settingsBtn {
         /* now lives beside Calibration in #controls */
       }
@@ -357,6 +375,7 @@
         -webkit-overflow-scrolling: touch;
         overscroll-behavior: contain;
       }
+      /* --- Settings form rows and calibration progress --- */
       .sd-group {
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
@@ -417,6 +436,7 @@
       }
 
       /* HUD pill — move to left side and include alert pill inside */
+      /* --- HUD: risk bar and alert pill --- */
       .hud {
         position: absolute;
         left: 0;
@@ -515,6 +535,7 @@
       }
 
       /* Stopwatch badge — match Motion receiver look */
+      /* --- Calibration stopwatch icon --- */
       .icon.timer {
         display: none;
         place-items: center;
@@ -714,6 +735,7 @@
     </script>
 
     <script type="module">
+      // Prone viewer logic. Face pose/occlusion -> EMA + dwell hysteresis -> Prone alerts; calibration; settings; help.
       import {
         DrawingUtils,
         FaceLandmarker,
@@ -738,6 +760,7 @@
       const uiRoom = window.__uiRoom || window.__pskRoom || 'Baby';
       const room = window.__scopedRoom || uiRoom;
 
+      // Bump the version suffix when settings change meaning.
       const LS_KEY = 'naptio:face-prone-settings:v1.2';
       // Supine baseline stored per *UI room* (unchanged)
       const LS_SUPINE_KEY = 'naptio:face-prone-supine:' + uiRoom;
@@ -797,6 +820,8 @@
       };
 
       /* ---------- Settings state ---------- */
+      // Tunable settings (persisted). Thresholds apply to EMA-smoothed risks in 0..1; dwell values are seconds the
+      // condition must hold; thetaOn is the head-down angle (degrees from the supine baseline) where pose risk starts.
       const defaults = {
         enabled: true,
         showLM: true,
@@ -866,6 +891,7 @@
         resetDefaultsBtn: $('resetDefaultsBtn'),
       };
 
+      // Push the current settings S into the drawer controls.
       function applySettingsToUI() {
         ui.enabled.checked = !!S.enabled;
         ui.showLM.checked = !!S.showLM;
@@ -894,6 +920,7 @@
 
         ui.supineVal.textContent = Number.isFinite(pitchSupine) ? pitchSupine.toFixed(1) : '–';
       }
+      // Read the drawer controls back into S.
       function readSettingsFromUI() {
         S.enabled = ui.enabled.checked;
         S.showLM = ui.showLM.checked;
@@ -921,6 +948,7 @@
         S.calDur = clampNum(parseFloat(ui.calDur.value), 3, 60);
         saveSettings();
       }
+      // Saved settings merged over defaults; falls back to defaults if storage is missing or corrupt.
       function loadSettings() {
         try {
           return { ...defaults, ...JSON.parse(localStorage.getItem(LS_KEY) || '{}') };
@@ -931,6 +959,7 @@
       function saveSettings() {
         localStorage.setItem(LS_KEY, JSON.stringify(S));
       }
+      // Calibrated face-up (supine) pitch in degrees, or NaN if never calibrated for this room.
       function loadSupine() {
         const v = parseFloat(localStorage.getItem(LS_SUPINE_KEY) || 'NaN');
         return Number.isFinite(v) ? v : NaN;
@@ -977,6 +1006,7 @@
       });
 
       // OPEN/CLOSE: Motion-style side sheet
+      // Inject the Help side-sheet markup on demand and wait until it is in the DOM.
       async function ensureHelpSheetLoaded() {
         // Already present?
         if (document.getElementById('helpSheet')) return;
@@ -1058,6 +1088,7 @@
       helpBtn.addEventListener('click', openHelp);
 
       /* Calibration control (shared with main "Calibration" button) */
+      // Calibration state: running flag, start time (ms), pitch sum / sample count and UI countdown timer.
       let calRunning = false,
         calStartTs = 0,
         calAccum = 0,
@@ -1068,6 +1099,7 @@
       calBtn.disabled = true;
       setCalBtn(false, 0);
 
+      // Switch the calibration button between idle and running (countdown) appearance.
       function setCalBtn(running, remainingSec = 0) {
         const label = calBtn.querySelector('.label');
         const icon = calBtn.querySelector('.icon.timer');
@@ -1110,6 +1142,7 @@
         else finishCalibration(true);
       });
 
+      // Start the supine calibration: average head pitch over calDur seconds while the baby lies face-up.
       function startCalibrationUI() {
         readSettingsFromUI();
         calRunning = true;
@@ -1156,6 +1189,7 @@
       let signalingRepeatInterval = null;
       let signalingConnectedActive = false;
 
+      // Cancel the timers that flash and repeat the "Signaling: connected" message.
       function stopSignalingConnectedTimers() {
         signalingConnectedActive = false;
         if (signalingInitialTimer) {
@@ -1213,6 +1247,7 @@
         }, 60_000);
       }
 
+      // Show a status message; "Signaling: connected" has its own hide timers so it never hides later messages.
       function showStatus(msg) {
         console.log('[STATUS]', msg);
         if (msg === SIGNALING_CONNECTED_STATUS) {
@@ -1229,6 +1264,7 @@
       }
 
       /* ---------- Audio UI ---------- */
+      // Show Enable or Disable sound depending on the video element's muted state.
       function updateAudioButtons() {
         if (remoteVideo.muted) {
           enableAudioBtn.style.display = 'block';
@@ -1240,6 +1276,7 @@
       }
       enableAudioBtn.style.display = 'block';
 
+      // Browsers only allow autoplay when muted, so start muted; the user can enable sound with a tap.
       async function tryStartMuted() {
         try {
           remoteVideo.muted = true;
@@ -1302,6 +1339,7 @@
       remoteVideo.addEventListener('resize', beginViewportSettle);
 
       /* ---------- Canvas alignment ---------- */
+      // Rectangle of the video content when letterboxed ("contain") inside its container.
       function containRect(containerW, containerH, contentW, contentH) {
         const scale = Math.min(containerW / (contentW || 1), containerH / (contentH || 1));
         const w = Math.round(contentW * scale);
@@ -1311,6 +1349,7 @@
         return { left: x, top: y, width: w, height: h };
       }
 
+      // Size and position the face canvas exactly over the displayed video (accounting for device pixel ratio).
       function alignCanvasToVideo() {
         const stageBox = stage.getBoundingClientRect();
         const videoBox = remoteVideo.getBoundingClientRect();
@@ -1342,6 +1381,7 @@
 
       let settleRAF = 0,
         settleUntil = 0;
+      // Re-align the canvas every frame for a short time after resize/scroll, while layout is still settling.
       function beginViewportSettle(durationMs = 1200) {
         settleUntil = performance.now() + durationMs;
         if (settleRAF) return;
@@ -1370,11 +1410,13 @@
       });
 
       /* ---------- Overlay helpers ---------- */
+      // Show/hide the face canvas (clearing it when hidden).
       function setOverlayVisible(v) {
         faceCanvas.style.display = v ? 'block' : 'none';
         if (v) beginViewportSettle();
         else faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
       }
+      // Erase the overlay, e.g. when the video freezes so stale landmarks do not stay on screen.
       function clearOverlayDrawing() {
         try {
           faceCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1389,6 +1431,7 @@
       let faceWhere = 'receiver';
       let faceDC = null;
 
+      // Tell the Camera which MediaPipe confidence thresholds to use when it runs face detection.
       function sendFaceConfig() {
         if (!faceDC || faceDC.readyState !== 'open') return;
         const payload = { type: 'face-config', minDet: S.minDet, minTrack: S.minTrack, minPres: S.minPres };
@@ -1398,6 +1441,7 @@
       }
 
       let _faceTaskP = null;
+      // Lazily create the FaceLandmarker once; concurrent callers share one promise.
       function ensureFaceTask() {
         if (faceTask) return Promise.resolve(faceTask);
         if (!_faceTaskP)
@@ -1427,6 +1471,7 @@
         );
         return faceTask;
       }
+      // Dispose and rebuild the FaceLandmarker (e.g. after confidence settings change).
       async function recreateFaceTask() {
         try {
           await faceTask?.close?.();
@@ -1435,9 +1480,11 @@
         await ensureFaceTask();
       }
 
+      // True once the video element has decoded at least one frame (needed before detectForVideo).
       function videoHasFrame(v) {
         return v && v.readyState >= HAVE_CURRENT_DATA && v.videoWidth > 0 && v.videoHeight > 0;
       }
+      // Resolve when the first video frame is available, so detection never runs on an empty element.
       function waitForVideoFrame(video) {
         if (videoHasFrame(video)) return Promise.resolve();
         return new Promise((resolve) => {
@@ -1461,6 +1508,8 @@
       /* ---------- Prone detection state ---------- */
       let lastTs = 0;
 
+      // Fused and per-path EMA values below are 0..1; *AboveT / *BelowT are the dwell timers in seconds.
+      // Fused and per-path EMA values below are 0..1; *AboveT / *BelowT are the dwell timers in seconds.
       // Visuals
       let pitchEma = NaN; // EMA of pitch-down (for HUD)
       let riskEma = 0; // EMA of fused visual risk (bar only) — normalized 0..1
@@ -1486,17 +1535,20 @@
         _proneCount = 0,
         _proneStartMs = 0;
 
+      // Time-aware exponential moving average (time constant tau seconds); ignores non-finite samples.
       function emaUpdate(prev, x, tau, dt) {
         if (!Number.isFinite(x)) return prev;
         const a = 1 - Math.exp(-dt / Math.max(0.001, tau));
         return Number.isFinite(prev) ? prev + a * (x - prev) : x;
       }
       const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+      // Clamp a possibly non-numeric value; non-finite input yields lo.
       function clampNum(v, lo, hi) {
         v = Number(v);
         return Number.isFinite(v) ? clamp(v, lo, hi) : lo;
       }
 
+      // Head Euler angles in degrees from a 4x4 facial transformation matrix.
       function computeEulerXYZ(m) {
         // m: Float32Array[16] row-major
         const m00 = m[0],
@@ -1523,6 +1575,7 @@
         return { pitch: x * R2D, yaw: y * R2D, roll: z * R2D };
       }
 
+      // Mean x/y of a list of landmarks.
       function averagePoint(lms) {
         let sx = 0,
           sy = 0,
@@ -1535,6 +1588,7 @@
       }
 
       /* draw 3D axis triad */
+      // Draw the head's X/Y/Z axes from its rotation matrix at the face centre (scalePx = axis length).
       function drawAxisTriad(m, centroid, scalePx) {
         let xaxis = { x: m[0], y: m[1], z: m[2] };
         let yaxis = { x: m[4], y: m[5], z: m[6] };
@@ -1577,6 +1631,7 @@
         drawVec(zaxis, AXIS_STYLE.z);
       }
 
+      // Draw face landmarks, orientation arrows/axes and the alert tint on the overlay canvas.
       function drawFaceAndHUD(result, opts) {
         const { showLM, showOrient, yawDeg, pitchDeg, rollDeg, relPitchDeg, risk, alert, rotMat } = opts;
         faceCtx.save();
@@ -1648,6 +1703,14 @@
       }
 
       // --- One symmetric step for prone logic (used by both receiver loop and sender-DC) ---
+      /**
+       * One detection step, fed by either the local FaceLandmarker loop or face messages from the Camera.
+       * Updates calibration, the pose and occlusion paths (EMA + dwell hysteresis), starts/ends Prone alert
+       * episodes, and refreshes overlay, pill and HUD.
+       * @param {object} obs  {present, yawDeg, pitchDeg, rollDeg, rotMat, landmarks}
+       * @param {number} ts  timestamp in ms
+       * @param {number} dt  seconds since the previous step
+       */
       function processProneStep(obs, ts, dt) {
         const { present, yawDeg, pitchDeg, rollDeg, rotMat, landmarks } = obs;
 
@@ -1679,11 +1742,14 @@
           let rPoseInst = 0;
           if (Number.isFinite(pitchDownNow)) {
             const over = pitchDownNow - S.thetaOn;
+            // Ramp from 0 at 10 degrees before thetaOn up to POSE_RANGE at 20 degrees past it.
             rPoseInst = POSE_RANGE * clamp((over + 10) / 30, 0, 1); // 0..POSE_RANGE
           }
           poseRiskEma = emaUpdate(poseRiskEma, rPoseInst, S.emaTau, dt);
           pitchEma = emaUpdate(pitchEma, pitchDownNow, S.emaTau, dt);
 
+          // Dwell logic: a path must exceed its ON threshold for dwellOn s to alert, and stay below OFF for dwellOff
+          // s to clear. While the condition fails, the timer drains at half speed instead of resetting.
           if (!poseAlert) {
             if (poseRiskEma > S.poseThrOn) {
               poseAboveT += dt;
@@ -1844,6 +1910,8 @@
         updateHud(Number.isFinite(pitchEma) ? pitchEma : NaN, riskEma || 0, yawDeg, pitchDeg, rollDeg, relPitchDeg);
       }
 
+      // Colour the alert pill: safe / rising risk / alert on.
+      // (Pill colour changes to "risk" once the pose risk passes the midpoint of the ON/OFF thresholds.)
       function updatePill(risk, alertOn) {
         alertPill.classList.remove('prone-safe', 'prone-risk', 'prone-on');
         const mid = (S.poseThrOn + S.poseThrOff) / 2;
@@ -1862,6 +1930,7 @@
       }
 
       /* HUD text + risk bar — unified 0..100% scale */
+      // Update the risk bar, threshold ticks and numeric readouts.
       function updateHud(pitchDownDeg, fused, yawDeg, pitchDeg, rollDeg, relPitchDeg) {
         const fmt = (v) => (Number.isFinite(v) ? v.toFixed(1) : '–');
         hudLines.textContent =
@@ -1888,6 +1957,7 @@
 
       let _loopGen = 0,
         _loopStarting = false;
+      // Run face detection on the Viewer for every video frame; _loopGen retires stale loops.
       async function startReceiverFaceLoop() {
         if (faceLoopRunning || _loopStarting) return;
         _loopStarting = true;
@@ -1921,6 +1991,7 @@
           }
 
           const ts = performance.now();
+          // Seconds since the previous frame, capped at 1 s; 0.016 (~60 fps) for the first frame.
           const dt = lastTs ? Math.min(1, (ts - lastTs) / 1000) : 0.016;
           lastTs = ts;
 
@@ -1974,6 +2045,7 @@
         scheduleNext();
       }
 
+      // Stop the loop; bumping _loopGen makes any in-flight loop iteration exit.
       function stopReceiverFaceLoop() {
         faceLoopRunning = false;
         _loopGen++;
@@ -1981,6 +2053,7 @@
         faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
       }
 
+      // Apply Camera face-mode: run locally ("receiver"), consume Camera landmarks ("sender"), or off.
       function applyFaceMode() {
         setOverlayVisible(faceEnabled);
         if (!faceEnabled) {
@@ -1992,6 +2065,8 @@
       }
 
       /* ---------- ReceiverCore hookup ---------- */
+      // WebRTC receiver core: signalling, peer connection and the Camera's data channel.
+      // WebRTC receiver core: signalling, peer connection and the Camera's data channel.
       const core = new ReceiverCore({
         wsEndpoint: WS_ENDPOINT,
         room,
@@ -2024,6 +2099,7 @@
           }
         },
 
+        // The Viewer creates the "pose" data channel: carries ai-modes/face-mode, face results and config requests.
         onCreatePC: (pc) => {
           const ch = pc.createDataChannel('pose');
           ch.onopen = () => console.log('[DC][receiver] pose DC open');
@@ -2075,6 +2151,7 @@
         remoteVideo.addEventListener(ev, clearOverlayDrawing, { passive: true });
       });
 
+      // A stopped, muted or removed video track would leave the last landmarks frozen: clear the overlay then.
       function attachStreamEndHandlers(stream) {
         if (!stream) return;
         stream.getVideoTracks().forEach((t) => {
@@ -2114,6 +2191,8 @@
       setOverlayVisible(true); // show canvas immediately for alignment
 
       // tiny typo guard used in logs
+      // Spelling alias of beginViewportSettle, kept in case something still calls the old name.
+      // Spelling alias of beginViewportSettle, kept in case something still calls the old name.
       function beginViewportSetle() {
         beginViewportSettle();
       }

@@ -1,6 +1,11 @@
 // /hungryface/home/review-nudge.js
 // Naptio review nudge (native-only), shown on Home when returning from Camera/Viewer.
 
+// Shows a one-off "rate Naptio" card on Home, only inside the native apps and only after the user
+// comes back
+// from Camera/Viewer. State (first seen, deferrals, snooze, done) is kept in localStorage under
+// naptio_review_nudge_v1.
+// Call once from the home page; options below can be overridden through userOptions.
 export function installReviewNudge(userOptions = {}) {
   const options = {
     daysAfterFirstSeen: 3, //7,

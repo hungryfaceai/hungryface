@@ -1,7 +1,13 @@
+// legal/require-terms.js — one-time Terms of Use gate shown before pairing.
+//
+// ensureTermsAccepted() shows a modal (built and styled in JS) until the user ticks the box and accepts.
+// Acceptance is remembered in localStorage under naptio:terms:<TERMS_VERSION>, so bumping TERMS_VERSION
+// asks everyone again. Declining (or Escape) navigates back to the home page.
 // /webrtc/shared/terms/require-terms.js
 export const TERMS_VERSION = '2025-10-11'; // match the "Effective" pill on your Legal page
 const STORAGE_KEY = `naptio:terms:${TERMS_VERSION}`;
 
+/** True if the current TERMS_VERSION has already been accepted on this device. */
 export function hasAcceptedTerms() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -13,6 +19,11 @@ export function hasAcceptedTerms() {
   }
 }
 
+/**
+ * Resolves true once the terms are accepted (immediately if already accepted).
+ * @param {{role?: 'sender'|'receiver'|'pair', locale?: string}} [opts] stored with the acceptance record
+ * @returns {Promise<boolean>}
+ */
 export async function ensureTermsAccepted(opts = {}) {
   const role = opts.role ?? 'pair'; // 'sender' | 'receiver' | 'pair'
   const locale = opts.locale ?? (navigator.language || 'en-GB');
@@ -76,6 +87,7 @@ export async function ensureTermsAccepted(opts = {}) {
   const acceptBtn = overlay.querySelector('#tos-accept');
   const decline = overlay.querySelector('#tos-decline');
 
+  // Keep Tab cycling inside the dialog; the list is recomputed because the Accept button toggles disabled.
   const focusables = () =>
     [...overlay.querySelectorAll('a,button,input,[tabindex]:not([tabindex="-1"])')].filter((el) => !el.disabled);
   let first, last;

@@ -1,4 +1,18 @@
 <!doctype html>
+<!--
+  Camera page (sender): runs on the phone that films the baby. It captures camera and microphone, streams them
+  over WebRTC to every Viewer in the room, and can run on-device AI (pose, face, audio classification) and
+  forward the results to Viewers over a "pose" data channel.
+
+  Flow: pair devices (PSK) -> pick room -> Start streaming -> short preview window -> blackout (screen stays on).
+  Pieces:
+    - Style blocks: dark full-screen stage, control card, blackout/preview/streaming body states.
+    - Script 1: PSK check (else redirect to Pair Devices), room namespace, PSK WebSocket shim installers.
+    - Script 2: UI wiring, signalling WebSocket, one RTCPeerConnection per Viewer, AI loops, start/stop.
+  Depends on: shared/psk/*.js, shared/config.js, shared/wake-lock.js, shared/audio-resampler.js,
+  shared/vision-task.js, MediaPipe tasks (loaded from jsDelivr / Google storage on demand).
+  localStorage: psk:<room>, naptio:lastRoom, bm_sender_* (saved form values).
+-->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -10,9 +24,12 @@
     />
     <link rel="stylesheet" href="/hungryface/shared/tokens.css" />
     <style>
+      /* Camera page styles: stage and canvas overlay, control card, debug panel, page states. */
+      /* --- Theme variables --- */
       :root {
         color-scheme: dark;
       }
+      /* --- Page base --- */
       html,
       body {
         margin: 0;
@@ -70,6 +87,7 @@
         transform: scaleX(-1);
       }
 
+      /* --- Control card container --- */
       #ui {
         position: relative;
         z-index: 5;
@@ -80,6 +98,7 @@
         padding: 16px 20px 20px; /* slightly smaller top padding */
       }
 
+      /* --- Short phone screens (landscape / small devices): tighter spacing --- */
       @media (max-height: 820px) {
         #ui {
           align-items: flex-start;
@@ -115,6 +134,7 @@
         }
       }
 
+      /* --- Card, rows and form controls --- */
       .card {
         width: 100%;
         max-width: 520px;
@@ -168,6 +188,7 @@
         -webkit-appearance: none;
         margin: 0;
       }
+      /* --- Buttons --- */
       button {
         width: 100%;
         padding: 14px 16px;
@@ -183,6 +204,7 @@
         transform: scale(0.99);
       }
 
+      /* --- Overlay, status line and tap layer --- */
       .overlay {
         position: fixed;
         inset: 0;
@@ -224,6 +246,7 @@
         background: var(--nt-bg, #000);
       }
 
+      /* --- AI options group --- */
       fieldset.ai {
         border: 1px solid var(--nt-border, #222);
         border-radius: 12px;
@@ -322,6 +345,7 @@
     </header>
 
     <style>
+      /* --- Page header and home link --- */
       .page-header {
         position: relative;
         z-index: 7;
@@ -455,6 +479,7 @@
     </div>
 
     <script type="module">
+      // Camera page bootstrap: require a PSK (else redirect to pairing), install room scope and PSK shim.
       import { installPskShim, getPsk } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
       import { requirePskOrRedirect } from '/hungryface/webrtc/shared/psk/require-psk.js';
       import { installRoomScope } from '/hungryface/webrtc/shared/psk/room-scope.js';
@@ -501,22 +526,27 @@
     </script>
 
     <script type="module">
+      // Camera page logic. Sections: room dropdown, persistence, signalling (WebSocket), peer connections,
+      // preview/blackout UI, start/stop, AI loops (pose, audio, face) and data-channel fan-out to Viewers.
       import { listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
       import { keepAwake } from '/hungryface/webrtc/shared/wake-lock.js';
       import { createStreamingResampler } from '/hungryface/webrtc/shared/audio-resampler.js';
       let screenAwake = null; // wake lock handle while streaming
       import { WS_ENDPOINT, ICE_SERVERS } from '/hungryface/webrtc/shared/config.js';
       import { createVisionTask } from '/hungryface/webrtc/shared/vision-task.js';
+      // Controls card auto-hides this long (ms) after the last interaction while streaming.
       const UI_AUTOHIDE_MS = 10000;
       // UI room = label in dropdown (e.g. "Baby")
       // Scoped room = namespace:slug, derived from PSK token
       const currentUiRoom = () => ((roomSel?.value || roomSel?.options?.[0]?.value || 'Baby') + '').trim();
+      // Map the dropdown label to the PSK-scoped room id (window.__scopeRoom comes from room-scope.js).
       function scopeRoom(uiRoom) {
         if (typeof window.__scopeRoom === 'function') {
           return window.__scopeRoom(uiRoom);
         }
         return uiRoom;
       }
+      // MediaPipe bundles and models (pinned versions) loaded lazily when an AI mode is first used.
       const TASKS_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0';
       const WASM_DIR = TASKS_URL + '/wasm';
       const AUDIO_TASKS_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@0.10.0';
@@ -544,6 +574,7 @@
         PREGAIN_DB: 0, // pre-gain for classifier path only (keeps WebRTC stream untouched)
       };
 
+      // --- DOM references ---
       const roomSel = document.getElementById('roomSel');
       const videoOn = document.getElementById('videoOn');
       const audioOn = document.getElementById('audioOn');
@@ -559,10 +590,12 @@
       const talkbackAudio = document.getElementById('talkbackAudio');
 
       // --- PSK Room dropdown population & default selection ---
+      // True if the select has an option with this value.
       function hasOption(sel, val) {
         return !!Array.from(sel?.options || []).find((o) => o.value === val);
       }
 
+      // Fill the room dropdown from all rooms with a valid PSK and pick the default room.
       (function initRoomDropdown() {
         const rooms = listValidPskRooms(); // all rooms with a valid PSK
         const qsRoom = new URLSearchParams(location.search).get('room') || '';
@@ -619,6 +652,7 @@
         });
       })();
 
+      // (Only wired up when DEBUG_UI is true; otherwise hidden below.)
       // Debug elements
       const elDbgPanel = document.getElementById('debugPanel');
       const elDbgToggle = document.getElementById('debugToggle');
@@ -650,9 +684,11 @@
         elDbgToggle.style.display = 'none';
       }
 
+      // First audio track of the camera/mic stream, or null when audio is off or not yet opened.
       function getLocalAudioTrack() {
         return localStream?.getAudioTracks?.()[0] || null;
       }
+      // The RTCRtpSender currently carrying an audio track on this peer connection, if any.
       function getAudioSender(pc) {
         return pc?.getSenders?.().find((s) => s.track && s.track.kind === 'audio') || null;
       }
@@ -692,6 +728,7 @@
         return track;
       }
 
+      // Tell every Viewer which AI modes are on and where they run ("sender" = this phone, else the Viewer).
       function announceAIModes() {
         applyPoseUI();
         applyAudioUI();
@@ -718,6 +755,7 @@
 
       /* ----------------------- PERSISTENCE ----------------------- */
       (function () {
+        // Remember form values in localStorage under bm_sender_<key> and restore them on load.
         const PREFIX = 'bm_sender_';
         const entries = [
           ['videoOn', 'checkbox', document.getElementById('videoOn')],
@@ -733,6 +771,7 @@
           ['faceWhere', 'select', faceWhere],
         ].filter(([, , el]) => !!el);
 
+        // Restore one saved control value from localStorage (key is prefixed with PREFIX).
         function loadOne(key, type, el) {
           if (!el) return;
           const v = localStorage.getItem(PREFIX + key);
@@ -742,6 +781,7 @@
             if (hasOption(el, v)) el.value = v;
           } else el.value = v;
         }
+        // Persist one control value to localStorage; failures (private mode, quota) are ignored.
         function saveOne(key, type, el) {
           if (!el) return;
           const v = type === 'checkbox' ? (el.checked ? '1' : '0') : el.value;
@@ -761,6 +801,7 @@
         }
       })();
 
+      // Runtime state: signalling socket, local media, streaming flag and timers.
       let ws = null,
         localStream = null;
       let started = false,
@@ -774,12 +815,14 @@
       let previewTimer = null,
         previewTicker = null,
         previewEnd = 0;
+      // Open "pose" data channels, one per connected Viewer (carries AI results and mode messages).
       const poseDCs = new Set();
       // Cache the most recent audio score payload so late-joining receivers get one instantly.
       let lastAudioPayload = null;
       let lastPosePayload = null;
       let lastFacePayload = null;
 
+      // MediaPipe classes and tasks are imported lazily; *LoopRunning flags stop the loops cleanly.
       let PoseLandmarker, FilesetResolver, DrawingUtils;
       let poseTask = null,
         poseLoopRunning = false;
@@ -797,6 +840,7 @@
       let poseRAF = 0,
         faceRAF = 0;
 
+      // Web Audio state for the on-sender classifier (fed by a separate raw mic or a tap on the streamed track).
       // AUDIO graph nodes/state
       let audioCtx = null,
         audioSource = null,
@@ -822,12 +866,14 @@
       let audioStarting = false;
 
       // --------- Audio helpers ----------
+      // Append two Float32Array buffers (used to accumulate samples until a full clip is available).
       function concatFloat32(a, b) {
         const out = new Float32Array(a.length + b.length);
         out.set(a, 0);
         out.set(b, a.length);
         return out;
       }
+      // One-shot linear resampler for whole buffers (the streaming classifier path uses audio-resampler.js).
       function resampleLinear(x, fromSr, toSr) {
         if (fromSr === toSr) return x;
         const n = Math.max(1, Math.round(x.length * (toSr / fromSr)));
@@ -843,6 +889,7 @@
         return out;
       }
       // Prefer track-node tap (avoids silent clone bug); fallback to stream source
+      // (A MediaStream source built from a cloned track can be silent in some browsers.)
       function makeSourceFromTrack(ctx, track) {
         try {
           return new MediaStreamTrackAudioSourceNode(ctx, { mediaStreamTrack: track });
@@ -851,6 +898,7 @@
           return ctx.createMediaStreamSource(tmp);
         }
       }
+      // Root-mean-square level (0..1) of a sample buffer.
       function rmsOf(x) {
         if (!x || !x.length) return 0;
         let s = 0;
@@ -860,6 +908,7 @@
         }
         return Math.sqrt(s / x.length);
       }
+      // Convert a linear amplitude (0..1) to dBFS; silence maps to -Infinity.
       function dbfs(x) {
         return x <= 0 ? -Infinity : 20 * Math.log10(x);
       }
@@ -876,22 +925,27 @@
         }
         return res.classifications?.[0]?.categories ?? res.classificationResult?.classifications?.[0]?.categories ?? [];
       }
+      // Best human-readable label for a classifier category.
       function categoryLabel(c) {
         return (c?.displayName || c?.categoryName || String(c?.index) || '').trim();
       }
 
+      // Show a message in the status line and mirror it to the console when LOG.status is on.
       const setStatus = (t) => {
         statusEl.textContent = t;
         if (LOG.status) console.log('[STATUS]', t);
       };
       //const currentRoom = () => ((roomSel?.value || roomSel?.options?.[0]?.value || 'Baby') + '').trim();
+      // Front ("user") camera is mirrored in the preview so it behaves like a mirror.
       const isFront = () => cameraSel.value === 'user';
 
+      // Toggle the CSS class that flips the preview and overlay canvas horizontally.
       function updateMirrorClass() {
         document.body.classList.toggle('mirror', isFront());
       }
 
       /* ----- Canvas alignment (letterbox-aware inside #stage) ----- */
+      // Place the overlay canvas over the letterboxed video and size its backing store for the pixel ratio.
       function resizeCanvasToVideo() {
         const showVideo = document.body.classList.contains('previewing') && videoOn.checked;
         localVideo.style.display = showVideo ? 'block' : 'none';
@@ -937,11 +991,14 @@
         ctx.setTransform(1, 0, 0, 1, 0, 0);
       }
 
+      // Layout can keep changing briefly after rotation/resize/fullscreen, so re-align every frame for durationMs.
       let settleRAF = 0,
         settleUntil = 0;
+      // Keep re-aligning the overlay on every animation frame until the settle window has elapsed.
       function beginViewportSettle(durationMs = 1200) {
         settleUntil = performance.now() + durationMs;
         if (settleRAF) return;
+        // Frame callback: realign, then either continue or stop once the settle deadline has passed.
         const tick = () => {
           resizeCanvasToVideo();
           if (performance.now() < settleUntil) {
@@ -955,12 +1012,14 @@
         tick();
       }
 
+      // Video size becomes known (or changes): realign the overlay canvas with the picture.
       localVideo.addEventListener('loadedmetadata', () => {
         console.log('[MEDIA] local video meta', localVideo.videoWidth, 'x', localVideo.videoHeight);
         beginViewportSettle();
       });
       localVideo.addEventListener('resize', beginViewportSettle);
 
+      // Any viewport change (rotation, iOS toolbar show/hide, zoom) restarts the settle window.
       const vpAlign = () => beginViewportSettle();
       ['resize', 'orientationchange', 'scroll'].forEach((ev) =>
         window.addEventListener(ev, vpAlign, { passive: true })
@@ -981,6 +1040,7 @@
         }
       });
 
+      // Open camera and mic (720p, 30 fps max); tracks start enabled according to the toggles.
       async function getMedia() {
         const wantVideo = videoOn.checked;
         const wantAudio = audioOn.checked;
@@ -1015,6 +1075,7 @@
         return stream;
       }
 
+      // The ON/OFF switches only enable/disable existing tracks, so muting needs no renegotiation.
       function applyVideoToggle() {
         if (!localStream) return;
         const vt = localStream.getVideoTracks()[0];
@@ -1023,6 +1084,7 @@
         setStatus(videoOn.checked ? 'Video ON' : 'Video OFF');
       }
 
+      // Mic ON/OFF switch: lazily acquire the audio track if needed, then just enable/disable it.
       async function applyAudioToggle() {
         const want = audioOn.checked;
         try {
@@ -1058,6 +1120,7 @@
         beginViewportSettle();
       });
 
+      // Open the signalling socket for the scoped room and join as sender. Rejects on timeout (15 s).
       function connectWS(uiRoom) {
         return new Promise((resolve, reject) => {
           const signalRoom = scopeRoom(uiRoom); // <-- derive PSK-scoped id
@@ -1114,12 +1177,14 @@
         });
       }
 
+      // Keepalive every 25 s so the server and proxies do not drop an idle socket.
       function startWSHeartbeat() {
         stopWSHeartbeat();
         wsHeartbeat = setInterval(() => {
           send({ type: 'keepalive' });
         }, 25000);
       }
+      // Cancel the keepalive timer (on close, stop or reconnect).
       function stopWSHeartbeat() {
         if (wsHeartbeat) {
           clearInterval(wsHeartbeat);
@@ -1131,6 +1196,7 @@
       const WS_RETRY_MIN_MS = 1500,
         WS_RETRY_MAX_MS = 30000;
       let wsRetryMs = WS_RETRY_MIN_MS;
+      // Queue one reconnect attempt (guarded so only one timer exists); delay has +/-20% jitter.
       function scheduleWSReconnect(reason = 'retry') {
         if (!started) return; // only while streaming
         if (wsReconnectTimer) return; // already queued
@@ -1151,12 +1217,15 @@
         }, delay);
       }
 
+      // Best-effort JSON send on the signalling socket; silently dropped when the socket is not open.
       const send = (obj) => {
         try {
           ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj));
         } catch {}
       };
 
+      // One RTCPeerConnection per Viewer: sends our tracks, plays talkback audio, serves the "pose" data channel.
+      // (Idempotent: returns the existing connection if this Viewer already has one.)
       function getOrCreatePC(peerId) {
         let rec = peers.get(peerId);
         if (rec && rec.pc) return rec.pc;
@@ -1203,6 +1272,7 @@
           });
         }
 
+        // The Viewer creates the "pose" data channel; it carries AI results and mode/config messages both ways.
         pc.ondatachannel = (ev) => {
           if (ev.channel?.label === 'pose') {
             const ch = ev.channel;
@@ -1252,6 +1322,7 @@
               }
               if (!msg || !msg.type) return;
 
+              // A Viewer just opened its channel and wants the current mode state.
               if (msg.type === 'need-modes') {
                 // Receiver is asking for the current AI modes after it opens
                 announceAIModes();
@@ -1318,12 +1389,14 @@
           }
         };
 
+        // Trickle ICE: forward each local candidate to the Viewer through the signalling server.
         pc.onicecandidate = (e) => {
           if (e.candidate && ws?.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'candidate', to: peerId, candidate: e.candidate }));
           }
         };
 
+        // 'disconnected' can recover by itself, so wait 3 s before tearing the peer down.
         pc.onconnectionstatechange = () => {
           const st = pc.connectionState;
           console.log('[SENDER][PC]', peerId, st);
@@ -1352,6 +1425,7 @@
         return pc;
       }
 
+      // Close and forget one Viewer connection.
       function cleanupPeer(peerId, reason = 'cleanup') {
         const rec = peers.get(peerId);
         if (!rec) return;
@@ -1371,6 +1445,7 @@
         console.log('[SENDER] cleaned', peerId, reason);
       }
 
+      // Signalling: peer-joined/roster -> ask Viewer for an offer; offer -> answer; candidate -> ICE; bye/peer-left.
       async function onSignal(evt) {
         let msg;
         try {
@@ -1389,11 +1464,13 @@
           return;
         }
 
+        // A Viewer joined: ask it to send an offer (the Viewer is always the offerer).
         if (t === 'peer-joined' && msg.id && msg.role === 'receiver') {
           ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: msg.id }));
           return;
         }
 
+        // On (re)connect the server sends the current peers: request an offer from each Viewer.
         if (t === 'roster' && Array.isArray(msg.peers)) {
           for (const p of msg.peers) {
             if (p.role === 'receiver') {
@@ -1412,6 +1489,7 @@
             rec = peers.get(msg.from);
           }
 
+          // The Viewer re-sends its offer every 2 s until answered: ignore repeats and overlapping handling.
           if (rec.lastOfferSdp === msg.sdp) {
             console.log('[DUP] identical offer ignored from', msg.from);
             return;
@@ -1490,6 +1568,7 @@
         if (t === 'hello' || t === 'keepalive') return;
       }
 
+      // Show the live preview for `minutes`, then go black (dark screen saves power and does not wake the baby).
       function beginPreviewWindow(minutes) {
         const ms = Math.max(0, Math.round((Number(minutes) || 1) * 60000));
         if (ms === 0) {
@@ -1509,6 +1588,7 @@
         previewTicker = setInterval(tickPreviewCountdown, 1000);
         previewTimer = setTimeout(endPreviewNow, ms);
       }
+      // Update the status line once per second with the remaining preview time (mm:ss).
       function tickPreviewCountdown() {
         const remain = Math.max(0, previewEnd - Date.now());
         const sec = Math.ceil(remain / 1000);
@@ -1516,12 +1596,14 @@
         const ss = String(sec % 60).padStart(2, '0');
         statusEl.textContent = `Preview ends in ${mm}:${ss}`;
       }
+      // Stop the preview timers and switch to the black screen immediately.
       function endPreviewNow() {
         if (previewTimer) clearTimeout(previewTimer);
         if (previewTicker) clearInterval(previewTicker);
         previewTimer = previewTicker = null;
         enterBlackout();
       }
+      // Streaming with a black screen; a tap shows the controls again.
       function enterBlackout() {
         document.body.classList.remove('previewing');
         document.body.classList.add('streaming');
@@ -1533,6 +1615,7 @@
         hideUITimer = null;
       }
 
+      // Tap handling: ends the preview; while streaming, toggles the controls card.
       document.addEventListener('click', (e) => {
         if (document.body.classList.contains('previewing')) {
           endPreviewNow();
@@ -1566,6 +1649,7 @@
           }
         }
       });
+      // Restart the idle timer that hides the controls card after UI_AUTOHIDE_MS.
       function scheduleAutoHideUI() {
         clearTimeout(hideUITimer);
         hideUITimer = setTimeout(() => {
@@ -1576,6 +1660,7 @@
         }, UI_AUTOHIDE_MS);
       }
 
+      // Start button: open media, install PSK, connect signalling, begin the preview. Pressing it again stops.
       async function startOrStop() {
         try {
           if (started) {
@@ -1648,6 +1733,7 @@
         }
       }
 
+      // Release everything (camera, mic, sockets, peers, AI) and return the page to its idle state.
       async function stopStreaming() {
         try {
           send({ type: 'bye' });
@@ -1756,12 +1842,15 @@
       window.addEventListener('beforeunload', stopStreaming);
       startBtn.addEventListener('click', startOrStop);
 
+      // --- On-device AI: lazy MediaPipe loading ---
+      // Dynamically import the MediaPipe vision bundle once (pose + face share it).
       async function ensureTasksLoaded() {
         if (PoseLandmarker && FaceLandmarker && FilesetResolver && DrawingUtils) return;
         ({ PoseLandmarker, FaceLandmarker, FilesetResolver, DrawingUtils } = await import(TASKS_URL));
         console.log('[TASKS] Vision tasks loaded');
       }
 
+      // Create (once) the pose landmarker: lite model, VIDEO mode, one person.
       async function ensurePoseTask() {
         await ensureTasksLoaded();
         if (poseTask) return poseTask;
@@ -1782,6 +1871,7 @@
         return poseTask;
       }
 
+      // Create (once) the face landmarker using the current FACE_OPTS thresholds.
       async function ensureFaceTask() {
         await ensureTasksLoaded();
         if (faceTask) return faceTask;
@@ -1804,6 +1894,7 @@
         return faceTask;
       }
 
+      // Rebuild the face task after a Viewer changed its thresholds (they are fixed at creation time).
       async function recreateSenderFaceTask() {
         try {
           await faceTask?.close?.();
@@ -1812,6 +1903,7 @@
         await ensureFaceTask();
       }
 
+      // Load the YAMNet audio classifier by URL, falling back to a downloaded buffer; 3 attempts with backoff.
       async function ensureAudioTask() {
         if (audioTask) return audioTask;
         if (!AudioClassifier || !AudioFilesetResolver) {
@@ -1824,12 +1916,14 @@
           'https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite';
 
         const resolver = await AudioFilesetResolver.forAudioTasks(WASM_DIR);
+        // Attempt 1: let MediaPipe fetch the YAMNet model itself from MODEL_URL.
         const createWithPath = () =>
           AudioClassifier.createFromOptions(resolver, {
             baseOptions: { modelAssetPath: MODEL_URL },
             runningMode: 'AUDIO_CLIPS',
             classifierOptions: { maxResults: 20, scoreThreshold: 0 },
           });
+        // Attempt 2: download the model with a cache-busting query and pass the raw bytes instead.
         const createWithBuffer = async () => {
           const bust = MODEL_URL + (MODEL_URL.includes('?') ? '&' : '?') + 'cb=' + Date.now();
           const res = await fetch(bust, { cache: 'no-store' });
@@ -1866,12 +1960,14 @@
         throw lastErr || new Error('audio task init failed');
       }
 
+      // Send an AI result to all Viewers and cache it so a Viewer joining later gets one immediately.
       function sendPoseToReceivers(landmarks) {
         const payload = JSON.stringify({ type: 'pose', landmarks, ts: performance.now() });
         lastPosePayload = payload; // <-- cache for late joiners
         for (const ch of poseDCs) if (ch.readyState === 'open') ch.send(payload);
       }
 
+      // Draw pose landmarks on the preview overlay (only used while the preview is visible).
       function drawPoseOnSender(landmarks) {
         if (!landmarks?.length || !poseCanvas.width || !poseCanvas.height) return;
         const dutils = new DrawingUtils(ctx);
@@ -1884,6 +1980,7 @@
         }
         ctx.restore();
       }
+      // Draw face mesh points on the preview overlay.
       function drawFaceOnSender(faces) {
         if (!faces?.length || !poseCanvas.width || !poseCanvas.height) return;
         const dutils = new DrawingUtils(ctx);
@@ -1892,6 +1989,7 @@
         }
       }
 
+      // Run pose detection on the local video every animation frame while the mode is set to run on the sender.
       async function startSenderPoseLoop() {
         if (!started || !poseOn.checked || poseWhere.value !== 'sender') return;
         if (poseLoopRunning) return;
@@ -1901,6 +1999,7 @@
         if (poseRAF) cancelAnimationFrame(poseRAF);
         console.log('[POSE][sender] inference START (sender)');
 
+        // rAF loop: bail out (and thereby stop) as soon as the mode, stream or location setting changes.
         const loop = (ts) => {
           if (!poseLoopRunning || !started || !poseOn.checked || poseWhere.value !== 'sender') {
             console.log('[POSE][sender] inference STOP (sender)');
@@ -1926,6 +2025,7 @@
 
         poseRAF = requestAnimationFrame(loop);
       }
+      // Stop the pose loop and clear its animation-frame handle.
       function stopSenderPoseLoop() {
         if (!poseLoopRunning) return;
         poseLoopRunning = false;
@@ -1936,6 +2036,8 @@
         if (!faceLoopRunning) ctx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
       }
 
+      // The next three handlers relay AI results computed by a Viewer (modes set to run on the Viewer) to the other
+      // Viewers and cache them for late joiners. The origin channel is skipped to avoid echo.
       function onAudioMessageFromReceiver(ev, originChannel = null) {
         let msg;
         try {
@@ -1959,6 +2061,7 @@
         }
       }
 
+      // Relay a pose result computed by a Viewer: cache it, draw it in preview, forward to other Viewers.
       function onPoseMessageFromReceiver(ev, originChannel = null) {
         let msg;
         try {
@@ -1989,6 +2092,7 @@
         }
       }
 
+      // Same relay as above for face results.
       function onFaceMessageFromReceiver(ev, originChannel = null) {
         let msg;
         try {
@@ -2019,6 +2123,7 @@
         }
       }
 
+      // Start or stop the sender-side pose loop to match the current toggle and location.
       function applyPoseUI() {
         beginViewportSettle();
         if (!poseOn.checked) {
@@ -2030,6 +2135,7 @@
       }
 
       // --- FACE helpers shared with receiver ---
+      // Euler angles in degrees (pitch X, yaw Y, roll Z) from a 4x4 row-major face transform matrix.
       function computeEulerXYZ(m) {
         // m: Float32Array[16] row-major
         const m00 = m[0],
@@ -2056,6 +2162,7 @@
         return { pitch: x * R2D, yaw: y * R2D, roll: z * R2D };
       }
 
+      // Mean x/y of the landmarks (falls back to the image centre).
       function averagePoint(lms) {
         let sx = 0,
           sy = 0,
@@ -2070,6 +2177,7 @@
 
       // ======= AUDIO (SENDER) =======
 
+      // Debug readouts (shown only when DEBUG_UI is true).
       let lastStreamRms = 0;
       let lastAIRmsDev = 0;
       let lastAIRms16 = 0;
@@ -2079,6 +2187,7 @@
       let streamSilentFrames = 0;
       let aiSilentFrames = 0;
 
+      // Refresh the debug panel text from the latest counters (only active when DEBUG_UI is true).
       function updateDebugUI() {
         const t = getLocalAudioTrack();
         const id = t?.id || 'none';
@@ -2105,6 +2214,7 @@
       }
       if (DEBUG_UI) setInterval(updateDebugUI, 500);
 
+      // Read outbound audio RTP stats (audio level, samples sent) to verify the mic is really being transmitted.
       async function pollRTCStats() {
         for (const [, rec] of peers) {
           const pc = rec.pc;
@@ -2127,6 +2237,8 @@
       }
       if (DEBUG_UI) setInterval(pollRTCStats, 1500);
 
+      // Start sound classification on this phone: capture the mic (a separate raw capture, or a tap on the streamed
+      // track when audio is already being sent), resample to 16 kHz and classify ~1 s clips with YAMNet.
       async function startSenderAudioLoop() {
         if (!started || !audioAiOn?.checked || audioAiWhere?.value !== 'sender') return;
         if (audioLoopRunning || audioStarting) return;
@@ -2224,6 +2336,7 @@
         } catch {}
 
         // Prepare resampling + ring
+        // YAMNet expects 16 kHz mono clips of 0.975 s (15600 samples).
         const SR_DEVICE = audioCtx.sampleRate;
         const SR_TARGET = 16000;
         const WINDOW_SEC = 0.975;
@@ -2236,11 +2349,13 @@
         // Silence watchdog
         aiSilentFrames = 0;
         streamSilentFrames = 0;
+        // If the mic delivers digital silence for SILENCE_LIMIT chunks, capture is considered dead and is restarted.
         const SILENCE_RMS = 1e-4; // ~ -80 dBFS
         const SILENCE_LIMIT = 60; // ~ 0.8–1.5s depending on callback size
 
         // Worklet modules (classifier + RMS)
         try {
+          // AudioWorklet processors are defined inline and loaded from a Blob URL (no extra file to host).
           const modURL = URL.createObjectURL(
             new Blob(
               [
@@ -2297,6 +2412,7 @@
         }
 
         // --- Classification path
+        // Per audio chunk: silence watchdog, resample to 16 kHz, collect into clips, classify, send to Viewers.
         const onChunk = async (frameFloat32) => {
           if (!audioLoopRunning || !started || !audioAiOn.checked || audioAiWhere.value !== 'sender') {
             try {
@@ -2485,6 +2601,7 @@
         console.log('[AUDIO][sender] loop START @', SR_DEVICE, '→', SR_TARGET, 'Hz | mode =', lastAIMode);
       }
 
+      // Stop and release the audio graph and any extra mic capture.
       function stopSenderAudioLoop() {
         audioLoopRunning = false;
         audioStarting = false;
@@ -2508,6 +2625,7 @@
         aiTapTrack = null;
       }
 
+      // Tell all Viewers whether audio AI is on and where it runs, over the data channels.
       function announceAudioMode() {
         const enabled = !!audioAiOn?.checked;
         const where = audioAiWhere?.value;
@@ -2516,12 +2634,14 @@
             ch.send(JSON.stringify({ type: 'audio-mode', enabled, where }));
           }
       }
+      // Start or stop the sender-side audio classifier to match the current toggle and location.
       function applyAudioUI() {
         if (started && audioAiOn?.checked && audioAiWhere?.value === 'sender') startSenderAudioLoop();
         else stopSenderAudioLoop();
       }
 
       // ======= FACE (SENDER) =======
+      // Run face landmark detection every frame; send landmarks plus head pose (yaw/pitch/roll) to Viewers.
       async function startSenderFaceLoop() {
         if (!started || !faceOn?.checked || faceWhere?.value !== 'sender') return;
         if (faceLoopRunning) return;
@@ -2531,6 +2651,7 @@
 
         console.log('[FACE][sender] loop START (sender)');
 
+        // Per-frame loop for face detection; exits when the mode or stream is turned off.
         const loop = (ts) => {
           if (!faceLoopRunning || !started || !faceOn.checked || faceWhere?.value !== 'sender') {
             console.log('[FACE][sender] loop STOP (sender)');
@@ -2604,6 +2725,7 @@
         faceRAF = requestAnimationFrame(loop);
       }
 
+      // Stop the face loop and clear its animation-frame handle.
       function stopSenderFaceLoop() {
         if (!faceLoopRunning) return;
         faceLoopRunning = false;
@@ -2614,6 +2736,7 @@
         if (!poseLoopRunning) ctx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
       }
 
+      // Tell all Viewers whether face AI is on and where it runs.
       function announceFaceMode() {
         const enabled = !!faceOn?.checked;
         const where = faceWhere?.value;
@@ -2622,6 +2745,7 @@
             ch.send(JSON.stringify({ type: 'face-mode', enabled, where }));
           }
       }
+      // Start or stop the sender-side face loop to match the current toggle and location.
       function applyFaceUI() {
         if (started && faceOn?.checked && faceWhere?.value === 'sender') startSenderFaceLoop();
         else stopSenderFaceLoop();

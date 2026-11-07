@@ -2,6 +2,12 @@
 // Minimal dependency-free gate for first-time users (0 PSKs).
 // Shows a bottom sheet prompting to pair, then routes to your Pair Devices page.
 
+// Options (all optional): cameraSelector / viewerSelector (links to intercept), pairRoute,
+// durations,
+// onEvent(name, data) for analytics, detectHasAnyPsk(localStorage), validateToken(b64u), copy
+// overrides.
+// The sheet is only shown when no valid psk:<room> record exists in localStorage; otherwise links
+// work normally.
 export function installLandingPairGate(userOptions = {}) {
   // Guard against double-init
   if (window.__NaptioPairGateInstalled) return;
@@ -144,6 +150,8 @@ export function installLandingPairGate(userOptions = {}) {
   }
 
   // ---------- PSK detection ----------
+  // True if localStorage holds at least one psk:<room> record with a usable key (or the host's own
+  // check says so).
   function hasAnyPsk(options) {
     if (typeof options.detectHasAnyPsk === 'function') {
       try {
@@ -223,6 +231,8 @@ export function installLandingPairGate(userOptions = {}) {
     }
   }
 
+  // Styles are injected as a single <style id="lpg-styles"> so the gate works on any page without a
+  // stylesheet.
   function injectStyles() {
     if (document.getElementById('lpg-styles')) return;
     const css = `
@@ -300,6 +310,7 @@ export function installLandingPairGate(userOptions = {}) {
     document.head.appendChild(style);
   }
 
+  // Create the scrim and bottom sheet once; they are shown and hidden by openSheet / closeSheet.
   function buildSheetDOM(copy, durations) {
     const scrim = el('div', 'lpg-scrim', { role: 'presentation' });
     const root = el('div', 'lpg-root', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'lpg-title' });
@@ -385,6 +396,7 @@ export function installLandingPairGate(userOptions = {}) {
     return String(str).replace(/\{nounSingular\}|\{nounPlural\}/g, (m) => map[m] || m);
   }
 
+  // Choose friendly words (phone / tablet / computer) for the copy from coarse user-agent hints.
   function detectDeviceNouns() {
     const ua = (navigator.userAgent || '').toLowerCase();
     const isIPhone = /\biphone\b/.test(ua);

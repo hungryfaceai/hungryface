@@ -1,4 +1,6 @@
 // Alerts Dashboard
+// Reads alerts from the shared IndexedDB store (../store.js), re-renders on 'alerts:changed' (same tab) and
+// BroadcastChannel 'alerts-bc' (other tabs). localStorage key 'alerts_sounds_enabled' stores the sound toggle.
 // Swimlane timeline + activity band + brush/zoom + search/filter/sort + table
 
 import {
@@ -199,6 +201,7 @@ async function playPing() {
   pip(t0 + 0.36);
 }
 
+// True when fresh rows contain entries newer than the previously rendered top row (used to decide on a ping).
 function hasNewSince(fresh, prev) {
   if (!prev || !prev.length) return false; // don't ping on first paint
   const prevTopId = prev[0]?.id;
@@ -311,6 +314,7 @@ function stopPolling() {
   }
 }
 
+// Polls the store and re-renders only when the data differs from the last fetch.
 async function fetchIfChanged() {
   try {
     const prev = state.rowsAll;
@@ -425,6 +429,7 @@ function sortRows(rows) {
 }
 
 // ------- Activity band (alerts/min) -------
+// Counts alerts per time bin across the visible window; an alert spanning several bins counts in each.
 function binActivity(rows, binMs) {
   const { windowStartMs, windowEndMs } = state;
   const nBins = Math.max(1, Math.ceil((windowEndMs - windowStartMs) / binMs));
@@ -603,6 +608,7 @@ function renderTimeline(rows) {
   }
 }
 
+// Picks the round tick interval (5 min - 12 h) closest to spanMs / 8, for about eight grid lines.
 function pickNiceTick(spanMs) {
   const targets = [
     5 * 60e3,
@@ -627,6 +633,7 @@ function pickNiceTick(spanMs) {
   }
   return best;
 }
+// Picks a bin size (1-30 min) giving roughly 80 bins over the span.
 function pickBin(spanMs) {
   const targetBins = 80;
   const raw = spanMs / targetBins;
@@ -799,6 +806,7 @@ function pickBin(spanMs) {
   }, { passive:true });
 }*/
 
+// Transparent overlay on the plot area: drag to select a time range and zoom; double click/tap resets.
 function addBrushOverlay(svg, plotBox, startMs, endMs) {
   const overlay = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   overlay.setAttribute('x', plotBox.x);
@@ -986,6 +994,7 @@ els.ths.forEach((th) =>
 window.addEventListener('resize', () => renderAll());
 
 // ------- Render all -------
+// Applies filters/sort to the cached rows and redraws timeline and table.
 function renderAll() {
   ensureWindow();
   const rowsInWin = filterRowsInWindow(state.rowsAll);
@@ -994,6 +1003,7 @@ function renderAll() {
 }
 
 // ------- Boot -------
+// Initial load (also used after Clear all): fetches rows, sets the window and renders.
 async function boot() {
   setRollingWindow(state.windowHours);
   syncWinBtnActive();

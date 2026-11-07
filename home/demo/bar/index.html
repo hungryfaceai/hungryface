@@ -1,4 +1,9 @@
 <!doctype html>
+<!--
+  home/demo/bar/index.html — "Naptio's Bar": a light-hearted 0.0% cocktail menu page, separate from the monitor.
+  Self-contained: translations and recipes are in the inline script, with a language picker, a background-music
+  toggle and a QR overlay (image from api.qrserver.com). Uses the shared sidebar stylesheet and tokens.css.
+-->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -14,6 +19,8 @@
 
     <link rel="stylesheet" href="/hungryface/shared/tokens.css" />
     <style>
+      /* Bar page styles: layout, menu cards, recipe panel, QR overlay and responsive tweaks. */
+      /* --- Theme variables and base --- */
       :root {
         color-scheme: dark;
         --bg: #0b0b0b;
@@ -76,6 +83,7 @@
         gap: 8px;
       }
 
+      /* --- Pill buttons --- */
       .pill {
         display: inline-flex;
         align-items: center;
@@ -210,6 +218,7 @@
         z-index: 0;
       }
 
+      /* --- Shimmer animation keyframes --- */
       @keyframes shimmer {
         0% {
           background-position: 0% 50%;
@@ -269,6 +278,7 @@
         position: relative;
         z-index: 1;
       }
+      /* --- Menu grid: two columns from 760px --- */
       @media (min-width: 760px) {
         .menu-wrapper .menu {
           grid-template-columns: 1fr 1fr;
@@ -276,6 +286,7 @@
         }
       }
 
+      /* --- Menu and recipe side by side from 1024px --- */
       @media (min-width: 1024px) {
         .menu-wrapper {
           flex-direction: row;
@@ -286,6 +297,7 @@
         }
       }
 
+      /* --- Menu sections and drinks --- */
       section {
         background: var(--panel);
         border-radius: var(--radius-card);
@@ -348,6 +360,7 @@
         line-height: 1.5;
       }
 
+      /* --- Recipe panel on wide screens --- */
       @media (min-width: 1024px) {
         .recipe-panel {
           flex: 1;
@@ -495,6 +508,7 @@
         z-index: 0;
       }
 
+      /* --- Footer glow animation --- */
       @keyframes glow {
         0% {
           opacity: 0.4;
@@ -724,8 +738,11 @@
     <audio id="bgAudio" src="/hungryface/home/snapshots/song/naptio.mp3" preload="auto"></audio>
 
     <script>
+      // Bar page script: i18n tables (translations, recipeLabels, recipes) followed by the UI wiring.
       (function () {
+        /* UI strings per language (en, ru, fr, es); keys match the data-i18n attributes in the markup. */
         const translations = {
+          /* English is the fallback for any missing language or key. */
           en: {
             brand: 'Naptio’s Bar',
             subtitle: 'Elegant 0.0% cocktails crafted with Clean T',
@@ -736,12 +753,14 @@
             hide_qr_label: 'Hide QR',
             qr_scan_header: 'Scan to open this menu',
             qr_close_label: 'Close',
+/* Header and QR overlay labels end above; below are the page title and intro. */
 
             ribbon: 'All cocktails · 0.0% ABV',
             title: 'Naptio’s Signature Menu',
             intro:
               'Calmly curated creations inspired by care, clarity, and the quiet hours. Prepared with <strong>CleanCo Clean T</strong> — agave warmth, olive depth, and a peppery finish.',
 
+            /* Menu section "Classics": each drink has name, description and tasting notes. */
             classics_header: 'Classics',
             napgarita_name: 'Napgarita',
             napgarita_desc: 'Clean T · Lime · Agave — a timeless balance of citrus and calm.',
@@ -755,6 +774,7 @@
             smokemonitor_desc: 'Clean T · Lime · Agave · Hint of Smoke — delicate and earthy.',
             smokemonitor_notes: 'The evening’s soft exhale.',
 
+            /* Menu section "Spiced & Savoury". */
             spiced_header: 'Spiced & Savoury',
             parentmode_name: 'Parent Mode',
             parentmode_desc: 'Clean T · Lime · Agave · Chili · Coriander — vibrant and confident.',
@@ -764,6 +784,7 @@
             crysignal_desc: 'Clean T · Lime · Agave · Chili Infusion — gentle fire, steady rhythm.',
             crysignal_notes: 'A spirited take on focus and warmth.',
 
+            /* Menu section "Fruity & Fresh". */
             fruity_header: 'Fruity & Fresh',
             nurserybreeze_name: 'Nursery Breeze',
             nurserybreeze_desc: 'Clean T · Watermelon · Lime · Syrup — light, lifted, refreshing.',
@@ -777,11 +798,13 @@
             goldenhour_desc: 'Clean T · Orange Juice · Grenadine — layered hues of dawn and dusk.',
             goldenhour_notes: 'A slow sip to start or end the day.',
 
+            /* Menu section "Light & Easy". */
             light_header: 'Light & Easy',
             quietmode_name: 'Quiet Mode',
             quietmode_desc: 'Clean T · Tonic · Lime — crisp, poised, and still.',
             quietmode_notes: 'Serenity in highball form.',
 
+            /* Footer lines and the empty state of the recipe panel. */
             footer_line1: '© 2026 Naptio · Crafted for calm evenings.',
             footer_line2: 'All drinks 0.0% ABV',
 
@@ -789,6 +812,7 @@
             recipe_empty_hint: 'Tap a cocktail name to see the full recipe here.',
           },
 
+          /* Russian */
           ru: {
             brand: 'Бар Naptio',
             subtitle: 'Изысканные коктейли 0.0% на основе Clean T',
@@ -852,6 +876,7 @@
             recipe_empty_hint: 'Нажмите на название коктейля, чтобы увидеть рецепт здесь.',
           },
 
+          /* French */
           fr: {
             brand: 'Bar Naptio',
             subtitle: 'Cocktails 0,0 % élégants préparés avec Clean T',
@@ -915,6 +940,7 @@
             recipe_empty_hint: 'Touchez un cocktail pour voir la recette ici.',
           },
 
+          /* Spanish */
           es: {
             brand: 'Bar Naptio',
             subtitle: 'Cócteles elegantes 0,0 % preparados con Clean T',
@@ -979,6 +1005,7 @@
           },
         };
 
+        /* Headings used inside the recipe panel, per language. */
         const recipeLabels = {
           en: {
             tastesLike: 'Tastes like',
@@ -1002,7 +1029,9 @@
           },
         };
 
+        /* Full recipes keyed by language then cocktail id (matches data-recipe on the menu names). */
         const recipes = {
+          /* Each recipe has title, taste, ingredients (list) and method (ordered steps). */
           en: {
             napgarita: {
               title: 'Napgarita',
@@ -1141,6 +1170,7 @@
             },
           },
 
+          /* Russian recipes */
           ru: {
             napgarita: {
               title: 'Napgarita',
@@ -1283,6 +1313,7 @@
             },
           },
 
+          /* French recipes */
           fr: {
             napgarita: {
               title: 'Napgarita',
@@ -1430,6 +1461,7 @@
             },
           },
 
+          /* Spanish recipes */
           es: {
             napgarita: {
               title: 'Napgarita',
@@ -1569,11 +1601,13 @@
           },
         };
 
+        // Current UI state: selected language, which recipe is open, and the audio / QR toggles.
         let currentLang = 'en';
         let currentRecipeId = null;
         let isPlaying = false;
         let qrVisible = false;
 
+        // Cached DOM references for the controls and recipe panel.
         const picker = document.getElementById('langPicker');
         const audioEl = document.getElementById('bgAudio');
         const audioToggle = document.getElementById('audioToggle');
@@ -1604,6 +1638,7 @@
           '</svg>' +
           '</span>';
 
+        // Look-ups fall back to English when a language has no entry.
         function getRecipeLabels(lang) {
           return recipeLabels[lang] || recipeLabels.en;
         }
@@ -1611,6 +1646,8 @@
           return recipes[lang] || recipes.en;
         }
 
+        // Fill the recipe panel for one cocktail in the current language (strings come from the local
+        // tables above).
         function renderRecipe(recipeId) {
           const langRecipes = getLangRecipes(currentLang);
           const langLabels = getRecipeLabels(currentLang);
@@ -1639,6 +1676,7 @@
           recipeBodyEl.innerHTML = html;
         }
 
+        // Swaps the audio pill between speaker (play) and mute icon plus translated label.
         function updateAudioLabel() {
           const dict = translations[currentLang] || translations.en;
           if (isPlaying) {
@@ -1648,11 +1686,14 @@
           }
         }
 
+        // Updates the QR pill text to Show / Hide in the current language.
         function updateQrLabel() {
           const dict = translations[currentLang] || translations.en;
           qrToggle.textContent = qrVisible ? dict.hide_qr_label : dict.show_qr_label;
         }
 
+        // The QR image is requested lazily, the first time the overlay opens, and only encodes this
+        // page's address.
         function ensureQrLoaded() {
           // Generate a QR code URL for the current page
           const pageUrl = window.location.href;
@@ -1663,6 +1704,7 @@
           qrUrlText.textContent = pageUrl;
         }
 
+        // Opens the QR overlay and keeps ARIA state in sync with the visual state.
         function openQr() {
           qrVisible = true;
           qrOverlay.classList.add('show');
@@ -1672,6 +1714,7 @@
           updateQrLabel();
         }
 
+        // Hides the QR overlay and resets the pill and ARIA state.
         function closeQr() {
           qrVisible = false;
           qrOverlay.classList.remove('show');
@@ -1680,6 +1723,7 @@
           updateQrLabel();
         }
 
+        // Switch language: update every [data-i18n] node, the aria labels and any open recipe.
         function applyLang(lang) {
           currentLang = lang;
           const dict = translations[lang] || translations.en;
@@ -1706,13 +1750,16 @@
           }
         }
 
+        // Language dropdown.
         picker.addEventListener('change', function () {
           applyLang(this.value);
         });
 
         // Play / Mute pill
+        // Starting the song resumes from the beginning; stopping rewinds so the next play restarts it.
         audioToggle.addEventListener('click', function () {
           if (!isPlaying) {
+            // play() returns a promise that rejects when the browser blocks playback without a gesture.
             audioEl.play().catch(function () {
               /* mobile autoplay restrictions are fine */
             });
@@ -1749,6 +1796,7 @@
         });
 
         // Cocktail name click -> show recipe
+        // Names are focusable; support Enter and Space as well as click.
         document.querySelectorAll('.name').forEach(function (el) {
           el.addEventListener('click', function () {
             const rid = el.getAttribute('data-recipe');
@@ -1763,6 +1811,7 @@
           });
         });
 
+        // Initial render using the picker's value (the browser may restore it after a reload).
         // initial setup
         applyLang(picker.value || 'en');
         updateAudioLabel();

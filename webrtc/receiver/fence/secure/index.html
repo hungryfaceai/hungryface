@@ -1,4 +1,14 @@
 <!doctype html>
+<!--
+  Naptio Viewer: Virtual fence (webrtc/receiver/fence/secure/index.html).
+  Shows the Camera phone live video with an editable polygon "safe zone" drawn over it. If any visible body
+  landmark leaves the zone, a Fence alert is raised until the baby is back inside. Pose landmarks come from the
+  Camera over the "pose" data channel or from a local MediaPipe PoseLandmarker.
+  Main pieces: video stage + canvas (polygon, handles, pose), Draw zone / Clear buttons, shared Alerts UI
+  (banner + history drawer), alert sound.
+  Dependencies: shared/receiver-core.js, psk/bootstrap.js, shared/alerts/*, shared/vision-task.js.
+  The zone is kept in memory only (it resets to the full frame on reload).
+-->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -14,6 +24,7 @@
 
     <link rel="stylesheet" href="/hungryface/shared/tokens.css" />
     <style>
+      /* Fence page styles: video stage, polygon canvas overlay, controls bar and zone alert badge. */
       :root {
         color-scheme: dark;
       }
@@ -171,6 +182,7 @@
     </div>
 
     <script type="module">
+      // Fence viewer logic: polygon editing (touch/mouse), inside/outside test per frame, Fence alert episodes.
       import {
         DrawingUtils,
         PoseLandmarker,
@@ -229,6 +241,7 @@
       let poseLoopRunning = false;
 
       // ---------- Polygon / Zone state ----------
+      // Vertices are in canvas pixel coordinates; polygonClosed is false while the user is still drawing.
       let polygonPoints = [];
       let polygonClosed = true;
       let drawingMode = false;
@@ -313,6 +326,7 @@
         }, 60_000);
       }
 
+      // Show a status message; "Signaling: connected" has special hide timers.
       function showStatus(msg) {
         // Special behaviour only for the exact "Signaling: connected" string
         if (msg === SIGNALING_CONNECTED_STATUS) {
@@ -400,6 +414,7 @@
       remoteVideo.addEventListener('resize', beginViewportSettle);
 
       /* ---------- Canvas alignment ---------- */
+      // Rectangle of the video content when letterboxed ("contain") inside its container.
       function containRect(containerW, containerH, contentW, contentH) {
         const scale = Math.min(containerW / (contentW || 1), containerH / (contentH || 1));
         const w = Math.round(contentW * scale);
@@ -408,6 +423,7 @@
         const y = Math.floor((containerH - h) / 2);
         return { left: x, top: y, width: w, height: h };
       }
+      // Size and position the canvas over the displayed video (accounting for device pixel ratio).
       function alignCanvasToVideo() {
         const stageBox = stage.getBoundingClientRect();
         const videoBox = remoteVideo.getBoundingClientRect();
@@ -499,6 +515,7 @@
       }
 
       /* ---------- Polygon helpers ---------- */
+      // Default zone: the whole frame.
       function setDefaultPolygon() {
         polygonPoints = [
           { x: 0, y: 0 },
@@ -510,6 +527,7 @@
         drawingMode = false;
         setOverlayVisible(true);
       }
+      // Convert pointer client coordinates to canvas pixel coordinates.
       function getCanvasCoordsFromClientXY(clientX, clientY) {
         const rect = poseCanvas.getBoundingClientRect();
         const xVis = clientX - rect.left;
@@ -518,6 +536,7 @@
         const sy = poseCanvas.height / Math.max(1, rect.height);
         return { x: xVis * sx, y: yVis * sy };
       }
+      // Handle hit radius (HANDLE_RADIUS_CSS) converted to canvas pixels.
       function getHitRadiusCanvasPx() {
         const rect = poseCanvas.getBoundingClientRect();
         const sx = poseCanvas.width / Math.max(1, rect.width);
@@ -545,6 +564,7 @@
           y: Math.max(0, Math.min(poseCanvas.height, pt.y)),
         };
       }
+      // Draw the zone outline, fill and vertex handles.
       function drawPolygonOverlay(ctx) {
         if (!polygonPoints.length) return;
         ctx.save();
@@ -579,6 +599,7 @@
         poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
         drawPolygonOverlay(poseCtx);
       }
+      // Even-odd ray casting point-in-polygon test.
       function pointInPolygon(pt, poly) {
         let inside = false;
         for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -591,6 +612,7 @@
         }
         return inside;
       }
+      // True if any sufficiently visible landmark of any detected person lies outside the closed zone.
       function anyLandmarkOutside(landmarks) {
         if (!polygonClosed || polygonPoints.length < 3) return false;
         const w = poseCanvas.width,
@@ -608,6 +630,7 @@
       }
 
       /* ---------- Shared Alerts helpers ---------- */
+      // End the open Fence alert (if any), storing the number of frames spent outside.
       function finalizeOpenFenceAlert(message = 'Ended') {
         if (!fenceAlertOn) {
           fenceAlertId = null;
@@ -629,6 +652,7 @@
         fenceStartMs = 0;
       }
 
+      // Per-frame state machine: start an alert when outside, count frames while outside, end when back inside.
       function updateFenceAlert(isOutside) {
         // ON transition
         if (isOutside && !fenceAlertOn) {
@@ -664,6 +688,7 @@
 
       /* ---------- MediaPipe on RECEIVER ---------- */
       let _poseTaskP = null;
+      // Lazily create the PoseLandmarker once; concurrent callers share one promise.
       function ensurePoseTask() {
         if (poseTask) return Promise.resolve(poseTask);
         if (!_poseTaskP)
@@ -731,6 +756,7 @@
       }
       let _loopGen = 0,
         _loopStarting = false;
+      // Run pose detection on the Viewer for every video frame; _loopGen retires stale loops.
       async function startReceiverPoseLoop() {
         if (poseLoopRunning || _loopStarting) return;
         _loopStarting = true;
@@ -787,6 +813,7 @@
         zoneAlert.style.display = 'none';
         updateFenceAlert(false);
       }
+      // Apply Camera pose-mode: run locally ("receiver"), consume Camera landmarks ("sender"), or off.
       function applyPoseMode() {
         setOverlayVisible(poseEnabled);
         if (!poseEnabled) {
@@ -882,6 +909,7 @@
         lastTapPos = null;
         lastTapTime = 0;
       }
+      // Drawing mode: tap adds a vertex, double-tap near the last one closes the polygon. Else drag a handle.
       function onPointerDown(e) {
         e.preventDefault();
         const pos = getCanvasCoordsFromClientXY(e.clientX, e.clientY);

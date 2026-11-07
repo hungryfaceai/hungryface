@@ -1,4 +1,8 @@
 // /hungryface/webrtc/receiver/shared/help-sheet.js
+// Header note: this file is motion/help-sheet.js (the line above names a different path).
+// Loads motion/help-sheet.html and injects the Help side-sheet (#helpSheet, #helpBackdrop) into the page,
+// plus the shared help-sheet.css. Fires a 'help:ready' event on document once the markup is in the DOM, so the
+// Motion page can wire up open/close handlers. Does nothing if the sheet was already injected.
 (async () => {
   // Avoid double-insert if this script runs twice
   if (document.getElementById('helpSheet') || document.getElementById('helpBackdrop')) return;

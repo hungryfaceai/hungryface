@@ -36,6 +36,7 @@ export function initAlertsUI(opts = {}) {
 }
 
 /** Start a new alert episode; returns the record id. */
+// Stores a record with endAt=null; finishAlert() closes it later.
 export async function beginAlert({ type, message }) {
   // type must be from AlertTypes; message is free text
   const rec = {

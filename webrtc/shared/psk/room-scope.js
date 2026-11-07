@@ -1,6 +1,7 @@
 // /hungryface/webrtc/shared/psk/room-scope.js
 // Derive a per-PSK namespace so that "Baby" on network A != "Baby" on network B.
 
+// Fixed message signed with the PSK; the HMAC output is the namespace, so it is stable per key.
 const NAMESPACE_MSG = new TextEncoder().encode('naptio-room-namespace-v1');
 
 /** base64url -> Uint8Array */

@@ -13,6 +13,14 @@
 
 const lastDelegate = new Map(); // label -> 'GPU' | 'CPU' (for diagnostics)
 
+/**
+ * Create a MediaPipe task via TaskClass.createFromOptions, trying the GPU delegate first, then the CPU.
+ * @param {object} TaskClass MediaPipe class with a static createFromOptions (e.g. PoseLandmarker).
+ * @param {object} fileset Result of FilesetResolver.forVisionTasks().
+ * @param {object} options Task options; baseOptions.delegate is overwritten here.
+ * @param {{label?: string, log?: object}} [meta] label keys visionDelegate(); log needs a warn method.
+ * @returns {Promise<object>} the created task (rejects only if the CPU attempt also fails).
+ */
 export async function createVisionTask(TaskClass, fileset, options, { label = 'vision', log = console } = {}) {
   const withDelegate = (delegate) => ({
     ...options,

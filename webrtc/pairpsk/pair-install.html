@@ -1,4 +1,10 @@
 <!doctype html>
+<!--
+  webrtc/pairpsk/pair-install.html — landing page of the pairing QR code / link made by Pair devices (index.html).
+  Reads #room=...&psk=... from the URL fragment, asks for Terms acceptance, stores the key as psk:<room> in
+  localStorage and removes the fragment from the address bar. The key can also be pasted or forgotten by hand.
+  Depends on webrtc/shared/psk/psk-ws-shim.js, adopt-room.js and legal/require-terms.js.
+-->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -8,6 +14,10 @@
     <link rel="icon" href="/hungryface/pwa/icons/favicon-196.png" sizes="196x196" />
     <link rel="stylesheet" href="/hungryface/shared/tokens.css" />
     <style>
+      /*
+       * Pair-install styles: hero card, masked PSK chip and editor, mode pills, success flash and
+       * toast.
+       */
       :root {
         color-scheme: dark;
       }
@@ -390,6 +400,8 @@
     <div id="toast" class="invite-toast" aria-live="polite"></div>
 
     <script type="module">
+      // Install logic: boot() reads the key from the URL fragment, validates it and persists it for the
+      // room.
       import { getPsk } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
       import { adoptPairedRoom } from '/hungryface/webrtc/shared/psk/adopt-room.js';
       import { ensureTermsAccepted } from '/hungryface/legal/require-terms.js';
@@ -509,6 +521,7 @@
         });
       }
 
+      // The fragment is parsed as query-string syntax: room and psk.
       function parseHash() {
         const hash = location.hash && location.hash.startsWith('#') ? location.hash.slice(1) : '';
         const qs = new URLSearchParams(hash);
@@ -516,6 +529,7 @@
         const psk = (qs.get('psk') || '').trim();
         return { hadHash: !!hash, room, psk };
       }
+      // Remove the secret from the address bar and history entry once it has been read.
       function scrubUrl() {
         history.replaceState(null, '', location.pathname + location.search);
       }
@@ -657,6 +671,8 @@
         pairedOk.classList.remove('show');
       });
 
+      // boot() runs once on load: handle an incoming key first, otherwise just show what is saved for
+      // the room.
       // Boot: install PSK from QR (if present) → auto-persist; only flash if valid; else grey pills
       (async function boot() {
         const intent = parseHash();

@@ -1,4 +1,16 @@
 <!doctype html>
+<!--
+  Viewer video page (webrtc/receiver/video/secure/): shows the Camera's live video and lets the parent
+  listen, talk back (Talk button: short press toggles, long press holds) and play lullabies to the Camera.
+
+  Pieces:
+    - Module script 1: PSK check (else redirect to Pair Devices), room resolution and scoping, PSK
+      WebSocket shim, then a ReceiverCore connection that feeds the <video>.
+    - Mini dashboard (alerts overlay) and wake lock scripts at the bottom.
+  Depends on: shared/psk/*.js, shared/config.js (WS_ENDPOINT), receiver/shared/receiver-core.js,
+  sidebar-loader.js, mini-dash.js, shared/wake-lock.js. localStorage: psk:<room>, naptio:lastRoom,
+  bm_receiver_room, naptio:miniDash:enabled. Lullaby tracks come from /hungryface/lullaby/.
+-->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -164,6 +176,7 @@
     </div>
 
     <script type="module">
+      // Viewer video page logic: room bootstrap, status overlay, audio, fullscreen, talkback, lullaby, ReceiverCore.
       import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
       import { requirePskOrRedirect, listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
       import { ReceiverCore } from '/hungryface/webrtc/receiver/shared/receiver-core.js';
@@ -201,6 +214,7 @@
         const uniq = new Set(rooms);
         if (envRoom) uniq.add(envRoom);
 
+        // Room priority: ?room= > last used > saved receiver room > env room > any paired room (as in Settings).
         const resolvedRoom = uniq.size
           ? (qsRoom && uniq.has(qsRoom) && qsRoom) ||
             (lastRoom && uniq.has(lastRoom) && lastRoom) ||
@@ -252,6 +266,7 @@
         let signalingRepeatInterval = null;
         let signalingConnectedActive = false;
 
+        // "Signaling: connected" is shown briefly, hidden after 10 s, then flashed for 2 s every minute as a heartbeat.
         function stopSignalingConnectedTimers() {
           signalingConnectedActive = false;
           if (signalingInitialTimer) {
@@ -308,6 +323,7 @@
           }, 60_000);
         }
 
+        // Update the status overlay; "Connected" auto-hides after 10 s, other messages stay visible.
         function showStatus(msg) {
           // Special behaviour only for the exact "Signaling: connected" string
           if (msg === SIGNALING_CONNECTED_STATUS) {
@@ -333,6 +349,7 @@
         }
 
         /* ---------- Audio UI ---------- */
+        // Show Enable or Disable audio depending on the muted state.
         function updateAudioButtons() {
           if (remoteVideo.muted) {
             enableAudioBtn.style.display = 'block';
@@ -346,6 +363,7 @@
 
         // The user's sound choice survives reconnects: only the very first stream starts muted.
         let userWantsSound = false;
+        // Start playback; muted on the first stream, with sound later if the user already asked for it.
         async function tryStartMuted() {
           try {
             remoteVideo.muted = !userWantsSound;
@@ -403,6 +421,7 @@
         });
         remoteVideo.addEventListener('resize', beginViewportSettle);
 
+        // Kept as a hook for pages that re-layout after viewport changes; video-only does nothing.
         function beginViewportSettle() {
           /* no-op for video-only */
         }
@@ -424,6 +443,7 @@
         let pttSession = false; // currently in PTT hold
         let pressTimer = null;
 
+        // Open the microphone once; the track starts disabled and is only enabled while talking.
         async function ensureTalkStream() {
           if (talkStream && talkTrack) return;
           talkStream = await navigator.mediaDevices.getUserMedia({
@@ -449,6 +469,7 @@
           talkTrack.enabled = false; // we toggle this; attach once
         }
 
+        // Bind the mic track to the preallocated sendonly sender (no renegotiation needed).
         function tryAttachOnce() {
           if (!talkTrack || !talkTx) return;
           const sender = talkTx.sender || talkSender;
@@ -468,6 +489,7 @@
           tryAttachOnce();
         }
 
+        // Enable or disable the mic track and duck the incoming audio while talking.
         function setTalking(on) {
           if (!talkTrack) return;
           console.log('[RX] setTalking:', on ? 'ENABLED' : 'DISABLED');
@@ -479,6 +501,7 @@
           updateTalkUI();
         }
 
+        // Reflect hold/toggle talking state on the Talk button.
         function updateTalkUI() {
           talkBtn.classList.toggle('ptt', pttSession);
           talkBtn.classList.toggle('live', pttSession || latched);
@@ -500,6 +523,7 @@
           }
         }
 
+        // Press handling: a press shorter than LONG_PRESS_MS toggles latched talking; holding longer is push-to-talk.
         async function handlePressStart(e) {
           e.preventDefault();
           pressed = true;
@@ -584,6 +608,7 @@
         let playlist = []; // shuffled order
         let trackIdx = 0;
 
+        // Fisher-Yates shuffle returning a copy.
         function shuffle(arr) {
           const a = arr.slice();
           for (let i = a.length - 1; i > 0; i--) {
@@ -593,6 +618,7 @@
           return a;
         }
 
+        // Check a file exists: HEAD first, then a 1-byte ranged GET for servers that reject HEAD.
         async function urlExists(url) {
           try {
             const h = await fetch(url, { method: 'HEAD', cache: 'no-cache' });
@@ -606,6 +632,7 @@
           }
         }
 
+        // Find lullaby URLs: playlist.json, else probe lullaby1..30.mp3, else assume lullaby1.mp3. Cached.
         async function discoverLullabies() {
           if (lullabyList.length) return lullabyList;
 
@@ -645,12 +672,14 @@
           return lullabyList;
         }
 
+        // Start a new shuffled cycle through the discovered tracks.
         function buildPlaylist() {
           playlist = shuffle(lullabyList);
           trackIdx = 0;
           console.log('[RX] reshuffled lullabies:', playlist);
         }
 
+        // Build the audio graph (mp3 element -> MediaStreamDestination) whose track is sent to the Camera.
         async function ensureLullabyGraph() {
           if (!lullabyCtx) {
             lullabyCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -680,6 +709,7 @@
           } catch {}
         }
 
+        // Play playlist entry i (wraps around).
         async function playTrackAt(i) {
           if (!playlist.length) return;
           trackIdx = ((i % playlist.length) + playlist.length) % playlist.length;
@@ -694,6 +724,7 @@
           console.log('[RX] playing lullaby:', url);
         }
 
+        // Advance to the next track; reshuffle after the last one.
         async function nextTrack() {
           if (!playlist.length) return;
           let next = trackIdx + 1;
@@ -704,6 +735,7 @@
           await playTrackAt(next);
         }
 
+        // Send the lullaby track to the Camera in place of the mic (talking is stopped first).
         async function startLullaby() {
           // ⬅️ If talking, stop it first (mutual exclusivity)
           if (pttSession || latched || talkTrack?.enabled) {
@@ -738,6 +770,7 @@
           console.log('[RX] lullabies → sender (shuffle loop active)');
         }
 
+        // Stop music and put the mic track (or silence) back on the sender.
         async function stopLullaby() {
           if (!sendingLullaby) return;
           sendingLullaby = false;
@@ -810,6 +843,7 @@
         });
 
         /* ---------- Shared core ---------- */
+        // onCreatePC runs for every new RTCPeerConnection, so talk/lullaby tracks are re-attached after reconnects.
         const core = new ReceiverCore({
           wsEndpoint: WS_ENDPOINT,
           room,

@@ -12,17 +12,24 @@
 
 const supported = typeof navigator !== 'undefined' && 'wakeLock' in navigator;
 
+/**
+ * Start holding a screen wake lock and keep re-acquiring it until release() is called.
+ * @param {{log?: function(string): void}} [opts] optional diagnostic logger.
+ * @returns {{active: boolean, supported: boolean, release: function(): Promise<void>}}
+ */
 export function keepAwake({ log = () => {} } = {}) {
   let sentinel = null;
   let wanted = true;
   let requesting = false;
 
+  // Request the lock if wanted, visible and not already held or in flight (guards against concurrent requests).
   async function acquire() {
     if (!supported || !wanted || sentinel || requesting) return;
     if (document.visibilityState !== 'visible') return;
     requesting = true;
     try {
       const s = await navigator.wakeLock.request('screen');
+      // release() was called while the request was pending: drop the lock we just got.
       if (!wanted) {
         try {
           await s.release();

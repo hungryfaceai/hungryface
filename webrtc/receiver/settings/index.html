@@ -1,4 +1,10 @@
 <!doctype html>
+<!--
+  webrtc/receiver/settings/index.html — per-device Settings: room selection, alert sounds and notification
+  cooldown, the mini dashboard toggle, and factory reset. Everything is stored locally (localStorage keys
+  naptio:notify:*, naptio:notifyCooldownMin, naptio:miniDash:enabled); factory reset wipes localStorage,
+  IndexedDB, caches and service workers. Uses the shared sidebar, tokens.css and the PSK modules.
+-->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -9,6 +15,10 @@
     <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
     <link rel="stylesheet" href="/hungryface/shared/tokens.css" />
     <style>
+      /*
+       * Settings styles: panel, grouped sections, controls, confirmation dialog, sidebar offset
+       * variables.
+       */
       :root {
         color-scheme: dark;
       }
@@ -404,6 +414,8 @@
 
     <!-- Sidebar overlap fix JS -->
     <script type="module">
+      // Keeps the page content clear of the sidebar by publishing its visible width as --sidebar-
+      // visible.
       (function () {
         const root = document.documentElement;
         let sidebar = null;
@@ -660,6 +672,8 @@
 
     <!-- PSK + Rooms bootstrap -->
     <script type="module">
+      // Room section: requires a PSK for the chosen room (else redirects to pairing) and fills the room
+      // list.
       import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
       import { requirePskOrRedirect, listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
 
@@ -744,6 +758,8 @@
 
     <!-- ——— Alerts + In-app dashboard persistence & wiring ——— -->
     <script type="module">
+      // Alert sound and dashboard preferences. Values are 'on' / 'off' strings; unset falls back to the
+      // default.
       const KEYS = {
         audio: 'naptio:notify:audio',
         motion: 'naptio:notify:motion',
@@ -808,6 +824,8 @@
     <!-- ——— End: Alerts + In-app dashboard ——— -->
 
     <script type="module">
+      // Deletes every kind of local state Naptio uses; reports per-store results so the UI can tell if
+      // a tab blocks it.
       // ——— Factory reset routine (no external deps) ———
       async function factoryResetNaptio({ includeSessionStorage = true, knownDbNames = [] } = {}) {
         const results = { indexedDB: [], localStorage: null, sessionStorage: null, caches: [], serviceWorkers: [] };

@@ -1,4 +1,10 @@
 <!doctype html>
+<!--
+  webrtc/receiver/support/index.html — "Contact us" form for support. Builds a mailto: link (or shares files via
+  the Web Share API where supported) with the user's message and, only if they opt in, a short diagnostics block
+  they can preview first. This page sends nothing itself: the user's email app does the sending.
+  Depends on webrtc/shared/psk/require-psk.js (room count) and webrtc/shared/config.js (server address check).
+-->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -13,6 +19,8 @@
     <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
     <link rel="stylesheet" href="/hungryface/shared/tokens.css" />
     <style>
+      /* Contact page styles: panel, form fields, attachment drop zone and chips, diagnostics preview. */
+      /* --- Theme and base --- */
       :root {
         color-scheme: dark;
       }
@@ -40,6 +48,7 @@
         padding: 20px 12px;
         box-sizing: border-box;
       }
+      /* --- Panel --- */
       .panel {
         width: 100%;
         max-width: 720px;
@@ -52,6 +61,7 @@
           0 8px 24px rgba(0, 0, 0, 0.5);
         padding: 18px 16px 28px;
       }
+      /* --- Wide screens and safe areas --- */
       @media (min-width: 720px) {
         #ui {
           padding: 24px;
@@ -66,6 +76,7 @@
           padding-bottom: calc(20px + env(safe-area-inset-bottom));
         }
       }
+      /* --- Header and typography --- */
       .header {
         padding: 2px 0 12px 44px;
         margin-bottom: 16px;
@@ -156,6 +167,7 @@
         margin: 6px 0 0;
       }
       input[type='text'],
+      /* --- Text area and counter --- */
       textarea {
         width: 100%;
         box-sizing: border-box;
@@ -185,6 +197,7 @@
         color: var(--nt-text-muted, #aaa);
       }
 
+      /* --- Attachment drop zone and chips --- */
       .drop {
         border: 1.5px dashed var(--nt-border-strong, #2a2a2a);
         background: var(--nt-bg, #000);
@@ -241,6 +254,7 @@
         background: #262626;
       }
 
+      /* --- Diagnostics opt-in and preview --- */
       .check {
         display: flex;
         align-items: flex-start;
@@ -350,6 +364,7 @@
           align-items: center;
         }
       }
+      /* --- Status messages and direct-email fallback --- */
       .hint {
         font-size: 13px;
         color: var(--nt-text-muted, #aaa);
@@ -380,6 +395,7 @@
         font-size: 14px;
         overflow-wrap: anywhere;
       }
+      /* --- Accessibility helper --- */
       .sr-only {
         position: absolute;
         width: 1px;
@@ -495,11 +511,14 @@
     </div>
 
     <script type="module">
+      // Form logic: diagnostics, mailto composition, attachments and validation.
       import { listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
       import { WS_ENDPOINT } from '/hungryface/webrtc/shared/config.js';
 
+      // Support mailbox, and a cap on attachments (share sheets cope badly with many files).
       const TO = 'naptio@vatrelay.co.uk';
       const MAX_FILES = 5;
+      // Short getElementById helper; the consts below cache the form elements.
       const $ = (id) => document.getElementById(id);
       const form = $('supportForm'),
         subjectEl = $('subject'),
@@ -520,9 +539,11 @@
         copyStatus = $('copyStatus');
 
       const ua = navigator.userAgent || '';
+      // iPadOS reports itself as a Mac, so touch support is used to tell it apart.
       const isIOS = /iP(hone|od|ad)/.test(ua) || (/Mac/.test(navigator.platform) && 'ontouchend' in document);
       const isAndroid = /Android/i.test(ua);
       const isTouch = matchMedia('(pointer: coarse)').matches;
+      // Drag-and-drop hints are meaningless on touch screens, so remove them.
       if (isTouch) document.querySelectorAll('.hide-touch').forEach((e) => e.remove());
 
       // Attachments only where the browser can hand files to the email app (Web Share with files).
@@ -532,12 +553,14 @@
         canShareFiles = !!(navigator.canShare && navigator.canShare({ files: [test] }) && navigator.share);
       } catch {}
       attachRow.hidden = !canShareFiles;
+      // Files picked by the user; only sent when canShareFiles is true.
       let selectedFiles = [];
 
       // ---------------- Diagnostics: minimal, relevant, shown before sending ----------------
       // Only what helps fix Naptio problems. Deliberately NOT collected (fingerprinting / not
       // needed): GPU model, battery, memory/CPU, storage, full user-agent string, page timings,
       // the page address (it can contain a room name), pairing keys or room names.
+      // Best-effort browser name/version and OS: prefers UA client hints, falls back to parsing the UA string.
       function browserAndOS() {
         const d = navigator.userAgentData;
         let browser = 'Unknown browser',
@@ -549,6 +572,7 @@
           if (b) browser = `${b.brand} ${b.version}`;
           if (d.platform) os = d.platform;
         }
+        // First capture group of a regex run against the UA string (undefined when no match).
         const m = (re) => (ua.match(re) || [])[1];
         if (browser === 'Unknown browser') {
           const v = m(/Edg\/(\d+)/)
@@ -568,12 +592,14 @@
           os = /Windows/.test(ua) ? 'Windows' : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : os;
         return { browser: browser.trim(), os: os.trim() };
       }
+      // Local time zone offset formatted as UTC+hh:mm.
       function utcOffset() {
         const min = -new Date().getTimezoneOffset(),
           sign = min >= 0 ? '+' : '-',
           a = Math.abs(min);
         return `UTC${sign}${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')}`; // keeps half-hour zones (e.g. +05:30)
       }
+      // Resolves a permission state ('granted'/'denied'/'prompt'), or 'unknown' if the Permissions API can't tell.
       async function permission(name) {
         try {
           return (await navigator.permissions.query({ name })).state;
@@ -581,6 +607,7 @@
           return 'unknown';
         }
       }
+      // Checks the signalling server's /admin/config over http(s); aborts after 6 s so the form never hangs.
       async function serverReachable() {
         try {
           const base = new URL(WS_ENDPOINT.replace(/^ws/, 'http'));
@@ -597,6 +624,7 @@
           return e.name === 'AbortError' ? 'no (timed out)' : 'no';
         }
       }
+      // Gathers the diagnostic rows (label/value pairs) shown in the preview and appended to the email.
       async function collectDiagnostics() {
         const { browser, os } = browserAndOS();
         let cams = '?',
@@ -638,25 +666,31 @@
           ['Naptio server reachable', server],
         ];
       }
+      // Rows to 'Label: value' lines.
       const formatDiag = (rows) => rows.map(([k, v]) => `${k}: ${v}`).join('\n');
+      // Diagnostics are probed once and cached (the probing is async and slow) until the checkbox changes.
       let diagCache = null;
       async function diagText() {
         if (!diagCache) diagCache = formatDiag(await collectDiagnostics());
         return diagCache;
       }
+      // Fill the preview lazily when the details element is opened.
       diagDetails.addEventListener('toggle', async () => {
         if (diagDetails.open) diagPreview.textContent = await diagText();
       });
+      // Force a fresh probe next time the checkbox is toggled.
       includeDiag.addEventListener('change', () => {
         diagCache = null;
         if (includeDiag.checked) diagText();
       });
 
       // ---------------- Compose + send ----------------
+      // Email subject: fixed prefix plus the user's optional topic.
       function composeSubject() {
         const s = subjectEl.value.trim();
         return 'Naptio support' + (s ? ': ' + s : '');
       }
+      // Email body: the user's message plus, if opted in, the device details block.
       async function composeBody() {
         const text = messageEl.value.trim();
         if (!includeDiag.checked) return text;
@@ -665,10 +699,12 @@
       // mailto: URLs over ~2,000 characters fail in some mail apps. Never cut the user's own words:
       // drop device details first, then tell the user if the message itself is too long.
       const MAILTO_MAX = 1900;
+      // Builds the mailto: link; encodeURIComponent keeps newlines and special characters intact.
       function mailtoUrl(subject, body) {
         return `mailto:${TO}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
       }
 
+      // Submit: use the share sheet when files are attached, otherwise open a mailto: link.
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         if (!validate(true)) return;
@@ -676,6 +712,7 @@
         try {
           const subject = composeSubject();
           let body = await composeBody();
+          // Copy the address first: share sheets usually have no "To" field.
           if (selectedFiles.length && canShareFiles) {
             try {
               await navigator.clipboard.writeText(TO);
@@ -694,6 +731,7 @@
               return;
             }
           }
+          // Plain mailto: path; degrade gracefully when the link is too long.
           let url = mailtoUrl(subject, body);
           if (url.length > MAILTO_MAX && includeDiag.checked) {
             body = messageEl.value.trim() + '\n\n(Device details were too long to include.)';
@@ -718,6 +756,7 @@
         addFiles([...(e.target.files || [])]);
         e.target.value = '';
       });
+      // Highlight the drop zone while a file is dragged over it.
       ['dragenter', 'dragover'].forEach((ev) =>
         drop.addEventListener(ev, (e) => {
           e.preventDefault();
@@ -731,6 +770,7 @@
         })
       );
       drop.addEventListener('drop', (e) => addFiles([...(e.dataTransfer?.files || [])]));
+      // Adds files (skipping duplicates by name/size/mtime) up to MAX_FILES, then refreshes the UI.
       function addFiles(files) {
         for (const f of files) {
           if (selectedFiles.length >= MAX_FILES) {
@@ -743,6 +783,7 @@
         renderChips();
         updateMode();
       }
+      // Rebuilds the attachment chips, each with a remove button.
       function renderChips() {
         chips.replaceChildren();
         selectedFiles.forEach((f, i) => {
@@ -765,6 +806,7 @@
           chips.appendChild(chip);
         });
       }
+      // Switches button label and hint between "share with files" and plain "open email" modes.
       function updateMode() {
         const withFiles = selectedFiles.length > 0 && canShareFiles;
         emailBtn.textContent = withFiles ? 'Share with files' : 'Open email';
@@ -772,6 +814,7 @@
           ? 'Choose your email app, then paste our address into “To” (we copied it for you).'
           : 'Opens your email app with your message ready to send.';
       }
+      // Human-readable file size (1024-based units).
       const fmtBytes = (n) => {
         if (n < 1024) return n + ' B';
         const u = ['KB', 'MB', 'GB'];
@@ -784,10 +827,12 @@
       };
 
       // ---------------- Validation + small bits ----------------
+      // Shows an inline error message (an empty string clears it).
       function showError(msg) {
         errEl.textContent = msg;
       }
       const EMPTY_MSG = 'Please describe the problem first.';
+      // Returns whether the message is non-empty; with show=true it also reports the error and focuses the field.
       function validate(show) {
         const ok = messageEl.value.trim().length > 0;
         if (show && !ok) {
@@ -797,12 +842,14 @@
         messageEl.setAttribute('aria-invalid', ok || !show ? 'false' : 'true');
         return ok;
       }
+      // Live validation, plus a character counter shown only near the 4000-character limit (from 3200).
       messageEl.addEventListener('input', () => {
         if (errEl.textContent && errEl.textContent !== EMPTY_MSG) showError('');
         validate();
         const n = messageEl.value.length;
         counterEl.textContent = n > 3200 ? `${n} / 4000` : '';
       });
+      // Copy the support address; the button label and status text reset after 1.5 s.
       copyBtn.addEventListener('click', async () => {
         try {
           await navigator.clipboard.writeText(TO);

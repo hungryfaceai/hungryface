@@ -1,6 +1,7 @@
 // webrtc/receiver/shared/alerts/pill.js
 // Creates (or wires) the Alerts button + red badge (iOS style)
 
+// Adds a <style> element once per page, keyed by id.
 function injectStyleOnce(id, css) {
   if (document.getElementById(id)) return;
   const s = document.createElement('style');
@@ -9,6 +10,7 @@ function injectStyleOnce(id, css) {
   document.head.appendChild(s);
 }
 
+// Styles for the injected (or adopted) Alerts button and its red count badge.
 injectStyleOnce(
   'alerts-pill-css',
   `
@@ -23,6 +25,10 @@ injectStyleOnce(
 `
 );
 
+/**
+ * Finds the Alerts button and badge by id, or creates them when missing.
+ * @returns {{openBtn: HTMLElement|null, badge: HTMLElement|null}}
+ */
 export function mountAlertsPill({
   drawerOpenBtnId = 'btnOpenAlerts',
   drawerBadgeId = 'alertsBadge',
