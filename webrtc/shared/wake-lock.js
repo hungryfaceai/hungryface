@@ -23,9 +23,16 @@ export function keepAwake({ log = () => {} } = {}) {
     requesting = true;
     try {
       const s = await navigator.wakeLock.request('screen');
-      if (!wanted) { try { await s.release(); } catch {} return; }
+      if (!wanted) {
+        try {
+          await s.release();
+        } catch {}
+        return;
+      }
       sentinel = s;
-      s.addEventListener('release', () => { if (sentinel === s) sentinel = null; });
+      s.addEventListener('release', () => {
+        if (sentinel === s) sentinel = null;
+      });
       log('wake lock acquired');
     } catch (e) {
       // NotAllowedError (no gesture yet / battery saver) etc. — retry later on gesture/visibility
@@ -35,25 +42,35 @@ export function keepAwake({ log = () => {} } = {}) {
     }
   }
 
-  const onVisible = () => { if (document.visibilityState === 'visible') acquire(); };
+  const onVisible = () => {
+    if (document.visibilityState === 'visible') acquire();
+  };
   const onGesture = () => acquire();
   const gestureEvents = ['pointerdown', 'keydown', 'touchend'];
 
   if (supported) {
     document.addEventListener('visibilitychange', onVisible);
-    gestureEvents.forEach(ev => document.addEventListener(ev, onGesture, { passive: true }));
+    gestureEvents.forEach((ev) => document.addEventListener(ev, onGesture, { passive: true }));
     acquire();
   }
 
   return {
-    get active() { return !!sentinel; },
+    get active() {
+      return !!sentinel;
+    },
     supported,
     async release() {
       wanted = false;
       document.removeEventListener('visibilitychange', onVisible);
-      gestureEvents.forEach(ev => document.removeEventListener(ev, onGesture));
-      const s = sentinel; sentinel = null;
-      if (s) { try { await s.release(); } catch {} log('wake lock released'); }
+      gestureEvents.forEach((ev) => document.removeEventListener(ev, onGesture));
+      const s = sentinel;
+      sentinel = null;
+      if (s) {
+        try {
+          await s.release();
+        } catch {}
+        log('wake lock released');
+      }
     },
   };
 }

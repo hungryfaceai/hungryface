@@ -30,7 +30,7 @@ function designLowpass(taps, cutoff) {
 
 export function createStreamingResampler(fromSr, toSr, { taps = 63 } = {}) {
   fromSr = Number(fromSr) || toSr;
-  const step = fromSr / toSr;             // input samples per output sample
+  const step = fromSr / toSr; // input samples per output sample
   const passthrough = Math.abs(step - 1) < 1e-9;
 
   // Low-pass only when downsampling: cut at 90% of the output Nyquist.
@@ -38,7 +38,7 @@ export function createStreamingResampler(fromSr, toSr, { taps = 63 } = {}) {
   const fir = down ? designLowpass(taps, (0.5 / step) * 0.9) : null;
   const firLen = fir ? fir.length : 0;
   const H = Math.max(0, firLen - 1);
-  let hist = new Float32Array(H);          // last H input samples (zeros at start)
+  let hist = new Float32Array(H); // last H input samples (zeros at start)
 
   // Filtered input not yet consumed by the interpolator. pos is the fractional read
   // position of the next output sample, relative to buf[0].
@@ -51,7 +51,8 @@ export function createStreamingResampler(fromSr, toSr, { taps = 63 } = {}) {
     const n = chunk.length;
     // ext = [history | chunk]; output i uses ext[i .. i+H]
     const ext = new Float32Array(H + n);
-    ext.set(hist, 0); ext.set(chunk, H);
+    ext.set(hist, 0);
+    ext.set(chunk, H);
     const out = new Float32Array(n);
     for (let i = 0; i < n; i++) {
       let acc = 0;
@@ -70,7 +71,8 @@ export function createStreamingResampler(fromSr, toSr, { taps = 63 } = {}) {
 
       // append filtered samples to the interpolation buffer
       const merged = new Float32Array(buf.length + f.length);
-      merged.set(buf, 0); merged.set(f, buf.length);
+      merged.set(buf, 0);
+      merged.set(f, buf.length);
       buf = merged;
 
       // linear interpolation needs buf[i0] and buf[i0+1], so read positions must be
@@ -80,7 +82,8 @@ export function createStreamingResampler(fromSr, toSr, { taps = 63 } = {}) {
       const out = new Float32Array(Math.max(0, nOut));
       let p = pos;
       for (let i = 0; i < out.length; i++) {
-        const i0 = Math.floor(p), t = p - i0;
+        const i0 = Math.floor(p),
+          t = p - i0;
         out[i] = buf[i0] * (1 - t) + buf[i0 + 1] * t;
         p += step;
       }
@@ -91,10 +94,15 @@ export function createStreamingResampler(fromSr, toSr, { taps = 63 } = {}) {
       return out;
     },
     reset() {
-      buf = new Float32Array(0); pos = 0;
+      buf = new Float32Array(0);
+      pos = 0;
       hist = new Float32Array(H);
     },
-    get fromSr() { return fromSr; },
-    get toSr() { return toSr; },
+    get fromSr() {
+      return fromSr;
+    },
+    get toSr() {
+      return toSr;
+    },
   };
 }

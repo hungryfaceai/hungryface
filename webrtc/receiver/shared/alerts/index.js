@@ -1,7 +1,12 @@
 // webrtc/receiver/shared/alerts/index.js
 // Public surface for shared Alerts UI + store + banner
 
-import { setupAlertBanner, showAlertBanner as _showAlertBanner, hideAlertBanner, setAlertBannerText } from './banner.js';
+import {
+  setupAlertBanner,
+  showAlertBanner as _showAlertBanner,
+  hideAlertBanner,
+  setAlertBannerText,
+} from './banner.js';
 import { setupAlertsDrawer, refreshAlertsBadge } from './drawer.js';
 import { getAllAlerts, addAlert, updateAlert, clearAllAlerts, AlertTypes } from './store.js';
 import { mountAlertsPill } from './pill.js';
@@ -15,15 +20,15 @@ export function initAlertsUI(opts = {}) {
   //   { drawerOpenBtnId: 'btnOpenAlerts', drawerBadgeId:'alertsBadge' }
   const { openBtn, badge } = mountAlertsPill({
     drawerOpenBtnId: opts.drawerOpenBtnId || 'btnOpenAlerts',
-    drawerBadgeId:   opts.drawerBadgeId   || 'alertsBadge',
-    injectIfMissing: true
+    drawerBadgeId: opts.drawerBadgeId || 'alertsBadge',
+    injectIfMissing: true,
   });
 
   // Drawer (history modal). You can pass a host to render into:
   setupAlertsDrawer({
     openBtnEl: openBtn,
     badgeEl: badge,
-    hostId: opts.drawerHostId || 'alertsModalHost'
+    hostId: opts.drawerHostId || 'alertsModalHost',
   });
 
   // Initial badge load
@@ -38,7 +43,7 @@ export async function beginAlert({ type, message }) {
     message: String(message || ''),
     startAt: new Date().toISOString(),
     endAt: null,
-    avgScore: 0
+    avgScore: 0,
   };
   // addAlert() notifies listeners itself (this tab + other tabs) with the full record
   return addAlert(rec);
@@ -48,7 +53,7 @@ export async function beginAlert({ type, message }) {
 export async function finishAlert(id, { avgScore = 0, message = '' } = {}) {
   const patch = {
     endAt: new Date().toISOString(),
-    avgScore: Number(avgScore) || 0
+    avgScore: Number(avgScore) || 0,
   };
   if (message) patch.message = message;
   // updateAlert() notifies listeners itself (this tab + other tabs) with the full record
@@ -61,4 +66,4 @@ export function showAlertBanner(whenMs = Date.now(), text) {
 }
 
 // re-exports for convenience / compatibility
-export { refreshAlertsBadge, getAllAlerts, clearAllAlerts, AlertTypes, hideAlertBanner, setAlertBannerText, };
+export { refreshAlertsBadge, getAllAlerts, clearAllAlerts, AlertTypes, hideAlertBanner, setAlertBannerText };

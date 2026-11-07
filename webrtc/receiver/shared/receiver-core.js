@@ -1,33 +1,32 @@
-
 // receiver-core.js — shared signaling + WebRTC for receivers (targets a specific sender)
 import { ICE_SERVERS } from '/hungryface/webrtc/shared/config.js';
 
 export class ReceiverCore {
   constructor(cfg) {
-    this.wsEndpoint = cfg.wsEndpoint;                 // wss://.../ws
-    this.room       = cfg.room || 'Baby';
+    this.wsEndpoint = cfg.wsEndpoint; // wss://.../ws
+    this.room = cfg.room || 'Baby';
     this.iceServers = cfg.iceServers || ICE_SERVERS;
 
     // UI / lifecycle hooks (all optional)
-    this.onStatus        = cfg.onStatus        || (()=>{});
-    this.onStream        = cfg.onStream        || (()=>{});
-    this.onIceState      = cfg.onIceState      || (()=>{});
-    this.onDataChannel   = cfg.onDataChannel   || (()=>{});
-    this.onSenderChange  = cfg.onSenderChange  || (()=>{});
-    this.onSignal        = cfg.onSignal        || (()=>{});
-    this.onHello         = cfg.onHello         || (()=>{});
-    this.onBye           = cfg.onBye           || (()=>{});
-    this.onRoster        = cfg.onRoster        || (()=>{});
-    this.onNeedOffer     = cfg.onNeedOffer     || (()=>{});
-    this.onCreatePC      = cfg.onCreatePC      || (()=>{});
+    this.onStatus = cfg.onStatus || (() => {});
+    this.onStream = cfg.onStream || (() => {});
+    this.onIceState = cfg.onIceState || (() => {});
+    this.onDataChannel = cfg.onDataChannel || (() => {});
+    this.onSenderChange = cfg.onSenderChange || (() => {});
+    this.onSignal = cfg.onSignal || (() => {});
+    this.onHello = cfg.onHello || (() => {});
+    this.onBye = cfg.onBye || (() => {});
+    this.onRoster = cfg.onRoster || (() => {});
+    this.onNeedOffer = cfg.onNeedOffer || (() => {});
+    this.onCreatePC = cfg.onCreatePC || (() => {});
 
     // Timers / backoff (overridable)
-    this.keepaliveMs          = cfg.keepaliveMs          || 25000;
-    this.reconnectMinMs       = cfg.reconnectMinMs       || 1000;
-    this.reconnectMaxMs       = cfg.reconnectMaxMs       || 10000;
+    this.keepaliveMs = cfg.keepaliveMs || 25000;
+    this.reconnectMinMs = cfg.reconnectMinMs || 1000;
+    this.reconnectMaxMs = cfg.reconnectMaxMs || 10000;
 
     // NEW: make 15s constants configurable
-    this.wsConnectTimeoutMs   = cfg.wsConnectTimeoutMs   || 10000; // WS open timeout
+    this.wsConnectTimeoutMs = cfg.wsConnectTimeoutMs || 10000; // WS open timeout
     this.iceDisconnectGraceMs = cfg.iceDisconnectGraceMs || 9000; // ICE disconnected grace
 
     // Internals
@@ -65,21 +64,38 @@ export class ReceiverCore {
       await this.#ensurePC();
       await this.#negotiate();
     })();
-    try { return await this.startPromise; }
-    finally { this.startPromise = null; }
+    try {
+      return await this.startPromise;
+    } finally {
+      this.startPromise = null;
+    }
   }
 
   close() {
     this.closed = true;
-    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.#clearIceGraceTimer();
-    try { this.#stopOfferResendLoop(); } catch {}
-    try { this.ws?.close(); } catch {}
-    try { this.pc?.close(); } catch {}
-    if (this.wsKeepalive) { clearInterval(this.wsKeepalive); this.wsKeepalive = null; }
+    try {
+      this.#stopOfferResendLoop();
+    } catch {}
+    try {
+      this.ws?.close();
+    } catch {}
+    try {
+      this.pc?.close();
+    } catch {}
+    if (this.wsKeepalive) {
+      clearInterval(this.wsKeepalive);
+      this.wsKeepalive = null;
+    }
   }
 
-  getPeerConnection() { return this.pc; }
+  getPeerConnection() {
+    return this.pc;
+  }
 
   /* ---------- Internals ---------- */
   async #ensureWS() {
@@ -92,7 +108,9 @@ export class ReceiverCore {
     const old = this.ws;
     if (old) {
       old.onopen = old.onmessage = old.onerror = old.onclose = null;
-      try { old.close(); } catch {}
+      try {
+        old.close();
+      } catch {}
     }
 
     this.wsConnectPromise = new Promise((resolve, reject) => {
@@ -103,11 +121,17 @@ export class ReceiverCore {
 
       let opened = false;
       const t = setTimeout(() => {
-        if (!opened) { try { sock.close(); } catch{}; reject(new Error('WS timeout')); }
+        if (!opened) {
+          try {
+            sock.close();
+          } catch {}
+          reject(new Error('WS timeout'));
+        }
       }, this.wsConnectTimeoutMs); // ← was 15000
 
       sock.onopen = () => {
-        opened = true; clearTimeout(t);
+        opened = true;
+        clearTimeout(t);
         this.#status('Signaling: connected');
         this.wsRetryMs = this.reconnectMinMs;
         this.#send({ type: 'join', room: this.room });
@@ -121,22 +145,28 @@ export class ReceiverCore {
       };
       sock.onmessage = (evt) => this.#onSignal(evt);
       sock.onerror = (e) => console.warn('[WS error]', e);
-      sock.onclose  = () => {
+      sock.onclose = () => {
         clearTimeout(t);
-        if (sock !== this.ws) return;              // stale socket — ignore
+        if (sock !== this.ws) return; // stale socket — ignore
         this.#status('Signaling: closed');
-        if (this.wsKeepalive) { clearInterval(this.wsKeepalive); this.wsKeepalive = null; }
+        if (this.wsKeepalive) {
+          clearInterval(this.wsKeepalive);
+          this.wsKeepalive = null;
+        }
         if (!opened) reject(new Error('WS closed before open'));
         this.#scheduleReconnect();
       };
     });
-    try { await this.wsConnectPromise; }
-    finally { this.wsConnectPromise = null; }
+    try {
+      await this.wsConnectPromise;
+    } finally {
+      this.wsConnectPromise = null;
+    }
   }
 
   #scheduleReconnect() {
     if (this.closed || this.reconnectTimer) return; // one pending reconnect at a time
-    const base  = Math.min(this.wsRetryMs, this.reconnectMaxMs);
+    const base = Math.min(this.wsRetryMs, this.reconnectMaxMs);
     const delay = Math.round(base * (0.8 + Math.random() * 0.4)); // ±20% jitter
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -150,7 +180,10 @@ export class ReceiverCore {
   }
 
   #clearIceGraceTimer() {
-    if (this.iceGraceTimer) { clearTimeout(this.iceGraceTimer); this.iceGraceTimer = null; }
+    if (this.iceGraceTimer) {
+      clearTimeout(this.iceGraceTimer);
+      this.iceGraceTimer = null;
+    }
   }
 
   async #restartPC() {
@@ -176,10 +209,12 @@ export class ReceiverCore {
       const oldPc = this.pc;
       // Detach handlers so the retired PC's state events can't trigger another rebuild
       oldPc.oniceconnectionstatechange = oldPc.onicecandidate = oldPc.ontrack = oldPc.ondatachannel = null;
-      try { oldPc.close(); } catch{};
+      try {
+        oldPc.close();
+      } catch {}
     }
     this.#clearIceGraceTimer();
-    this.#stopOfferResendLoop();   // kill any old resend timer
+    this.#stopOfferResendLoop(); // kill any old resend timer
     this.processingAnswer = false; // clear any stale lock
     this.pc = null;
     this.remoteDescriptionSet = false;
@@ -194,21 +229,27 @@ export class ReceiverCore {
     pc.addTransceiver('audio', { direction: 'recvonly' });
 
     // Allow page to add custom DCs (e.g., 'pose')
-    try { this.onCreatePC(pc); } catch (e) { console.warn('[onCreatePC] error', e); }
+    try {
+      this.onCreatePC(pc);
+    } catch (e) {
+      console.warn('[onCreatePC] error', e);
+    }
 
     // Leave inbound DCs open
     pc.ondatachannel = (e) => {
       this.onDataChannel?.(e);
     };
 
-    pc.onicecandidate = (ev) => { if (ev.candidate) this.#send({ type:'candidate', candidate: ev.candidate }); };
+    pc.onicecandidate = (ev) => {
+      if (ev.candidate) this.#send({ type: 'candidate', candidate: ev.candidate });
+    };
     pc.ontrack = (ev) => {
       const stream = ev.streams?.[0];
       if (stream) this.onStream?.(stream, ev.track);
     };
 
     pc.oniceconnectionstatechange = () => {
-      if (pc !== this.pc) return;                  // event from a retired PC
+      if (pc !== this.pc) return; // event from a retired PC
       const s = pc.iceConnectionState;
       this.onIceState?.(s);
       //if (s === 'connected' || s === 'completed') {
@@ -218,7 +259,7 @@ export class ReceiverCore {
         this.#clearIceGraceTimer();
       } else if (s === 'failed') {
         this.#status('ICE: failed');
-        this.#restartPC().catch(()=>{});
+        this.#restartPC().catch(() => {});
       } else if (s === 'disconnected') {
         if (!this.iceDisconnectedSince) this.iceDisconnectedSince = Date.now();
         const grace = this.iceDisconnectGraceMs;
@@ -228,7 +269,7 @@ export class ReceiverCore {
             if (pc !== this.pc) return;
             if (this.iceDisconnectedSince && Date.now() - this.iceDisconnectedSince >= grace) {
               //this.#status(`ICE: disconnected >${Math.round(grace/1000)}s (renegotiating)`);
-              this.#restartPC().catch(()=>{});
+              this.#restartPC().catch(() => {});
             }
           }, grace + 100); // ← was 15100 to exceed the ≥ check reliably
         }
@@ -274,11 +315,16 @@ export class ReceiverCore {
   }
 
   async #onSignal(evt) {
-    let msg; try { msg = JSON.parse(evt.data); } catch { return; }
+    let msg;
+    try {
+      msg = JSON.parse(evt.data);
+    } catch {
+      return;
+    }
     this.onSignal?.(msg);
 
     if (msg.type === 'roster' && Array.isArray(msg.peers)) {
-      const snd = msg.peers.find(p => p.role === 'sender');
+      const snd = msg.peers.find((p) => p.role === 'sender');
       if (snd) this.senderId = snd.id;
       const newId = snd?.id || null;
       if (newId && newId !== this.targetSenderId) {
@@ -303,7 +349,9 @@ export class ReceiverCore {
           await this.pc.setLocalDescription(offer);
           await this.#sendCurrentOffer();
           this.#startOfferResendLoop();
-        } catch (e) { console.warn('[ReceiverCore] renegotiation failed', e); }
+        } catch (e) {
+          console.warn('[ReceiverCore] renegotiation failed', e);
+        }
         this.onNeedOffer?.(msg);
         return;
       }
@@ -315,16 +363,19 @@ export class ReceiverCore {
     if (msg.type === 'peer-joined' && msg.role === 'sender' && msg.id) {
       const wasConnectedToOther = this.remoteDescriptionSet && this.targetSenderId && this.targetSenderId !== msg.id;
       this.senderId = msg.id;
-      this.targetSenderId = msg.id;   // the Camera re-joined with a new id: talk to the new one
+      this.targetSenderId = msg.id; // the Camera re-joined with a new id: talk to the new one
       // Our connection belongs to the Camera's previous session: start a fresh one now instead of
       // waiting for the old one to time out.
-      if (wasConnectedToOther) { this.#restartPC().catch(() => {}); return; }
+      if (wasConnectedToOther) {
+        this.#restartPC().catch(() => {});
+        return;
+      }
       await this.#sendCurrentOffer();
       return;
     }
 
     if (msg.type === 'bye') {
-      if (msg.from && this.targetSenderId && msg.from !== this.targetSenderId) return;   // another device
+      if (msg.from && this.targetSenderId && msg.from !== this.targetSenderId) return; // another device
       this.remoteDescriptionSet = false;
       this.#stopOfferResendLoop();
       this.onBye?.(msg);
@@ -354,8 +405,8 @@ export class ReceiverCore {
       }
       this.candidateQueue.length = 0;
       return;*/
-    
-      if (this.processingAnswer) return;           // drop concurrent duplicate
+
+      if (this.processingAnswer) return; // drop concurrent duplicate
       this.processingAnswer = true;
       try {
         // state may change while we were awaiting earlier tasks; check *now*
@@ -363,17 +414,21 @@ export class ReceiverCore {
           if (this.pc.signalingState === 'stable') this.#stopOfferResendLoop();
           return;
         }
-        if (this.lastAnswerSdp === msg.sdp) return;  // exact dup?
-      
+        if (this.lastAnswerSdp === msg.sdp) return; // exact dup?
+
         // Apply; if another answer raced and got in first, this may flip to stable mid-flight
         await this.pc.setRemoteDescription(new RTCSessionDescription(msg));
         this.remoteDescriptionSet = true;
         this.lastAnswerSdp = msg.sdp;
         this.#stopOfferResendLoop();
         //this.#status('Got answer, applied.');
-      
+
         for (const c of this.candidateQueue) {
-          try { await this.pc.addIceCandidate(c); } catch (e) { console.warn('late ICE add failed', e); }
+          try {
+            await this.pc.addIceCandidate(c);
+          } catch (e) {
+            console.warn('late ICE add failed', e);
+          }
         }
         this.candidateQueue.length = 0;
       } catch (e) {
@@ -397,13 +452,20 @@ export class ReceiverCore {
 
       const cand = new RTCIceCandidate(msg.candidate);
       if (this.remoteDescriptionSet) {
-        try { await this.pc.addIceCandidate(cand); } catch (e) { console.warn('ICE add failed', e); }
+        try {
+          await this.pc.addIceCandidate(cand);
+        } catch (e) {
+          console.warn('ICE add failed', e);
+        }
       } else {
         this.candidateQueue.push(cand);
       }
     }
   }
 
-  #status(s) { try { this.onStatus?.(s); } catch {} }
+  #status(s) {
+    try {
+      this.onStatus?.(s);
+    } catch {}
+  }
 }
-

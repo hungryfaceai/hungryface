@@ -4,7 +4,7 @@
 const DB = 'naptioAlerts';
 const STORE = 'alerts';
 // Cross-tab notifications
-const _bc = ('BroadcastChannel' in self) ? new BroadcastChannel('alerts-bc') : null;
+const _bc = 'BroadcastChannel' in self ? new BroadcastChannel('alerts-bc') : null;
 // Identifies this tab, so channel listeners in the same tab can ignore its own messages
 // (another BroadcastChannel object in the same tab DOES receive them).
 export const TAB_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -12,9 +12,11 @@ export const TAB_ID = Math.random().toString(36).slice(2) + Date.now().toString(
 function _notify(action, payload = {}) {
   try {
     // Local (same-tab) listeners
-    document.dispatchEvent(new CustomEvent('alerts:changed', {
-      detail: { action, ...payload }
-    }));
+    document.dispatchEvent(
+      new CustomEvent('alerts:changed', {
+        detail: { action, ...payload },
+      })
+    );
     // Cross-tab listeners
     _bc?.postMessage({ type: 'changed', action, ...payload, tab: TAB_ID });
   } catch {}
@@ -35,11 +37,12 @@ if (_bc) {
 }
 
 // Open (or create) the DB + object store
-let _db = null, _dbP = null;   // one shared open (parallel first calls must not open twice)
+let _db = null,
+  _dbP = null; // one shared open (parallel first calls must not open twice)
 export function openDB() {
   if (_db) return Promise.resolve(_db);
   if (_dbP) return _dbP;
-  return _dbP = new Promise((resolve, reject) => {
+  return (_dbP = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB, 1);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
@@ -51,11 +54,20 @@ export function openDB() {
     };
     req.onsuccess = () => {
       _db = req.result;
-      _db.onversionchange = () => { try { _db.close(); } catch {} _db = null; _dbP = null; };
+      _db.onversionchange = () => {
+        try {
+          _db.close();
+        } catch {}
+        _db = null;
+        _dbP = null;
+      };
       resolve(_db);
     };
-    req.onerror   = () => { _dbP = null; reject(req.error); };
-  });
+    req.onerror = () => {
+      _dbP = null;
+      reject(req.error);
+    };
+  }));
 }
 
 /** Create a new alert episode. Returns the new id. */
@@ -67,7 +79,7 @@ export async function addAlert(record) {
     startAt: record?.startAt || new Date().toISOString(),
     endAt: record?.endAt || null,
     avgScore: Number(record?.avgScore ?? 0),
-    message: record?.message || ''
+    message: record?.message || '',
   };
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
@@ -96,7 +108,10 @@ export async function updateAlert(id, patch) {
     getReq.onerror = () => reject(getReq.error);
     getReq.onsuccess = () => {
       const cur = getReq.result;
-      if (!cur) { resolve(false); return; }
+      if (!cur) {
+        resolve(false);
+        return;
+      }
       const next = { ...cur, ...patch };
       const putReq = st.put(next);
       putReq.onerror = () => reject(putReq.error);
@@ -117,8 +132,7 @@ export async function getAllAlerts() {
     const req = st.getAll();
     req.onerror = () => reject(req.error);
     req.onsuccess = () => {
-      const rows = (req.result || [])
-        .sort((a, b) => +new Date(b.startAt || 0) - +new Date(a.startAt || 0));
+      const rows = (req.result || []).sort((a, b) => +new Date(b.startAt || 0) - +new Date(a.startAt || 0));
       resolve(rows);
     };
   });
@@ -144,23 +158,16 @@ export async function clearAllAlerts() {
 /** Build a CSV string from alert rows. */
 function _rowsToCSV(rows) {
   const esc = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
-  const header = ['startAt','endAt','durationSec','avgScore','type','message'];
+  const header = ['startAt', 'endAt', 'durationSec', 'avgScore', 'type', 'message'];
   const lines = [header.join(',')];
 
   for (const r of rows) {
-    const t0  = r.startAt ? +new Date(r.startAt) : NaN;
-    const t1  = r.endAt   ? +new Date(r.endAt)   : NaN;
-    const dur = (Number.isFinite(t0) && Number.isFinite(t1))
-      ? Math.round((t1 - t0) / 1000)
-      : '';
-    lines.push([
-      esc(r.startAt),
-      esc(r.endAt),
-      dur,
-      Number(r.avgScore || 0),
-      esc(r.type || ''),
-      esc(r.message || '')
-    ].join(','));
+    const t0 = r.startAt ? +new Date(r.startAt) : NaN;
+    const t1 = r.endAt ? +new Date(r.endAt) : NaN;
+    const dur = Number.isFinite(t0) && Number.isFinite(t1) ? Math.round((t1 - t0) / 1000) : '';
+    lines.push(
+      [esc(r.startAt), esc(r.endAt), dur, Number(r.avgScore || 0), esc(r.type || ''), esc(r.message || '')].join(',')
+    );
   }
   return lines.join('\n');
 }
@@ -170,12 +177,8 @@ function _rowsToCSV(rows) {
  * If `rows` not provided, fetches all via getAllAlerts().
  */
 export async function exportAlertsJSON(rows) {
-  const data = rows ?? await getAllAlerts();
-  return JSON.stringify(
-    { version: 1, exportedAt: new Date().toISOString(), rows: data },
-    null,
-    2
-  );
+  const data = rows ?? (await getAllAlerts());
+  return JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), rows: data }, null, 2);
 }
 
 /**
@@ -183,13 +186,13 @@ export async function exportAlertsJSON(rows) {
  * If `rows` not provided, fetches all via getAllAlerts().
  */
 export async function exportAlertsCSV(rows) {
-  const data = rows ?? await getAllAlerts();
+  const data = rows ?? (await getAllAlerts());
   return _rowsToCSV(data);
 }
 
 export const AlertTypes = Object.freeze({
-  Audio:  'Audio',
-  Prone:  'Prone',
+  Audio: 'Audio',
+  Prone: 'Prone',
   Motion: 'Motion',
-  Fence:  'Fence',
+  Fence: 'Fence',
 });

@@ -22,13 +22,7 @@ async function importHmacKeyFromEnv(env) {
   }
 
   const raw = b64uToBytes(token);
-  return crypto.subtle.importKey(
-    'raw',
-    raw,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
+  return crypto.subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
 }
 
 /** Derive a short namespace hex string from the PSK token */
@@ -54,7 +48,6 @@ export function slugifyRoom(uiName) {
   return slug || 'room';
 }
 
-
 /** Compose final signaling room id */
 export function scopeRoomId(namespaceHex, uiName) {
   const slug = slugifyRoom(uiName);
@@ -73,8 +66,7 @@ export async function installRoomScope(env) {
   }
 
   const ns = await deriveNamespace(env);
-  const scopeFn = (uiName) =>
-    scopeRoomId(ns, uiName || env.room || 'Baby');
+  const scopeFn = (uiName) => scopeRoomId(ns, uiName || env.room || 'Baby');
 
   window.__naptioRoomNamespace = ns;
   window.__scopeRoom = scopeFn;

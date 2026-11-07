@@ -2,8 +2,8 @@
 // Generic alert banner styled like the audio page (red, top-centered)
 // + free-form "dismiss for N minutes" input (default 10m).
 
-const DEFAULT_SNOOZE_MIN = 10;                      // <— default 10 minutes
-const LS_KEY_SNOOZE_MIN  = 'naptio-alerts-snooze-mins';
+const DEFAULT_SNOOZE_MIN = 10; // <— default 10 minutes
+const LS_KEY_SNOOZE_MIN = 'naptio-alerts-snooze-mins';
 
 let bannerEl = null;
 let timeEl = null;
@@ -26,19 +26,26 @@ function fmtHM(ms) {
 }
 
 function getSavedSnoozeMinutes() {
-  let raw = null; try { raw = localStorage.getItem(LS_KEY_SNOOZE_MIN); } catch {}
+  let raw = null;
+  try {
+    raw = localStorage.getItem(LS_KEY_SNOOZE_MIN);
+  } catch {}
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_SNOOZE_MIN;
 }
 function setSavedSnoozeMinutes(mins) {
   const m = Math.max(1, Math.round(Number(mins) || DEFAULT_SNOOZE_MIN));
-  try { localStorage.setItem(LS_KEY_SNOOZE_MIN, String(m)); } catch {}
+  try {
+    localStorage.setItem(LS_KEY_SNOOZE_MIN, String(m));
+  } catch {}
   return m;
 }
 
 export function setupAlertBanner() {
   // Styles copied to match audio banner look & feel
-  injectStyleOnce('shared-alert-banner-css', `
+  injectStyleOnce(
+    'shared-alert-banner-css',
+    `
     .alert-banner{
       position: fixed;
       top: 12px; left: 50%; transform: translateX(-50%);
@@ -68,7 +75,8 @@ export function setupAlertBanner() {
     }
     .banner-input::-webkit-outer-spin-button,
     .banner-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-  `);
+  `
+  );
 
   // Mount HTML
   const host = document.getElementById('alertBannerHost') || document.body;
@@ -107,7 +115,7 @@ export function setupAlertBanner() {
 
   dismissBtn?.addEventListener('click', () => {
     const mins = Math.max(1, Math.round(Number(minsInput.value) || getSavedSnoozeMinutes()));
-    setSavedSnoozeMinutes(mins);            // persist the latest choice
+    setSavedSnoozeMinutes(mins); // persist the latest choice
     suppressUntil = Date.now() + mins * 60 * 1000;
     hideAlertBanner();
   });

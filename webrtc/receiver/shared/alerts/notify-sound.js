@@ -13,10 +13,10 @@ const KEYS = {
 };
 
 function inferTypeFromPath(p = location.pathname) {
-  if (/\/audio\//i.test(p))  return 'audio';
+  if (/\/audio\//i.test(p)) return 'audio';
   if (/\/motion\//i.test(p)) return 'motion';
-  if (/\/prone\//i.test(p))  return 'prone';
-  if (/\/fence\//i.test(p))  return 'fence';
+  if (/\/prone\//i.test(p)) return 'prone';
+  if (/\/fence\//i.test(p)) return 'fence';
   return 'audio';
 }
 
@@ -34,8 +34,12 @@ let audioCtx = null;
 let lastBeepWallNow = 0; // 1s safety limit (separate from minutes cooldown)
 let DEBUG = false;
 
-const dlog  = (...a) => { if (DEBUG) console.log('[notify-sound]', ...a); };
-const dwarn = (...a) => { if (DEBUG) console.warn('[notify-sound]', ...a); };
+const dlog = (...a) => {
+  if (DEBUG) console.log('[notify-sound]', ...a);
+};
+const dwarn = (...a) => {
+  if (DEBUG) console.warn('[notify-sound]', ...a);
+};
 
 function ensureCtx() {
   if (!audioCtx) {
@@ -52,33 +56,54 @@ function ensureCtx() {
 function unlockOnFirstGesture() {
   const once = async (ev) => {
     const ac = ensureCtx();
-    if (!ac) { dwarn('No AudioContext on gesture'); return; }
+    if (!ac) {
+      dwarn('No AudioContext on gesture');
+      return;
+    }
     const before = ac.state;
-    try { await ac.resume(); } catch {}
+    try {
+      await ac.resume();
+    } catch {}
     dlog('Gesture unlock', ev?.type, 'state:', before, '→', ac.state);
   };
-  ['pointerdown','touchend','keydown','click'].forEach(ev =>
-    window.addEventListener(ev, once, { once:true, passive:true })
+  ['pointerdown', 'touchend', 'keydown', 'click'].forEach((ev) =>
+    window.addEventListener(ev, once, { once: true, passive: true })
   );
 }
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && audioCtx?.state === 'suspended') {
     dlog('Tab visible; resuming suspended AudioContext…');
-    audioCtx.resume().then(() => dlog('AudioContext state:', audioCtx.state)).catch((e)=>dwarn('resume error', e));
+    audioCtx
+      .resume()
+      .then(() => dlog('AudioContext state:', audioCtx.state))
+      .catch((e) => dwarn('resume error', e));
   }
 });
 
 // ----- Triple pip (1.7k → 2.6k), three pips ~0.18s apart -----
 async function playDashboardPips() {
   const ac = ensureCtx();
-  if (!ac) { dwarn('No AudioContext; cannot play'); return; }
+  if (!ac) {
+    dwarn('No AudioContext; cannot play');
+    return;
+  }
 
-  if (ac.state === 'suspended') { try { await ac.resume(); } catch {} }
-  if (ac.state !== 'running') { dwarn('AudioContext not running; abort. state=', ac.state); return; }
+  if (ac.state === 'suspended') {
+    try {
+      await ac.resume();
+    } catch {}
+  }
+  if (ac.state !== 'running') {
+    dwarn('AudioContext not running; abort. state=', ac.state);
+    return;
+  }
 
   const nowPerf = performance.now();
-  if (nowPerf - lastBeepWallNow < 1000) { dlog('1s rate-limit; skip'); return; }
+  if (nowPerf - lastBeepWallNow < 1000) {
+    dlog('1s rate-limit; skip');
+    return;
+  }
   lastBeepWallNow = nowPerf;
 
   const t0 = ac.currentTime;
@@ -105,12 +130,15 @@ async function playDashboardPips() {
 
 function inMinutesCooldown(nowMs = Date.now()) {
   const last = parseInt(localStorage.getItem(KEYS.lastTs), 10) || 0;
-  const inCd = (nowMs - last) < getCooldownMs();
+  const inCd = nowMs - last < getCooldownMs();
   dlog('Cooldown check:', { nowMs, lastTs: last, cooldownMs: getCooldownMs(), inCooldown: inCd });
   return inCd;
 }
 function stampPlayed(nowMs = Date.now()) {
-  try { localStorage.setItem(KEYS.lastTs, String(nowMs)); dlog('Stamped lastTs=', nowMs); } catch {}
+  try {
+    localStorage.setItem(KEYS.lastTs, String(nowMs));
+    dlog('Stamped lastTs=', nowMs);
+  } catch {}
 }
 
 function gateSnapshot(type) {
@@ -124,11 +152,11 @@ function gateSnapshot(type) {
 }
 
 export function installAlertSound(opts = {}) {
-  const pageType = (opts.type || inferTypeFromPath());
+  const pageType = opts.type || inferTypeFromPath();
 
   // Debug from opts, URL, or localStorage
   const qsDebug = new URLSearchParams(location.search).get('notifyDebug');
-  DEBUG = !!opts.debug || qsDebug === '1' || (localStorage.getItem('naptio:notify:debug') === '1');
+  DEBUG = !!opts.debug || qsDebug === '1' || localStorage.getItem('naptio:notify:debug') === '1';
   dlog('installAlertSound:', { pageType, DEBUG });
 
   ensureCtx();
@@ -136,14 +164,16 @@ export function installAlertSound(opts = {}) {
 
   // Optional cross-tab ping (noop here; kept for future use)
   window.addEventListener('storage', (e) => {
-    if (e.key === KEYS.tsPing) { dlog('storage ping observed'); }
+    if (e.key === KEYS.tsPing) {
+      dlog('storage ping observed');
+    }
   });
 
   async function trigger(type = pageType) {
     const snap = gateSnapshot(type);
     dlog('trigger()', snap);
 
-    if (!['audio','motion','fence','prone'].includes(type)) {
+    if (!['audio', 'motion', 'fence', 'prone'].includes(type)) {
       dwarn('Invalid type for trigger:', type);
       return false;
     }
@@ -164,14 +194,17 @@ export function installAlertSound(opts = {}) {
   }
 
   const onEvt = (e) => {
-    const t = (e?.detail?.type) || pageType;
+    const t = e?.detail?.type || pageType;
     dlog('naptio:alert event → trigger', t);
     trigger(t);
   };
   window.addEventListener('naptio:alert', onEvt);
 
   // Debug helpers
-  async function debugPing() { dlog('debugPing() — bypassing gates'); await playDashboardPips(); }
+  async function debugPing() {
+    dlog('debugPing() — bypassing gates');
+    await playDashboardPips();
+  }
   function report() {
     const t = pageType;
     const snap = gateSnapshot(t);
@@ -190,7 +223,7 @@ export function installAlertSound(opts = {}) {
 
   return {
     trigger,
-    emit: (type) => window.dispatchEvent(new CustomEvent('naptio:alert', { detail:{ type:type || pageType } })),
+    emit: (type) => window.dispatchEvent(new CustomEvent('naptio:alert', { detail: { type: type || pageType } })),
     destroy: () => window.removeEventListener('naptio:alert', onEvt),
     _debug: { ping: debugPing, report },
   };

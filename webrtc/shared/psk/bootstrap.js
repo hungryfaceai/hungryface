@@ -16,40 +16,46 @@ import { installRoomScope } from '/hungryface/webrtc/shared/psk/room-scope.js';
 const DEFAULT_ROOM = 'Baby';
 
 function readLS(key) {
-  try { return (localStorage.getItem(key) || '').trim(); } catch { return ''; }
+  try {
+    return (localStorage.getItem(key) || '').trim();
+  } catch {
+    return '';
+  }
 }
 function persistRoom(label) {
-  try { localStorage.setItem('bm_receiver_room', label); } catch {}
-  try { localStorage.setItem('naptio:lastRoom', label); } catch {}
+  try {
+    localStorage.setItem('bm_receiver_room', label);
+  } catch {}
+  try {
+    localStorage.setItem('naptio:lastRoom', label);
+  } catch {}
 }
 function scope(label) {
-  return (typeof window.__scopeRoom === 'function') ? window.__scopeRoom(label) : label;
+  return typeof window.__scopeRoom === 'function' ? window.__scopeRoom(label) : label;
 }
 function setRoomGlobals(uiRoom, scopedRoom) {
-  window.__pskRoom       = uiRoom;      // backward-compat alias for UI room
-  window.__uiRoom        = uiRoom;      // explicit UI label
-  window.__scopedRoom    = scopedRoom;  // PSK-scoped signaling room ID
-  window.__pskScopedRoom = scopedRoom;  // alias used by the training page
+  window.__pskRoom = uiRoom; // backward-compat alias for UI room
+  window.__uiRoom = uiRoom; // explicit UI label
+  window.__scopedRoom = scopedRoom; // PSK-scoped signaling room ID
+  window.__pskScopedRoom = scopedRoom; // alias used by the training page
 }
 
 /** Pick the UI room using the same priority chain as Settings. */
 export function resolveUiRoom({ qsRoom, env, rooms = listValidPskRooms() }) {
-  const lastRoom  = readLS('naptio:lastRoom');
+  const lastRoom = readLS('naptio:lastRoom');
   const persisted = readLS('bm_receiver_room');
-  const envRoom   = (env?.room || '').trim();
+  const envRoom = (env?.room || '').trim();
 
   const uniq = new Set(rooms);
   if (envRoom) uniq.add(envRoom);
 
   const resolved = uniq.size
-    ? (
-        (qsRoom    && uniq.has(qsRoom)    && qsRoom)    ||
-        (lastRoom  && uniq.has(lastRoom)  && lastRoom)  ||
-        (persisted && uniq.has(persisted) && persisted) ||
-        envRoom ||
-        Array.from(uniq)[0]
-      )
-    : (envRoom || qsRoom || DEFAULT_ROOM);   // defensive fallback if list is empty
+    ? (qsRoom && uniq.has(qsRoom) && qsRoom) ||
+      (lastRoom && uniq.has(lastRoom) && lastRoom) ||
+      (persisted && uniq.has(persisted) && persisted) ||
+      envRoom ||
+      Array.from(uniq)[0]
+    : envRoom || qsRoom || DEFAULT_ROOM; // defensive fallback if list is empty
 
   return (resolved && String(resolved).trim()) || DEFAULT_ROOM;
 }
@@ -94,7 +100,9 @@ export async function bootstrapSecureReceiver({ label = 'receiver', intent = 'vi
   window.__installPskForRoom = (roomLabel) => {
     const next = (roomLabel || '').trim() || DEFAULT_ROOM;
     const scoped = scope(next);
-    try { window.__pskUndo?.(); } catch {}
+    try {
+      window.__pskUndo?.();
+    } catch {}
     window.__pskUndo = installPskShim({ room: next });
     console.log(tag, 'shim re-installed for room:', next, 'scoped:', scoped);
     setRoomGlobals(next, scoped);

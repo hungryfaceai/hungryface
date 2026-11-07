@@ -10,18 +10,32 @@
 // another device), and it is less than 30 minutes old — so a room that might already be shared is never
 // touched.
 
-const LAST = 'naptio:lastRoom', SENDER = 'bm_sender_room', RECEIVER = 'bm_receiver_room';
+const LAST = 'naptio:lastRoom',
+  SENDER = 'bm_sender_room',
+  RECEIVER = 'bm_receiver_room';
 const DEFAULT_ROOM = 'Baby';
 const FRESH_MS = 30 * 60 * 1000;
 
-function read(k) { try { return localStorage.getItem(k); } catch { return null; } }
-function parse(s) { try { return JSON.parse(s); } catch { return null; } }
+function read(k) {
+  try {
+    return localStorage.getItem(k);
+  } catch {
+    return null;
+  }
+}
+function parse(s) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
 
 /** True if psk:<room> was generated on this device a moment ago and never installed from elsewhere. */
 function isThrowAwayDefault(room) {
   if (room !== DEFAULT_ROOM) return false;
   const rec = parse(read('psk:' + room));
-  if (!rec || rec.installedFrom || rec.rotatedAt) return false;   // installed from another device, or rotated → keep
+  if (!rec || rec.installedFrom || rec.rotatedAt) return false; // installed from another device, or rotated → keep
   const created = Number(rec.createdAt) || Date.parse(rec.ts || '') || 0;
   return created > 0 && Date.now() - created < FRESH_MS;
 }

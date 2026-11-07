@@ -19,10 +19,7 @@ export function installReviewNudge(userOptions = {}) {
     insertAfterSelector: '.hero-ctas',
 
     // The routes we consider "Camera/Viewer"
-    fromPatterns: [
-      '/webrtc/sender/',
-      '/webrtc/receiver/',
-    ],
+    fromPatterns: ['/webrtc/sender/', '/webrtc/receiver/'],
 
     // Simple daily cap (recommended). Set to false if you truly want it multiple times/day.
     oncePerDay: true,
@@ -53,9 +50,7 @@ export function installReviewNudge(userOptions = {}) {
 
     if (state.snooze_until && Date.now() < state.snooze_until) return;
 
-    const eligibleAt =
-      state.first_native_home_seen_at +
-      options.daysAfterFirstSeen * 24 * 60 * 60 * 1000;
+    const eligibleAt = state.first_native_home_seen_at + options.daysAfterFirstSeen * 24 * 60 * 60 * 1000;
 
     if (Date.now() < eligibleAt) return;
 
@@ -126,7 +121,7 @@ export function installReviewNudge(userOptions = {}) {
   // Wire actions
   const btnReview = card.querySelector('[data-action="review"]');
   const btnNotNow = card.querySelector('[data-action="not-now"]');
-  const btnClose  = card.querySelector('[data-action="close"]');
+  const btnClose = card.querySelector('[data-action="close"]');
 
   btnReview?.addEventListener('click', async () => {
     visit.actionTaken = true;
@@ -228,12 +223,14 @@ export function installReviewNudge(userOptions = {}) {
   }
 
   function removeCard(cardEl) {
-    try { cardEl.remove(); } catch {}
+    try {
+      cardEl.remove();
+    } catch {}
   }
 
   function ensureStyles() {
     if (document.getElementById('review-nudge-styles')) return;
-  
+
     const style = document.createElement('style');
     style.id = 'review-nudge-styles';
     style.textContent = `
@@ -361,7 +358,7 @@ export function installReviewNudge(userOptions = {}) {
         .review-nudge__btn, .review-nudge__close { transition: none !important; }
       }
     `;
-  
+
     document.head.appendChild(style);
   }
 } // end installReviewNudge
@@ -373,7 +370,14 @@ const LS_KEY = 'naptio_review_nudge_v1';
 function loadState() {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return { deferral_count: 0, done: false, snooze_until: null, last_shown_day: null, first_native_home_seen_at: null };
+    if (!raw)
+      return {
+        deferral_count: 0,
+        done: false,
+        snooze_until: null,
+        last_shown_day: null,
+        first_native_home_seen_at: null,
+      };
     const parsed = JSON.parse(raw);
     return {
       deferral_count: Number(parsed.deferral_count || 0),
@@ -383,7 +387,13 @@ function loadState() {
       first_native_home_seen_at: parsed.first_native_home_seen_at ? Number(parsed.first_native_home_seen_at) : null,
     };
   } catch {
-    return { deferral_count: 0, done: false, snooze_until: null, last_shown_day: null, first_native_home_seen_at: null };
+    return {
+      deferral_count: 0,
+      done: false,
+      snooze_until: null,
+      last_shown_day: null,
+      first_native_home_seen_at: null,
+    };
   }
 }
 
@@ -428,11 +438,10 @@ function getRuntime() {
   const ua = (navigator.userAgent || '').toLowerCase();
   const isAndroid = ua.includes('android');
   const isStandalone =
-    (window.matchMedia && (
-      window.matchMedia('(display-mode: standalone)').matches ||
+    window.matchMedia &&
+    (window.matchMedia('(display-mode: standalone)').matches ||
       window.matchMedia('(display-mode: fullscreen)').matches ||
-      window.matchMedia('(display-mode: minimal-ui)').matches
-    ));
+      window.matchMedia('(display-mode: minimal-ui)').matches);
 
   if (isAndroid && isStandalone) {
     return { allowed: true, platform: 'android', via: 'standalone' };

@@ -20,7 +20,11 @@ export function installLandingPairGate(userOptions = {}) {
   };
 
   const opts = { ...defaults, ...userOptions };
-  const onEvent = (name, data) => { try { opts.onEvent(name, data); } catch {} };
+  const onEvent = (name, data) => {
+    try {
+      opts.onEvent(name, data);
+    } catch {}
+  };
 
   // ---------- Copy with device nouns ----------
   const nouns = detectDeviceNouns();
@@ -42,9 +46,7 @@ export function installLandingPairGate(userOptions = {}) {
     lastFocused = document.activeElement || null;
 
     // Context subline
-    dom.subline.textContent = intent === 'camera'
-      ? COPY.sublineCamera
-      : COPY.sublineViewer;
+    dom.subline.textContent = intent === 'camera' ? COPY.sublineCamera : COPY.sublineViewer;
 
     document.documentElement.classList.add('lpg-open');
     dom.scrim.style.display = 'block';
@@ -69,7 +71,9 @@ export function installLandingPairGate(userOptions = {}) {
       dom.scrim.style.display = 'none';
       document.documentElement.classList.remove('lpg-open');
       isOpen = false;
-      try { lastFocused && lastFocused.focus(); } catch {}
+      try {
+        lastFocused && lastFocused.focus();
+      } catch {}
     }, opts.durations.sheetOutMs);
     onEvent('sheet_close', { reason, intent: currentIntent });
   }
@@ -97,8 +101,11 @@ export function installLandingPairGate(userOptions = {}) {
   dom.btnPrimary.addEventListener('click', () => {
     onEvent('pair_cta', { intent: currentIntent });
     // Route to Pair Devices
-    try { window.location.href = opts.pairRoute; }
-    catch { closeSheet('navigate-failed'); }
+    try {
+      window.location.href = opts.pairRoute;
+    } catch {
+      closeSheet('navigate-failed');
+    }
   });
 
   dom.howLink.addEventListener('click', (e) => {
@@ -139,8 +146,11 @@ export function installLandingPairGate(userOptions = {}) {
   // ---------- PSK detection ----------
   function hasAnyPsk(options) {
     if (typeof options.detectHasAnyPsk === 'function') {
-      try { return !!options.detectHasAnyPsk(window.localStorage); }
-      catch { return false; }
+      try {
+        return !!options.detectHasAnyPsk(window.localStorage);
+      } catch {
+        return false;
+      }
     }
     try {
       const ls = window.localStorage;
@@ -151,15 +161,21 @@ export function installLandingPairGate(userOptions = {}) {
           const obj = JSON.parse(ls.getItem(key) || 'null');
           const token = obj && obj.tokenB64u;
           if (token && isValidToken(token, options.validateToken)) return true;
-        } catch { /* ignore bad json */ }
+        } catch {
+          /* ignore bad json */
+        }
       }
-    } catch { /* private mode or blocked */ }
+    } catch {
+      /* private mode or blocked */
+    }
     return false;
   }
 
   function isValidToken(b64u, externalValidator) {
     if (typeof externalValidator === 'function') {
-      try { return !!externalValidator(b64u); } catch {}
+      try {
+        return !!externalValidator(b64u);
+      } catch {}
     }
     // Default: base64url decode to >=16 bytes
     try {
@@ -181,26 +197,29 @@ export function installLandingPairGate(userOptions = {}) {
 
   // ---------- Utils ----------
   function focusFirst(dom) {
-    const els = dom.sheet.querySelectorAll(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    );
-    if (els.length) try { els[0].focus(); } catch {}
+    const els = dom.sheet.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (els.length)
+      try {
+        els[0].focus();
+      } catch {}
   }
 
   function trapTab(e, container) {
-    const focusables = Array.from(container.querySelectorAll(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    )).filter(el => !el.hasAttribute('disabled') && el.offsetParent !== null);
+    const focusables = Array.from(
+      container.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+    ).filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null);
     if (!focusables.length) return;
     const first = focusables[0];
-    const last  = focusables[focusables.length - 1];
+    const last = focusables[focusables.length - 1];
     const active = document.activeElement;
     const forward = !e.shiftKey;
 
     if (forward && active === last) {
-      e.preventDefault(); first.focus();
+      e.preventDefault();
+      first.focus();
     } else if (!forward && active === first) {
-      e.preventDefault(); last.focus();
+      e.preventDefault();
+      last.focus();
     }
   }
 
@@ -283,10 +302,10 @@ export function installLandingPairGate(userOptions = {}) {
 
   function buildSheetDOM(copy, durations) {
     const scrim = el('div', 'lpg-scrim', { role: 'presentation' });
-    const root  = el('div', 'lpg-root', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'lpg-title' });
+    const root = el('div', 'lpg-root', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'lpg-title' });
     const sheet = el('div', 'lpg-sheet');
 
-    const hdr   = el('div', 'lpg-hdr');
+    const hdr = el('div', 'lpg-hdr');
     const title = el('h2', 'lpg-title', { id: 'lpg-title' }, copy.title);
     // No close button
     hdr.append(title);
@@ -294,7 +313,11 @@ export function installLandingPairGate(userOptions = {}) {
     const subline = el('div', 'lpg-subline');
 
     const bullets = el('ul', 'lpg-bullets');
-    bullets.append(el('li', null, {}, copy.bullet1), el('li', null, {}, copy.bullet2), el('li', null, {}, copy.bullet3));
+    bullets.append(
+      el('li', null, {}, copy.bullet1),
+      el('li', null, {}, copy.bullet2),
+      el('li', null, {}, copy.bullet3)
+    );
 
     const actions = el('div', 'lpg-actions');
     const btnPrimary = el('button', 'lpg-cta', { type: 'button' }, copy.primaryCta);
@@ -302,7 +325,7 @@ export function installLandingPairGate(userOptions = {}) {
     actions.append(btnPrimary, howLink);
 
     const howBody = el('div', 'lpg-how-body', { 'aria-hidden': 'true' });
-    copy.howBody.forEach(p => howBody.append(el('div', null, {}, p)));
+    copy.howBody.forEach((p) => howBody.append(el('div', null, {}, p)));
     if (copy.privacyTip) howBody.append(el('small', null, {}, copy.privacyTip));
 
     const body = el('div', 'lpg-row');
@@ -353,19 +376,19 @@ export function installLandingPairGate(userOptions = {}) {
     };
     for (const k of Object.keys(merged)) {
       if (typeof merged[k] === 'string') merged[k] = replaceTokens(merged[k], tokens);
-      if (Array.isArray(merged[k])) merged[k] = merged[k].map(s => replaceTokens(s, tokens));
+      if (Array.isArray(merged[k])) merged[k] = merged[k].map((s) => replaceTokens(s, tokens));
     }
     return merged;
   }
 
   function replaceTokens(str, map) {
-    return String(str).replace(/\{nounSingular\}|\{nounPlural\}/g, m => map[m] || m);
+    return String(str).replace(/\{nounSingular\}|\{nounPlural\}/g, (m) => map[m] || m);
   }
 
   function detectDeviceNouns() {
     const ua = (navigator.userAgent || '').toLowerCase();
     const isIPhone = /\biphone\b/.test(ua);
-    const isIPad   = /\bipad\b/.test(ua) || (/\bmacintosh\b/.test(ua) && 'ontouchend' in window);
+    const isIPad = /\bipad\b/.test(ua) || (/\bmacintosh\b/.test(ua) && 'ontouchend' in window);
     const isAndroid = /\bandroid\b/.test(ua);
     const isMobile = /\bmobi\b/.test(ua);
     const vw = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
@@ -373,7 +396,7 @@ export function installLandingPairGate(userOptions = {}) {
 
     // Coarse, friendly inferences — never mention OS or model to the user.
     if (isIPhone || (isAndroid && isMobile)) return { singular: 'phone', plural: 'phones' };
-    if (isIPad || (isAndroid && !isMobile))  return { singular: 'tablet', plural: 'tablets' };
+    if (isIPad || (isAndroid && !isMobile)) return { singular: 'tablet', plural: 'tablets' };
 
     // Large screens with fine pointer → "computer"
     const finePointer = window.matchMedia && matchMedia('(pointer: fine)').matches;

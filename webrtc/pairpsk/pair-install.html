@@ -1,461 +1,651 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>Pair devices (install)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Install a one-time PSK to pair this device." />
-  <link rel="icon" href="/hungryface/pwa/icons/favicon-196.png" sizes="196x196">
-  <link rel="stylesheet" href="/hungryface/shared/tokens.css">
-  <style>
-    :root { color-scheme: dark; }
-    html, body { height: 100%; margin: 0; background: var(--nt-bg, #000); color: var(--nt-text, #fff);
-      font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
-    a { color: var(--nt-text, #fff); text-decoration: none; opacity: 0.9; }
-    a:hover, a:focus { opacity: 1; }
+  <head>
+    <meta charset="utf-8" />
+    <title>Pair devices (install)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Install a one-time PSK to pair this device." />
+    <link rel="icon" href="/hungryface/pwa/icons/favicon-196.png" sizes="196x196" />
+    <link rel="stylesheet" href="/hungryface/shared/tokens.css" />
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--nt-bg, #000);
+        color: var(--nt-text, #fff);
+        font-family:
+          -apple-system,
+          system-ui,
+          Segoe UI,
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+      }
+      a {
+        color: var(--nt-text, #fff);
+        text-decoration: none;
+        opacity: 0.9;
+      }
+      a:hover,
+      a:focus {
+        opacity: 1;
+      }
 
-    /* Prevent underline on Camera / Viewer pills */
-    .nav-center a,
-    .nav-center a:hover,
-    .nav-center a:focus { text-decoration: none; }
+      /* Prevent underline on Camera / Viewer pills */
+      .nav-center a,
+      .nav-center a:hover,
+      .nav-center a:focus {
+        text-decoration: none;
+      }
 
-    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-    .page { min-height: 100%; display: flex; flex-direction: column; }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      .page {
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
 
-    header {
-      display: grid;
-      grid-template-columns: 1fr auto 1fr;
-      align-items: center; padding: 14px 20px; gap: 12px;
-    }
-    .nav-left, .nav-center, .nav-right {
-      display: flex; gap: 18px; align-items: center; white-space: nowrap; font-size: 0.95rem;
-    }
-    .nav-left  { justify-self: start; }
-    .nav-center{ justify-self: center; gap: 12px; min-width: 0; }
-    .nav-right { justify-self: end; gap: 12px; }
+      header {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        padding: 14px 20px;
+        gap: 12px;
+      }
+      .nav-left,
+      .nav-center,
+      .nav-right {
+        display: flex;
+        gap: 18px;
+        align-items: center;
+        white-space: nowrap;
+        font-size: 0.95rem;
+      }
+      .nav-left {
+        justify-self: start;
+      }
+      .nav-center {
+        justify-self: center;
+        gap: 12px;
+        min-width: 0;
+      }
+      .nav-right {
+        justify-self: end;
+        gap: 12px;
+      }
 
-    .home-link { display: inline-flex; align-items: center; line-height: 1; }
-    .icon { width: var(--icon-size, 24px); height: var(--icon-size, 24px); display: block; }
-    .icon-home { --icon-size: 26px; }
+      .home-link {
+        display: inline-flex;
+        align-items: center;
+        line-height: 1;
+      }
+      .icon {
+        width: var(--icon-size, 24px);
+        height: var(--icon-size, 24px);
+        display: block;
+      }
+      .icon-home {
+        --icon-size: 26px;
+      }
 
-    .nav-center a {
-      color: #000; background: #fff; border-radius: 9999px; border: 1px solid #fff;
-      opacity: 1; font-weight: 600; line-height: 1; white-space: nowrap;
-      font-size: clamp(0.78rem, 2.6vw, 0.95rem);
-      padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
-    }
-    .nav-center a:hover { background: #eaeaea; }
-    .nav-center a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+      .nav-center a {
+        color: #000;
+        background: #fff;
+        border-radius: 9999px;
+        border: 1px solid #fff;
+        opacity: 1;
+        font-weight: 600;
+        line-height: 1;
+        white-space: nowrap;
+        font-size: clamp(0.78rem, 2.6vw, 0.95rem);
+        padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
+      }
+      .nav-center a:hover {
+        background: #eaeaea;
+      }
+      .nav-center a:focus-visible {
+        outline: 2px solid #fff;
+        outline-offset: 3px;
+      }
 
-    /* Disabled state for Camera/Viewer when no valid PSK is stored */
-    .nav-center a.is-disabled {
-      background: var(--nt-surface-3, #1a1a1a) !important;
-      border-color: var(--nt-border-strong, #2a2a2a) !important;
-      color: #8a8a8a !important;
-      opacity: 0.6 !important;
-      cursor: not-allowed !important;
-      pointer-events: none; /* truly non-clickable */
-    }
+      /* Disabled state for Camera/Viewer when no valid PSK is stored */
+      .nav-center a.is-disabled {
+        background: var(--nt-surface-3, #1a1a1a) !important;
+        border-color: var(--nt-border-strong, #2a2a2a) !important;
+        color: #8a8a8a !important;
+        opacity: 0.6 !important;
+        cursor: not-allowed !important;
+        pointer-events: none; /* truly non-clickable */
+      }
 
-    .btn-pill {
-      color: var(--nt-text, #fff); background: var(--nt-bg, #000); border: 1px solid #fff; border-radius: 9999px;
-      font-weight: 600; line-height: 1; opacity: 1; white-space: nowrap;
-      font-size: clamp(0.78rem, 2.6vw, 0.95rem);
-      padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
-      transition: background-color .15s ease, box-shadow .15s ease;
-      cursor: pointer; /* show hand on hover for pills/buttons */
-    }
-    .btn-pill:hover, .btn-pill:focus {
-      background: var(--nt-surface-2, #141414); border-color: #e6e6e6; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16);
-    }
-    .btn-pill:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+      .btn-pill {
+        color: var(--nt-text, #fff);
+        background: var(--nt-bg, #000);
+        border: 1px solid #fff;
+        border-radius: 9999px;
+        font-weight: 600;
+        line-height: 1;
+        opacity: 1;
+        white-space: nowrap;
+        font-size: clamp(0.78rem, 2.6vw, 0.95rem);
+        padding: clamp(6px, 1.6vw, 8px) clamp(10px, 3.2vw, 14px);
+        transition:
+          background-color 0.15s ease,
+          box-shadow 0.15s ease;
+        cursor: pointer; /* show hand on hover for pills/buttons */
+      }
+      .btn-pill:hover,
+      .btn-pill:focus {
+        background: var(--nt-surface-2, #141414);
+        border-color: #e6e6e6;
+        box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.16);
+      }
+      .btn-pill:focus-visible {
+        outline: 2px solid #fff;
+        outline-offset: 3px;
+      }
 
-    main { flex: 1; display: grid; place-items: center; padding: 24px; text-align: center; }
-    .hero { width: min(920px, 96vw); }
+      main {
+        flex: 1;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        text-align: center;
+      }
+      .hero {
+        width: min(920px, 96vw);
+      }
 
-    .pair-card {
-      background: var(--nt-bg-soft, #0b0b0b); border: 1px solid #141414; border-radius: 16px;
-      padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,0.35);
-      display: grid; gap: 14px; justify-items: center;
-    }
-    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:center; }
-    .input { border-radius:12px; padding:12px 14px; border:1px solid var(--nt-border, #222); background:var(--nt-bg-soft, #0b0b0b); color:var(--nt-text, #fff); }
-    .label { opacity:.9; }
-    .chip { border-radius:9999px; padding:8px 12px; border:1px solid #242424; background:#0a0a0a; color:#d9d9d9; font-size:.9rem; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .pair-card {
+        background: var(--nt-bg-soft, #0b0b0b);
+        border: 1px solid #141414;
+        border-radius: 16px;
+        padding: 18px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        display: grid;
+        gap: 14px;
+        justify-items: center;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      .input {
+        border-radius: 12px;
+        padding: 12px 14px;
+        border: 1px solid var(--nt-border, #222);
+        background: var(--nt-bg-soft, #0b0b0b);
+        color: var(--nt-text, #fff);
+      }
+      .label {
+        opacity: 0.9;
+      }
+      .chip {
+        border-radius: 9999px;
+        padding: 8px 12px;
+        border: 1px solid #242424;
+        background: #0a0a0a;
+        color: #d9d9d9;
+        font-size: 0.9rem;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
 
-    /* Editable PSK: chip <-> input */
-    #pskChip { outline: none; cursor: pointer; }
-    #pskChip:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+      /* Editable PSK: chip <-> input */
+      #pskChip {
+        outline: none;
+        cursor: pointer;
+      }
+      #pskChip:focus-visible {
+        outline: 2px solid #fff;
+        outline-offset: 3px;
+      }
 
-    .success {
-      background:#0f2; color:#001500; border:1px solid #1a1a1a;
-      padding:8px 12px; border-radius:9999px; font-weight:700;
-      opacity:0; transform: translateY(6px); transition: opacity .2s, transform .2s;
-    }
-    .success.show { opacity:1; transform: translateY(0); }
+      .success {
+        background: #0f2;
+        color: #001500;
+        border: 1px solid #1a1a1a;
+        padding: 8px 12px;
+        border-radius: 9999px;
+        font-weight: 700;
+        opacity: 0;
+        transform: translateY(6px);
+        transition:
+          opacity 0.2s,
+          transform 0.2s;
+      }
+      .success.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
 
-    .invite-toast {
-      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(12px);
-      background: var(--nt-surface, #111); border: 1px solid var(--nt-border, #222); color: var(--nt-text, #fff); padding: 10px 14px;
-      border-radius: 9999px; opacity: 0; transition: opacity .2s ease, transform .2s ease;
-      z-index: 1100; font-size: 0.9rem;
-    }
-    .invite-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+      .invite-toast {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%) translateY(12px);
+        background: var(--nt-surface, #111);
+        border: 1px solid var(--nt-border, #222);
+        color: var(--nt-text, #fff);
+        padding: 10px 14px;
+        border-radius: 9999px;
+        opacity: 0;
+        transition:
+          opacity 0.2s ease,
+          transform 0.2s ease;
+        z-index: 1100;
+        font-size: 0.9rem;
+      }
+      .invite-toast.show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
 
-    @media (max-width: 560px) {
-      header { grid-template-columns: 1fr 1fr; grid-auto-rows: minmax(0, auto); row-gap:10px; }
-      .nav-left{ grid-column:1; grid-row:1; justify-self:start; }
-      .nav-right{ grid-column:2; grid-row:1; justify-self:end; gap:10px; }
-      .nav-center{ grid-column:1/-1; grid-row:2; justify-content:center; gap:12px; width:100%; }
-      .nav-center a { font-size: clamp(0.92rem, 3.8vw, 1.12rem); padding: clamp(8px, 2.2vw, 12px) clamp(14px, 4.5vw, 18px); }
-      .btn-pill { font-size: clamp(0.78rem, 3.0vw, 0.92rem); padding: clamp(6px, 1.8vw, 8px) clamp(10px, 3.0vw, 14px); }
-    }
-    @media (max-width: 380px) {
-      .nav-left a, .nav-right a { font-size: 0.82rem; }
-      .nav-left, .nav-right { gap: 10px; } .nav-center { gap: 10px; }
-      header { padding: 12px 14px; }
-    }
-  </style>
-    <script defer src="https://cloud.umami.is/script.js" data-website-id="e5feef4a-8ebd-4094-b6ff-36bdc4512e2e" data-exclude-search="true" data-exclude-hash="true" data-domains="hungryfaceai.github.io"></script>
-</head>
-<body>
-  <div class="page">
-    <header>
-      <nav class="nav-left" aria-label="Primary">
-        <a href="https://hungryfaceai.github.io/hungryface/home" class="home-link" aria-label="Home" title="Home">
-          <svg class="icon icon-home" aria-hidden="true" focusable="false">
-            <use href="/hungryface/assets/icons.svg#icon-cradle-ai" xlink:href="/hungryface/assets/icons.svg#icon-cradle-ai"></use>
-          </svg>
-          <span class="sr-only">Home</span>
-        </a>
-      </nav>
+      @media (max-width: 560px) {
+        header {
+          grid-template-columns: 1fr 1fr;
+          grid-auto-rows: minmax(0, auto);
+          row-gap: 10px;
+        }
+        .nav-left {
+          grid-column: 1;
+          grid-row: 1;
+          justify-self: start;
+        }
+        .nav-right {
+          grid-column: 2;
+          grid-row: 1;
+          justify-self: end;
+          gap: 10px;
+        }
+        .nav-center {
+          grid-column: 1/-1;
+          grid-row: 2;
+          justify-content: center;
+          gap: 12px;
+          width: 100%;
+        }
+        .nav-center a {
+          font-size: clamp(0.92rem, 3.8vw, 1.12rem);
+          padding: clamp(8px, 2.2vw, 12px) clamp(14px, 4.5vw, 18px);
+        }
+        .btn-pill {
+          font-size: clamp(0.78rem, 3vw, 0.92rem);
+          padding: clamp(6px, 1.8vw, 8px) clamp(10px, 3vw, 14px);
+        }
+      }
+      @media (max-width: 380px) {
+        .nav-left a,
+        .nav-right a {
+          font-size: 0.82rem;
+        }
+        .nav-left,
+        .nav-right {
+          gap: 10px;
+        }
+        .nav-center {
+          gap: 10px;
+        }
+        header {
+          padding: 12px 14px;
+        }
+      }
+    </style>
+    <script
+      defer
+      src="https://cloud.umami.is/script.js"
+      data-website-id="e5feef4a-8ebd-4094-b6ff-36bdc4512e2e"
+      data-exclude-search="true"
+      data-exclude-hash="true"
+      data-domains="hungryfaceai.github.io"
+    ></script>
+  </head>
+  <body>
+    <div class="page">
+      <header>
+        <nav class="nav-left" aria-label="Primary">
+          <a href="https://hungryfaceai.github.io/hungryface/home" class="home-link" aria-label="Home" title="Home">
+            <svg class="icon icon-home" aria-hidden="true" focusable="false">
+              <use
+                href="/hungryface/assets/icons.svg#icon-cradle-ai"
+                xlink:href="/hungryface/assets/icons.svg#icon-cradle-ai"
+              ></use>
+            </svg>
+            <span class="sr-only">Home</span>
+          </a>
+        </nav>
 
-      <nav class="nav-center" aria-label="Modes">
-        <a id="linkSender" href="https://hungryfaceai.github.io/hungryface/webrtc/sender/secure/" role="button">Camera (Baby)</a>
-        <a id="linkViewer" href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/shared/alerts/dashboard/" role="button">Viewer (Parent)</a>
-      </nav>
+        <nav class="nav-center" aria-label="Modes">
+          <a id="linkSender" href="https://hungryfaceai.github.io/hungryface/webrtc/sender/secure/" role="button"
+            >Camera (Baby)</a
+          >
+          <a
+            id="linkViewer"
+            href="https://hungryfaceai.github.io/hungryface/webrtc/receiver/shared/alerts/dashboard/"
+            role="button"
+            >Viewer (Parent)</a
+          >
+        </nav>
 
-      <nav class="nav-right" aria-label="Quick actions"></nav>
-    </header>
+        <nav class="nav-right" aria-label="Quick actions"></nav>
+      </header>
 
-    <main>
-      <section class="hero">
-        <div class="pair-card" aria-labelledby="pair-title">
-          <h2 id="pair-title" style="margin:0">Pair devices (install)</h2>
+      <main>
+        <section class="hero">
+          <div class="pair-card" aria-labelledby="pair-title">
+            <h2 id="pair-title" style="margin: 0">Pair devices (install)</h2>
 
-          <!-- Room (inherited from QR) -->
-          <div class="row" style="gap:12px">
-            <label for="room" class="label">Room</label>
-            <input id="room" class="input mono" value="Baby" spellcheck="false" style="min-width:160px"/>
-          </div>
-
-          <!-- Only Forget pill here -->
-          <div class="row">
-            <button id="forget" class="btn-pill" type="button" style="border-color:#444">Forget on this device</button>
-          </div>
-
-          <!-- PSK chip masked initially; click to edit full PSK -->
-          <div class="row mono" style="gap:8px;">
-            <div id="pskChip" class="chip" tabindex="0" role="button" aria-label="Show and edit secret">
-              Key: <span id="tokenMasked" class="mono" style="margin-left:6px; opacity:.9">—</span>
+            <!-- Room (inherited from QR) -->
+            <div class="row" style="gap: 12px">
+              <label for="room" class="label">Room</label>
+              <input id="room" class="input mono" value="Baby" spellcheck="false" style="min-width: 160px" />
             </div>
 
-            <div id="pskEdit" class="row" style="display:none; gap:8px;">
-              <input id="pskInput" class="input mono" placeholder="Enter PSK" style="min-width:260px"/>
+            <!-- Only Forget pill here -->
+            <div class="row">
+              <button id="forget" class="btn-pill" type="button" style="border-color: #444">
+                Forget on this device
+              </button>
+            </div>
+
+            <!-- PSK chip masked initially; click to edit full PSK -->
+            <div class="row mono" style="gap: 8px">
+              <div id="pskChip" class="chip" tabindex="0" role="button" aria-label="Show and edit secret">
+                Key: <span id="tokenMasked" class="mono" style="margin-left: 6px; opacity: 0.9">—</span>
+              </div>
+
+              <div id="pskEdit" class="row" style="display: none; gap: 8px">
+                <input id="pskInput" class="input mono" placeholder="Enter PSK" style="min-width: 260px" />
+              </div>
+            </div>
+
+            <!-- Ephemeral success -->
+            <div class="row" style="gap: 12px">
+              <span id="pairedOk" class="success" role="status" aria-live="polite">Device paired</span>
             </div>
           </div>
+        </section>
+      </main>
+    </div>
 
-          <!-- Ephemeral success -->
-          <div class="row" style="gap:12px;">
-            <span id="pairedOk" class="success" role="status" aria-live="polite">Device paired</span>
-          </div>
-        </div>
-      </section>
-    </main>
-  </div>
+    <div id="toast" class="invite-toast" aria-live="polite"></div>
 
-  <div id="toast" class="invite-toast" aria-live="polite"></div>
+    <script type="module">
+      import { getPsk } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+      import { adoptPairedRoom } from '/hungryface/webrtc/shared/psk/adopt-room.js';
+      import { ensureTermsAccepted } from '/hungryface/legal/require-terms.js';
+      // ---- Durations (ms)
+      const DURATIONS = Object.freeze({
+        pairedFlash: 3000,
+        toast: 1600,
+      });
+      // Elements
+      const roomEl = document.getElementById('room');
+      const forgetBtn = document.getElementById('forget');
 
-  <script type="module">
-    import { getPsk } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
-    import { adoptPairedRoom } from '/hungryface/webrtc/shared/psk/adopt-room.js';
-    import { ensureTermsAccepted } from '/hungryface/legal/require-terms.js';
-    // ---- Durations (ms)
-    const DURATIONS = Object.freeze({
-      pairedFlash: 3000,
-      toast: 1600,
-    });
-    // Elements
-    const roomEl = document.getElementById('room');
-    const forgetBtn = document.getElementById('forget');
+      const pskChip = document.getElementById('pskChip');
+      const tokenMaskedEl = document.getElementById('tokenMasked');
 
-    const pskChip = document.getElementById('pskChip');
-    const tokenMaskedEl = document.getElementById('tokenMasked');
+      const pskEditWrap = document.getElementById('pskEdit');
+      const pskInput = document.getElementById('pskInput');
 
-    const pskEditWrap = document.getElementById('pskEdit');
-    const pskInput = document.getElementById('pskInput');
+      const linkSender = document.getElementById('linkSender');
+      const linkViewer = document.getElementById('linkViewer');
 
-    const linkSender = document.getElementById('linkSender');
-    const linkViewer = document.getElementById('linkViewer');
+      const pairedOk = document.getElementById('pairedOk');
+      const toastEl = document.getElementById('toast');
 
-    const pairedOk = document.getElementById('pairedOk');
-    const toastEl = document.getElementById('toast');
+      // State
+      let currentPSK = ''; // transient (what's shown/edited)
+      let savedPSK = ''; // last persisted for current room
+      let hadFragment = false; // whether we came via #room&psk
 
-    // State
-    let currentPSK = '';       // transient (what's shown/edited)
-    let savedPSK = '';         // last persisted for current room
-    let hadFragment = false;   // whether we came via #room&psk
+      // Helpers
+      function showToast(msg) {
+        toastEl.textContent = msg;
+        toastEl.classList.add('show');
+        setTimeout(() => {
+          toastEl.classList.remove('show');
+        }, DURATIONS.toast);
+      }
+      function fingerprint(b64u) {
+        return b64u ? b64u.slice(-6) : '—';
+      }
+      function maskToken(b64u) {
+        return b64u ? '•••• (…' + fingerprint(b64u) + ')' : '—';
+      }
 
-    // Helpers
-    function showToast(msg) {
-      toastEl.textContent = msg;
-      toastEl.classList.add('show');
-      setTimeout(() => { toastEl.classList.remove('show'); }, DURATIONS.toast);
-    }
-    function fingerprint(b64u) { return b64u ? b64u.slice(-6) : '—'; }
-    function maskToken(b64u) { return b64u ? ('•••• (…' + fingerprint(b64u) + ')') : '—'; }
+      // Keep base64url characters from URL (only trim whitespace)
+      function normalizeUrlToken(s) {
+        return (s || '').trim(); // PRESERVE '-' and '_'
+      }
 
-    // Keep base64url characters from URL (only trim whitespace)
-    function normalizeUrlToken(s) {
-      return (s || '').trim(); // PRESERVE '-' and '_'
-    }
-    
-    // For manual edits: allow users to paste with spaces/dashes; strip those
-    function normalizeManualToken(s) {
-      return (s || '').replace(/\s+/g, '').trim(); // DO NOT strip '-','_'
-    }
+      // For manual edits: allow users to paste with spaces/dashes; strip those
+      function normalizeManualToken(s) {
+        return (s || '').replace(/\s+/g, '').trim(); // DO NOT strip '-','_'
+      }
 
-    /*function normalizeToken(s) {
+      /*function normalizeToken(s) {
       s = (s || '').trim();
       const strip = ['-', ' ', '\n', '\r', '\t'];
       for (const ch of strip) s = s.split(ch).join('');
       return s;
     }*/
-    
-    function b64uToBytes(b64u) {
-      if (!b64u) return new Uint8Array(0);
-      let b64 = b64u.replace(/-/g, '+').replace(/_/g, '/');
-      const pad = (4 - (b64.length % 4)) % 4;
-      if (pad) b64 += '===='.slice(0, pad);
-      const bin = atob(b64);
-      const out = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-      return out;
-    }
 
-    function isValidPsk(token) {
-      if (!token || typeof token !== 'string') return false;
-      try {
-        return b64uToBytes(token).length >= 16;
-      } catch {
-        return false;
+      function b64uToBytes(b64u) {
+        if (!b64u) return new Uint8Array(0);
+        let b64 = b64u.replace(/-/g, '+').replace(/_/g, '/');
+        const pad = (4 - (b64.length % 4)) % 4;
+        if (pad) b64 += '===='.slice(0, pad);
+        const bin = atob(b64);
+        const out = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+        return out;
       }
-    }
 
-    function hasValidStoredPsk(room) {
-      try {
-        const raw = localStorage.getItem('psk:' + room);
-        if (!raw) return false;
-        const obj = JSON.parse(raw);
-        return isValidPsk(obj && obj.tokenB64u);
-      } catch { return false; }
-    }
-    
-    // Camera / Viewer buttons open the room shown on this page.
-    function pointModeLinksAt(room) {
-      for (const a of [linkSender, linkViewer]) {
-        if (!a) continue;
-        const u = new URL(a.getAttribute('href'), location.href);
-        if (room) u.searchParams.set('room', room); else u.searchParams.delete('room');
-        a.href = u.toString();
+      function isValidPsk(token) {
+        if (!token || typeof token !== 'string') return false;
+        try {
+          return b64uToBytes(token).length >= 16;
+        } catch {
+          return false;
+        }
       }
-    }
 
-    function setModeLinksEnabled(enabled) {
-      const links = [linkSender, linkViewer];
-      links.forEach(a => {
-        if (!a) return;
-        if (enabled) {
-          a.classList.remove('is-disabled');
-          a.removeAttribute('aria-disabled');
-          a.tabIndex = 0;
+      function hasValidStoredPsk(room) {
+        try {
+          const raw = localStorage.getItem('psk:' + room);
+          if (!raw) return false;
+          const obj = JSON.parse(raw);
+          return isValidPsk(obj && obj.tokenB64u);
+        } catch {
+          return false;
+        }
+      }
+
+      // Camera / Viewer buttons open the room shown on this page.
+      function pointModeLinksAt(room) {
+        for (const a of [linkSender, linkViewer]) {
+          if (!a) continue;
+          const u = new URL(a.getAttribute('href'), location.href);
+          if (room) u.searchParams.set('room', room);
+          else u.searchParams.delete('room');
+          a.href = u.toString();
+        }
+      }
+
+      function setModeLinksEnabled(enabled) {
+        const links = [linkSender, linkViewer];
+        links.forEach((a) => {
+          if (!a) return;
+          if (enabled) {
+            a.classList.remove('is-disabled');
+            a.removeAttribute('aria-disabled');
+            a.tabIndex = 0;
+          } else {
+            a.classList.add('is-disabled');
+            a.setAttribute('aria-disabled', 'true');
+            a.tabIndex = -1; // remove from tab order
+          }
+        });
+      }
+
+      function parseHash() {
+        const hash = location.hash && location.hash.startsWith('#') ? location.hash.slice(1) : '';
+        const qs = new URLSearchParams(hash);
+        const room = (qs.get('room') || '').trim();
+        const psk = (qs.get('psk') || '').trim();
+        return { hadHash: !!hash, room, psk };
+      }
+      function scrubUrl() {
+        history.replaceState(null, '', location.pathname + location.search);
+      }
+      function currentRoom() {
+        return (roomEl.value || '').trim();
+      }
+
+      function setMaskedChip(psk) {
+        tokenMaskedEl.textContent = maskToken(psk);
+      }
+
+      function showPairedFlash() {
+        pairedOk.classList.add('show');
+        setTimeout(() => pairedOk.classList.remove('show'), DURATIONS.pairedFlash);
+      }
+
+      function showEditMode(psk) {
+        pskChip.style.display = 'none';
+        pskEditWrap.style.display = 'flex';
+        pskInput.value = psKOrEmpty(psk);
+        setTimeout(() => {
+          try {
+            pskInput.focus();
+            pskInput.select();
+          } catch {}
+        }, 0);
+      }
+      function hideEditMode() {
+        pskChip.style.display = '';
+        pskEditWrap.style.display = 'none';
+      }
+      function psKOrEmpty(x) {
+        return x || '';
+      }
+
+      // Persist; only show green pill if PSK is valid; always (re)grey/enable top pills accordingly
+      function persistPSK(pskValue, source = 'manual') {
+        const room = currentRoom();
+        const valid = isValidPsk(pskValue);
+        if (!room || !valid) {
+          // Never store an invalid key: it would overwrite this room's working key.
+          showToast(
+            !room ? 'Enter a room name first.' : 'That key isn’t valid. Copy the whole key from the other device.'
+          );
+          setMaskedChip(savedPSK || '');
+          setModeLinksEnabled(isValidPsk(savedPSK || ''));
+          pairedOk.classList.remove('show');
+          return false;
+        }
+        const payload = { tokenB64u: pskValue, installedFrom: source, ts: new Date().toISOString() };
+        localStorage.setItem('psk:' + room, JSON.stringify(payload));
+        savedPSK = pskValue;
+
+        setModeLinksEnabled(valid);
+        if (valid) {
+          const { removedDefault } = adoptPairedRoom(room); // paired room = current room on Home, Camera, Viewer, Settings
+          pointModeLinksAt(room);
+          if (removedDefault) console.log('[pair-install] removed the unused default room created moments ago');
+          showPairedFlash();
         } else {
-          a.classList.add('is-disabled');
-          a.setAttribute('aria-disabled', 'true');
-          a.tabIndex = -1; // remove from tab order
+          // ensure the pill is not visible if we previously showed it
+          pairedOk.classList.remove('show');
+        }
+      }
+
+      // Interactions
+
+      // Click/focus the masked chip → switch to editable input with full PSK
+      pskChip.addEventListener('click', () => {
+        showEditMode(currentPSK || savedPSK);
+      });
+      pskChip.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          showEditMode(currentPSK || savedPSK);
         }
       });
-    }
 
-    function parseHash() {
-      const hash = (location.hash && location.hash.startsWith('#')) ? location.hash.slice(1) : '';
-      const qs = new URLSearchParams(hash);
-      const room = (qs.get('room') || '').trim();
-      const psk = (qs.get('psk') || '').trim();
-      return { hadHash: !!hash, room, psk };
-    }
-    function scrubUrl() {
-      history.replaceState(null, '', location.pathname + location.search);
-    }
-    function currentRoom() { return (roomEl.value || '').trim(); }
+      // Input typing updates the transient PSK
+      pskInput.addEventListener('input', () => {
+        currentPSK = pskInput.value.trim(); // keep '-' and '_'
+      });
 
-    function setMaskedChip(psk) {
-      tokenMaskedEl.textContent = maskToken(psk);
-    }
-
-    function showPairedFlash() {
-      pairedOk.classList.add('show');
-      setTimeout(() => pairedOk.classList.remove('show'), DURATIONS.pairedFlash);
-    }
-
-    function showEditMode(psk) {
-      pskChip.style.display = 'none';
-      pskEditWrap.style.display = 'flex';
-      pskInput.value = psKOrEmpty(psk);
-      setTimeout(() => { try { pskInput.focus(); pskInput.select(); } catch {} }, 0);
-    }
-    function hideEditMode() {
-      pskChip.style.display = '';
-      pskEditWrap.style.display = 'none';
-    }
-    function psKOrEmpty(x){ return x || ''; }
-
-    // Persist; only show green pill if PSK is valid; always (re)grey/enable top pills accordingly
-    function persistPSK(pskValue, source = 'manual') {
-      const room = currentRoom();
-      const valid = isValidPsk(pskValue);
-      if (!room || !valid) {
-        // Never store an invalid key: it would overwrite this room's working key.
-        showToast(!room ? 'Enter a room name first.' : 'That key isn’t valid. Copy the whole key from the other device.');
-        setMaskedChip(savedPSK || '');
-        setModeLinksEnabled(isValidPsk(savedPSK || ''));
-        pairedOk.classList.remove('show');
-        return false;
-      }
-      const payload = { tokenB64u: pskValue, installedFrom: source, ts: new Date().toISOString() };
-      localStorage.setItem('psk:' + room, JSON.stringify(payload));
-      savedPSK = pskValue;
-
-      setModeLinksEnabled(valid);
-      if (valid) {
-        const { removedDefault } = adoptPairedRoom(room);   // paired room = current room on Home, Camera, Viewer, Settings
-        pointModeLinksAt(room);
-        if (removedDefault) console.log('[pair-install] removed the unused default room created moments ago');
-        showPairedFlash();
-      } else {
-        // ensure the pill is not visible if we previously showed it
-        pairedOk.classList.remove('show');
-      }
-    }
-
-    // Interactions
-
-    // Click/focus the masked chip → switch to editable input with full PSK
-    pskChip.addEventListener('click', () => {
-      showEditMode(currentPSK || savedPSK);
-    });
-    pskChip.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        showEditMode(currentPSK || savedPSK);
-      }
-    });
-
-    // Input typing updates the transient PSK
-    pskInput.addEventListener('input', () => {
-      currentPSK = pskInput.value.trim(); // keep '-' and '_'
-    });
-
-    // Blur the input → hide, mask, and if changed & non-empty, persist (green pill only for valid)
-    pskInput.addEventListener('blur', () => {
-      const newVal = normalizeManualToken(pskInput.value);
-      hideEditMode();
-      if (newVal && newVal !== savedPSK) {
-        if (persistPSK(newVal, 'manual') !== false) setMaskedChip(newVal);
-        else currentPSK = savedPSK;
-      } else {
-        setMaskedChip(savedPSK || currentPSK);
-        // If unchanged but invalid, make sure links reflect validity
-        setModeLinksEnabled(isValidPsk(savedPSK || ''));
-      }
-    });
-
-    // Optional: Enter saves (then blurs), Escape cancels edit without saving
-    pskInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        pskInput.blur(); // triggers blur handler (save if changed)
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        pskInput.value = psKOrEmpty(savedPSK || currentPSK);
+      // Blur the input → hide, mask, and if changed & non-empty, persist (green pill only for valid)
+      pskInput.addEventListener('blur', () => {
+        const newVal = normalizeManualToken(pskInput.value);
         hideEditMode();
-        setMaskedChip(savedPSK || currentPSK);
-        setModeLinksEnabled(isValidPsk(savedPSK || ''));
-      }
-    });
+        if (newVal && newVal !== savedPSK) {
+          if (persistPSK(newVal, 'manual') !== false) setMaskedChip(newVal);
+          else currentPSK = savedPSK;
+        } else {
+          setMaskedChip(savedPSK || currentPSK);
+          // If unchanged but invalid, make sure links reflect validity
+          setModeLinksEnabled(isValidPsk(savedPSK || ''));
+        }
+      });
 
-    // Forget clears local storage and UI, and disables mode links
-    forgetBtn.addEventListener('click', () => {
-      const room = currentRoom();
-      if (!room) return;
-      try {
-        localStorage.removeItem('psk:' + room);
-        for (const k of ['naptio:lastRoom', 'bm_sender_room', 'bm_receiver_room']) if (localStorage.getItem(k) === room) localStorage.removeItem(k);
-      } catch {}
-      savedPSK = '';
-      currentPSK = '';
-      setMaskedChip('');
-      setModeLinksEnabled(false);
-      pairedOk.classList.remove('show'); // no green pill on forget
-      showToast('Forgot on this device');
-    });
+      // Optional: Enter saves (then blurs), Escape cancels edit without saving
+      pskInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          pskInput.blur(); // triggers blur handler (save if changed)
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          pskInput.value = psKOrEmpty(savedPSK || currentPSK);
+          hideEditMode();
+          setMaskedChip(savedPSK || currentPSK);
+          setModeLinksEnabled(isValidPsk(savedPSK || ''));
+        }
+      });
 
-    // Room change: load saved PSK (if any) for that room; update mode link enabled state
-    roomEl.addEventListener('change', () => {
-      const room = currentRoom();
-      const saved = getPsk(room) || {};
-      savedPSK = saved.tokenB64u || '';
-      currentPSK = savedPSK;
-      setMaskedChip(savedPSK || '');
-      setModeLinksEnabled(isValidPsk(savedPSK || ''));
-      pointModeLinksAt(isValidPsk(savedPSK || '') ? room : '');
-      // do not flash here; only flash on successful save or QR install with valid key
-      pairedOk.classList.remove('show');
-    });
-
-    // Boot: install PSK from QR (if present) → auto-persist; only flash if valid; else grey pills
-    (async function boot() {
-      const intent = parseHash();
-      hadFragment = intent.hadHash;
-      const incoming = normalizeUrlToken(intent.psk || '');
-
-      // A pairing link without a room name can't be installed safely (it would land in the wrong room).
-      if (incoming && !intent.room) {
-        if (intent.hadHash) scrubUrl();
-        roomEl.value = '';
+      // Forget clears local storage and UI, and disables mode links
+      forgetBtn.addEventListener('click', () => {
+        const room = currentRoom();
+        if (!room) return;
+        try {
+          localStorage.removeItem('psk:' + room);
+          for (const k of ['naptio:lastRoom', 'bm_sender_room', 'bm_receiver_room'])
+            if (localStorage.getItem(k) === room) localStorage.removeItem(k);
+        } catch {}
+        savedPSK = '';
+        currentPSK = '';
         setMaskedChip('');
         setModeLinksEnabled(false);
-        pskChip.style.pointerEvents = 'none'; pskChip.setAttribute('aria-disabled', 'true'); pskChip.tabIndex = -1;
-        forgetBtn.disabled = true;
-        showToast('This pairing link has no room name. Ask for a new QR code.');
-        return;
-      }
+        pairedOk.classList.remove('show'); // no green pill on forget
+        showToast('Forgot on this device');
+      });
 
-      roomEl.value = intent.room || 'Baby';
-
-      // Terms of use first, as on Pair devices. The key is only saved once they are accepted.
-      try { await ensureTermsAccepted({ role: 'pair' }); }
-      catch { if (intent.hadHash) scrubUrl(); return; }
-
-      if (incoming) {
-        const saved = getPsk(currentRoom()) || {};
-        savedPSK = saved.tokenB64u || '';
-        if (persistPSK(incoming, 'url') !== false) { setMaskedChip(incoming); currentPSK = incoming; }
-        else { currentPSK = savedPSK; pointModeLinksAt(isValidPsk(savedPSK) ? currentRoom() : ''); }
-        if (intent.hadHash) scrubUrl();   // scrub fragment for privacy
-      } else {
+      // Room change: load saved PSK (if any) for that room; update mode link enabled state
+      roomEl.addEventListener('change', () => {
         const room = currentRoom();
         const saved = getPsk(room) || {};
         savedPSK = saved.tokenB64u || '';
@@ -463,8 +653,61 @@
         setMaskedChip(savedPSK || '');
         setModeLinksEnabled(isValidPsk(savedPSK || ''));
         pointModeLinksAt(isValidPsk(savedPSK || '') ? room : '');
-      }
-    })();
-  </script>
-</body>
+        // do not flash here; only flash on successful save or QR install with valid key
+        pairedOk.classList.remove('show');
+      });
+
+      // Boot: install PSK from QR (if present) → auto-persist; only flash if valid; else grey pills
+      (async function boot() {
+        const intent = parseHash();
+        hadFragment = intent.hadHash;
+        const incoming = normalizeUrlToken(intent.psk || '');
+
+        // A pairing link without a room name can't be installed safely (it would land in the wrong room).
+        if (incoming && !intent.room) {
+          if (intent.hadHash) scrubUrl();
+          roomEl.value = '';
+          setMaskedChip('');
+          setModeLinksEnabled(false);
+          pskChip.style.pointerEvents = 'none';
+          pskChip.setAttribute('aria-disabled', 'true');
+          pskChip.tabIndex = -1;
+          forgetBtn.disabled = true;
+          showToast('This pairing link has no room name. Ask for a new QR code.');
+          return;
+        }
+
+        roomEl.value = intent.room || 'Baby';
+
+        // Terms of use first, as on Pair devices. The key is only saved once they are accepted.
+        try {
+          await ensureTermsAccepted({ role: 'pair' });
+        } catch {
+          if (intent.hadHash) scrubUrl();
+          return;
+        }
+
+        if (incoming) {
+          const saved = getPsk(currentRoom()) || {};
+          savedPSK = saved.tokenB64u || '';
+          if (persistPSK(incoming, 'url') !== false) {
+            setMaskedChip(incoming);
+            currentPSK = incoming;
+          } else {
+            currentPSK = savedPSK;
+            pointModeLinksAt(isValidPsk(savedPSK) ? currentRoom() : '');
+          }
+          if (intent.hadHash) scrubUrl(); // scrub fragment for privacy
+        } else {
+          const room = currentRoom();
+          const saved = getPsk(room) || {};
+          savedPSK = saved.tokenB64u || '';
+          currentPSK = savedPSK;
+          setMaskedChip(savedPSK || '');
+          setModeLinksEnabled(isValidPsk(savedPSK || ''));
+          pointModeLinksAt(isValidPsk(savedPSK || '') ? room : '');
+        }
+      })();
+    </script>
+  </body>
 </html>

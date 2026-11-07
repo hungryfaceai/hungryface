@@ -31,4 +31,6 @@ export async function createVisionTask(TaskClass, fileset, options, { label = 'v
 }
 
 /** Which delegate the last task created under `label` is using ('GPU', 'CPU', or undefined). */
-export function visionDelegate(label) { return lastDelegate.get(label); }
+export function visionDelegate(label) {
+  return lastDelegate.get(label);
+}

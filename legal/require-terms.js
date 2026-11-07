@@ -76,38 +76,57 @@ export async function ensureTermsAccepted(opts = {}) {
   const acceptBtn = overlay.querySelector('#tos-accept');
   const decline = overlay.querySelector('#tos-decline');
 
-  const focusables = () => [...overlay.querySelectorAll('a,button,input,[tabindex]:not([tabindex="-1"])')].filter(el => !el.disabled);
+  const focusables = () =>
+    [...overlay.querySelectorAll('a,button,input,[tabindex]:not([tabindex="-1"])')].filter((el) => !el.disabled);
   let first, last;
-  function setTrap() { [first] = focusables(); last = focusables().slice(-1)[0]; }
+  function setTrap() {
+    [first] = focusables();
+    last = focusables().slice(-1)[0];
+  }
   setTrap();
   overlay.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { // treat Escape as decline (just navigate away)
+    if (e.key === 'Escape') {
+      // treat Escape as decline (just navigate away)
       decline.click();
     } else if (e.key === 'Tab') {
       setTrap();
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     }
   });
 
   // Logic
-  checkbox.addEventListener('change', () => { acceptBtn.disabled = !checkbox.checked; });
-  setTimeout(() => (checkbox.focus({ preventScroll: true })), 0);
+  checkbox.addEventListener('change', () => {
+    acceptBtn.disabled = !checkbox.checked;
+  });
+  setTimeout(() => checkbox.focus({ preventScroll: true }), 0);
 
   return new Promise((resolve) => {
-    acceptBtn.addEventListener('click', () => {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
-          acceptedAt: new Date().toISOString(),
-          locale,
-          role
-        }));
-      } catch {
-        // If storage blocked, we still let them proceed after explicit acceptance
-      }
-      overlay.remove();
-      style.remove();
-      resolve(true);
-    }, { once: true });
+    acceptBtn.addEventListener(
+      'click',
+      () => {
+        try {
+          localStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify({
+              acceptedAt: new Date().toISOString(),
+              locale,
+              role,
+            })
+          );
+        } catch {
+          // If storage blocked, we still let them proceed after explicit acceptance
+        }
+        overlay.remove();
+        style.remove();
+        resolve(true);
+      },
+      { once: true }
+    );
   });
 }

@@ -20,17 +20,19 @@ export function listValidPskRooms() {
 }
 
 export async function requirePskOrRedirect({
-  intent = 'unknown',                // 'sender' | 'viewer'
+  intent = 'unknown', // 'sender' | 'viewer'
   pairRoute = '/hungryface/webrtc/pairpsk/',
-  preferRoom = '',                   // e.g., from ?room=
-  fallbackRoom = 'Baby',             // your default label
+  preferRoom = '', // e.g., from ?room=
+  fallbackRoom = 'Baby', // your default label
 } = {}) {
   const room = chooseRoom(preferRoom, fallbackRoom);
-  const rec  = getPsk(room) || {};
+  const rec = getPsk(room) || {};
   const token = rec.tokenB64u || '';
 
   if (isValidToken(token)) {
-    try { localStorage.setItem('naptio:lastRoom', room); } catch {}
+    try {
+      localStorage.setItem('naptio:lastRoom', room);
+    } catch {}
     return { room, tokenB64u: token, redirected: false };
   }
 
@@ -39,17 +41,19 @@ export async function requirePskOrRedirect({
   const rooms = listValidPskRooms();
   if (rooms.length === 1 || (rooms.length > 1 && !(preferRoom || '').trim())) {
     const onlyRoom = rooms[0];
-    const onlyRec  = getPsk(onlyRoom) || {};
-    const onlyTok  = onlyRec.tokenB64u || '';
+    const onlyRec = getPsk(onlyRoom) || {};
+    const onlyTok = onlyRec.tokenB64u || '';
     if (isValidToken(onlyTok)) {
-      try { localStorage.setItem('naptio:lastRoom', onlyRoom); } catch {}
+      try {
+        localStorage.setItem('naptio:lastRoom', onlyRoom);
+      } catch {}
       return { room: onlyRoom, tokenB64u: onlyTok, redirected: false };
     }
   }
 
   // No valid PSK → redirect to Pair Devices with context
   const url = new URL(pairRoute, location.origin);
-  if (room)  url.searchParams.set('room', room);
+  if (room) url.searchParams.set('room', room);
   if (intent) url.searchParams.set('intent', intent);
   // Optionally: url.searchParams.set('return', location.href);
   location.href = url.toString();
@@ -69,7 +73,11 @@ function chooseRoom(prefer, fallback) {
 
 function isValidToken(b64u) {
   if (!b64u || typeof b64u !== 'string') return false;
-  try { return b64uByteLen(b64u) >= 16; } catch { return false; }
+  try {
+    return b64uByteLen(b64u) >= 16;
+  } catch {
+    return false;
+  }
 }
 
 function b64uByteLen(b64u) {
@@ -78,4 +86,10 @@ function b64uByteLen(b64u) {
   return atob(clean + '===='.slice(0, pad)).length;
 }
 
-function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
+function safeParse(s) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}

@@ -18,19 +18,31 @@ function b64uToBytes(b64u) {
   return out;
 }
 function bytesToB64u(arr) {
-  let s = ''; for (let i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]);
-  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/,'');
+  let s = '';
+  for (let i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 async function hmac(keyBytes, payloadBytes) {
-  const key = await crypto.subtle.importKey('raw', keyBytes, {name:'HMAC', hash:'SHA-256'}, false, ['sign']);
+  const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const mac = await crypto.subtle.sign('HMAC', key, payloadBytes);
   return new Uint8Array(mac);
 }
-function storageKey(room) { return 'psk:' + String(room || '').trim(); }
-function getStored(room) {
-  try { const x = localStorage.getItem(storageKey(room)); return x ? JSON.parse(x) : null; } catch { return null; }
+function storageKey(room) {
+  return 'psk:' + String(room || '').trim();
 }
-function setStored(room, obj) { try { localStorage.setItem(storageKey(room), JSON.stringify(obj)); } catch {} }
+function getStored(room) {
+  try {
+    const x = localStorage.getItem(storageKey(room));
+    return x ? JSON.parse(x) : null;
+  } catch {
+    return null;
+  }
+}
+function setStored(room, obj) {
+  try {
+    localStorage.setItem(storageKey(room), JSON.stringify(obj));
+  } catch {}
+}
 function parseFragment() {
   const hash = (location.hash || '').replace(/^#/, '');
   if (!hash) return {};
@@ -45,7 +57,12 @@ function scrubFragment() {
   }
 }
 
-function timingSafeEq(a,b){ if(!a||!b||a.length!==b.length) return false; let v=0; for(let i=0;i<a.length;i++) v|=(a[i]^b[i]); return v===0; }
+function timingSafeEq(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  let v = 0;
+  for (let i = 0; i < a.length; i++) v |= a[i] ^ b[i];
+  return v === 0;
+}
 
 // Build the compact view we sign/verify (stable field order)
 function viewFor(obj, ctr) {
@@ -57,29 +74,32 @@ function viewFor(obj, ctr) {
     cand: obj.candidate?.candidate || null,
     mid: obj.candidate?.sdpMid ?? null,
     idx: obj.candidate?.sdpMLineIndex ?? null,
-    ctr: Number(ctr) || 0
+    ctr: Number(ctr) || 0,
   };
 }
-const PASSTHRU = new Set(['hello','roster','peer-joined','peer-left','keepalive']); // never require psk
+const PASSTHRU = new Set(['hello', 'roster', 'peer-joined', 'peer-left', 'keepalive']); // never require psk
 
 // ---- Public helpers ----
-export async function ensurePskForRoom(room, role='receiver') {
+export async function ensurePskForRoom(room, role = 'receiver') {
   // 1) import from #fragment if present (and scrub)
   const { room: fragRoom, token } = parseFragment();
   if (token) {
-    const r = (fragRoom || room || 'Baby');
+    const r = fragRoom || room || 'Baby';
     if (!/^[A-Za-z0-9\-_]{22,}$/.test(token)) throw new Error('Invalid token in fragment');
     setStored(r, { tokenB64u: token, createdAt: Date.now(), installedFrom: 'url' });
     // If fragment specified a different room, keep it; callers may read it back via getPsk()
     if (r !== room) room = r;
     // A key received from another device: that room becomes this device's current room everywhere.
-    try { (await import('/hungryface/webrtc/shared/psk/adopt-room.js')).adoptPairedRoom(r); } catch {}
+    try {
+      (await import('/hungryface/webrtc/shared/psk/adopt-room.js')).adoptPairedRoom(r);
+    } catch {}
     scrubFragment();
   }
   // 2) ensure present (sender may auto-create; receiver shouldn’t)
   let st = getStored(room);
   if (!st?.tokenB64u && role === 'sender') {
-    const bytes = new Uint8Array(16); crypto.getRandomValues(bytes);
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
     setStored(room, { tokenB64u: bytesToB64u(bytes), createdAt: Date.now() });
     st = getStored(room);
   }
@@ -87,14 +107,18 @@ export async function ensurePskForRoom(room, role='receiver') {
 }
 
 export function getPsk(room) {
-  const st = getStored(room); return { room, tokenB64u: st?.tokenB64u || null };
+  const st = getStored(room);
+  return { room, tokenB64u: st?.tokenB64u || null };
 }
 
 export function makeShareUrl({ baseUrl, room }) {
   const { tokenB64u } = getPsk(room);
   const u = new URL(baseUrl, location.origin);
-  const h = new URLSearchParams(); h.set('room', room || 'Baby'); if (tokenB64u) h.set('token', tokenB64u);
-  u.hash = h.toString(); return u.toString();
+  const h = new URLSearchParams();
+  h.set('room', room || 'Baby');
+  if (tokenB64u) h.set('token', tokenB64u);
+  u.hash = h.toString();
+  return u.toString();
 }
 
 // ---- Install a global WebSocket proxy for this room ----
@@ -112,19 +136,19 @@ export function installPskShim({ room }) {
   class PskWS {
     constructor(url, protocols) {
       this._inner = new NativeWS(url, protocols);
-  
+
       // EventTarget shim
       this._et = document.createDocumentFragment();
       this.addEventListener = this._et.addEventListener.bind(this._et);
       this.removeEventListener = this._et.removeEventListener.bind(this._et);
       this.dispatchEvent = this._et.dispatchEvent.bind(this._et);
-  
+
       // on* property handlers (to match native WebSocket usage)
       this._onopen = null;
       this._onmessage = null;
       this._onerror = null;
       this._onclose = null;
-  
+
       // Inbound messages are processed strictly in arrival order. HMAC verification is
       // async; without this queue a later message could finish verifying first, and the
       // counter (replay) check would then drop the earlier, legitimate one.
@@ -135,11 +159,22 @@ export function installPskShim({ room }) {
         this._onmessage && this._onmessage(evOut);
       };
       const handleInbound = async (data) => {
-        if (!tokenBytes) { deliver(data); return; }
+        if (!tokenBytes) {
+          deliver(data);
+          return;
+        }
         let obj;
-        try { obj = JSON.parse(data); } catch { deliver(data); return; }
+        try {
+          obj = JSON.parse(data);
+        } catch {
+          deliver(data);
+          return;
+        }
         const t = obj?.type || obj?.op || '';
-        if (PASSTHRU.has(t)) { deliver(JSON.stringify(obj)); return; }
+        if (PASSTHRU.has(t)) {
+          deliver(JSON.stringify(obj));
+          return;
+        }
 
         const sig = obj?.psk;
         if (!sig || typeof sig.ctr !== 'number' || typeof sig.mac !== 'string') return; // drop
@@ -148,11 +183,15 @@ export function installPskShim({ room }) {
         const payload = te.encode(JSON.stringify(view));
         const expect = await hmac(tokenBytes, payload);
         let got;
-        try { got = b64uToBytes(sig.mac); } catch { return; } // malformed MAC → drop
-        if (!timingSafeEq(expect, got)) return;               // bad MAC → drop
+        try {
+          got = b64uToBytes(sig.mac);
+        } catch {
+          return;
+        } // malformed MAC → drop
+        if (!timingSafeEq(expect, got)) return; // bad MAC → drop
         const key = obj.from || 'room';
         const last = lastCtrByPeer.get(key) || 0;
-        if (sig.ctr <= last) return;                          // replay → drop
+        if (sig.ctr <= last) return; // replay → drop
         lastCtrByPeer.set(key, sig.ctr);
         deliver(JSON.stringify(obj));
       };
@@ -163,50 +202,85 @@ export function installPskShim({ room }) {
           const data = evIn.data;
           inboundChain = inboundChain
             .then(() => handleInbound(data))
-            .catch(e => console.warn('[PSK] inbound message dropped:', e?.message || e));
+            .catch((e) => console.warn('[PSK] inbound message dropped:', e?.message || e));
           return;
         }
-  
+
         // Non-message events: forward as regular Events and also call property handler
         const evOut =
-          type === 'close' ? new CloseEvent('close', evIn) :
-          type === 'error' ? new Event('error') :
-                             new Event('open');
+          type === 'close' ? new CloseEvent('close', evIn) : type === 'error' ? new Event('error') : new Event('open');
         this.dispatchEvent(evOut);
-        if (type === 'open'   && this._onopen)   this._onopen(evOut);
-        if (type === 'error'  && this._onerror)  this._onerror(evOut);
-        if (type === 'close'  && this._onclose)  this._onclose(evOut);
+        if (type === 'open' && this._onopen) this._onopen(evOut);
+        if (type === 'error' && this._onerror) this._onerror(evOut);
+        if (type === 'close' && this._onclose) this._onclose(evOut);
       };
-  
-      this._inner.addEventListener('open',    (e) => relay('open', e));
-      this._inner.addEventListener('error',   (e) => relay('error', e));
-      this._inner.addEventListener('close',   (e) => relay('close', e));
+
+      this._inner.addEventListener('open', (e) => relay('open', e));
+      this._inner.addEventListener('error', (e) => relay('error', e));
+      this._inner.addEventListener('close', (e) => relay('close', e));
       this._inner.addEventListener('message', (e) => relay('message', e));
     }
-  
+
     // on* property compatibility
-    get onopen()    { return this._onopen; }
-    set onopen(fn)  { this._onopen = typeof fn === 'function' ? fn : null; }
-    get onmessage() { return this._onmessage; }
-    set onmessage(fn){ this._onmessage = typeof fn === 'function' ? fn : null; }
-    get onerror()   { return this._onerror; }
-    set onerror(fn) { this._onerror = typeof fn === 'function' ? fn : null; }
-    get onclose()   { return this._onclose; }
-    set onclose(fn) { this._onclose = typeof fn === 'function' ? fn : null; }
-  
+    get onopen() {
+      return this._onopen;
+    }
+    set onopen(fn) {
+      this._onopen = typeof fn === 'function' ? fn : null;
+    }
+    get onmessage() {
+      return this._onmessage;
+    }
+    set onmessage(fn) {
+      this._onmessage = typeof fn === 'function' ? fn : null;
+    }
+    get onerror() {
+      return this._onerror;
+    }
+    set onerror(fn) {
+      this._onerror = typeof fn === 'function' ? fn : null;
+    }
+    get onclose() {
+      return this._onclose;
+    }
+    set onclose(fn) {
+      this._onclose = typeof fn === 'function' ? fn : null;
+    }
+
     // Forwarders
-    get readyState() { return this._inner.readyState; }
-    get bufferedAmount() { return this._inner.bufferedAmount; }
-    get url() { return this._inner.url; }
-    get protocol() { return this._inner.protocol; }
-  
+    get readyState() {
+      return this._inner.readyState;
+    }
+    get bufferedAmount() {
+      return this._inner.bufferedAmount;
+    }
+    get url() {
+      return this._inner.url;
+    }
+    get protocol() {
+      return this._inner.protocol;
+    }
+
     send(data) {
-      if (!tokenBytes) { this._inner.send(data); return; }
+      if (!tokenBytes) {
+        this._inner.send(data);
+        return;
+      }
       let obj;
-      try { obj = (typeof data === 'string') ? JSON.parse(data) : data; } catch { obj = null; }
-      if (!obj || typeof obj !== 'object') { this._enqueueSend(() => data); return; }
+      try {
+        obj = typeof data === 'string' ? JSON.parse(data) : data;
+      } catch {
+        obj = null;
+      }
+      if (!obj || typeof obj !== 'object') {
+        this._enqueueSend(() => data);
+        return;
+      }
       const t = obj?.type || obj?.op || '';
-      if (PASSTHRU.has(t)) { this._enqueueSend(() => JSON.stringify(obj)); return; }
+      if (PASSTHRU.has(t)) {
+        this._enqueueSend(() => JSON.stringify(obj));
+        return;
+      }
       const nextCtr = ++ctr;
       const view = viewFor(obj, nextCtr);
       const payload = te.encode(JSON.stringify(view));
@@ -222,25 +296,41 @@ export function installPskShim({ room }) {
     _enqueueSend(build) {
       this._sendChain = (this._sendChain || Promise.resolve())
         .then(build)
-        .then(out => {
+        .then((out) => {
           if (this._inner.readyState !== NativeWS.OPEN) return; // closed meanwhile → drop (as native would error)
           this._inner.send(out);
         })
-        .catch(e => console.warn('[PSK] send failed:', e?.message || e));
+        .catch((e) => console.warn('[PSK] send failed:', e?.message || e));
     }
-  
+
     // Let messages still being signed (e.g. a final "bye") go out first; never wait more than 1 s.
     close(code, reason) {
-      const shut = () => { try { this._inner.close(code, reason); } catch {} };
+      const shut = () => {
+        try {
+          this._inner.close(code, reason);
+        } catch {}
+      };
       if (!this._sendChain) return shut();
-      let done = false; const once = () => { if (!done) { done = true; shut(); } };
-      this._sendChain.then(once, once); setTimeout(once, 1000);
+      let done = false;
+      const once = () => {
+        if (!done) {
+          done = true;
+          shut();
+        }
+      };
+      this._sendChain.then(once, once);
+      setTimeout(once, 1000);
     }
   }
   PskWS.__pskWrapped = true;
-  PskWS.CLOSING = NativeWS.CLOSING; PskWS.CLOSED = NativeWS.CLOSED; PskWS.CONNECTING = NativeWS.CONNECTING; PskWS.OPEN = NativeWS.OPEN;
+  PskWS.CLOSING = NativeWS.CLOSING;
+  PskWS.CLOSED = NativeWS.CLOSED;
+  PskWS.CONNECTING = NativeWS.CONNECTING;
+  PskWS.OPEN = NativeWS.OPEN;
 
   const prev = window.WebSocket;
   window.WebSocket = PskWS;
-  return () => { window.WebSocket = prev; };
+  return () => {
+    window.WebSocket = prev;
+  };
 }

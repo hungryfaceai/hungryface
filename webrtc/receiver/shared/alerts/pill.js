@@ -3,10 +3,15 @@
 
 function injectStyleOnce(id, css) {
   if (document.getElementById(id)) return;
-  const s = document.createElement('style'); s.id = id; s.textContent = css; document.head.appendChild(s);
+  const s = document.createElement('style');
+  s.id = id;
+  s.textContent = css;
+  document.head.appendChild(s);
 }
 
-injectStyleOnce('alerts-pill-css', `
+injectStyleOnce(
+  'alerts-pill-css',
+  `
   .alerts-btn{ padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.4);
                background:transparent; color:#fff; font-weight:600; cursor:pointer; }
   .alerts-btn:active{ transform:scale(.98); }
@@ -15,11 +20,16 @@ injectStyleOnce('alerts-pill-css', `
     min-width:18px; height:18px; padding:0 5px; border-radius:999px;
     background:#ef4444; color:#fff; font-size:12px; line-height:1; font-weight:800; margin-left:8px;
   }
-`);
+`
+);
 
-export function mountAlertsPill({ drawerOpenBtnId='btnOpenAlerts', drawerBadgeId='alertsBadge', injectIfMissing=true } = {}) {
+export function mountAlertsPill({
+  drawerOpenBtnId = 'btnOpenAlerts',
+  drawerBadgeId = 'alertsBadge',
+  injectIfMissing = true,
+} = {}) {
   let openBtn = document.getElementById(drawerOpenBtnId);
-  let badge   = document.getElementById(drawerBadgeId);
+  let badge = document.getElementById(drawerBadgeId);
 
   if (!openBtn && injectIfMissing) {
     // Try to append in a sensible spot (topbar if present, else controls, else body)
@@ -32,11 +42,11 @@ export function mountAlertsPill({ drawerOpenBtnId='btnOpenAlerts', drawerBadgeId
     `.trim();
     host.appendChild(wrap.firstChild);
     openBtn = document.getElementById(drawerOpenBtnId);
-    badge   = document.getElementById(drawerBadgeId);
+    badge = document.getElementById(drawerBadgeId);
   } else {
     // Add classes for consistent styling if you supplied your own elements
     if (openBtn) openBtn.classList.add('alerts-btn');
-    if (badge)   badge.classList.add('alerts-badge');
+    if (badge) badge.classList.add('alerts-badge');
   }
 
   return { openBtn, badge };

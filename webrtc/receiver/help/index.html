@@ -1,469 +1,841 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>Help</title>
-  <link rel="icon" href="/hungryface/pwa/icons/favicon-196.png" sizes="196x196">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="description" content="How to set up Naptio in 3 steps: pair your two devices, start the Camera, and watch on your phone. Plus everyday use, optional alerts, and fixes for common problems." />
+  <head>
+    <meta charset="utf-8" />
+    <title>Help</title>
+    <link rel="icon" href="/hungryface/pwa/icons/favicon-196.png" sizes="196x196" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta
+      name="description"
+      content="How to set up Naptio in 3 steps: pair your two devices, start the Camera, and watch on your phone. Plus everyday use, optional alerts, and fixes for common problems."
+    />
 
-  <!-- Shared sidebar stylesheet (same as Settings) -->
-  <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
+    <!-- Shared sidebar stylesheet (same as Settings) -->
+    <link rel="stylesheet" href="/hungryface/webrtc/receiver/shared/sidebar.css" />
 
-  <link rel="stylesheet" href="/hungryface/shared/tokens.css">
-  <style>
-    :root { color-scheme: dark; }
-    html, body {
-      margin: 0; background: var(--nt-bg, #000); color: var(--nt-text, #fff);
-      font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-      -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
-      height: 100%;
-      touch-action: manipulation;
-      overflow-x: hidden;
-    }
+    <link rel="stylesheet" href="/hungryface/shared/tokens.css" />
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      html,
+      body {
+        margin: 0;
+        background: var(--nt-bg, #000);
+        color: var(--nt-text, #fff);
+        font-family:
+          -apple-system,
+          system-ui,
+          Segoe UI,
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        height: 100%;
+        touch-action: manipulation;
+        overflow-x: hidden;
+      }
 
-    /* Layout */
-    #ui {
-      position: relative; z-index: 5; min-height: 100svh;
-      display: flex; align-items: flex-start; justify-content: center;
-      padding: 20px;
-      transition: padding-left .18s ease;
-      will-change: padding-left;
-      box-sizing: border-box;
-    }
-    .panel {
-      width: 100%; max-width: 1100px;
-      background: var(--nt-bg-soft, #0b0b0b); color: #eaeaea;
-      border: 1px solid #1b1b1b; border-radius: 16px;
-      box-shadow: 0 0 0 1px #0a0a0a inset, 0 8px 24px rgba(0,0,0,0.5);
-      padding: 20px 16px 40px;
-      box-sizing: border-box;
-    }
-    @media (min-width: 720px) {
-      .panel { padding: 28px 28px 52px; }
-    }
-
-    /* Header (NOT sticky; scrolls away) */
-    .header {
-      padding: 10px 0 12px;
-      margin: 0 0 18px;
-      border-bottom: 1px solid #141414;
-    }
-    .header-row { display: flex; align-items: center; gap: 12px; }
-    h1 { margin: 0; font-size: 22px; letter-spacing: .2px; color: var(--nt-text, #fff); }
-    @media (min-width: 720px) { h1 { font-size: 26px; } }
-
-    /* Content */
-    h2 { font-size: 20px; margin: 26px 0 10px; color: var(--nt-text, #fff); }
-    h3 { font-size: 17px; margin: 18px 0 8px; color: var(--nt-text, #fff); }
-    p { line-height: 1.6; margin: 10px 0; color: #e1e1e1; }
-    ul, ol { margin: 8px 0 14px 20px; }
-    li { margin: 6px 0; }
-    hr { border: 0; height: 1px; background: #161616; margin: 18px 0; }
-
-    .muted { color: #bdbdbd; }
-    .inline-code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      background: #121212; border: 1px solid #1c1c1c; padding: 2px 6px; border-radius: 8px;
-      color: var(--nt-text-2, #ddd);
-    }
-    .note, .tip, .warn {
-      border-radius: 12px; padding: 10px 12px; margin: 10px 0 14px;
-      border: 1px solid;
-    }
-    .note { background:#0f1117; border-color:#1b2130; }
-    .tip  { background:#10170f; border-color:#19301b; }
-    .warn { background:#17100f; border-color:#30211b; }
-
-    .quick-card {
-      border: 1px solid #1b1b1b; border-radius: 14px;
-      background: #0a0a0a;
-      padding: 14px 14px 2px; margin: 8px 0 16px;
-    }
-    .pill {
-      display:inline-block; padding: 6px 10px; border-radius: 999px;
-      border: 1px solid #1f1f1f; background:#0f0f0f; color:#e8e8e8; font-size:12px;
-      margin: 0 6px 0 0;
-    }
-    a { color: var(--nt-text, #fff); text-decoration: none; opacity: 0.95; }
-    a:hover { text-decoration: underline; opacity: 1; }
-    .toc a { color:#dcdcdc; }
-    .toc { border:1px solid #1b1b1b; background:#0a0a0a; border-radius:12px; padding:10px 12px; }
-
-    @supports (padding-top: env(safe-area-inset-top)) {
+      /* Layout */
       #ui {
-        /* keep your original 20px, plus the notch safe area when present */
-        padding-top: calc(20px + env(safe-area-inset-top));
-        padding-bottom: calc(20px + env(safe-area-inset-bottom));
+        position: relative;
+        z-index: 5;
+        min-height: 100svh;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 20px;
+        transition: padding-left 0.18s ease;
+        will-change: padding-left;
+        box-sizing: border-box;
       }
-    }
+      .panel {
+        width: 100%;
+        max-width: 1100px;
+        background: var(--nt-bg-soft, #0b0b0b);
+        color: #eaeaea;
+        border: 1px solid #1b1b1b;
+        border-radius: 16px;
+        box-shadow:
+          0 0 0 1px #0a0a0a inset,
+          0 8px 24px rgba(0, 0, 0, 0.5);
+        padding: 20px 16px 40px;
+        box-sizing: border-box;
+      }
+      @media (min-width: 720px) {
+        .panel {
+          padding: 28px 28px 52px;
+        }
+      }
 
+      /* Header (NOT sticky; scrolls away) */
+      .header {
+        padding: 10px 0 12px;
+        margin: 0 0 18px;
+        border-bottom: 1px solid #141414;
+      }
+      .header-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 22px;
+        letter-spacing: 0.2px;
+        color: var(--nt-text, #fff);
+      }
+      @media (min-width: 720px) {
+        h1 {
+          font-size: 26px;
+        }
+      }
 
-    /* ---- Help page: task-first layout ---- */
-    .lead { font-size: 16px; line-height: 1.6; color: var(--nt-text-2, #ddd); }
-    .small { font-size: 14px; color: #bdbdbd; margin: 6px 0 4px; }
-    section { margin-top: 28px; }
-    section > h2 { margin-top: 0; }
-    .toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 8px; }
-    .toc a { display: inline-block; padding: 8px 12px; border-radius: var(--nt-radius-pill, 999px);
-             border: 1px solid var(--nt-border-strong, #2a2a2a); background: var(--nt-surface, #111); }
-    .toc a:hover { text-decoration: none; background: var(--nt-surface-3, #1a1a1a); }
-    .need { border: 1px solid #1b1b1b; border-radius: 14px; background: #0a0a0a; padding: 12px 14px; margin: 10px 0 16px; }
-    .need ul { margin: 6px 0 2px 20px; }
-    /* numbered setup steps */
-    ol.steps { list-style: none; counter-reset: step; margin: 0; padding: 0; }
-    ol.steps > li { counter-increment: step; position: relative; padding: 4px 0 14px 52px; margin: 0; }
-    ol.steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 36px; height: 36px;
-                            border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 18px;
-                            background: var(--nt-text, #fff); color: var(--nt-bg, #000); }
-    ol.steps > li:not(:last-child)::after { content: ""; position: absolute; left: 17px; top: 42px; bottom: 2px;
-                                             width: 2px; background: #222; }
-    ol.steps > li > h3 { margin: 6px 0 6px; font-size: 18px; }
-    ol.steps ol { margin: 6px 0 6px 18px; }
-    ul.plain { list-style: none; margin: 8px 0; padding: 0; }
-    ul.plain li { padding: 6px 0; border-bottom: 1px solid #141414; }
-    .badge { font-size: 12px; font-weight: 600; vertical-align: middle; padding: 2px 8px; border-radius: 999px;
-             border: 1px solid var(--nt-border-strong, #2a2a2a); color: var(--nt-text-muted, #aaa); margin-left: 6px; }
-    /* collapsible sections (progressive disclosure) */
-    details { border: 1px solid #1b1b1b; border-radius: 12px; background: #0a0a0a; margin: 8px 0; }
-    details[open] { background: #0d0d0d; }
-    summary { cursor: pointer; padding: 12px 40px 12px 14px; list-style: none; position: relative; min-height: 24px;
-              display: flex; flex-direction: column; gap: 2px; }
-    summary::-webkit-details-marker { display: none; }
-    summary::after { content: "+"; position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
-                     font-size: 20px; color: var(--nt-text-muted, #aaa); }
-    details[open] > summary::after { content: "−"; }
-    .sum-title { font-weight: 600; color: var(--nt-text, #fff); }
-    .sum-desc { font-size: 14px; color: var(--nt-text-muted, #aaa); }
-    details > *:not(summary) { margin-left: 14px; margin-right: 14px; }
-    details > ol, details > ul { margin-left: 34px; }
-    details > :last-child { margin-bottom: 12px; }
-    details.advanced { margin-top: 14px; }
-    /* links inside the guide's text: underlined so they read as tappable */
-    main p a, main li a { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; color: var(--nt-accent, #7aa2ff); }
-    main p a:hover, main li a:hover { text-decoration-thickness: 2px; }
-    @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
-    [id] { scroll-margin-top: 16px; }
-  </style>
+      /* Content */
+      h2 {
+        font-size: 20px;
+        margin: 26px 0 10px;
+        color: var(--nt-text, #fff);
+      }
+      h3 {
+        font-size: 17px;
+        margin: 18px 0 8px;
+        color: var(--nt-text, #fff);
+      }
+      p {
+        line-height: 1.6;
+        margin: 10px 0;
+        color: #e1e1e1;
+      }
+      ul,
+      ol {
+        margin: 8px 0 14px 20px;
+      }
+      li {
+        margin: 6px 0;
+      }
+      hr {
+        border: 0;
+        height: 1px;
+        background: #161616;
+        margin: 18px 0;
+      }
 
-  <!-- --- Sidebar overlap fix CSS (same approach as Settings) --- -->
-  <style>
-    :root {
-      --sidebar-visible: 0px;
-      --sidebar-gutter: 12px;                     /* spacing from drawer edge */
-      --safe-left: env(safe-area-inset-left, 0px);/* iPhone gesture area */
-      --menu-hit: 52px;                           /* tappable area for hamburger (if needed elsewhere) */
-      --sidebar-offset: calc(var(--sidebar-visible) + var(--safe-left) + var(--sidebar-gutter));
-    }
-    /* Shift content so it never sits under the drawer */
-    #ui { padding-left: var(--sidebar-offset); }
-    /* Keep panel within remaining width */
-    .panel { max-width: min(1100px, calc(100vw - var(--sidebar-offset) - 32px)); }
+      .muted {
+        color: #bdbdbd;
+      }
+      .inline-code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+        background: #121212;
+        border: 1px solid #1c1c1c;
+        padding: 2px 6px;
+        border-radius: 8px;
+        color: var(--nt-text-2, #ddd);
+      }
+      .note,
+      .tip,
+      .warn {
+        border-radius: 12px;
+        padding: 10px 12px;
+        margin: 10px 0 14px;
+        border: 1px solid;
+      }
+      .note {
+        background: #0f1117;
+        border-color: #1b2130;
+      }
+      .tip {
+        background: #10170f;
+        border-color: #19301b;
+      }
+      .warn {
+        background: #17100f;
+        border-color: #30211b;
+      }
 
-    @media (max-width: 480px) {
-      /* On very small screens, don't push content when the drawer opens */
-      body.drawer-open-detected #ui { padding-left: 0 !important; }
-      .panel { max-width: min(1100px, calc(100vw - 32px)); }
-    }
-  </style>
-    <script defer src="https://cloud.umami.is/script.js" data-website-id="e5feef4a-8ebd-4094-b6ff-36bdc4512e2e" data-exclude-search="true" data-exclude-hash="true" data-domains="hungryfaceai.github.io"></script>
-</head>
-<body>
-  <!-- Shared sidebar injection (identical pattern to Settings) -->
-  <script type="module" src="/hungryface/webrtc/receiver/shared/sidebar-loader.js"></script>
+      .quick-card {
+        border: 1px solid #1b1b1b;
+        border-radius: 14px;
+        background: #0a0a0a;
+        padding: 14px 14px 2px;
+        margin: 8px 0 16px;
+      }
+      .pill {
+        display: inline-block;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid #1f1f1f;
+        background: #0f0f0f;
+        color: #e8e8e8;
+        font-size: 12px;
+        margin: 0 6px 0 0;
+      }
+      a {
+        color: var(--nt-text, #fff);
+        text-decoration: none;
+        opacity: 0.95;
+      }
+      a:hover {
+        text-decoration: underline;
+        opacity: 1;
+      }
+      .toc a {
+        color: #dcdcdc;
+      }
+      .toc {
+        border: 1px solid #1b1b1b;
+        background: #0a0a0a;
+        border-radius: 12px;
+        padding: 10px 12px;
+      }
 
-  <!-- Sidebar visible-width measurer (same logic as Settings) -->
-  <script type="module">
-    (function () {
-      const root = document.documentElement;
-      let sidebar = null;
-      let ro = null, mo = null;
-      let rafId = 0;
+      @supports (padding-top: env(safe-area-inset-top)) {
+        #ui {
+          /* keep your original 20px, plus the notch safe area when present */
+          padding-top: calc(20px + env(safe-area-inset-top));
+          padding-bottom: calc(20px + env(safe-area-inset-bottom));
+        }
+      }
 
-      function px(n) { return Math.max(0, Math.round(n)) + 'px'; }
+      /* ---- Help page: task-first layout ---- */
+      .lead {
+        font-size: 16px;
+        line-height: 1.6;
+        color: var(--nt-text-2, #ddd);
+      }
+      .small {
+        font-size: 14px;
+        color: #bdbdbd;
+        margin: 6px 0 4px;
+      }
+      section {
+        margin-top: 28px;
+      }
+      section > h2 {
+        margin-top: 0;
+      }
+      .toc {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 16px 0 8px;
+      }
+      .toc a {
+        display: inline-block;
+        padding: 8px 12px;
+        border-radius: var(--nt-radius-pill, 999px);
+        border: 1px solid var(--nt-border-strong, #2a2a2a);
+        background: var(--nt-surface, #111);
+      }
+      .toc a:hover {
+        text-decoration: none;
+        background: var(--nt-surface-3, #1a1a1a);
+      }
+      .need {
+        border: 1px solid #1b1b1b;
+        border-radius: 14px;
+        background: #0a0a0a;
+        padding: 12px 14px;
+        margin: 10px 0 16px;
+      }
+      .need ul {
+        margin: 6px 0 2px 20px;
+      }
+      /* numbered setup steps */
+      ol.steps {
+        list-style: none;
+        counter-reset: step;
+        margin: 0;
+        padding: 0;
+      }
+      ol.steps > li {
+        counter-increment: step;
+        position: relative;
+        padding: 4px 0 14px 52px;
+        margin: 0;
+      }
+      ol.steps > li::before {
+        content: counter(step);
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font-weight: 700;
+        font-size: 18px;
+        background: var(--nt-text, #fff);
+        color: var(--nt-bg, #000);
+      }
+      ol.steps > li:not(:last-child)::after {
+        content: '';
+        position: absolute;
+        left: 17px;
+        top: 42px;
+        bottom: 2px;
+        width: 2px;
+        background: #222;
+      }
+      ol.steps > li > h3 {
+        margin: 6px 0 6px;
+        font-size: 18px;
+      }
+      ol.steps ol {
+        margin: 6px 0 6px 18px;
+      }
+      ul.plain {
+        list-style: none;
+        margin: 8px 0;
+        padding: 0;
+      }
+      ul.plain li {
+        padding: 6px 0;
+        border-bottom: 1px solid #141414;
+      }
+      .badge {
+        font-size: 12px;
+        font-weight: 600;
+        vertical-align: middle;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--nt-border-strong, #2a2a2a);
+        color: var(--nt-text-muted, #aaa);
+        margin-left: 6px;
+      }
+      /* collapsible sections (progressive disclosure) */
+      details {
+        border: 1px solid #1b1b1b;
+        border-radius: 12px;
+        background: #0a0a0a;
+        margin: 8px 0;
+      }
+      details[open] {
+        background: #0d0d0d;
+      }
+      summary {
+        cursor: pointer;
+        padding: 12px 40px 12px 14px;
+        list-style: none;
+        position: relative;
+        min-height: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      summary::-webkit-details-marker {
+        display: none;
+      }
+      summary::after {
+        content: '+';
+        position: absolute;
+        right: 14px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 20px;
+        color: var(--nt-text-muted, #aaa);
+      }
+      details[open] > summary::after {
+        content: '−';
+      }
+      .sum-title {
+        font-weight: 600;
+        color: var(--nt-text, #fff);
+      }
+      .sum-desc {
+        font-size: 14px;
+        color: var(--nt-text-muted, #aaa);
+      }
+      details > *:not(summary) {
+        margin-left: 14px;
+        margin-right: 14px;
+      }
+      details > ol,
+      details > ul {
+        margin-left: 34px;
+      }
+      details > :last-child {
+        margin-bottom: 12px;
+      }
+      details.advanced {
+        margin-top: 14px;
+      }
+      /* links inside the guide's text: underlined so they read as tappable */
+      main p a,
+      main li a {
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        text-decoration-thickness: 1px;
+        color: var(--nt-accent, #7aa2ff);
+      }
+      main p a:hover,
+      main li a:hover {
+        text-decoration-thickness: 2px;
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        html {
+          scroll-behavior: smooth;
+        }
+      }
+      [id] {
+        scroll-margin-top: 16px;
+      }
+    </style>
 
-      function pickSidebarCandidate() {
-        const preferred = document.querySelector(
-          '[data-hf-sidebar], [data-sidebar], .hf-sidebar, #hfSidebar, #sidebar, .sidebar, aside[role="complementary"], nav[aria-label="Sidebar"]'
-        );
-        if (preferred) return preferred;
+    <!-- --- Sidebar overlap fix CSS (same approach as Settings) --- -->
+    <style>
+      :root {
+        --sidebar-visible: 0px;
+        --sidebar-gutter: 12px; /* spacing from drawer edge */
+        --safe-left: env(safe-area-inset-left, 0px); /* iPhone gesture area */
+        --menu-hit: 52px; /* tappable area for hamburger (if needed elsewhere) */
+        --sidebar-offset: calc(var(--sidebar-visible) + var(--safe-left) + var(--sidebar-gutter));
+      }
+      /* Shift content so it never sits under the drawer */
+      #ui {
+        padding-left: var(--sidebar-offset);
+      }
+      /* Keep panel within remaining width */
+      .panel {
+        max-width: min(1100px, calc(100vw - var(--sidebar-offset) - 32px));
+      }
 
-        const nodes = Array.from(document.body.querySelectorAll('body > *'));
-        return nodes.find(el => {
-          const cs = getComputedStyle(el);
-          if (cs.position !== 'fixed') return false;
-          if (!(/^0(px)?$/).test(cs.left)) return false;
+      @media (max-width: 480px) {
+        /* On very small screens, don't push content when the drawer opens */
+        body.drawer-open-detected #ui {
+          padding-left: 0 !important;
+        }
+        .panel {
+          max-width: min(1100px, calc(100vw - 32px));
+        }
+      }
+    </style>
+    <script
+      defer
+      src="https://cloud.umami.is/script.js"
+      data-website-id="e5feef4a-8ebd-4094-b6ff-36bdc4512e2e"
+      data-exclude-search="true"
+      data-exclude-hash="true"
+      data-domains="hungryfaceai.github.io"
+    ></script>
+  </head>
+  <body>
+    <!-- Shared sidebar injection (identical pattern to Settings) -->
+    <script type="module" src="/hungryface/webrtc/receiver/shared/sidebar-loader.js"></script>
+
+    <!-- Sidebar visible-width measurer (same logic as Settings) -->
+    <script type="module">
+      (function () {
+        const root = document.documentElement;
+        let sidebar = null;
+        let ro = null,
+          mo = null;
+        let rafId = 0;
+
+        function px(n) {
+          return Math.max(0, Math.round(n)) + 'px';
+        }
+
+        function pickSidebarCandidate() {
+          const preferred = document.querySelector(
+            '[data-hf-sidebar], [data-sidebar], .hf-sidebar, #hfSidebar, #sidebar, .sidebar, aside[role="complementary"], nav[aria-label="Sidebar"]'
+          );
+          if (preferred) return preferred;
+
+          const nodes = Array.from(document.body.querySelectorAll('body > *'));
+          return (
+            nodes.find((el) => {
+              const cs = getComputedStyle(el);
+              if (cs.position !== 'fixed') return false;
+              if (!/^0(px)?$/.test(cs.left)) return false;
+              const r = el.getBoundingClientRect();
+              const w = r.width;
+              return w >= 160 && w <= window.innerWidth * 0.9;
+            }) || null
+          );
+        }
+
+        function visibleLeftWidth(el) {
           const r = el.getBoundingClientRect();
-          const w = r.width;
-          return w >= 160 && w <= window.innerWidth * 0.9;
-        }) || null;
-      }
+          const visible = Math.max(0, Math.min(window.innerWidth, r.right) - Math.max(0, r.left));
+          const cs = getComputedStyle(el);
+          const displayOK = cs.display !== 'none' && cs.visibility !== 'hidden' && r.height > 0;
+          return displayOK && r.left < window.innerWidth / 2 ? visible : 0;
+        }
 
-      function visibleLeftWidth(el) {
-        const r = el.getBoundingClientRect();
-        const visible = Math.max(0, Math.min(window.innerWidth, r.right) - Math.max(0, r.left));
-        const cs = getComputedStyle(el);
-        const displayOK = cs.display !== 'none' && cs.visibility !== 'hidden' && r.height > 0;
-        return displayOK && r.left < (window.innerWidth / 2) ? visible : 0;
-      }
+        function updateShift() {
+          rafId && cancelAnimationFrame(rafId);
+          rafId = requestAnimationFrame(() => {
+            const w = sidebar ? visibleLeftWidth(sidebar) : 0;
+            root.style.setProperty('--sidebar-visible', px(w));
+            document.body.classList.toggle('drawer-open-detected', w > 8);
+          });
+        }
 
-      function updateShift() {
-        rafId && cancelAnimationFrame(rafId);
-        rafId = requestAnimationFrame(() => {
-          const w = sidebar ? visibleLeftWidth(sidebar) : 0;
-          root.style.setProperty('--sidebar-visible', px(w));
-          document.body.classList.toggle('drawer-open-detected', w > 8);
-        });
-      }
+        function attachObservers() {
+          if (!sidebar) return;
+          try {
+            ro?.disconnect();
+            mo?.disconnect();
+          } catch {}
+          ro = new ResizeObserver(updateShift);
+          ro.observe(sidebar);
+          mo = new MutationObserver(updateShift);
+          mo.observe(sidebar, {
+            attributes: true,
+            attributeFilter: ['style', 'class', 'hidden', 'inert'],
+            subtree: false,
+          });
+        }
 
-      function attachObservers() {
-        if (!sidebar) return;
-        try { ro?.disconnect(); mo?.disconnect(); } catch {}
-        ro = new ResizeObserver(updateShift);
-        ro.observe(sidebar);
-        mo = new MutationObserver(updateShift);
-        mo.observe(sidebar, { attributes: true, attributeFilter: ['style', 'class', 'hidden', 'inert'], subtree: false });
-      }
+        function boot() {
+          sidebar = pickSidebarCandidate();
+          if (!sidebar) {
+            setTimeout(boot, 120);
+            return;
+          }
+          attachObservers();
+          updateShift();
+        }
 
-      function boot() {
-        sidebar = pickSidebarCandidate();
-        if (!sidebar) { setTimeout(boot, 120); return; }
-        attachObservers();
-        updateShift();
-      }
+        ['resize', 'orientationchange'].forEach((ev) => window.addEventListener(ev, updateShift, { passive: true }));
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', updateShift, { passive: true });
+          window.visualViewport.addEventListener('scroll', updateShift, { passive: true });
+        }
 
-      ['resize','orientationchange'].forEach(ev => window.addEventListener(ev, updateShift, { passive: true }));
-      if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', updateShift, { passive: true });
-        window.visualViewport.addEventListener('scroll',  updateShift, { passive: true });
-      }
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', boot, { once: true });
+        } else {
+          boot();
+        }
+      })();
+    </script>
 
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', boot, { once: true });
-      } else {
-        boot();
-      }
-    })();
-  </script>
-
-  <div id="ui">
-    <main class="panel" role="main">
-      <div class="header">
-        <div class="header-row">
-          <h1 style="padding-left:2ch">Help</h1>
-        </div>
-      </div>
-
-      <p class="lead">Naptio turns two phones or tablets into a baby monitor. One watches your baby, the other shows you the video and alerts you. Video stays between your two devices; it isn’t uploaded anywhere.</p>
-
-      <div class="warn" role="note">
-        <strong>Naptio is not a medical device.</strong> It can miss things. Always follow safe-sleep advice and keep an adult responsible for your baby.
-      </div>
-
-      <nav class="toc" aria-label="On this page">
-        <a href="#setup">Set up in 3 steps</a>
-        <a href="#everyday">Everyday use</a>
-        <a href="#features">Extra features</a>
-        <a href="#problems">Fix a problem</a>
-        <a href="#privacy">Privacy &amp; safety</a>
-      </nav>
-
-      <!-- ===================== SET UP ===================== -->
-      <section aria-labelledby="setup">
-        <h2 id="setup">Set up in 3 steps</h2>
-        <p class="muted">Takes about 5 minutes. You only pair once.</p>
-
-        <div class="need">
-          <strong>You’ll need:</strong>
-          <ul>
-            <li><strong>Two devices</strong>: a spare phone or tablet for the baby’s room (the <em>Camera</em>) and your own phone (the <em>Viewer</em>).</li>
-            <li><strong>The same Wi-Fi</strong> on both devices.</li>
-            <li><strong>A charger</strong> for the Camera, as it stays on all night.</li>
-          </ul>
+    <div id="ui">
+      <main class="panel" role="main">
+        <div class="header">
+          <div class="header-row">
+            <h1 style="padding-left: 2ch">Help</h1>
+          </div>
         </div>
 
-        <ol class="steps">
-          <li>
-            <h3>Pair your two devices</h3>
-            <p>This links them, so only your devices can see your baby.</p>
+        <p class="lead">
+          Naptio turns two phones or tablets into a baby monitor. One watches your baby, the other shows you the video
+          and alerts you. Video stays between your two devices; it isn’t uploaded anywhere.
+        </p>
+
+        <div class="warn" role="note">
+          <strong>Naptio is not a medical device.</strong> It can miss things. Always follow safe-sleep advice and keep
+          an adult responsible for your baby.
+        </div>
+
+        <nav class="toc" aria-label="On this page">
+          <a href="#setup">Set up in 3 steps</a>
+          <a href="#everyday">Everyday use</a>
+          <a href="#features">Extra features</a>
+          <a href="#problems">Fix a problem</a>
+          <a href="#privacy">Privacy &amp; safety</a>
+        </nav>
+
+        <!-- ===================== SET UP ===================== -->
+        <section aria-labelledby="setup">
+          <h2 id="setup">Set up in 3 steps</h2>
+          <p class="muted">Takes about 5 minutes. You only pair once.</p>
+
+          <div class="need">
+            <strong>You’ll need:</strong>
+            <ul>
+              <li>
+                <strong>Two devices</strong>: a spare phone or tablet for the baby’s room (the <em>Camera</em>) and your
+                own phone (the <em>Viewer</em>).
+              </li>
+              <li><strong>The same Wi-Fi</strong> on both devices.</li>
+              <li><strong>A charger</strong> for the Camera, as it stays on all night.</li>
+            </ul>
+          </div>
+
+          <ol class="steps">
+            <li>
+              <h3>Pair your two devices</h3>
+              <p>This links them, so only your devices can see your baby.</p>
+              <ol>
+                <li>
+                  On the <strong>Camera</strong> device, open <a href="/hungryface/webrtc/pairpsk/">Pair devices</a> and
+                  tap <strong>Share</strong>.
+                </li>
+                <li>
+                  Send the link to your <strong>Viewer</strong> phone (by message or email), or scan the QR code with it
+                  using <strong>Scan QR</strong>.
+                </li>
+                <li>
+                  Open the link on the Viewer. A green <strong>Device paired</strong> message confirms it. That’s it.
+                </li>
+              </ol>
+              <p class="small">Keep that link private, like a password. Anyone who has it could view your camera.</p>
+            </li>
+
+            <li>
+              <h3>Start the Camera</h3>
+              <ol>
+                <li>On the Camera device, open <a href="/hungryface/webrtc/sender/secure/">Camera (Baby)</a>.</li>
+                <li>Tap <strong>Start streaming</strong>, and allow camera and microphone access when asked.</li>
+                <li>
+                  Place it where it can see the cot clearly, <strong>out of the baby’s reach</strong>, and plug it in.
+                </li>
+              </ol>
+              <p class="small">The screen stays on by itself while streaming. Cables must be well away from the cot.</p>
+            </li>
+
+            <li>
+              <h3>Watch on your phone</h3>
+              <ol>
+                <li>
+                  On your Viewer phone, open <a href="/hungryface/webrtc/receiver/video/secure/">Viewer (Parent)</a>.
+                  The video appears in a few seconds.
+                </li>
+                <li>Tap <strong>Enable audio</strong> to hear the room.</li>
+              </ol>
+            </li>
+          </ol>
+
+          <div class="tip">
+            <strong>All set!</strong> Next time, just do steps 2 and 3. You don’t need to pair again.
+          </div>
+        </section>
+
+        <!-- ===================== EVERYDAY ===================== -->
+        <section aria-labelledby="everyday">
+          <h2 id="everyday">Everyday use</h2>
+          <ul class="plain">
+            <li><strong>Switch screens</strong> with the menu button (☰) at the top left.</li>
+            <li><strong>Listen</strong>: <strong>Enable audio</strong> / <strong>Disable audio</strong>.</li>
+            <li><strong>Talk to your baby</strong>: hold <strong>Talk</strong>; your voice plays on the Camera.</li>
+            <li><strong>Play a lullaby</strong> on the Camera: tap <strong>Lullaby</strong>.</li>
+            <li><strong>Full screen</strong> for night-time: tap <strong>Fullscreen</strong>.</li>
+            <li>
+              <strong>See past alerts</strong>: open
+              <a href="/hungryface/webrtc/receiver/shared/alerts/dashboard/">Dashboard</a> from the menu.
+            </li>
+          </ul>
+        </section>
+
+        <!-- ===================== OPTIONAL FEATURES ===================== -->
+        <section aria-labelledby="features">
+          <h2 id="features">Extra features <span class="badge">optional</span></h2>
+          <p class="muted">
+            Naptio can alert you when something happens. Each one works best after a short set-up. Open the one you want
+            from the menu; each screen has its own <strong>Help</strong> button with more detail.
+          </p>
+
+          <details>
+            <summary>
+              <span class="sum-title">Crying alerts</span><span class="sum-desc">Get alerted when your baby cries</span>
+            </summary>
             <ol>
-              <li>On the <strong>Camera</strong> device, open <a href="/hungryface/webrtc/pairpsk/">Pair devices</a> and tap <strong>Share</strong>.</li>
-              <li>Send the link to your <strong>Viewer</strong> phone (by message or email), or scan the QR code with it using <strong>Scan QR</strong>.</li>
-              <li>Open the link on the Viewer. A green <strong>Device paired</strong> message confirms it. That’s it.</li>
+              <li>
+                Open <a href="/hungryface/webrtc/receiver/audio/detect/secure/">Audio</a> from the menu and tap
+                <strong>Start</strong>.
+              </li>
+              <li>
+                For best results, first let it learn what a quiet room sounds like: use <strong>Settings</strong> on
+                that screen with the room silent for about 20 seconds.
+              </li>
             </ol>
-            <p class="small">Keep that link private, like a password. Anyone who has it could view your camera.</p>
-          </li>
+            <p class="small">
+              Getting too many or too few alerts?
+              <a href="/hungryface/webrtc/receiver/audio/training/secure/">AI training</a> teaches it the sounds of your
+              home.
+            </p>
+          </details>
 
-          <li>
-            <h3>Start the Camera</h3>
+          <details>
+            <summary>
+              <span class="sum-title">Movement alerts</span
+              ><span class="sum-desc">Get alerted when your baby moves or wakes</span>
+            </summary>
             <ol>
-              <li>On the Camera device, open <a href="/hungryface/webrtc/sender/secure/">Camera (Baby)</a>.</li>
-              <li>Tap <strong>Start streaming</strong>, and allow camera and microphone access when asked.</li>
-              <li>Place it where it can see the cot clearly, <strong>out of the baby’s reach</strong>, and plug it in.</li>
+              <li>Open <a href="/hungryface/webrtc/receiver/motion/secure/">Motion</a> from the menu.</li>
+              <li>
+                While your baby is still, tap <strong>Calibration</strong>, then <strong>Start</strong>. This teaches it
+                what “still” looks like.
+              </li>
             </ol>
-            <p class="small">The screen stays on by itself while streaming. Cables must be well away from the cot.</p>
-          </li>
+            <p class="small">Moved the camera? Run <strong>Calibration</strong> again.</p>
+          </details>
 
-          <li>
-            <h3>Watch on your phone</h3>
+          <details>
+            <summary>
+              <span class="sum-title">Face-down alerts</span
+              ><span class="sum-desc">Get alerted if your baby may be lying face-down</span>
+            </summary>
             <ol>
-              <li>On your Viewer phone, open <a href="/hungryface/webrtc/receiver/video/secure/">Viewer (Parent)</a>. The video appears in a few seconds.</li>
-              <li>Tap <strong>Enable audio</strong> to hear the room.</li>
+              <li>Open <a href="/hungryface/webrtc/receiver/prone/secure/">Prone</a> from the menu.</li>
+              <li>
+                With your baby lying on their back, open <strong>Settings</strong> and run the calibration for a few
+                seconds.
+              </li>
             </ol>
-          </li>
-        </ol>
+            <p class="small">
+              This is an extra prompt only. It can’t replace safe-sleep practice: always lay your baby on their back to
+              sleep.
+            </p>
+          </details>
 
-        <div class="tip"><strong>All set!</strong> Next time, just do steps 2 and 3. You don’t need to pair again.</div>
-      </section>
+          <details>
+            <summary>
+              <span class="sum-title">Zone alerts</span
+              ><span class="sum-desc">Get alerted when there’s movement in one area</span>
+            </summary>
+            <ol>
+              <li>
+                Open <a href="/hungryface/webrtc/receiver/fence/secure/">Fence</a> from the menu and tap
+                <strong>Draw zone</strong>.
+              </li>
+              <li>Tap around the area to watch, such as inside the cot, to draw its outline.</li>
+            </ol>
+            <p class="small">Tap <strong>Clear</strong> to start again. Redraw it if you move the camera.</p>
+          </details>
 
-      <!-- ===================== EVERYDAY ===================== -->
-      <section aria-labelledby="everyday">
-        <h2 id="everyday">Everyday use</h2>
-        <ul class="plain">
-          <li><strong>Switch screens</strong> with the menu button (☰) at the top left.</li>
-          <li><strong>Listen</strong>: <strong>Enable audio</strong> / <strong>Disable audio</strong>.</li>
-          <li><strong>Talk to your baby</strong>: hold <strong>Talk</strong>; your voice plays on the Camera.</li>
-          <li><strong>Play a lullaby</strong> on the Camera: tap <strong>Lullaby</strong>.</li>
-          <li><strong>Full screen</strong> for night-time: tap <strong>Fullscreen</strong>.</li>
-          <li><strong>See past alerts</strong>: open <a href="/hungryface/webrtc/receiver/shared/alerts/dashboard/">Dashboard</a> from the menu.</li>
-        </ul>
-      </section>
+          <details>
+            <summary>
+              <span class="sum-title">Alerts &amp; history</span
+              ><span class="sum-desc">See and review what happened</span>
+            </summary>
+            <ul>
+              <li>A <strong>red banner</strong> at the top shows a new alert.</li>
+              <li>The <strong>alerts</strong> button shows recent ones; the number is how many are new.</li>
+              <li>
+                The <a href="/hungryface/webrtc/receiver/shared/alerts/dashboard/">Dashboard</a> shows a timeline you
+                can filter and export.
+              </li>
+            </ul>
+            <p class="small">Alert history is kept only on this phone.</p>
+          </details>
+        </section>
 
-      <!-- ===================== OPTIONAL FEATURES ===================== -->
-      <section aria-labelledby="features">
-        <h2 id="features">Extra features <span class="badge">optional</span></h2>
-        <p class="muted">Naptio can alert you when something happens. Each one works best after a short set-up. Open the one you want from the menu; each screen has its own <strong>Help</strong> button with more detail.</p>
+        <!-- ===================== TROUBLESHOOTING ===================== -->
+        <section aria-labelledby="problems">
+          <h2 id="problems">Fix a problem</h2>
 
-        <details>
-          <summary><span class="sum-title">Crying alerts</span><span class="sum-desc">Get alerted when your baby cries</span></summary>
-          <ol>
-            <li>Open <a href="/hungryface/webrtc/receiver/audio/detect/secure/">Audio</a> from the menu and tap <strong>Start</strong>.</li>
-            <li>For best results, first let it learn what a quiet room sounds like: use <strong>Settings</strong> on that screen with the room silent for about 20 seconds.</li>
-          </ol>
-          <p class="small">Getting too many or too few alerts? <a href="/hungryface/webrtc/receiver/audio/training/secure/">AI training</a> teaches it the sounds of your home.</p>
-        </details>
+          <details>
+            <summary><span class="sum-title">I can’t see the video</span></summary>
+            <ol>
+              <li>Check the Camera still says it’s streaming. If not, tap <strong>Start streaming</strong> again.</li>
+              <li>
+                Make sure both devices are on the <strong>same Wi-Fi</strong>. Turning Wi-Fi off and on again often
+                helps.
+              </li>
+              <li>If you use a VPN, turn it off on both devices.</li>
+              <li>Still nothing? Pair the devices again (step 1).</li>
+            </ol>
+          </details>
 
-        <details>
-          <summary><span class="sum-title">Movement alerts</span><span class="sum-desc">Get alerted when your baby moves or wakes</span></summary>
-          <ol>
-            <li>Open <a href="/hungryface/webrtc/receiver/motion/secure/">Motion</a> from the menu.</li>
-            <li>While your baby is still, tap <strong>Calibration</strong>, then <strong>Start</strong>. This teaches it what “still” looks like.</li>
-          </ol>
-          <p class="small">Moved the camera? Run <strong>Calibration</strong> again.</p>
-        </details>
+          <details>
+            <summary><span class="sum-title">I can’t hear anything</span></summary>
+            <ul>
+              <li>Tap <strong>Enable audio</strong>. Phones only play sound after you tap the screen.</li>
+              <li>Check your phone isn’t on silent and the volume is up.</li>
+              <li>On the Camera, check <strong>Audio ON</strong> is ticked and the microphone was allowed.</li>
+            </ul>
+          </details>
 
-        <details>
-          <summary><span class="sum-title">Face-down alerts</span><span class="sum-desc">Get alerted if your baby may be lying face-down</span></summary>
-          <ol>
-            <li>Open <a href="/hungryface/webrtc/receiver/prone/secure/">Prone</a> from the menu.</li>
-            <li>With your baby lying on their back, open <strong>Settings</strong> and run the calibration for a few seconds.</li>
-          </ol>
-          <p class="small">This is an extra prompt only. It can’t replace safe-sleep practice: always lay your baby on their back to sleep.</p>
-        </details>
+          <details>
+            <summary><span class="sum-title">It asks me to pair again</span></summary>
+            <p>
+              This device doesn’t have your pairing link, for example after clearing the browser or using a different
+              browser. Repeat <a href="#setup">step 1</a>.
+            </p>
+            <p class="small">Pairing is stored per browser, so use the same browser each time.</p>
+          </details>
 
-        <details>
-          <summary><span class="sum-title">Zone alerts</span><span class="sum-desc">Get alerted when there’s movement in one area</span></summary>
-          <ol>
-            <li>Open <a href="/hungryface/webrtc/receiver/fence/secure/">Fence</a> from the menu and tap <strong>Draw zone</strong>.</li>
-            <li>Tap around the area to watch, such as inside the cot, to draw its outline.</li>
-          </ol>
-          <p class="small">Tap <strong>Clear</strong> to start again. Redraw it if you move the camera.</p>
-        </details>
+          <details>
+            <summary><span class="sum-title">The camera or microphone is blocked</span></summary>
+            <ul>
+              <li><strong>iPhone/iPad</strong>: Settings → Safari (or your browser) → Camera / Microphone → Allow.</li>
+              <li>
+                <strong>Android</strong>: tap the icon left of the web address → Permissions → allow Camera and
+                Microphone.
+              </li>
+              <li>Then reload the page.</li>
+            </ul>
+          </details>
 
-        <details>
-          <summary><span class="sum-title">Alerts &amp; history</span><span class="sum-desc">See and review what happened</span></summary>
-          <ul>
-            <li>A <strong>red banner</strong> at the top shows a new alert.</li>
-            <li>The <strong>alerts</strong> button shows recent ones; the number is how many are new.</li>
-            <li>The <a href="/hungryface/webrtc/receiver/shared/alerts/dashboard/">Dashboard</a> shows a timeline you can filter and export.</li>
+          <details>
+            <summary><span class="sum-title">The Camera stopped during the night</span></summary>
+            <ul>
+              <li>Keep it <strong>plugged in</strong> and turn off battery saver or low-power mode.</li>
+              <li>Leave Naptio open on screen; don’t switch to other apps on the Camera.</li>
+            </ul>
+          </details>
+
+          <details>
+            <summary><span class="sum-title">Too many alerts, or alerts missed</span></summary>
+            <ul>
+              <li>
+                Run the set-up for that alert again (see <a href="#features">Extra features</a>), especially after
+                moving the camera.
+              </li>
+              <li>Each alert screen has a <strong>Help</strong> button with tips on adjusting it.</li>
+            </ul>
+          </details>
+
+          <details>
+            <summary><span class="sum-title">Start again from scratch</span></summary>
+            <p>
+              Open <a href="/hungryface/webrtc/receiver/settings/">Settings</a> and use <strong>Factory reset</strong>.
+              It clears everything Naptio stored <strong>on this device only</strong>: pairing, alerts and settings.
+              Then pair again.
+            </p>
+          </details>
+
+          <p>Still stuck? <a href="/hungryface/webrtc/receiver/support/">Contact us</a>. We’re happy to help.</p>
+        </section>
+
+        <!-- ===================== PRIVACY ===================== -->
+        <section aria-labelledby="privacy">
+          <h2 id="privacy">Privacy &amp; safety</h2>
+          <ul class="plain">
+            <li>
+              <strong>Private</strong>: video and sound go directly between your two devices and are encrypted. Nothing
+              is recorded or uploaded.
+            </li>
+            <li><strong>Your devices only</strong>: only devices you paired can connect.</li>
+            <li>
+              <strong>Not a medical device</strong>: it’s an aid, not a replacement for supervision or safe-sleep
+              practice.
+            </li>
+            <li>
+              <strong>Consent</strong>: if you monitor anyone other than your own child, ask them first and follow local
+              laws.
+            </li>
           </ul>
-          <p class="small">Alert history is kept only on this phone.</p>
-        </details>
-      </section>
+          <p class="small">More detail in our <a href="/hungryface/legal/#privacy">Privacy Notice</a>.</p>
 
-      <!-- ===================== TROUBLESHOOTING ===================== -->
-      <section aria-labelledby="problems">
-        <h2 id="problems">Fix a problem</h2>
-
-        <details>
-          <summary><span class="sum-title">I can’t see the video</span></summary>
-          <ol>
-            <li>Check the Camera still says it’s streaming. If not, tap <strong>Start streaming</strong> again.</li>
-            <li>Make sure both devices are on the <strong>same Wi-Fi</strong>. Turning Wi-Fi off and on again often helps.</li>
-            <li>If you use a VPN, turn it off on both devices.</li>
-            <li>Still nothing? Pair the devices again (step 1).</li>
-          </ol>
-        </details>
-
-        <details>
-          <summary><span class="sum-title">I can’t hear anything</span></summary>
-          <ul>
-            <li>Tap <strong>Enable audio</strong>. Phones only play sound after you tap the screen.</li>
-            <li>Check your phone isn’t on silent and the volume is up.</li>
-            <li>On the Camera, check <strong>Audio ON</strong> is ticked and the microphone was allowed.</li>
-          </ul>
-        </details>
-
-        <details>
-          <summary><span class="sum-title">It asks me to pair again</span></summary>
-          <p>This device doesn’t have your pairing link, for example after clearing the browser or using a different browser. Repeat <a href="#setup">step 1</a>.</p>
-          <p class="small">Pairing is stored per browser, so use the same browser each time.</p>
-        </details>
-
-        <details>
-          <summary><span class="sum-title">The camera or microphone is blocked</span></summary>
-          <ul>
-            <li><strong>iPhone/iPad</strong>: Settings → Safari (or your browser) → Camera / Microphone → Allow.</li>
-            <li><strong>Android</strong>: tap the icon left of the web address → Permissions → allow Camera and Microphone.</li>
-            <li>Then reload the page.</li>
-          </ul>
-        </details>
-
-        <details>
-          <summary><span class="sum-title">The Camera stopped during the night</span></summary>
-          <ul>
-            <li>Keep it <strong>plugged in</strong> and turn off battery saver or low-power mode.</li>
-            <li>Leave Naptio open on screen; don’t switch to other apps on the Camera.</li>
-          </ul>
-        </details>
-
-        <details>
-          <summary><span class="sum-title">Too many alerts, or alerts missed</span></summary>
-          <ul>
-            <li>Run the set-up for that alert again (see <a href="#features">Extra features</a>), especially after moving the camera.</li>
-            <li>Each alert screen has a <strong>Help</strong> button with tips on adjusting it.</li>
-          </ul>
-        </details>
-
-        <details>
-          <summary><span class="sum-title">Start again from scratch</span></summary>
-          <p>Open <a href="/hungryface/webrtc/receiver/settings/">Settings</a> and use <strong>Factory reset</strong>. It clears everything Naptio stored <strong>on this device only</strong>: pairing, alerts and settings. Then pair again.</p>
-        </details>
-
-        <p>Still stuck? <a href="/hungryface/webrtc/receiver/support/">Contact us</a>. We’re happy to help.</p>
-      </section>
-
-      <!-- ===================== PRIVACY ===================== -->
-      <section aria-labelledby="privacy">
-        <h2 id="privacy">Privacy &amp; safety</h2>
-        <ul class="plain">
-          <li><strong>Private</strong>: video and sound go directly between your two devices and are encrypted. Nothing is recorded or uploaded.</li>
-          <li><strong>Your devices only</strong>: only devices you paired can connect.</li>
-          <li><strong>Not a medical device</strong>: it’s an aid, not a replacement for supervision or safe-sleep practice.</li>
-          <li><strong>Consent</strong>: if you monitor anyone other than your own child, ask them first and follow local laws.</li>
-        </ul>
-        <p class="small">More detail in our <a href="/hungryface/legal/#privacy">Privacy Notice</a>.</p>
-
-        <details class="advanced">
-          <summary><span class="sum-title">For advanced users: room names and changing the pairing link</span></summary>
-          <ul>
-            <li><strong>Rooms</strong>: on <a href="/hungryface/webrtc/pairpsk/">Pair devices</a>, a <strong>Room</strong> name (e.g. “Baby”) keeps separate cameras apart. Use one per child or space, and choose it on the Viewer in <a href="/hungryface/webrtc/receiver/settings/">Settings</a>.</li>
-            <li><strong>New link</strong>: <strong>Rotate secret</strong> makes a new pairing link and stops old ones working; pair your devices again afterwards. Do this if a link was shared by mistake.</li>
-            <li><strong>Remove a device</strong>: <strong>Forget on this device</strong> unpairs just that device.</li>
-          </ul>
-        </details>
-      </section>
-    </main>
-  </div>
-</body>
+          <details class="advanced">
+            <summary>
+              <span class="sum-title">For advanced users: room names and changing the pairing link</span>
+            </summary>
+            <ul>
+              <li>
+                <strong>Rooms</strong>: on <a href="/hungryface/webrtc/pairpsk/">Pair devices</a>, a
+                <strong>Room</strong> name (e.g. “Baby”) keeps separate cameras apart. Use one per child or space, and
+                choose it on the Viewer in <a href="/hungryface/webrtc/receiver/settings/">Settings</a>.
+              </li>
+              <li>
+                <strong>New link</strong>: <strong>Rotate secret</strong> makes a new pairing link and stops old ones
+                working; pair your devices again afterwards. Do this if a link was shared by mistake.
+              </li>
+              <li>
+                <strong>Remove a device</strong>: <strong>Forget on this device</strong> unpairs just that device.
+              </li>
+            </ul>
+          </details>
+        </section>
+      </main>
+    </div>
+  </body>
 </html>
