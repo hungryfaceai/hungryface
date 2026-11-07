@@ -259,21 +259,28 @@
       }
       enableAudioBtn.style.display = 'block';
   
+      // The user's sound choice survives reconnects: only the very first stream starts muted.
+      let userWantsSound = false;
       async function tryStartMuted() {
         try {
-          remoteVideo.muted = true;
+          remoteVideo.muted = !userWantsSound;
           remoteVideo.volume = 1.0;
           await remoteVideo.play();
-        } catch {}
+        } catch {
+          // Browser refused to play with sound (no recent tap): fall back to muted, keep the choice for later.
+          try { remoteVideo.muted = true; await remoteVideo.play(); } catch {}
+        }
         updateAudioButtons();
       }
       enableAudioBtn.addEventListener('click', async (e) => {
         e?.preventDefault?.();
+        userWantsSound = true;
         try { remoteVideo.muted = false; remoteVideo.volume = 1.0; await remoteVideo.play(); } catch {}
         updateAudioButtons();
       });
       disableAudioBtn.addEventListener('click', (e) => {
         e?.preventDefault?.();
+        userWantsSound = false;
         remoteVideo.muted = true;
         updateAudioButtons();
       });
@@ -677,7 +684,12 @@
             console.warn('[Receiver] addTransceiver failed:', e);
           }
   
-          tryAttachOnce();
+          // A lullaby was playing: the new connection must carry it too (not the mic / silence).
+          if (sendingLullaby && lullabyTrack && talkSender) {
+            talkSender.replaceTrack(lullabyTrack).catch(err => console.warn('[Receiver] lullaby re-attach failed:', err));
+          } else {
+            tryAttachOnce();
+          }
   
           // keep SDP shape consistent with other pages: create a 'pose' DC but ignore messages here
           const ch = pc.createDataChannel('pose');

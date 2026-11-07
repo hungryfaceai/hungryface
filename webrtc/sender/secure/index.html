@@ -272,7 +272,7 @@
   </div>
   
   <script type="module">
-    import { installPskShim } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
+    import { installPskShim, getPsk } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
     import { requirePskOrRedirect } from '/hungryface/webrtc/shared/psk/require-psk.js';
     import { installRoomScope } from '/hungryface/webrtc/shared/psk/room-scope.js';
   
@@ -297,6 +297,14 @@
       try { window.__pskUndo?.(); } catch {}
       window.__pskUndo = installPskShim({ room: roomLabel });
       console.log('[PSK][sender] shim installed for room label:', roomLabel);
+    };
+    // Room picked in the dropdown: its own key decides the signalling namespace too (else Viewers of
+    // that room, which use its key, would never meet this Camera).
+    window.__scopeForRoom = async (roomLabel) => {
+      const rec = getPsk(roomLabel);
+      if (!rec || !rec.tokenB64u || roomLabel === window.__pskEnv?.room) return;
+      await installRoomScope({ room: roomLabel, tokenB64u: rec.tokenB64u, redirected: false });
+      window.__pskEnv = { ...window.__pskEnv, room: roomLabel, tokenB64u: rec.tokenB64u };
     };
   
     if (env.redirected) {
@@ -457,8 +465,10 @@
     function getAudioSender(pc) {
       return pc?.getSenders?.().find(s => s.track && s.track.kind === 'audio') || null;
     }
-    function nudgePeerForOffer(peerId) {
-      try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: peerId })); } catch {}
+    // renegotiate: the Viewer must make a NEW offer (e.g. audio was added mid-stream); its previous offer
+    // would be ignored here as a duplicate.
+    function nudgePeerForOffer(peerId, renegotiate = false) {
+      try { ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'need-offer', to: peerId, ...(renegotiate ? { renegotiate: true } : {}) })); } catch {}
     }
 
     /** Ensure we have a mic track in localStream, attach to all PCs, and trigger renegotiation. */
@@ -482,7 +492,7 @@
           } else {
             pc.addTrack(track, localStream);
           }
-          nudgePeerForOffer(peerId);
+          nudgePeerForOffer(peerId, true);
         }
       }
       return track;
@@ -1229,6 +1239,7 @@
         if (typeof window.__installPskForRoom === 'function') {
           window.__installPskForRoom(uiRoom);
         }
+        if (typeof window.__scopeForRoom === 'function') await window.__scopeForRoom(uiRoom);
         await connectWS(uiRoom);
         started = true;
         try { screenAwake?.release(); screenAwake = keepAwake({ log: (m) => console.log('[SENDER]', m) }); } catch {}

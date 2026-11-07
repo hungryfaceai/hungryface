@@ -1612,6 +1612,11 @@
     }
 
     window.addEventListener('beforeunload', () => {
+      // Tab closing during an alert: record its end now.
+      if (alert && _proneAlertId != null) {
+        const id = _proneAlertId; _proneAlertId = null;
+        try { finishAlert(id, { avgScore: Number(((_proneCount > 0 ? _proneSum / _proneCount : riskEma) || 0).toFixed(4)), message: 'Page closed' }); } catch {}
+      }
       try { core?.stop?.(); } catch {}
       if (hideStatusTimer) clearTimeout(hideStatusTimer);
       stopSignalingConnectedTimers();

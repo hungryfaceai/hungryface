@@ -264,7 +264,7 @@ export class ReceiverCore {
   #startOfferResendLoop() {
     this.#stopOfferResendLoop();
     this.offerResendTimer = setInterval(() => {
-      if (!this.remoteDescriptionSet) this.#sendCurrentOffer();
+      if (!this.remoteDescriptionSet || this.pc?.signalingState === 'have-local-offer') this.#sendCurrentOffer();
       else this.#stopOfferResendLoop();
     }, 2000);
   }
@@ -296,6 +296,17 @@ export class ReceiverCore {
     }
 
     if (msg.type === 'need-offer') {
+      // The Camera changed what it sends (e.g. audio switched on): make a fresh offer, if connected and idle.
+      if (msg.renegotiate && this.pc && this.pc.signalingState === 'stable' && this.remoteDescriptionSet) {
+        try {
+          const offer = await this.pc.createOffer();
+          await this.pc.setLocalDescription(offer);
+          await this.#sendCurrentOffer();
+          this.#startOfferResendLoop();
+        } catch (e) { console.warn('[ReceiverCore] renegotiation failed', e); }
+        this.onNeedOffer?.(msg);
+        return;
+      }
       await this.#sendCurrentOffer();
       this.onNeedOffer?.(msg);
       return;
