@@ -445,6 +445,7 @@
     let offLink = { ema: false, int: false, drift: false };
     // ===== Alerts episode state (Motion) =====
     let _motionAlertId = null;
+    let _motionAlertP = null;   // pending beginAlert()
     let _motionSum = 0, _motionCount = 0;
     const runAsync = (p) => Promise.resolve(p).catch(()=>{});
 
@@ -462,7 +463,33 @@
       if (calStartBtn) calStartBtn.disabled = !live || !!calActive;
       updateStateRowVisibility();
     }
-    setInterval(updateCalibrationAvailability, 500);
+    // End an open movement episode (connection lost, Camera stopped, or no body seen for a while),
+    // so the alert never stays open with no end time.
+    function endMotionEpisode(reason = 'Movement ended') {
+      if (!moving) return;
+      moving = false;
+      const avg = _motionCount > 0 ? (_motionSum / _motionCount) : intScore;
+      const finish = (id) => { if (id != null) runAsync(finishAlert(id, { avgScore: Number((avg || 0).toFixed(4)), message: reason })); };
+      if (_motionAlertId != null) { const id = _motionAlertId; _motionAlertId = null; finish(id); }
+      else if (_motionAlertP) _motionAlertP.then(finish);   // still being created: close it once it exists
+      _motionAlertP = null; _motionSum = 0; _motionCount = 0;
+    }
+    // Calibration that can't finish (no body points any more) is cancelled rather than left stuck,
+    // and never saved from too few measurements.
+    function abortCalibration(msg) {
+      if (!calActive) return;
+      calActive = false;
+      if (calProgRow) calProgRow.style.display = 'none';
+      if (calStatus) { calStatus.className = 'muted'; calStatus.textContent = msg; }
+      updateCalQuickUI(false);
+    }
+    const NO_POSE_END_MS = 10000;
+    setInterval(() => {
+      updateCalibrationAvailability();
+      const quiet = performance.now() - lastPoseTs;
+      if (moving && quiet > NO_POSE_END_MS) endMotionEpisode('Movement ended (no body seen)');
+      if (calActive && quiet > LIVE_POSE_TIMEOUT_MS) abortCalibration('Calibration cancelled: body points stopped arriving. Try again.');
+    }, 500);
 
     /* ---------- Status overlay ---------- */
     function showStatus(msg) {
@@ -963,22 +990,19 @@
           _motionSum = 0; _motionCount = 0;
       
           // Start a Motion alert + show the red top banner (matches audio page)
-          runAsync((async () => {
-            _motionAlertId = await beginAlert({
-              type: (AlertTypes?.Motion ?? 'motion'),
-              message: 'Movement detected'
-            });
-            showAlertBanner(Date.now(), 'Motion detected');
-          })());
-          void alertSound.trigger();
-        } else if (prev && _motionAlertId != null) {
-          // Finish the Motion alert with an average score (use integrator as sustained proxy)
-          const avg = _motionCount > 0 ? (_motionSum / _motionCount) : intScore;
-          const id = _motionAlertId; _motionAlertId = null;
-          runAsync(finishAlert(id, {
-            avgScore: Number(avg.toFixed(4)),
-            message: 'Movement ended'
+          const p = _motionAlertP = Promise.resolve(beginAlert({
+            type: (AlertTypes?.Motion ?? 'motion'),
+            message: 'Movement detected'
+          })).catch(() => null);
+          runAsync(p.then(id => {
+            if (_motionAlertP !== p) return;   // episode already ended; endMotionEpisode closes it
+            _motionAlertId = id; _motionAlertP = null;
+            if (moving) showAlertBanner(Date.now(), 'Motion detected');
           }));
+          void alertSound.trigger();
+        } else if (prev) {
+          // Finish the Motion alert with an average score (use integrator as sustained proxy)
+          moving = true; endMotionEpisode('Movement ended');
         }
       }
 
@@ -1105,6 +1129,7 @@
     }
 
     function finishCalibration() {
+      if (calSamples.length < 20) { abortCalibration('Calibration cancelled: not enough body points measured. Try again.'); return; }
       calActive = false;
       updateCalibrationAvailability();
       if (calProgRow) calProgRow.style.display = 'none';
@@ -1149,7 +1174,13 @@
 
     /* ---------- MediaPipe on RECEIVER ---------- */
     let useRVFC = false;
-    async function ensurePoseTask() {
+    let _poseTaskP = null;
+    function ensurePoseTask() {
+      if (poseTask) return Promise.resolve(poseTask);
+      if (!_poseTaskP) _poseTaskP = _ensurePoseTaskImpl().catch(e => { _poseTaskP = null; throw e; });
+      return _poseTaskP;
+    }
+    async function _ensurePoseTaskImpl() {
       if (poseTask) return poseTask;
       const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
       poseTask = await createVisionTask(PoseLandmarker, vision, {
@@ -1170,13 +1201,21 @@
         video.addEventListener('resize', check);
       });
     }
+    let _loopGen = 0, _loopStarting = false;
     async function startReceiverPoseLoop() {
-      if (poseLoopRunning) return;
-      await ensurePoseTask(); await waitForVideoFrame(remoteVideo);
+      if (poseLoopRunning || _loopStarting) return;
+      _loopStarting = true;
+      const gen = ++_loopGen;
+      try {
+        await ensurePoseTask(); await waitForVideoFrame(remoteVideo);
+      } finally { _loopStarting = false; }
+      if (gen !== _loopGen) return;   // stopped meanwhile
+       
       useRVFC = 'requestVideoFrameCallback' in (remoteVideo || {});
       poseLoopRunning = true;
 
       const onFrame = () => {
+        if (gen !== _loopGen) return;   // an older loop: let it end
         if (!poseLoopRunning || !poseEnabled || poseWhere !== 'receiver') return;
         if (!videoHasFrame(remoteVideo)) { poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height); updateCalibrationAvailability(); scheduleNext(); return; }
         try {
@@ -1202,7 +1241,8 @@
       scheduleNext();
     }
     function stopReceiverPoseLoop() {
-      poseLoopRunning = false;
+      poseLoopRunning = false; _loopGen++;
+      endMotionEpisode('Movement detection stopped');
       prevLm = null; moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
       reflectPanel();
@@ -1231,11 +1271,13 @@
         if (state === 'failed' || state === 'disconnected' || state === 'closed') {
           clearOverlayDrawing();
           lastPoseTs = 0; updateCalibrationAvailability();
+          endMotionEpisode('Connection lost'); abortCalibration('Calibration cancelled: connection lost.');
         }
       },
       onBye: () => {
         clearOverlayDrawing();
         lastPoseTs = 0; updateCalibrationAvailability();
+        endMotionEpisode('Camera stopped'); abortCalibration('Calibration cancelled: Camera stopped.');
       },
       onCreatePC: (pc) => {
         const ch = pc.createDataChannel('pose');
@@ -1492,6 +1534,7 @@
       baseLm = null; prevLm = null; moveEma = 0; intScore = 0; driftScore = 0; lastTs = 0;
       offLink = { ema: false, int: false, drift: false };
       if (calActive) { calActive = false; if (calProgRow) calProgRow.style.display = 'none'; }
+      updateCalQuickUI(false);
       initMovePanel(); applyOnCaps(); reflectPanel(); saveMoveConfig(); matchButtonSizes();
       if (calStatus) { calStatus.className = 'muted'; calStatus.textContent = 'Defaults restored'; }
       if (calStats)  { calStats.style.display = 'none'; }

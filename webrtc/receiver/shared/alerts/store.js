@@ -35,10 +35,11 @@ if (_bc) {
 }
 
 // Open (or create) the DB + object store
-let _db = null;
+let _db = null, _dbP = null;   // one shared open (parallel first calls must not open twice)
 export function openDB() {
   if (_db) return Promise.resolve(_db);
-  return new Promise((resolve, reject) => {
+  if (_dbP) return _dbP;
+  return _dbP = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB, 1);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
@@ -50,10 +51,10 @@ export function openDB() {
     };
     req.onsuccess = () => {
       _db = req.result;
-      _db.onversionchange = () => _db.close();
+      _db.onversionchange = () => { try { _db.close(); } catch {} _db = null; _dbP = null; };
       resolve(_db);
     };
-    req.onerror   = () => reject(req.error);
+    req.onerror   = () => { _dbP = null; reject(req.error); };
   });
 }
 

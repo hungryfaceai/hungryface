@@ -35,8 +35,9 @@ export async function requirePskOrRedirect({
   }
 
   // If there is exactly one valid PSK across rooms, prefer that room to avoid mismatch.
+  // If no room was asked for (the remembered room was forgotten), use the first paired room instead.
   const rooms = listValidPskRooms();
-  if (rooms.length === 1) {
+  if (rooms.length === 1 || (rooms.length > 1 && !(preferRoom || '').trim())) {
     const onlyRoom = rooms[0];
     const onlyRec  = getPsk(onlyRoom) || {};
     const onlyTok  = onlyRec.tokenB64u || '';

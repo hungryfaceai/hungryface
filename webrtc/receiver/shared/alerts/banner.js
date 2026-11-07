@@ -26,13 +26,13 @@ function fmtHM(ms) {
 }
 
 function getSavedSnoozeMinutes() {
-  const raw = localStorage.getItem(LS_KEY_SNOOZE_MIN);
+  let raw = null; try { raw = localStorage.getItem(LS_KEY_SNOOZE_MIN); } catch {}
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_SNOOZE_MIN;
 }
 function setSavedSnoozeMinutes(mins) {
   const m = Math.max(1, Math.round(Number(mins) || DEFAULT_SNOOZE_MIN));
-  localStorage.setItem(LS_KEY_SNOOZE_MIN, String(m));
+  try { localStorage.setItem(LS_KEY_SNOOZE_MIN, String(m)); } catch {}
   return m;
 }
 

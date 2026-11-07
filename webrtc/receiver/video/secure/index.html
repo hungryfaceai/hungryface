@@ -398,7 +398,10 @@
           // Long press → PTT session
           await ensureLullabyStoppedIfNeeded();   // ⬅️ stop lullaby before talking
           pttSession = true;
-          await prepareIfNeeded();
+          try { await prepareIfNeeded(); }
+          catch (err) { console.warn(err); pttSession = false; updateTalkUI(); return; }
+          // Released while the microphone was starting (e.g. during the permission prompt): stay off.
+          if (!pressed || !pttSession) return;
           setTalking(true);
         }, LONG_PRESS_MS);
       }
@@ -416,8 +419,8 @@
             (async () => {
               await ensureLullabyStoppedIfNeeded();   // ⬅️ stop lullaby before talking
               await prepareIfNeeded();
-              setTalking(true);
-            })().catch(console.warn);
+              if (latched) setTalking(true);   // turned off again while the microphone was starting
+            })().catch(err => { console.warn(err); latched = false; updateTalkUI(); });
           } else {
             setTalking(false);
           }

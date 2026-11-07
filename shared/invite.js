@@ -70,6 +70,8 @@
     return qrReady || (qrReady = new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = QRIOUS_URL;
+      s.integrity = 'sha384-Dr98ddmUw2QkdCarNQ+OL7xLty7cSxgR0T7v1tq4UErS/qLV0132sBYTolRAFuOV';   // qrious 4.0.2
+      s.crossOrigin = 'anonymous';
       s.onload = resolve; s.onerror = () => { qrReady = null; reject(new Error('QR library failed to load')); };
       document.head.appendChild(s);
     }));

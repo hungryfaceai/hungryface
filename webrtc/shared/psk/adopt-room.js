@@ -21,7 +21,7 @@ function parse(s) { try { return JSON.parse(s); } catch { return null; } }
 function isThrowAwayDefault(room) {
   if (room !== DEFAULT_ROOM) return false;
   const rec = parse(read('psk:' + room));
-  if (!rec || rec.installedFrom) return false;               // installed from another device → keep
+  if (!rec || rec.installedFrom || rec.rotatedAt) return false;   // installed from another device, or rotated → keep
   const created = Number(rec.createdAt) || Date.parse(rec.ts || '') || 0;
   return created > 0 && Date.now() - created < FRESH_MS;
 }

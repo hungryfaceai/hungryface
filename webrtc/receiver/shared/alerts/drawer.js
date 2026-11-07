@@ -111,15 +111,24 @@ export function setupAlertsDrawer({ openBtnEl, badgeEl, hostId='alertsModalHost'
   };
 
   // Open/close
+  let lastFocus = null;
   els.openBtn?.addEventListener('click', async () => {
-    await renderTable();
-    await refreshAlertsBadge();
+    lastFocus = document.activeElement;
     els.modal.classList.add('show');
     els.modal.setAttribute('aria-hidden','false');
+    try { els.btnClose?.focus(); } catch {}
+    try { await renderTable(); await refreshAlertsBadge(); }
+    catch (e) { console.warn('[alerts] could not read the alert history', e); }
   });
   els.btnClose?.addEventListener('click', () => closeModal());
   els.modal.addEventListener('click', (e) => { if (e.target === els.modal) closeModal(); });
-  function closeModal(){ els.modal.classList.remove('show'); els.modal.setAttribute('aria-hidden','true'); }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && els.modal.classList.contains('show')) { e.preventDefault(); closeModal(); }
+  });
+  function closeModal(){
+    els.modal.classList.remove('show'); els.modal.setAttribute('aria-hidden','true');
+    try { lastFocus?.focus?.(); } catch {}
+  }
 
   // Filters
   els.search?.addEventListener('input', () => { filterState.q = (els.search.value||'').trim().toLowerCase(); renderTable(); });
@@ -223,9 +232,11 @@ async function renderTable() {
       <td>${fmtDT(r.endAt)}</td>
       <td>${fmtDur(durMs)}</td>
       <td>${(Number(r.avgScore)||0).toFixed(4)}</td>
-      <td>${r.type || ''}</td>
-      <td>${r.message || ''}</td>
+      <td>${escHtml(r.type || '')}</td>
+      <td>${escHtml(r.message || '')}</td>
     `;
     tb.appendChild(tr);
   }
 }
+
+function escHtml(v) { return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }

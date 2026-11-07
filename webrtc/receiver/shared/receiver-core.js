@@ -303,6 +303,7 @@ export class ReceiverCore {
 
     if (msg.type === 'peer-joined' && msg.role === 'sender' && msg.id) {
       this.senderId = msg.id;
+      this.targetSenderId = msg.id;   // the Camera re-joined with a new id: talk to the new one
       await this.#sendCurrentOffer();
       return;
     }

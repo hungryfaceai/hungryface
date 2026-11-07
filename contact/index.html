@@ -93,7 +93,13 @@
         e.preventDefault();
         if (!msg.value.trim()) { err.classList.add('show'); msg.setAttribute('aria-invalid', 'true'); msg.focus(); return; }
         const subject = 'Naptio: ' + document.getElementById('topic').value;
-        location.href = `mailto:${TO}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body())}`;
+        const url = `mailto:${TO}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body())}`;
+        // Some email apps ignore very long links: then offer copy + paste straight away.
+        if (url.length > 1900) {
+          after.firstChild.textContent = 'Your message is too long to open in your email app directly. Copy it and paste it into an email to ';
+          after.classList.add('show'); return;
+        }
+        location.href = url;
         setTimeout(() => after.classList.add('show'), 800);
       });
       document.getElementById('copy').addEventListener('click', async e => {

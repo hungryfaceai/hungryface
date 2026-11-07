@@ -1195,7 +1195,13 @@
       enableThrSliders(false);
       updateToggleButtonsUI();
 
-      await startInputForMode('detect'); // Mic or Sender
+      try { await startInputForMode('detect'); } // Mic or Sender
+      catch (e) {
+        log('err', 'Calibration could not start: ' + (e?.message || e));
+        stopCalibrationEarly();
+        setStatus('Calibration could not start: microphone or Camera audio unavailable.');
+        return;
+      }
       setStatus(`Quiet calibration for ${durSec}s… Please keep things quiet.`);
       setPill('calibrating', true);
 
@@ -1663,10 +1669,10 @@
       const trainingActive = (state.mode === 'train' || state.mode === 'train_file' || state.mode === 'train_folder');
 
       if (trainingActive) {
-        if (src === 'mic') await stopAll();
-        else if (src === 'file') await stopFilePlayback();
-        else if (src === 'folder') await stopFolderTraining();
-        else if (src === 'sender') { await stopAll(); }
+        // Stop whatever is actually running (the dropdown may have been changed since it started).
+        if (state.mode === 'train_file') await stopFilePlayback();
+        else if (state.mode === 'train_folder') await stopFolderTraining();
+        else await stopAll();
         setStatus('Training stopped');
         updateToggleButtonsUI();
         return;
@@ -1734,8 +1740,9 @@
     els.MODEL_SELECT.addEventListener('change', () => {
       const v = els.MODEL_SELECT.value;
       if (v === NEW_MODEL_VALUE) {
-        const name = (prompt('New model name:', '').trim() || '').replace(/[^\w \-().,]/g,'').trim();
-        if (!name) { refreshModelSelect(getModelName()); return; }
+        // Cancel returns null: go back to the model that was active (never leave "New…" selected).
+        const name = ((prompt('New model name:', '') || '').trim()).replace(/[^\w \-().,]/g,'').trim();
+        if (!name) { refreshModelSelect(localStorage.getItem(ACTIVE_MODEL_NAME_KEY) || 'default'); return; }
         const exists = listModelNames().includes(name);
         setModelName(name);
         if (!exists) { const m = loadModel(); saveModel(m); log('ok', `Created model “${name}”.`); }
@@ -1842,9 +1849,9 @@
             setStatus('Connected to sender');
             log('info', `[RTC] audio-mode: enabled=${wrtc.audioEnabled} where=${wrtc.where}`);
     
-            if (!wrtc.audioEnabled) {
-              stopRemoteAudioTap();
-            } else if (wrtc.where === 'receiver' && wrtc.stream && state.mode !== 'idle') {
+            if (!wrtc.audioEnabled || wrtc.where !== 'receiver') {
+              stopRemoteAudioTap();   // Camera scores itself (or no audio): never count the sound twice
+            } else if (tapWanted()) {
               // If we're already training/detecting and sender wants us to classify
               startRemoteAudioTap(state.mode);
             }
@@ -1857,9 +1864,9 @@
             setStatus('Connected to sender');
             log('info', `[RTC] ai-modes: enabled=${wrtc.audioEnabled} where=${wrtc.where}`);
     
-            if (!wrtc.audioEnabled) {
+            if (!wrtc.audioEnabled || wrtc.where !== 'receiver') {
               stopRemoteAudioTap();
-            } else if (wrtc.where === 'receiver' && wrtc.stream && state.mode !== 'idle') {
+            } else if (tapWanted()) {
               startRemoteAudioTap(state.mode);
             }
     
@@ -1892,7 +1899,7 @@
           }
           wrtc.stream = stream;
           log('ok', `[RTC] Remote stream: tracks=${stream.getTracks().map(t=>t.kind).join(',')}`);
-          if (state.mode !== 'idle' && wrtc.audioEnabled && wrtc.where === 'receiver') {
+          if (wrtc.audioEnabled && wrtc.where === 'receiver' && tapWanted()) {
             startRemoteAudioTap(state.mode).catch(()=>{});
           }
         },
@@ -1936,6 +1943,11 @@
     // }, 2500);
 
 
+    // The Camera's streamed sound is only used when "Sender" is the chosen source and training/detecting
+    // from it — never mixed into mic, file or folder training.
+    function tapWanted() {
+      return els.TRAIN_SRC.value === 'sender' && !!wrtc.stream && (state.mode === 'train' || state.mode === 'detect');
+    }
     async function startRemoteAudioTap(mode){
       if (!wrtc.stream) { log('warn','[RTC] No remote stream yet.'); return; }
       await stopRemoteAudioTap();

@@ -781,8 +781,8 @@ function renderTable(rows) {
         <td>${fmtDT(r.endAt)}</td>
         <td>${fmtDur(durMs)}</td>
         <td class="mono">${(Number(r.avgScore)||0).toFixed(4)}</td>
-        <td>${r.type || ''}</td>
-        <td>${r.message || ''}</td>
+        <td>${escHtml(r.type || '')}</td>
+        <td>${escHtml(r.message || '')}</td>
       `;
       tb.appendChild(tr);
     }
@@ -870,3 +870,5 @@ async function boot() {
   renderAll();
 }
 boot();
+
+function escHtml(v) { return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }

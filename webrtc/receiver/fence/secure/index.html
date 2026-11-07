@@ -177,6 +177,7 @@
     const runAsync = (p) => Promise.resolve(p).catch(()=>{});
     let fenceAlertOn = false;
     let fenceAlertId = null;
+    let fenceAlertP = null;   // pending beginAlert()
     let fenceStartMs = 0;
     let fenceFrames = 0;
 
@@ -390,10 +391,11 @@
       if (want) beginViewportSettle();
       else poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
     }
-    function clearOverlayDrawing() {
+    function clearOverlayDrawing(keepAlert = false) {
       try {
         poseCtx.setTransform(1,0,0,1,0,0);
         poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+        if (keepAlert === true) return;   // brief video hiccup: don't end (and re-raise) the alert
         zoneAlert.style.display = 'none';
         // Ensure any open fence alert is finalized when video/overlay clears
         finalizeOpenFenceAlert('Video unavailable');
@@ -498,18 +500,13 @@
 
     /* ---------- Shared Alerts helpers ---------- */
     function finalizeOpenFenceAlert(message = 'Ended') {
-      if (!fenceAlertOn || fenceAlertId == null) {
-        fenceAlertOn = false; fenceAlertId = null; fenceStartMs = 0; fenceFrames = 0;
-        return;
-      }
-      const id = fenceAlertId;
-      fenceAlertId = null;
-      fenceAlertOn = false;
+      if (!fenceAlertOn) { fenceAlertId = null; fenceAlertP = null; fenceStartMs = 0; fenceFrames = 0; return; }
       const frames = fenceFrames; fenceFrames = 0;
-      runAsync(finishAlert(id, {
-        message,
-        frames
-      }));
+      const finish = (id) => { if (id != null) runAsync(finishAlert(id, { message, frames })); };
+      if (fenceAlertId != null) finish(fenceAlertId);
+      else if (fenceAlertP) fenceAlertP.then(finish);   // still being created: close it once it exists
+      fenceAlertId = null; fenceAlertP = null;
+      fenceAlertOn = false;
       fenceStartMs = 0;
     }
 
@@ -519,15 +516,17 @@
         fenceAlertOn = true;
         fenceStartMs = Date.now();
         fenceFrames = 0;
-        runAsync((async () => {
-          fenceAlertId = await beginAlert({
-            type: (AlertTypes?.Fence ?? AlertTypes?.Motion ?? 'fence'),
-            message: 'Movement outside virtual fence'
-          });
+        const p = fenceAlertP = Promise.resolve(beginAlert({
+          type: (AlertTypes?.Fence ?? AlertTypes?.Motion ?? 'fence'),
+          message: 'Movement outside virtual fence'
+        })).catch(() => null);
+        runAsync(p.then(id => {
+          if (fenceAlertP !== p) return;   // already ended; finalizeOpenFenceAlert closes it
+          fenceAlertId = id; fenceAlertP = null;
           showAlertBanner(fenceStartMs, 'Movement outside virtual fence');
           // 🔊 play the triple-pip (per-type toggle + cooldown enforced)
           alertSound.trigger();   // (or: alertSound.emit('fence'))
-        })());
+        }));
       }
       // accumulate while ON
       if (isOutside && fenceAlertOn) {
@@ -540,7 +539,13 @@
     }
 
     /* ---------- MediaPipe on RECEIVER ---------- */
-    async function ensurePoseTask() {
+    let _poseTaskP = null;
+    function ensurePoseTask() {
+      if (poseTask) return Promise.resolve(poseTask);
+      if (!_poseTaskP) _poseTaskP = _ensurePoseTaskImpl().catch(e => { _poseTaskP = null; throw e; });
+      return _poseTaskP;
+    }
+    async function _ensurePoseTaskImpl() {
       if (poseTask) return poseTask;
       const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
       poseTask = await createVisionTask(PoseLandmarker, vision, {
@@ -586,15 +591,23 @@
       zoneAlert.style.display = out ? 'block' : 'none';
       updateFenceAlert(!!out);
     }
+    let _loopGen = 0, _loopStarting = false;
     async function startReceiverPoseLoop() {
-      if (poseLoopRunning) return;
-      await ensurePoseTask();
-      await waitForVideoFrame(remoteVideo);
+      if (poseLoopRunning || _loopStarting) return;
+      _loopStarting = true;
+      const gen = ++_loopGen;
+      try {
+        await ensurePoseTask(); await waitForVideoFrame(remoteVideo);
+      } finally { _loopStarting = false; }
+      if (gen !== _loopGen) return;   // stopped meanwhile
+      
+      
 
       poseLoopRunning = true;
       const useRVFC = 'requestVideoFrameCallback' in remoteVideo;
 
       const onFrame = () => {
+        if (gen !== _loopGen) return;   // an older loop: let it end
         if (!poseLoopRunning || !poseEnabled || poseWhere !== 'receiver') return;
 
         if (!videoHasFrame(remoteVideo)) {
@@ -628,7 +641,7 @@
       scheduleNext();
     }
     function stopReceiverPoseLoop() {
-      poseLoopRunning = false;
+      poseLoopRunning = false; _loopGen++;
       poseCtx.clearRect(0,0, poseCanvas.width, poseCanvas.height);
       zoneAlert.style.display = 'none';
       updateFenceAlert(false);
@@ -692,8 +705,11 @@
     });
 
     /* ---------- NEW: clear overlay on video element stop-like states ---------- */
-    ['pause','ended','emptied','stalled','suspend','waiting'].forEach((ev) => {
-      remoteVideo.addEventListener(ev, clearOverlayDrawing, { passive: true });
+    ['pause','ended','emptied'].forEach((ev) => {
+      remoteVideo.addEventListener(ev, () => clearOverlayDrawing(), { passive: true });
+    });
+    ['stalled','suspend','waiting'].forEach((ev) => {
+      remoteVideo.addEventListener(ev, () => clearOverlayDrawing(true), { passive: true });
     });
 
     /* ---------- Track/stream end handlers ---------- */

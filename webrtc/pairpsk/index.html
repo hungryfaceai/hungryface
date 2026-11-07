@@ -510,8 +510,20 @@
         return;
       }
       AUTO_CREATE = true;
+      let old = null;
+      try { old = JSON.parse(localStorage.getItem(PSK_PREFIX + room) || 'null'); } catch {}
       try { localStorage.removeItem(PSK_PREFIX + room); } catch {}
       await ensurePskForRoom(room, 'sender');
+      // A rotated room is an existing (possibly shared) room, never a throw-away default: keep its history.
+      try {
+        const rec = JSON.parse(localStorage.getItem(PSK_PREFIX + room) || 'null');
+        if (rec) {
+          rec.rotatedAt = Date.now();
+          if (old && old.installedFrom) rec.installedFrom = old.installedFrom;
+          if (old && old.createdAt) rec.createdAt = old.createdAt;
+          localStorage.setItem(PSK_PREFIX + room, JSON.stringify(rec));
+        }
+      } catch {}
       await refresh();
       showToast('Secret rotated');
     });
@@ -740,7 +752,12 @@
       return { room:'', psk:(text||'').trim() };
     }
 
-    function looksBase64Url(s){ return !!s && /^[A-Za-z0-9\-_]+$/.test(s); }
+    // A real key: base64url and at least 16 bytes (same rule as Camera, Viewer and Home).
+    function looksBase64Url(s){
+      if (!s || !/^[A-Za-z0-9\-_]+$/.test(s)) return false;
+      try { const b = s.replace(/-/g, '+').replace(/_/g, '/'); return atob(b + '===='.slice(0, (4 - b.length % 4) % 4)).length >= 16; }
+      catch { return false; }
+    }
 
     scanBtn?.addEventListener('click', async () => {
       try {

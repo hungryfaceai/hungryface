@@ -68,7 +68,7 @@ export async function ensurePskForRoom(room, role='receiver') {
   const { room: fragRoom, token } = parseFragment();
   if (token) {
     const r = (fragRoom || room || 'Baby');
-    if (!/^[A-Za-z0-9\-_]{16,}$/.test(token)) throw new Error('Invalid token in fragment');
+    if (!/^[A-Za-z0-9\-_]{22,}$/.test(token)) throw new Error('Invalid token in fragment');
     setStored(r, { tokenB64u: token, createdAt: Date.now(), installedFrom: 'url' });
     // If fragment specified a different room, keep it; callers may read it back via getPsk()
     if (r !== room) room = r;
@@ -229,7 +229,13 @@ export function installPskShim({ room }) {
         .catch(e => console.warn('[PSK] send failed:', e?.message || e));
     }
   
-    close(code, reason) { try { this._inner.close(code, reason); } catch {} }
+    // Let messages still being signed (e.g. a final "bye") go out first; never wait more than 1 s.
+    close(code, reason) {
+      const shut = () => { try { this._inner.close(code, reason); } catch {} };
+      if (!this._sendChain) return shut();
+      let done = false; const once = () => { if (!done) { done = true; shut(); } };
+      this._sendChain.then(once, once); setTimeout(once, 1000);
+    }
   }
   PskWS.__pskWrapped = true;
   PskWS.CLOSING = NativeWS.CLOSING; PskWS.CLOSED = NativeWS.CLOSED; PskWS.CONNECTING = NativeWS.CONNECTING; PskWS.OPEN = NativeWS.OPEN;

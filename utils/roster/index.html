@@ -1555,16 +1555,22 @@
         base.searchParams.set('to', to.toISOString());
         return base.href;
       }
+      let raReq = 0;
       async function loadRoomAnalytics() {
+        const my = ++raReq;   // only the latest period chosen may fill the table
         raContent.innerHTML = '<p class="ra-empty">Loading…</p>';
         try {
           const r = await fetch(analyticsUrl(), { headers: adminHeaders(), cache: 'no-store', mode: 'cors' });
+          if (my !== raReq) return;
           if (r.status === 401) { raContent.innerHTML = '<p class="ra-error">Your sign-in has expired. Sign in again to see room analytics.</p>'; return; }
           if (r.status === 503 || r.status === 404) { raContent.innerHTML = '<p class="ra-empty">Room analytics isn’t switched on yet: the server has no activity database configured.</p>'; return; }
           if (!r.ok) throw new Error('HTTP ' + r.status);
-          raData = await r.json();
+          const data = await r.json();
+          if (my !== raReq) return;
+          raData = data;
           renderRoomAnalytics();
         } catch (e) {
+          if (my !== raReq) return;
           raContent.innerHTML = '<p class="ra-error">Couldn’t load room analytics (' + esc(e.message) + '). Check the connection and try again.</p>';
         }
       }
@@ -1625,8 +1631,10 @@
       document.getElementById('btn-room-analytics').addEventListener('click', openRoomAnalytics);
       document.getElementById('btn-ra-close').addEventListener('click', closeRoomAnalytics);
       raViewer.addEventListener('click', e => { if (e.target === raViewer) closeRoomAnalytics(); });
-      raViewer.addEventListener('keydown', e => {
+      document.addEventListener('keydown', e => {
+        if (!raViewer.classList.contains('open')) return;
         if (e.key === 'Escape') { e.preventDefault(); closeRoomAnalytics(); return; }
+        if (e.key === 'Tab' && !raViewer.contains(document.activeElement)) { e.preventDefault(); const b = [...raViewer.querySelectorAll('button')].find(x => x.offsetParent); b && b.focus(); return; }
         if (e.key !== 'Tab') return;
         const f = [...raViewer.querySelectorAll('button')].filter(b => b.offsetParent);
         if (!f.length) return;
@@ -1747,8 +1755,10 @@
       document.getElementById('btn-map').addEventListener('click', openMap);
       document.getElementById('btn-map-close').addEventListener('click', closeMap);
       mapViewer.addEventListener('click', e => { if (e.target === mapViewer) closeMap(); });
-      mapViewer.addEventListener('keydown', e => {
+      document.addEventListener('keydown', e => {
+        if (!mapViewer.classList.contains('open')) return;
         if (e.key === 'Escape') { e.preventDefault(); closeMap(); return; }
+        if (e.key === 'Tab' && !mapViewer.contains(document.activeElement)) { e.preventDefault(); const b = [...mapViewer.querySelectorAll('button, input, a[href]')].find(x => x.offsetParent); b && b.focus(); return; }
         if (e.key !== 'Tab') return;
         const f = [...mapViewer.querySelectorAll('button, input, a[href]')].filter(b => b.offsetParent);
         if (!f.length) return;

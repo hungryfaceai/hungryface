@@ -207,10 +207,12 @@ html.is-paired .first-time { display: none !important; }
         for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i);
           if (!k || !k.startsWith('psk:')) continue;
-          const t = (JSON.parse(localStorage.getItem(k)) || {}).tokenB64u;
-          if (typeof t !== 'string' || !t) continue;
-          const b = t.replace(/-/g, '+').replace(/_/g, '/');
-          if (atob(b + '===='.slice(0, (4 - b.length % 4) % 4)).length >= 16) { document.documentElement.classList.add('is-paired'); return; }
+          try {   // one damaged record must not hide the valid ones after it
+            const t = (JSON.parse(localStorage.getItem(k)) || {}).tokenB64u;
+            if (typeof t !== 'string' || !t) continue;
+            const b = t.replace(/-/g, '+').replace(/_/g, '/');
+            if (atob(b + '===='.slice(0, (4 - b.length % 4) % 4)).length >= 16) { document.documentElement.classList.add('is-paired'); return; }
+          } catch {}
         }
       } catch {}
     })();

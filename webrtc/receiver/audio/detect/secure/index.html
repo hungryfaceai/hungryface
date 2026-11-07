@@ -303,7 +303,7 @@
 
   <script type="module">
     /* ========= Shared alerts (same as motion page) ========= */
-    import {initAlertsUI, beginAlert, finishAlert, AlertTypes, showAlertBanner} from "/hungryface/webrtc/receiver/shared/alerts/index.js";
+    import {initAlertsUI, beginAlert, finishAlert, AlertTypes, showAlertBanner, hideAlertBanner} from "/hungryface/webrtc/receiver/shared/alerts/index.js";
     import { installAlertSound } from "/hungryface/webrtc/receiver/shared/alerts/notify-sound.js";
     const alertSound = installAlertSound({ type: 'audio' });
 
@@ -1088,6 +1088,17 @@
       state.procNode=null; state.srcNode=null; state.sinkNode=null; state.micCtx=null; state.micStream=null;
     }
 
+    // Close an open alert episode (e.g. the Camera stopped, so no more sound arrives to end it).
+    function endOpenAudioAlert(message) {
+      if (!state.alertOn) return;
+      const avg = _audioCount > 0 ? (_audioSum / _audioCount) : 0;
+      const id = _audioAlertId; _audioAlertId = null;
+      if (id != null) runAsync(finishAlert(id, { avgScore: Number(avg.toFixed(4)), message }));
+      log('warn', 'ALERT OFF (' + message + ').');
+      state.alertOn = false; state.alertStartMs = 0; _audioSum = 0; _audioCount = 0;
+      try { hideAlertBanner(); } catch {}
+    }
+
     async function stopAll(){
       // finalize open alert if any
       if (state.alertOn && _audioAlertId != null) {
@@ -1132,8 +1143,10 @@
       }
     }
     // Kick detection on first incoming sender score if auto-start raced.
+    let userStopped = false;   // the user pressed Stop: incoming Camera scores must not restart detection
     function kickDetectIfIdle() {
       if (els.TRAIN_SRC.value !== 'sender') return;      // only when using Sender as source
+      if (userStopped) return;
     
       if (state.mode !== 'detect') {
         log('info', '[RUN] First score arrived; starting detection (sender).');
@@ -1210,6 +1223,8 @@
         onStatus: (m) => log('info', `[RTC] ${m}`),
         onStream: (stream) => {
           if (EL('remote').srcObject !== stream) EL('remote').srcObject = stream;
+          // Camera reconnected with a new stream: the old audio tap would only hear silence, so replace it.
+          if (wrtc.ctx && wrtc.stream && wrtc.stream !== stream) { stopRemoteAudioTap(); }
           wrtc.stream = stream;
           log('ok', `[RTC] Remote stream: tracks=${stream.getTracks().map(t=>t.kind).join(',')}`);
           ensureListening();
@@ -1223,7 +1238,7 @@
           log('info', `[RTC] inbound DC: ${e.channel?.label}`);
           wireDC(e.channel);
         },
-        onBye: () => log('warn', '[RTC] bye')
+        onBye: () => { log('warn', '[RTC] bye'); endOpenAudioAlert('Camera stopped'); }
       });
     
       wrtc.core.start()
@@ -1301,8 +1316,10 @@
     els.btnDetect.onclick = async () => {
       const active = (state.mode === 'detect');
       if (!active) {
+        userStopped = false;
         await startDetectBasedOnSource();
       } else {
+        userStopped = true;
         await stopAll();
         setStatus('Detection stopped.');
       }

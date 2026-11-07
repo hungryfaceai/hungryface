@@ -459,7 +459,7 @@
     import { DrawingUtils, FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
     import { ReceiverCore } from "/hungryface/webrtc/receiver/shared/receiver-core.js";
     /* === Shared Alerts (banner + drawer + persistence) === */
-    import { initAlertsUI, beginAlert, finishAlert, AlertTypes, showAlertBanner } from "/hungryface/webrtc/receiver/shared/alerts/index.js";
+    import { initAlertsUI, beginAlert, finishAlert, AlertTypes, showAlertBanner, hideAlertBanner } from "/hungryface/webrtc/receiver/shared/alerts/index.js";
     import { installAlertSound } from "/hungryface/webrtc/receiver/shared/alerts/notify-sound.js";
 
     /* ---------- Constants ---------- */
@@ -1074,7 +1074,13 @@
       try { faceDC.send(JSON.stringify(payload)); } catch {}
     }
 
-    async function ensureFaceTask() {
+    let _faceTaskP = null;
+    function ensureFaceTask() {
+      if (faceTask) return Promise.resolve(faceTask);
+      if (!_faceTaskP) _faceTaskP = _ensureFaceTaskImpl().catch(e => { _faceTaskP = null; throw e; });
+      return _faceTaskP;
+    }
+    async function _ensureFaceTaskImpl() {
       if (faceTask) return faceTask;
       const vision = await FilesetResolver.forVisionTasks(WASM_DIR);
       faceTask = await createVisionTask(FaceLandmarker, vision, {
@@ -1362,7 +1368,13 @@
         riskEma = emaUpdate(riskEma, fusedInst, S.emaTau, dt);
     
       } else {
-        // Disabled: reset FSM + UI
+        // Disabled: close an open alert episode, then reset FSM + UI
+        if (alert) {
+          const id = _proneAlertId; _proneAlertId = null;
+          if (id != null) finishAlert(id, { avgScore: Number(((_proneCount > 0 ? _proneSum / _proneCount : riskEma) || 0).toFixed(4)), message: 'Prone detection turned off' }).catch(()=>{});
+          _proneStartMs = 0; _proneSum = 0; _proneCount = 0;
+          try { hideAlertBanner(); } catch {}
+        }
         poseAlert = false; occAlert = false; alert = false;
         poseAboveT = poseBelowT = 0;
         occAboveT = occBelowT = 0;
@@ -1423,11 +1435,18 @@
       }
     }
 
+    let _loopGen = 0, _loopStarting = false;
     async function startReceiverFaceLoop() {
-      if (faceLoopRunning) return;
-      await ensureFaceTask();
+      if (faceLoopRunning || _loopStarting) return;
+      _loopStarting = true;
+      const gen = ++_loopGen;
+      try {
+        await ensureFaceTask(); await waitForVideoFrame(remoteVideo);
+      } finally { _loopStarting = false; }
+      if (gen !== _loopGen) return;   // stopped meanwhile
+      
       sendFaceConfig();
-      await waitForVideoFrame(remoteVideo);
+      
 
       faceLoopRunning = true;
       console.log('[FACE][receiver] inference START (receiver)');
@@ -1435,6 +1454,7 @@
       const useRVFC = 'requestVideoFrameCallback' in remoteVideo;
 
       const onFrame = () => {
+        if (gen !== _loopGen) return;   // an older loop: let it end
         if (!faceLoopRunning || !faceEnabled || faceWhere !== 'receiver') {
           console.log('[FACE][receiver] inference STOP (receiver)');
           return;
@@ -1447,7 +1467,7 @@
         }
 
         const ts = performance.now();
-        const dt = lastTs ? (ts - lastTs)/1000 : 0.016;
+        const dt = lastTs ? Math.min(1, (ts - lastTs)/1000) : 0.016;
         lastTs = ts;
 
         try {
@@ -1491,7 +1511,8 @@
     }
 
     function stopReceiverFaceLoop() {
-      faceLoopRunning = false;
+      faceLoopRunning = false; _loopGen++;
+      lastTs = 0;
       faceCtx.clearRect(0,0, faceCanvas.width, faceCanvas.height);
     }
 
@@ -1555,7 +1576,7 @@
             } else if (msg.type === 'face') {
               if (faceEnabled && faceWhere === 'sender') {
                 const ts = performance.now();
-                const dt = lastTs ? (ts - lastTs)/1000 : 0.016;
+                const dt = lastTs ? Math.min(1, (ts - lastTs)/1000) : 0.016;
                 lastTs = ts;
             
                 processProneStep({

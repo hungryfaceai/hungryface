@@ -11,6 +11,7 @@ const BASE = '/hungryface/webrtc/receiver/shared/';
 async function loadSidebar() {
   try {
     const res = await fetch(BASE + 'sidebar.html', { cache: 'no-cache' });
+    if (!res.ok) throw new Error('sidebar.html ' + res.status);   // never inject an error page into the menu
     const html = await res.text();
     const wrap = document.createElement('div');
     wrap.innerHTML = html.trim();

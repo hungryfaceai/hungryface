@@ -292,7 +292,12 @@
         if (selectedFiles.length && canShareFiles) {
           try { await navigator.clipboard.writeText(TO); } catch {}
           try { await navigator.share({ title: subject, text: body, files: selectedFiles }); return; }
-          catch (err) { if (err && err.name === 'AbortError') return; }      // user cancelled the share sheet
+          catch (err) {
+            if (err && err.name === 'AbortError') return;      // user cancelled the share sheet
+            // The share sheet was refused (e.g. it took too long to prepare): never drop the files silently.
+            showError('Your files couldn’t be attached automatically. Tap Send again to share them, or email them to ' + TO + '.');
+            return;
+          }
         }
         let url = mailtoUrl(subject, body);
         if (url.length > MAILTO_MAX && includeDiag.checked) { body = messageEl.value.trim() + '\n\n(Device details were too long to include.)'; url = mailtoUrl(subject, body); }

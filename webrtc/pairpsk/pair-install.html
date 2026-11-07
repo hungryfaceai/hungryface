@@ -299,7 +299,7 @@
     function scrubUrl() {
       history.replaceState(null, '', location.pathname + location.search);
     }
-    function currentRoom() { return (roomEl.value || 'Baby').trim(); }
+    function currentRoom() { return (roomEl.value || '').trim(); }
 
     function setMaskedChip(psk) {
       tokenMaskedEl.textContent = maskToken(psk);
@@ -325,11 +325,19 @@
     // Persist; only show green pill if PSK is valid; always (re)grey/enable top pills accordingly
     function persistPSK(pskValue, source = 'manual') {
       const room = currentRoom();
+      const valid = isValidPsk(pskValue);
+      if (!room || !valid) {
+        // Never store an invalid key: it would overwrite this room's working key.
+        showToast(!room ? 'Enter a room name first.' : 'That key isn’t valid. Copy the whole key from the other device.');
+        setMaskedChip(savedPSK || '');
+        setModeLinksEnabled(isValidPsk(savedPSK || ''));
+        pairedOk.classList.remove('show');
+        return false;
+      }
       const payload = { tokenB64u: pskValue, installedFrom: source, ts: new Date().toISOString() };
       localStorage.setItem('psk:' + room, JSON.stringify(payload));
       savedPSK = pskValue;
 
-      const valid = isValidPsk(pskValue);
       setModeLinksEnabled(valid);
       if (valid) {
         const { removedDefault } = adoptPairedRoom(room);   // paired room = current room on Home, Camera, Viewer, Settings
@@ -365,8 +373,8 @@
       const newVal = normalizeManualToken(pskInput.value);
       hideEditMode();
       if (newVal && newVal !== savedPSK) {
-        persistPSK(newVal, 'manual');
-        setMaskedChip(newVal);
+        if (persistPSK(newVal, 'manual') !== false) setMaskedChip(newVal);
+        else currentPSK = savedPSK;
       } else {
         setMaskedChip(savedPSK || currentPSK);
         // If unchanged but invalid, make sure links reflect validity
@@ -391,7 +399,11 @@
     // Forget clears local storage and UI, and disables mode links
     forgetBtn.addEventListener('click', () => {
       const room = currentRoom();
-      try { localStorage.removeItem('psk:' + room); } catch {}
+      if (!room) return;
+      try {
+        localStorage.removeItem('psk:' + room);
+        for (const k of ['naptio:lastRoom', 'bm_sender_room', 'bm_receiver_room']) if (localStorage.getItem(k) === room) localStorage.removeItem(k);
+      } catch {}
       savedPSK = '';
       currentPSK = '';
       setMaskedChip('');
@@ -425,6 +437,8 @@
         roomEl.value = '';
         setMaskedChip('');
         setModeLinksEnabled(false);
+        pskChip.style.pointerEvents = 'none'; pskChip.setAttribute('aria-disabled', 'true'); pskChip.tabIndex = -1;
+        forgetBtn.disabled = true;
         showToast('This pairing link has no room name. Ask for a new QR code.');
         return;
       }
@@ -432,15 +446,14 @@
       roomEl.value = intent.room || 'Baby';
 
       // Terms of use first, as on Pair devices. The key is only saved once they are accepted.
-      if (incoming) {
-        try { await ensureTermsAccepted({ role: 'pair' }); }
-        catch { if (intent.hadHash) scrubUrl(); return; }
-      }
+      try { await ensureTermsAccepted({ role: 'pair' }); }
+      catch { if (intent.hadHash) scrubUrl(); return; }
 
       if (incoming) {
-        persistPSK(incoming, 'url');      // handles validity + greying + conditional flash
-        setMaskedChip(incoming);
-        currentPSK = incoming;
+        const saved = getPsk(currentRoom()) || {};
+        savedPSK = saved.tokenB64u || '';
+        if (persistPSK(incoming, 'url') !== false) { setMaskedChip(incoming); currentPSK = incoming; }
+        else { currentPSK = savedPSK; pointModeLinksAt(isValidPsk(savedPSK) ? currentRoom() : ''); }
         if (intent.hadHash) scrubUrl();   // scrub fragment for privacy
       } else {
         const room = currentRoom();
