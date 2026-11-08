@@ -1278,6 +1278,7 @@
       let savedWUserVisible = false;
       // ===== Alerts episode state (Audio) =====
       let _audioAlertId = null;
+      let _lastCameraScoreTs = 0; // when the Camera (sender inference) last sent a score; see the watchdog below
       let _audioSum = 0,
         _audioCount = 0;
       // Fire-and-forget wrapper: alert storage errors must never break the audio loop.
@@ -1985,6 +1986,15 @@
         state.micStream = null;
       }
 
+      // Camera-run inference: if its scores stop arriving while the connection stays up (e.g. its model stalls),
+      // nothing else would end an open cry alert. End it after 10 s of silence, as Motion/Fence do for poses.
+      const NO_SCORE_END_MS = 10000;
+      setInterval(() => {
+        if (!state.alertOn || !cameraInfers()) return;
+        if (_lastCameraScoreTs && performance.now() - _lastCameraScoreTs > NO_SCORE_END_MS)
+          endOpenAudioAlert('Cry ended (no sound analysis received)');
+      }, 1000);
+
       // Close an open alert episode (e.g. the Camera stopped, so no more sound arrives to end it).
       function endOpenAudioAlert(message) {
         if (!state.alertOn) return;
@@ -2154,6 +2164,7 @@
                 categoryName: (c.displayName || c.categoryName || '').trim(),
                 score: c.score || 0,
               }));
+              _lastCameraScoreTs = performance.now();
               onCategories(categories);
             }
           };

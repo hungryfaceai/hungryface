@@ -951,7 +951,17 @@
       // Saved settings merged over defaults; falls back to defaults if storage is missing or corrupt.
       function loadSettings() {
         try {
-          return { ...defaults, ...JSON.parse(localStorage.getItem(LS_KEY) || '{}') };
+          const obj = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+          const cfg = { ...defaults };
+          // Only accept a stored value when its type matches the default (and, for numbers, it is finite). Corrupt
+          // storage otherwise skews the thresholds/dwell maths until the user next edits a setting.
+          for (const k of Object.keys(defaults)) {
+            const v = obj[k];
+            if (typeof v !== typeof defaults[k]) continue;
+            if (typeof v === 'number' && !Number.isFinite(v)) continue;
+            cfg[k] = v;
+          }
+          return cfg;
         } catch {
           return { ...defaults };
         }
