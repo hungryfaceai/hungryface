@@ -233,6 +233,7 @@ export class ReceiverCore {
     this.processingAnswer = false; // clear any stale lock
     this.pc = null;
     this.remoteDescriptionSet = false;
+    this.iceLive = false; // no media yet on this PC
     this.lastAnswerSdp = null;
     this.candidateQueue.length = 0;
 
@@ -270,9 +271,11 @@ export class ReceiverCore {
       //if (s === 'connected' || s === 'completed') {
       if (s === 'connected' || s === 'completed') {
         //this.#status('Connected'); //// UI logging handled by onIceState in the page
+        this.iceLive = true; // a media connection is up right now (see the roster/peer-joined handlers)
         this.iceDisconnectedSince = null;
         this.#clearIceGraceTimer();
       } else if (s === 'failed') {
+        this.iceLive = false;
         this.#status('ICE: failed');
         this.#restartPC().catch(() => {});
       } else if (s === 'disconnected') {
@@ -290,6 +293,7 @@ export class ReceiverCore {
         }
         this.#status('ICE: disconnected');
       } else if (s === 'closed') {
+        this.iceLive = false;
         this.#clearIceGraceTimer();
         this.#status('ICE: closed');
       } else {
@@ -345,7 +349,10 @@ export class ReceiverCore {
       const snd = msg.peers.find((p) => p.role === 'sender');
       if (snd) this.senderId = snd.id;
       const newId = snd?.id || null;
-      if (newId && newId !== this.targetSenderId) {
+      // Don't switch to a newly-announced sender while our stream is live. roster/peer-joined are not signed, so
+      // anyone who knows the room id (not the key) could otherwise make us drop a healthy stream. If the real
+      // Camera restarted, our ICE drops and #restartPC recovers on its own.
+      if (newId && newId !== this.targetSenderId && !this.iceLive) {
         this.targetSenderId = newId;
         await this.#sendCurrentOffer();
       }
@@ -379,6 +386,11 @@ export class ReceiverCore {
     }
 
     if (msg.type === 'peer-joined' && msg.role === 'sender' && msg.id) {
+      // A live stream is never torn down by this unsigned message (an unauthorised peer who knows the room id
+      // could otherwise disrupt us). A genuine Camera restart drops our ICE first, so iceLive is already false.
+      if (this.iceLive && this.targetSenderId && this.targetSenderId !== msg.id) {
+        return;
+      }
       const wasConnectedToOther = this.remoteDescriptionSet && this.targetSenderId && this.targetSenderId !== msg.id;
       this.senderId = msg.id;
       this.targetSenderId = msg.id; // the Camera re-joined with a new id: talk to the new one
@@ -395,6 +407,7 @@ export class ReceiverCore {
     if (msg.type === 'bye') {
       if (msg.from && this.targetSenderId && msg.from !== this.targetSenderId) return; // another device
       this.remoteDescriptionSet = false;
+      this.iceLive = false;
       this.#stopOfferResendLoop();
       this.onBye?.(msg);
       // The Camera stopped: get a fresh connection ready so it reconnects as soon as the Camera starts.
