@@ -1,5 +1,7 @@
-// iOS-only subscription gate (RevenueCat). Browser and Android: always allowed.
-const RC_IOS_KEY = 'appl_XXXXXXXXXXXXXXXX'; // RevenueCat public iOS key
+// Subscription gate for the native iOS app (RevenueCat). In the browser and on Android it always allows access.
+// Place at /hungryface/shared/subscription.js. Requires `npm install @revenuecat/purchases-capacitor` + `npx cap sync`
+// so the native plugin exists; this file reaches it through window.Capacitor (no bundler needed).
+const RC_IOS_KEY = 'appl_XXXXXXXXXXXXXXXX'; // RevenueCat public iOS API key
 const ENTITLEMENT = 'premium';
 
 const cap = window.Capacitor;
@@ -14,6 +16,7 @@ function rc() {
 }
 const isActive = (info) => !!info?.entitlements?.active?.[ENTITLEMENT];
 
+// True when the user may stream (always true outside the iOS app).
 export async function hasAccess() {
   if (!needsSubscription()) return true;
   try {
@@ -31,7 +34,7 @@ async function getPackage() {
   return cur?.monthly ?? cur?.availablePackages?.[0] ?? null;
 }
 
-// Text for the paywall, built from the App Store product (price is localised by Apple).
+// Paywall text built from the App Store product (price localised by Apple).
 export async function offerText() {
   const pkg = await getPackage();
   if (!pkg) return null;
@@ -44,7 +47,7 @@ export async function offerText() {
   return `${trial}${p.priceString} per month. Renews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.`;
 }
 
-// Returns true if the user now has access, false if they cancelled.
+// Returns true if the user now has access, false if they closed the Apple sheet.
 export async function purchase() {
   const pkg = await getPackage();
   if (!pkg) throw new Error('Subscription not available right now.');
@@ -52,7 +55,7 @@ export async function purchase() {
     const { customerInfo } = await (await rc()).purchasePackage({ aPackage: pkg });
     return isActive(customerInfo);
   } catch (e) {
-    if (e?.userCancelled || e?.code === '1') return false; // user closed the Apple sheet
+    if (e?.userCancelled || e?.code === '1') return false;
     throw e;
   }
 }
