@@ -490,7 +490,7 @@
       // importing a key.
       import { ensureTermsAccepted } from '/hungryface/legal/require-terms.js';
       import { ensurePskForRoom, getPsk } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
-      import { adoptPairedRoom } from '/hungryface/webrtc/shared/psk/adopt-room.js';
+      import { adoptPairedRoom, isUnusedLocalKey, markShared } from '/hungryface/webrtc/shared/psk/adopt-room.js';
 
       await ensureTermsAccepted({ role: 'pair' });
 
@@ -896,6 +896,7 @@ This device stops connecting to it until you pair again.`)
         const token = getCurrentToken();
         if (!room || !token) return;
         const url = makeInstallUrl(room, token);
+        markShared(room); // this key may now be in use on another device: ask before it is ever replaced
         try {
           if (navigator.share && (!navigator.canShare || navigator.canShare({ url }))) {
             await navigator.share({ title: 'Naptio pairing', text: 'Install secret for room ' + room, url });
@@ -911,6 +912,7 @@ This device stops connecting to it until you pair again.`)
         const token = getCurrentToken();
         if (!room || !token) return;
         const url = makeInstallUrl(room, token);
+        markShared(room); // this key may now be in use on another device
         try {
           await navigator.clipboard.writeText(url);
           showToast('Link copied');
@@ -1097,7 +1099,13 @@ This device stops connecting to it until you pair again.`)
             try {
               existing = JSON.parse(localStorage.getItem(PSK_PREFIX + targetRoom) || 'null');
             } catch {}
-            if (existing && looksBase64Url(existing.tokenB64u) && existing.tokenB64u !== psk) {
+            // (No question for this phone's own, never shared key: that's the normal first pairing.)
+            if (
+              existing &&
+              looksBase64Url(existing.tokenB64u) &&
+              existing.tokenB64u !== psk &&
+              !isUnusedLocalKey(targetRoom)
+            ) {
               const ok = confirm(
                 `This device is already paired in room “${targetRoom}” with a different key.
 

@@ -526,7 +526,7 @@
               mode: 'cors',
               cache: 'no-store',
               headers: (sentHeaders = adminHeaders()),
-              signal: AbortSignal.timeout(15000), // a server that never answers must not freeze refreshing
+              signal: NaptioAdmin.timeoutSignal(15000), // a server that never answers must not freeze refreshing
             });
             if (resp.status === 401) {
               adminSession.expired(sentHeaders);
@@ -534,6 +534,8 @@
             }
             if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
             const data = await resp.json();
+            // Signed out (or a different session) while this was in flight: don't put the data back on screen.
+            if ((adminHeaders().Authorization || '') !== (sentHeaders.Authorization || '')) return;
             render(data);
             setBadge('ok', 'LIVE');
             statusMsg.textContent = 'Updated successfully.';

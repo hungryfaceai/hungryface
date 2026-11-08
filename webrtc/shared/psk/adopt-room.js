@@ -32,11 +32,28 @@ function parse(s) {
   }
 }
 
-/** True if psk:<room> was generated on this device a moment ago and never installed from elsewhere. */
+/**
+ * True if psk:<room> is a key this device made itself and nothing else can depend on: not received from another
+ * device, never rotated, and its link never copied or shared from here (sharedAt). Pairing with another device's
+ * code may then replace it without asking — the normal first pairing, where both phones made their own "Baby".
+ */
+export function isUnusedLocalKey(room) {
+  const rec = parse(read('psk:' + room));
+  return !!rec && !rec.installedFrom && !rec.rotatedAt && !rec.sharedAt;
+}
+/** Record that this room's link was copied/shared from this device (its key may now be in use elsewhere). */
+export function markShared(room) {
+  try {
+    const rec = parse(read('psk:' + room));
+    if (rec && !rec.sharedAt) localStorage.setItem('psk:' + room, JSON.stringify({ ...rec, sharedAt: Date.now() }));
+  } catch {}
+}
+
+/** True if psk:<room> was generated on this device a moment ago, never installed from elsewhere and never shared. */
 function isThrowAwayDefault(room) {
   if (room !== DEFAULT_ROOM) return false;
+  if (!isUnusedLocalKey(room)) return false; // received, rotated or shared → keep
   const rec = parse(read('psk:' + room));
-  if (!rec || rec.installedFrom || rec.rotatedAt) return false; // installed from another device, or rotated → keep
   const created = Number(rec.createdAt) || Date.parse(rec.ts || '') || 0;
   return created > 0 && Date.now() - created < FRESH_MS;
 }

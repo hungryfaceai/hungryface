@@ -97,9 +97,14 @@ export async function ensurePskForRoom(room, role = 'receiver') {
     // This room already has a different key on this device (an old link after a rotation, or someone else's
     // link): replacing it would silently disconnect it, so ask first; "No" keeps the working key.
     const existing = getStored(r)?.tokenB64u;
+    let unused = false;
+    try {
+      unused = (await import('/hungryface/webrtc/shared/psk/adopt-room.js')).isUnusedLocalKey(r);
+    } catch {}
     const replace =
       !existing ||
       existing === token ||
+      unused || // this device's own, never shared key (first pairing): nothing depends on it
       confirm(
         `This device is already paired in room “${r}” with a different key.
 

@@ -403,7 +403,7 @@
       // Install logic: boot() reads the key from the URL fragment, validates it and persists it for the
       // room.
       import { getPsk } from '/hungryface/webrtc/shared/psk/psk-ws-shim.js';
-      import { adoptPairedRoom } from '/hungryface/webrtc/shared/psk/adopt-room.js';
+      import { adoptPairedRoom, isUnusedLocalKey } from '/hungryface/webrtc/shared/psk/adopt-room.js';
       import { ensureTermsAccepted } from '/hungryface/legal/require-terms.js';
       // ---- Durations (ms)
       const DURATIONS = Object.freeze({
@@ -645,6 +645,12 @@
       forgetBtn.addEventListener('click', () => {
         const room = currentRoom();
         if (!room) return;
+        if (
+          !confirm(`Forget room “${room}” on this device?
+
+This device stops connecting to it until you pair again.`)
+        )
+          return;
         try {
           localStorage.removeItem('psk:' + room);
           for (const k of ['naptio:lastRoom', 'bm_sender_room', 'bm_receiver_room'])
@@ -712,6 +718,7 @@
             isValidPsk(savedPSK) &&
             savedPSK !== incoming &&
             isValidPsk(incoming) &&
+            !isUnusedLocalKey(currentRoom()) && // this phone's own, never shared key (first pairing): just replace
             !confirm(
               `This device is already paired in room “${currentRoom()}” with a different key.
 

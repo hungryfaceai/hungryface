@@ -709,6 +709,11 @@
             audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
           });
           track = s.getAudioTracks()[0];
+          // Stopped while the microphone was opening (e.g. during the permission prompt): close it again at once.
+          if (!started) {
+            s.getTracks().forEach((t) => t.stop());
+            return null;
+          }
           if (!localStream) localStream = new MediaStream();
           localStream.addTrack(track);
         }
@@ -2040,8 +2045,12 @@
         } finally {
           poseStarting = false;
         }
-        // Stopped (or switched off) while the model was loading: don't start, so the next Start can.
-        if (gen !== poseGen || !started || !poseOn.checked || poseWhere.value !== 'sender') return;
+        // Stopped or switched while the model was loading: this start is stale. If pose is (again) wanted here,
+        // start afresh — a re-enable during the load was refused because this start was still running.
+        if (gen !== poseGen || !started || !poseOn.checked || poseWhere.value !== 'sender') {
+          if (gen !== poseGen && started && poseOn.checked && poseWhere.value === 'sender') startSenderPoseLoop();
+          return;
+        }
 
         poseLoopRunning = true;
         if (poseRAF) cancelAnimationFrame(poseRAF);
@@ -2481,6 +2490,15 @@
         } catch (e) {
           console.warn('[AUDIO][sender] Worklet addModule failed, will use ScriptProcessor fallback.', e);
         }
+        // Stopped while the worklet was loading: release what this start opened and give up.
+        if (stale()) {
+          try {
+            aiMicStream?.getTracks().forEach((t) => t.stop());
+          } catch {}
+          if (ctxHere.state !== 'closed') ctxHere.close().catch(() => {});
+          if (gen === audioGen) audioStarting = false;
+          return;
+        }
 
         // --- Classification path
         // Per audio chunk: silence watchdog, resample to 16 kHz, collect into clips, classify, send to Viewers.
@@ -2720,7 +2738,10 @@
         } finally {
           faceStarting = false;
         }
-        if (gen !== faceGen || !started || !faceOn?.checked || faceWhere?.value !== 'sender') return;
+        if (gen !== faceGen || !started || !faceOn?.checked || faceWhere?.value !== 'sender') {
+          if (gen !== faceGen && started && faceOn?.checked && faceWhere?.value === 'sender') startSenderFaceLoop();
+          return;
+        }
         faceLoopRunning = true;
         if (faceRAF) cancelAnimationFrame(faceRAF);
 

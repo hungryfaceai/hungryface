@@ -92,12 +92,14 @@ export async function addAlert(record) {
     const tx = db.transaction(STORE, 'readwrite');
     const st = tx.objectStore(STORE);
     tx.onerror = () => reject(tx.error);
+    // An abort (e.g. storage full at commit) fires only "abort": without this the promise would never settle.
+    tx.onabort = () => reject(tx.error || new Error('alert not saved (transaction aborted)'));
     const addReq = st.add(rec);
     addReq.onerror = () => reject(addReq.error);
-    addReq.onsuccess = () => {
+    // Resolve once the transaction has committed, so callers never hold the id of a record that wasn't saved.
+    tx.oncomplete = () => {
       const id = addReq.result;
-      const full = { id, ...rec };
-      _notify('add', { id, record: full });
+      _notify('add', { id, record: { id, ...rec } });
       resolve(id);
     };
   });
@@ -110,22 +112,23 @@ export async function updateAlert(id, patch) {
     const tx = db.transaction(STORE, 'readwrite');
     const st = tx.objectStore(STORE);
     tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('alert not updated (transaction aborted)'));
+    let result = false,
+      next = null;
+    tx.oncomplete = () => {
+      if (result) _notify('update', { id, record: next });
+      resolve(result);
+    };
 
     const getReq = st.get(id);
     getReq.onerror = () => reject(getReq.error);
     getReq.onsuccess = () => {
       const cur = getReq.result;
-      if (!cur) {
-        resolve(false);
-        return;
-      }
-      const next = { ...cur, ...patch };
+      if (!cur) return; // nothing to update: resolves false on complete
+      next = { ...cur, ...patch };
       const putReq = st.put(next);
       putReq.onerror = () => reject(putReq.error);
-      putReq.onsuccess = () => {
-        _notify('update', { id, record: next });
-        resolve(true);
-      };
+      putReq.onsuccess = () => (result = true);
     };
   });
 }
@@ -138,6 +141,7 @@ export async function getAllAlerts() {
     const st = tx.objectStore(STORE);
     const req = st.getAll();
     req.onerror = () => reject(req.error);
+    tx.onabort = () => reject(tx.error || new Error('alerts not read (transaction aborted)'));
     req.onsuccess = () => {
       const rows = (req.result || []).sort((a, b) => +new Date(b.startAt || 0) - +new Date(a.startAt || 0));
       resolve(rows);
@@ -152,6 +156,7 @@ export async function clearAllAlerts() {
     const tx = db.transaction(STORE, 'readwrite');
     const st = tx.objectStore(STORE);
     tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('alerts not cleared (transaction aborted)'));
     tx.oncomplete = () => {
       _notify('clear');
       resolve();

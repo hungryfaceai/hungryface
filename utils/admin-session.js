@@ -165,7 +165,8 @@
       clearTimeout(expiryTimer);
       if (!session) return;
       const left = Date.parse(session.expiresAt) - Date.now();
-      if (left <= 0) return end('Session expired — sign in again');
+      // Also treats a missing/unreadable expiry as expired (NaN would make this timer fire in a tight loop).
+      if (!(left > 0)) return end('Session expired — sign in again');
       // Long sessions: re-check periodically instead of one huge (overflowing) timeout.
       expiryTimer = setTimeout(scheduleExpiry, Math.min(left, MAX_TIMER_MS));
     }
@@ -203,11 +204,14 @@
           mode: 'cors',
           cache: 'no-store',
           credentials: 'omit',
+          // A cold Render server can take ~30 s to wake; after 45 s say so instead of "Signing in…" for ever.
+          signal: timeoutSignal(45000),
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password }),
         });
         const body = await resp.json().catch(() => ({}));
         if (!resp.ok || !body.token) throw new Error(body.error || 'Sign-in failed (HTTP ' + resp.status + ')');
+        if (!Number.isFinite(Date.parse(body.expiresAt))) throw new Error('Sign-in failed (unexpected server reply).');
         session = { token: body.token, expiresAt: body.expiresAt, remember: remember.checked };
         clearError();
         save(session);
@@ -215,7 +219,11 @@
         onChange(true);
       } catch (err) {
         render('');
-        showError((err && err.message) || 'Sign-in failed.');
+        showError(
+          err && (err.name === 'TimeoutError' || err.name === 'AbortError')
+            ? 'The server didn’t answer. It may be starting up — try again in a moment.'
+            : (err && err.message) || 'Sign-in failed.'
+        );
       } finally {
         pw.value = ''; // never keep the password around
         signIn.disabled = false;
@@ -256,5 +264,14 @@
     };
   }
 
-  window.NaptioAdmin = { mount };
+  // AbortSignal that fires after ms. AbortSignal.timeout() is missing before Safari 16 (iOS 15): fall back to a
+  // controller + timer there, or every request would fail with a TypeError.
+  function timeoutSignal(ms) {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms);
+    const c = new AbortController();
+    setTimeout(() => c.abort(new DOMException('The request timed out.', 'TimeoutError')), ms);
+    return c.signal;
+  }
+
+  window.NaptioAdmin = { mount, timeoutSignal };
 })();

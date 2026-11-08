@@ -315,7 +315,7 @@ export function installMiniDashboard(opts = {}) {
       dx = 0,
       dy = 0;
     titlebar.addEventListener('pointerdown', (e) => {
-      if (e.target.closest('.md-btn') || e.target === closeBtn) return;
+      if (e.target.closest('.md-btn') || e.target.closest('.md-zoom') || e.target === closeBtn) return; // let buttons and the zoom slider work
       if (root.hidden) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
 

@@ -13,24 +13,26 @@ function injectStyleOnce(id, css) {
 injectStyleOnce(
   'alerts-drawer-css',
   `
-  .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);z-index:140;}
-  .modal.show{display:flex;}
-  .modal-card{width:min(96%,1100px);max-height:90vh;overflow:auto;background:#0b0b0b;border:1px solid #242424;border-radius:14px;}
-  .modal-head{position:sticky;top:0;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #1a1a1a;background:#0d0d0d;border-top-left-radius:14px;border-top-right-radius:14px;}
-  .modal-actions{display:flex;gap:8px;align-items:center;}
-  .close{appearance:none;border:none;background:transparent;color:#aaa;font-size:22px;cursor:pointer;padding:2px 6px;}
+  /* Scoped to #alertsModal: these generic class names (.btn, .modal, label, …) must not restyle the pages
+     the drawer is opened on. */
+  #alertsModal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);z-index:140;}
+  #alertsModal.show{display:flex;}
+  #alertsModal .modal-card{width:min(96%,1100px);max-height:90vh;overflow:auto;background:#0b0b0b;border:1px solid #242424;border-radius:14px;}
+  #alertsModal .modal-head{position:sticky;top:0;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #1a1a1a;background:#0d0d0d;border-top-left-radius:14px;border-top-right-radius:14px;}
+  #alertsModal .modal-actions{display:flex;gap:8px;align-items:center;}
+  #alertsModal .close{appearance:none;border:none;background:transparent;color:#aaa;font-size:22px;cursor:pointer;padding:2px 6px;}
 
-  .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
-  .table{width:100%;border-collapse:collapse}
-  .table th,.table td{padding:8px 10px;border-bottom:1px solid #1f2937;text-align:left;font-size:13px}
-  .table th{color:#ddd;font-weight:700;cursor:pointer;user-select:none}
-  .table td{color:#bbb;white-space:nowrap}
-  .muted{color:#aaa}
-  .btn{padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-weight:600;cursor:pointer;}
-  .btn:active{transform:scale(.98)}
-  input[type="text"]{padding:8px 10px;border-radius:10px;border:1px solid #222;background:#0b0b0b;color:#ddd;}
-  label{font-size:12px;color:#ddd;display:inline-flex;gap:6px;align-items:center;}
-  .chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #333;border-radius:999px;font-size:12px}
+  #alertsModal .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+  #alertsModal .table{width:100%;border-collapse:collapse}
+  #alertsModal .table th,#alertsModal .table td{padding:8px 10px;border-bottom:1px solid #1f2937;text-align:left;font-size:13px}
+  #alertsModal .table th{color:#ddd;font-weight:700;cursor:pointer;user-select:none}
+  #alertsModal .table td{color:#bbb;white-space:nowrap}
+  #alertsModal .muted{color:#aaa}
+  #alertsModal .btn{padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-weight:600;cursor:pointer;}
+  #alertsModal .btn:active{transform:scale(.98)}
+  #alertsModal input[type="text"]{padding:8px 10px;border-radius:10px;border:1px solid #222;background:#0b0b0b;color:#ddd;}
+  #alertsModal label{font-size:12px;color:#ddd;display:inline-flex;gap:6px;align-items:center;}
+  #alertsModal .chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #333;border-radius:999px;font-size:12px}
 `
 );
 

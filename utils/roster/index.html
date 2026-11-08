@@ -2569,7 +2569,7 @@
               mode: 'cors',
               cache: 'no-store',
               headers: (sentHeaders = adminHeaders()),
-              signal: AbortSignal.timeout(15000), // a server that never answers must not freeze refreshing
+              signal: NaptioAdmin.timeoutSignal(15000), // a server that never answers must not freeze refreshing
             });
             // Expired or missing session: drop back to the signed-out view.
             if (resp.status === 401) {
@@ -2578,6 +2578,8 @@
             }
             if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
             data = await resp.json();
+            // Signed out (or a different session) while this was in flight: don't put the data back on screen.
+            if ((adminHeaders().Authorization || '') !== (sentHeaders.Authorization || '')) return;
             render(data);
 
             lastFetchOk = true;
@@ -2827,7 +2829,7 @@
               headers: sent,
               cache: 'no-store',
               mode: 'cors',
-              signal: AbortSignal.timeout(30000),
+              signal: NaptioAdmin.timeoutSignal(30000),
             });
             if (my !== raReq) return;
             if (r.status === 401) {
@@ -3201,7 +3203,7 @@
               headers: sent,
               cache: 'no-store',
               mode: 'cors',
-              signal: AbortSignal.timeout(30000),
+              signal: NaptioAdmin.timeoutSignal(30000),
             });
             if (r.status === 401) {
               adminSession.expired(sent);
@@ -3215,6 +3217,7 @@
             }
             if (!r.ok) throw new Error('HTTP ' + r.status);
             const data = await r.json();
+            if ((adminHeaders().Authorization || '') !== (sent.Authorization || '')) return; // signed out meanwhile
             layerLive.clearLayers();
             layerPast.clearLayers();
             // Rooms connected now vs. past ones, both listed even when their location is unknown.
