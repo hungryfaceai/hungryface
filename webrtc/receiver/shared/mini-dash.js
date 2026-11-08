@@ -304,7 +304,9 @@ export function installMiniDashboard(opts = {}) {
 
     // Double-tap/click title to reset zoom
     let lastTap = 0;
-    titlebar.addEventListener('click', () => {
+    titlebar.addEventListener('click', (e) => {
+      // Double-tap the title bar resets zoom — but not when the tap was on the zoom buttons or slider.
+      if (e.target.closest('.md-zoom, .md-btn')) return;
       const now = Date.now();
       if (now - lastTap < 350) onSetZoom(1);
       lastTap = now;

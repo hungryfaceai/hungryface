@@ -802,7 +802,12 @@
         } finally {
           _loopStarting = false;
         }
-        if (gen !== _loopGen) return; // stopped meanwhile
+        // Stopped or switched while the model/first frame was loading: this start is stale. If the Camera still
+        // wants pose on the Viewer, start again (a re-enable during the load was refused as this start was busy).
+        if (gen !== _loopGen) {
+          if (poseEnabled && poseWhere === 'receiver') startReceiverPoseLoop();
+          return;
+        }
 
         poseLoopRunning = true;
         const useRVFC = 'requestVideoFrameCallback' in remoteVideo;

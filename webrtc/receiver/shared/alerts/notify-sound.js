@@ -27,10 +27,10 @@ function settingIsOn(key, def = 'on') {
   const v = (localStorage.getItem(key) || def).toLowerCase();
   return v === 'on';
 }
-// Global cooldown between sounds in ms (setting is in minutes, default 2).
+// Global cooldown between sounds in ms (setting is in minutes; default 1, matching the Settings page).
 function getCooldownMs() {
   const n = parseInt(localStorage.getItem(KEYS.cooldown), 10);
-  const minutes = Number.isFinite(n) ? n : 2;
+  const minutes = Number.isFinite(n) ? n : 1;
   return Math.max(0, minutes) * 60_000;
 }
 

@@ -1969,7 +1969,12 @@
         } finally {
           _loopStarting = false;
         }
-        if (gen !== _loopGen) return; // stopped meanwhile
+        // Stopped or switched while the model/first frame was loading: this start is stale. If the Camera still
+        // wants face detection on the Viewer, start again.
+        if (gen !== _loopGen) {
+          if (faceEnabled && faceWhere === 'receiver') startReceiverFaceLoop();
+          return;
+        }
 
         sendFaceConfig();
 
