@@ -94,6 +94,21 @@ export async function ensurePskForRoom(room, role = 'receiver') {
   if (token) {
     const r = fragRoom || room || 'Baby';
     if (!/^[A-Za-z0-9\-_]{22,}$/.test(token)) throw new Error('Invalid token in fragment');
+    // This room already has a different key on this device (an old link after a rotation, or someone else's
+    // link): replacing it would silently disconnect it, so ask first; "No" keeps the working key.
+    const existing = getStored(r)?.tokenB64u;
+    const replace =
+      !existing ||
+      existing === token ||
+      confirm(
+        `This device is already paired in room “${r}” with a different key.
+
+` + 'Replace it with the key from this link? Devices still using the old key will stop connecting.'
+      );
+    if (!replace) {
+      scrubFragment();
+      return { room: r, tokenB64u: existing };
+    }
     setStored(r, { tokenB64u: token, createdAt: Date.now(), installedFrom: 'url' });
     // If fragment specified a different room, keep it; callers may read it back via getPsk()
     if (r !== room) room = r;

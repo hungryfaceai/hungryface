@@ -31,7 +31,14 @@
     // The drawer closes itself after SIDEBAR_AUTOHIDE_MS of inactivity (timer restarted on open and
     // on menu clicks).
     function hideSidebar() {
+      // Keyboard focus inside the drawer: don't close it under the user (try again later).
+      if (sidebar.contains(document.activeElement) && sidebar.classList.contains('visible')) {
+        clearTimeout(sidebarTimer);
+        sidebarTimer = setTimeout(hideSidebar, SIDEBAR_AUTOHIDE_MS);
+        return;
+      }
       sidebar.classList.remove('visible');
+      sidebar.inert = true; // closed (off-screen): its links leave the tab order and screen readers
       hamburger.classList.remove('hidden'); // show button when drawer closes
       hamburger.setAttribute('aria-expanded', 'false');
       clearTimeout(sidebarTimer);
@@ -39,6 +46,7 @@
       resetHamburgerFade();
     }
     function showSidebar() {
+      sidebar.inert = false;
       sidebar.classList.add('visible');
       hamburger.classList.add('hidden'); // hide button entirely while open
       hamburger.setAttribute('aria-expanded', 'true');
@@ -63,13 +71,13 @@
     // Hamburger auto-fade (disabled on touch so it's always visible there)
     const HAMBURGER_FADE_MS = 4000;
     let hamburgerFadeTimer = null;
+    // "Faded" is only dimmed (still usable), so it stays visible to screen readers; never fade while focused.
     function showHamburger() {
       hamburger.classList.remove('faded');
-      hamburger.setAttribute('aria-hidden', 'false');
     }
     function hideHamburgerBtn() {
+      if (document.activeElement === hamburger) return;
       hamburger.classList.add('faded');
-      hamburger.setAttribute('aria-hidden', 'true');
     }
     function resetHamburgerFade() {
       if (hamburger.classList.contains('hidden')) return; // don't touch while drawer open
