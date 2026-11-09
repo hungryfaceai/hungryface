@@ -21,7 +21,8 @@ if (!isNativeIos() && qsMock) {
     else localStorage.setItem(MOCK_KEY, qsMock);
   } catch {}
 }
-const mockState = () => (isNativeIos() ? null : localStorage.getItem(MOCK_KEY)); // 'expired' | 'active' | null
+const mockState = () =>
+  isNativeIos() ? null : localStorage.getItem(MOCK_KEY); // 'new' | 'expired' | 'active' | null
 const setMock = (v) => {
   try {
     localStorage.setItem(MOCK_KEY, v);
