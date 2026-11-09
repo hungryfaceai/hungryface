@@ -2,7 +2,9 @@
 // Test mode (browser only): add ?submock=expired or ?submock=active to the URL; ?submock=off clears it.
 const RC_IOS_KEY = 'appl_XXXXXXXXXXXXXXXX'; // RevenueCat public iOS API key
 const ENTITLEMENT = 'premium';
-
+const RENEW_TEXT =
+  'Renews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.';
+  
 const cap = window.Capacitor;
 const isNativeIos = () => !!cap?.isNativePlatform?.() && cap.getPlatform() === 'ios';
 
@@ -53,20 +55,50 @@ async function getPackage() {
   return cur?.monthly ?? cur?.availablePackages?.[0] ?? null;
 }
 
+// Paywall wording, depending on whether this Apple ID can still get the free trial.
+// Returns { title, terms, button } or null if the product can't be loaded.
+function buildOffer(priceString, trialText) {
+  return trialText
+    ? {
+        title: 'Start your free trial',
+        terms: `${trialText} free, then ${priceString} per month. ${RENEW_TEXT}`,
+        button: 'Start free trial',
+      }
+    : {
+        title: 'Subscribe',
+        terms: `${priceString} per month. ${RENEW_TEXT}`,
+        button: `Subscribe for ${priceString}/month`,
+      };
+}
+
 // Paywall text built from the App Store product (price localised by Apple).
-export async function offerText() {
+export async function offer() {
   if (mockState()) {
-    return '[TEST] 2 weeks free, then £2.99 per month. Renews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.';
+    // 'new' = never had the trial; 'expired' = trial already used.
+    return buildOffer('£2.99', mockState() === 'new' ? '2 weeks' : null);
   }
   const pkg = await getPackage();
   if (!pkg) return null;
   const p = pkg.product;
   const intro = p.introPrice;
-  const trial =
-    intro && intro.price === 0
-      ? `${intro.periodNumberOfUnits} ${intro.periodUnit.toLowerCase()}${intro.periodNumberOfUnits > 1 ? 's' : ''} free, then `
-      : '';
-  return `${trial}${p.priceString} per month. Renews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.`;
+  let trialText = null;
+  if (intro && intro.price === 0) {
+    // Ask Apple (via RevenueCat) whether this Apple ID can still use the introductory offer.
+    let eligible = false;
+    try {
+      const res = await (await rc()).checkTrialOrIntroductoryPriceEligibility({
+        productIdentifiers: [p.identifier],
+      });
+      eligible = res?.[p.identifier]?.status === 2; // 2 = ELIGIBLE
+    } catch (e) {
+      console.warn('[SUB] eligibility check failed', e);
+    }
+    if (eligible) {
+      const n = intro.periodNumberOfUnits;
+      trialText = `${n} ${intro.periodUnit.toLowerCase()}${n > 1 ? 's' : ''}`;
+    }
+  }
+  return buildOffer(p.priceString, trialText);
 }
 
 // Returns true if the user now has access, false if they closed the Apple sheet.
