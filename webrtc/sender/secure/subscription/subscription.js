@@ -5,7 +5,7 @@
 // ?submock=active  = active subscriber
 // ?submock=off     = clear test mode
 // https://copilot.cloud.microsoft/chat/conversation/56778f3d-24a9-45ea-a24f-f93a7d96dc51?fromcode=cmmwuwpzorz&es=UnauthClick
-const RC_IOS_KEY = 'appl_XXXXXXXXXXXXXXXX'; // RevenueCat public iOS API key
+const RC_IOS_KEY = 'appl_rGJQugZEBckkaqbOCHnGCGnPgoe'; // RevenueCat public iOS API key
 const ENTITLEMENT = 'premium';
 const MOCK_PRICE = '£2.99';
 const RENEW_TEXT =
