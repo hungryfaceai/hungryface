@@ -1,5 +1,9 @@
 // Subscription gate for the native iOS app (RevenueCat). In the browser and on Android it always allows access.
-// Test mode (browser only): add ?submock=expired or ?submock=active to the URL; ?submock=off clears it.
+// Test mode (browser only):
+// ?submock=new     = eligible for free trial
+// ?submock=expired = trial already used / expired
+// ?submock=active  = active subscriber
+// ?submock=off     = clear test mode
 const RC_IOS_KEY = 'appl_XXXXXXXXXXXXXXXX'; // RevenueCat public iOS API key
 const ENTITLEMENT = 'premium';
 const RENEW_TEXT =
