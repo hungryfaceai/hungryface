@@ -10,7 +10,9 @@
     - Script 1: PSK check (else redirect to Pair Devices), room namespace, PSK WebSocket shim installers.
     - Script 2: UI wiring, signalling WebSocket, one RTCPeerConnection per Viewer, AI loops, start/stop.
   Subscription: in the native iOS app, Start streaming requires an active "premium" entitlement (RevenueCat,
-  see subscription.js). In the browser and on Android the check always passes.
+  see subscription.js). 
+  Sender streaming is unavailable in browsers. In the native Android app, the subscription check currently passes.
+  
   Depends on: shared/psk/*.js, shared/config.js, shared/wake-lock.js, shared/audio-resampler.js,
   shared/vision-task.js, subscription.js, MediaPipe tasks (loaded from jsDelivr / Google storage on demand).
   localStorage: psk:<room>, naptio:lastRoom, bm_sender_* (saved form values).
@@ -642,6 +644,16 @@
       const pwBuy = document.getElementById('pwBuy');
       const pwRestore = document.getElementById('pwRestore');
       const pwClose = document.getElementById('pwClose');
+
+      function isNativeApp() {
+        return !!window.Capacitor?.isNativePlatform?.();
+      }
+
+      if (!isNativeApp()) {
+        startBtn.disabled = true;
+        startBtn.textContent = 'Available in the mobile app';
+        startBtn.title = 'Camera streaming requires the installed mobile app';
+      }
 
       // --- PSK Room dropdown population & default selection ---
       // True if the select has an option with this value.
@@ -1798,15 +1810,23 @@
             await stopStreaming();
             return;
           }
-          // iOS app needs an active subscription (browser/Android: always true). Checked only when starting,
-          // so a subscription expiring overnight never cuts off a stream that is already running.
+		  
+          // Sender streaming is available only from the installed app.
+          if (!isNativeApp()) {
+            alert('Camera streaming is available only in the installed app.');
+            return;
+          }
+
+          // Subscription check
           startBtn.disabled = true;
           const allowed = await hasAccess();
           startBtn.disabled = false;
+
           if (!allowed) {
             await showPaywall();
             return;
           }
+	
           roomSel.disabled = true;
           startBtn.disabled = true;
 
