@@ -7,7 +7,7 @@
 const RC_IOS_KEY = 'appl_XXXXXXXXXXXXXXXX'; // RevenueCat public iOS API key
 const ENTITLEMENT = 'premium';
 const RENEW_TEXT =
-  'Renews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.';
+  '\nRenews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.';
   
 const cap = window.Capacitor;
 const isNativeIos = () => !!cap?.isNativePlatform?.() && cap.getPlatform() === 'ios';
