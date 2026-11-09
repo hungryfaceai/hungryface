@@ -6,6 +6,7 @@
 // ?submock=off     = clear test mode
 const RC_IOS_KEY = 'appl_XXXXXXXXXXXXXXXX'; // RevenueCat public iOS API key
 const ENTITLEMENT = 'premium';
+const MOCK_PRICE = '£2.99';
 const RENEW_TEXT =
   '\nRenews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.';
   
@@ -80,7 +81,7 @@ function buildOffer(priceString, trialText) {
 export async function offer() {
   if (mockState()) {
     // 'new' = never had the trial; 'expired' = trial already used.
-    return buildOffer('£2.99', mockState() === 'new' ? '2 weeks' : null);
+    return buildOffer(MOCK_PRICE, mockState() === 'new' ? '2 weeks' : null);
   }
   const pkg = await getPackage();
   if (!pkg) return null;
