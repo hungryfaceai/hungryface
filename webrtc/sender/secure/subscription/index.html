@@ -581,7 +581,7 @@
       import { listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
       import { keepAwake } from '/hungryface/webrtc/shared/wake-lock.js';
       import { createStreamingResampler } from '/hungryface/webrtc/shared/audio-resampler.js';
-      import { hasAccess, offerText, purchase, restore } from './subscription.js';
+      import { hasAccess, offer, purchase, restore } from './subscription.js';
       let screenAwake = null; // wake lock handle while streaming
       import { WS_ENDPOINT, ICE_SERVERS } from '/hungryface/webrtc/shared/config.js';
       import { createVisionTask } from '/hungryface/webrtc/shared/vision-task.js';
@@ -1755,9 +1755,15 @@
         paywall.hidden = false;
         pwTerms.textContent = 'Loading price…';
         pwBuy.disabled = true;
-        const text = await offerText().catch(() => null);
-        pwTerms.textContent = text || 'Subscription unavailable. Check your connection and try again.';
-        pwBuy.disabled = !text;
+        const o = await offer().catch(() => null);
+        if (o) {
+          document.getElementById('pwTitle').textContent = o.title;
+          pwTerms.textContent = o.terms;
+          pwBuy.textContent = o.button;
+        } else {
+          pwTerms.textContent = 'Subscription unavailable. Check your connection and try again.';
+        }
+        pwBuy.disabled = !o;
       }
 
       pwClose.addEventListener('click', () => {
