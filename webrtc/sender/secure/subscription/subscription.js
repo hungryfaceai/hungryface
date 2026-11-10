@@ -68,7 +68,13 @@ export async function hasAccess() {
 async function getPackage() {
   const offerings = await (await rc()).getOfferings();
   const cur = offerings?.current;
-  return cur?.monthly ?? cur?.availablePackages?.[0] ?? null;
+  if (!cur) {
+    throw new Error('No current RevenueCat offering is configured.');
+  }
+  if (!cur.monthly) {
+    throw new Error('The monthly subscription package is unavailable.');
+  }
+  return cur.monthly;
 }
 
 // Paywall wording, depending on whether this Apple ID can still get the free trial.
