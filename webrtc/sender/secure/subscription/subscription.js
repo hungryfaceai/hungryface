@@ -36,6 +36,16 @@ export const needsSubscription = () => isNativeIos() || !!mockState();
 let Purchases = null;
 let ready = null;
 function rc() {
+  if (!isNativeIos()) {
+    return Promise.reject(
+      new Error('RevenueCat is available only in the native iOS app.')
+    );
+  }
+  if (!cap?.isPluginAvailable?.('Purchases')) {
+    return Promise.reject(
+      new Error('RevenueCat Purchases plugin is not included in this app build.')
+    );
+  }
   Purchases ??= cap.registerPlugin('Purchases');
   ready ??= Purchases.configure({ apiKey: RC_IOS_KEY });
   return ready.then(() => Purchases);
