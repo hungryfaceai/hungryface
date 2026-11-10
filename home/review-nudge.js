@@ -197,9 +197,9 @@ export function installReviewNudge(userOptions = {}) {
         <button class="review-nudge__close" type="button" aria-label="Close" data-action="close">×</button>
 
         <div class="review-nudge__text">
-          <div class="review-nudge__title">Keeping Naptio free for parents</div>
+          <div class="review-nudge__title">Naptio</div>
           <div class="review-nudge__body">
-            If you have a minute, a store review helps other parents find Naptio and helps us keep it free.
+            If you have a minute, a store review helps other parents find Naptio and helps us maintain it.
           </div>
         </div>
 
