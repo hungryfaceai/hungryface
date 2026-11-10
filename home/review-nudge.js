@@ -199,7 +199,7 @@ export function installReviewNudge(userOptions = {}) {
         <div class="review-nudge__text">
           <div class="review-nudge__title">Naptio</div>
           <div class="review-nudge__body">
-            If you have a minute, a store review helps other parents find Naptio and helps us maintain it.
+            If you have a minute, a store review helps other parents find Naptio.
           </div>
         </div>
 
