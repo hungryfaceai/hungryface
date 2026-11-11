@@ -505,6 +505,26 @@
         <h2 id="pwTitle" style="margin: 0 0 8px 0">Start your free trial</h2>
         <p>Naptio</p>
         <p id="pwTerms" style="font-size: 13px; opacity: 0.75">Loading price…</p>
+
+        <pre
+          id="pwDebug"
+          style="
+            display: none;
+            margin: 10px 0;
+            padding: 10px;
+            max-height: 180px;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #8fd3ff;
+            background: #050505;
+            font-size: 11px;
+            line-height: 1.4;
+          "
+        ></pre>
+        
         <div class="row"><button id="pwBuy">Start free trial</button></div>
         <div class="row"><button id="pwRestore" class="secondary">Restore purchases</button></div>
         <div class="row"><button id="pwClose" class="link-btn">Not now</button></div>
@@ -645,9 +665,22 @@
       const paywall = document.getElementById('paywall');
       const pwTerms = document.getElementById('pwTerms');
       const pwBuy = document.getElementById('pwBuy');
+      const pwDebug = document.getElementById('pwDebug');
       const pwRestore = document.getElementById('pwRestore');
       const pwClose = document.getElementById('pwClose');
-
+      
+      window.addEventListener('naptio:subscription-debug', (event) => {
+        if (!pwDebug) return;
+        pwDebug.style.display = 'block';
+        const line =
+          typeof event.detail === 'string'
+            ? event.detail
+            : JSON.stringify(event.detail);
+        pwDebug.textContent +=
+          (pwDebug.textContent ? '\n' : '') + line;
+        pwDebug.scrollTop = pwDebug.scrollHeight;
+      });
+      
       function isNativeApp() {
         return !!window.Capacitor?.isNativePlatform?.();
       }
