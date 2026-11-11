@@ -1343,7 +1343,6 @@ var Purchases = new Proxy(nativePlugin, {
 });
 
 // webrtc/sender/secure/subscription.js
-var RC_IOS_KEY = "appl_rGJQugZEBckkaqbOCHnGCGnPgoe";
 var ENTITLEMENT = "premium";
 var MOCK_PRICE = "\xA32.99";
 var RENEW_TEXT = "\nRenews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.";
@@ -1389,6 +1388,7 @@ async function rc() {
     throw new Error("RevenueCat is available only in the native iOS app.");
   }
   if (!ready) {
+    const startedAt = performance.now();
     diag("configure START");
     ready = (async () => {
       diag("setLogLevel START");
@@ -1397,9 +1397,11 @@ async function rc() {
       });
       diag("setLogLevel OK");
       diag("Purchases.configure START");
-      await Purchases.configure({
-        apiKey: RC_IOS_KEY
-      });
+      diag(
+        `Purchases.configure OK after ${Math.round(
+          performance.now() - startedAt
+        )} ms`
+      );
       diag("Purchases.configure OK");
     })().catch((err) => {
       ready = null;
@@ -1439,7 +1441,7 @@ async function hasAccess() {
     diag("access check START");
     const purchases = await withTimeout(
       rc(),
-      1e4,
+      3e4,
       "RevenueCat initialization"
     );
     diag("CustomerInfo START");
