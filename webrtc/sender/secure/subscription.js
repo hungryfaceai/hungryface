@@ -37,19 +37,30 @@ export const needsSubscription = () => isNativeIos() || !!mockState();
 
 let ready = null;
 
-function rc() {
+async function rc() {
   if (!isNativeIos()) {
-    return Promise.reject(
-      new Error('RevenueCat is available only in the native iOS app.')
-    );
+    throw new Error('RevenueCat is available only in the native iOS app.');
   }
 
-  ready ??= Purchases.configure({
-    apiKey: RC_IOS_KEY,
-  });
+  if (!ready) {
+    console.log('[SUB] configuring RevenueCat');
 
-  return ready.then(() => Purchases);
+    ready = Purchases.configure({
+      apiKey: RC_IOS_KEY,
+    }).catch((err) => {
+      // Allow a subsequent attempt rather than permanently caching
+      // a failed configuration promise.
+      ready = null;
+      throw err;
+    });
+  }
+
+  await ready;
+
+  console.log('[SUB] RevenueCat configured');
+  return Purchases;
 }
+
 const isActive = (info) => !!info?.entitlements?.active?.[ENTITLEMENT];
 
 // True when the user may stream (always true outside the iOS app, unless test mode is on).
