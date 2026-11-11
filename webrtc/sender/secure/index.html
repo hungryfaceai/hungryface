@@ -1758,7 +1758,16 @@
         paywall.hidden = false;
         pwTerms.textContent = 'Loading price…';
         pwBuy.disabled = true;
-        const o = await offer().catch((err) => {
+        
+        const o = await Promise.race([
+          offer(),
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error('RevenueCat offer request timed out after 10000 ms')),
+              10000
+            )
+          ),
+        ]).catch((err) => {
           console.error('[SUB] offer load failed', err);
           return null;
         });
