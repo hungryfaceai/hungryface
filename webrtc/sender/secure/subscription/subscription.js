@@ -1,4 +1,4 @@
-import { Purchases } from '@revenuecat/purchases-capacitor';
+import { Purchases, LOG_LEVEL } from '@revenuecat/purchases-capacitor';
 // Subscription gate for the native iOS app (RevenueCat). In the browser and on Android it always allows access.
 // Test mode (browser only):
 // ?submock=new     = eligible for free trial
@@ -45,12 +45,17 @@ async function rc() {
   if (!ready) {
     console.log('[SUB] configuring RevenueCat');
 
-    ready = Purchases.configure({
-      apiKey: RC_IOS_KEY,
-    }).catch((err) => {
-      // Allow a subsequent attempt rather than permanently caching
-      // a failed configuration promise.
+    ready = (async () => {
+      await Purchases.setLogLevel({
+        level: LOG_LEVEL.DEBUG,
+      });
+
+      await Purchases.configure({
+        apiKey: RC_IOS_KEY,
+      });
+    })().catch((err) => {
       ready = null;
+      console.error('[SUB] RevenueCat configuration failed', err);
       throw err;
     });
   }
