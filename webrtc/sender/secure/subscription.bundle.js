@@ -1379,14 +1379,37 @@ function rc() {
   return ready.then(() => Purchases);
 }
 var isActive = (info) => !!info?.entitlements?.active?.[ENTITLEMENT];
+function withTimeout(promise, timeoutMs, label) {
+  return Promise.race([
+    promise,
+    new Promise(
+      (_, reject) => setTimeout(
+        () => reject(new Error(`${label} timed out after ${timeoutMs} ms`)),
+        timeoutMs
+      )
+    )
+  ]);
+}
 async function hasAccess() {
   if (mockState()) return mockState() === "active";
   if (!needsSubscription()) return true;
   try {
-    const { customerInfo } = await (await rc()).getCustomerInfo();
-    return isActive(customerInfo);
+    console.log("[SUB] checking customer access");
+    const purchases = await withTimeout(
+      rc(),
+      1e4,
+      "RevenueCat initialization"
+    );
+    const { customerInfo } = await withTimeout(
+      purchases.getCustomerInfo(),
+      1e4,
+      "RevenueCat customer-info request"
+    );
+    const active = isActive(customerInfo);
+    console.log("[SUB] premium active:", active);
+    return active;
   } catch (e) {
-    console.warn("[SUB] check failed", e);
+    console.warn("[SUB] access check failed", e);
     return false;
   }
 }
