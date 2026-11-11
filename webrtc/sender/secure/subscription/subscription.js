@@ -1,3 +1,4 @@
+import { Purchases } from '@revenuecat/purchases-capacitor';
 // Subscription gate for the native iOS app (RevenueCat). In the browser and on Android it always allows access.
 // Test mode (browser only):
 // ?submock=new     = eligible for free trial
