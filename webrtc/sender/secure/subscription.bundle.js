@@ -1367,16 +1367,28 @@ var setMock = (v) => {
 if (mockState()) console.warn("[SUB] TEST MODE:", mockState());
 var needsSubscription = () => isNativeIos() || !!mockState();
 var ready = null;
-function rc() {
+async function rc() {
   if (!isNativeIos()) {
-    return Promise.reject(
-      new Error("RevenueCat is available only in the native iOS app.")
-    );
+    throw new Error("RevenueCat is available only in the native iOS app.");
   }
-  ready ??= Purchases.configure({
-    apiKey: RC_IOS_KEY
-  });
-  return ready.then(() => Purchases);
+  if (!ready) {
+    console.log("[SUB] configuring RevenueCat");
+    ready = (async () => {
+      await Purchases.setLogLevel({
+        level: LOG_LEVEL.DEBUG
+      });
+      await Purchases.configure({
+        apiKey: RC_IOS_KEY
+      });
+    })().catch((err) => {
+      ready = null;
+      console.error("[SUB] RevenueCat configuration failed", err);
+      throw err;
+    });
+  }
+  await ready;
+  console.log("[SUB] RevenueCat configured");
+  return Purchases;
 }
 var isActive = (info) => !!info?.entitlements?.active?.[ENTITLEMENT];
 function withTimeout(promise, timeoutMs, label) {
