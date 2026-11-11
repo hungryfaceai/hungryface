@@ -79,6 +79,7 @@ async function rc() {
   }
 
   if (!ready) {
+    const startedAt = performance.now();
     diag('configure START');
 
     ready = (async () => {
@@ -92,9 +93,11 @@ async function rc() {
 
       diag('Purchases.configure START');
 
-      await Purchases.configure({
-        apiKey: RC_IOS_KEY,
-      });
+      diag(
+        `Purchases.configure OK after ${Math.round(
+          performance.now() - startedAt
+        )} ms`
+      );
 
       diag('Purchases.configure OK');
     })().catch((err) => {
@@ -156,7 +159,7 @@ export async function hasAccess() {
 
     const purchases = await withTimeout(
       rc(),
-      10000,
+      30000,
       'RevenueCat initialization'
     );
 
