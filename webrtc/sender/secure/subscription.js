@@ -1,3 +1,4 @@
+import { Purchases } from '@revenuecat/purchases-capacitor';
 // Subscription gate for the native iOS app (RevenueCat). In the browser and on Android it always allows access.
 // Test mode (browser only):
 // ?submock=new     = eligible for free trial
@@ -10,8 +11,9 @@ const MOCK_PRICE = '£2.99';
 const RENEW_TEXT =
   '\nRenews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.';
   
-const cap = window.Capacitor;
-const isNativeIos = () => !!cap?.isNativePlatform?.() && cap.getPlatform() === 'ios';
+const isNativeIos = () =>
+  !!window.Capacitor?.isNativePlatform?.() &&
+  window.Capacitor.getPlatform() === 'ios';
 
 // ---- Browser test mode (never active inside the native app) ----
 const MOCK_KEY = 'submock';
@@ -33,21 +35,19 @@ if (mockState()) console.warn('[SUB] TEST MODE:', mockState());
 
 export const needsSubscription = () => isNativeIos() || !!mockState();
 
-let Purchases = null;
 let ready = null;
+
 function rc() {
   if (!isNativeIos()) {
     return Promise.reject(
       new Error('RevenueCat is available only in the native iOS app.')
     );
   }
-  if (!cap?.isPluginAvailable?.('Purchases')) {
-    return Promise.reject(
-      new Error('RevenueCat Purchases plugin is not included in this app build.')
-    );
-  }
-  Purchases ??= cap.registerPlugin('Purchases');
-  ready ??= Purchases.configure({ apiKey: RC_IOS_KEY });
+
+  ready ??= Purchases.configure({
+    apiKey: RC_IOS_KEY,
+  });
+
   return ready.then(() => Purchases);
 }
 const isActive = (info) => !!info?.entitlements?.active?.[ENTITLEMENT];
