@@ -53,14 +53,43 @@ function rc() {
 const isActive = (info) => !!info?.entitlements?.active?.[ENTITLEMENT];
 
 // True when the user may stream (always true outside the iOS app, unless test mode is on).
+
+function withTimeout(promise, timeoutMs, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`${label} timed out after ${timeoutMs} ms`)),
+        timeoutMs
+      )
+    ),
+  ]);
+}
+
 export async function hasAccess() {
   if (mockState()) return mockState() === 'active';
   if (!needsSubscription()) return true;
+
   try {
-    const { customerInfo } = await (await rc()).getCustomerInfo();
-    return isActive(customerInfo);
+    console.log('[SUB] checking customer access');
+
+    const purchases = await withTimeout(
+      rc(),
+      10000,
+      'RevenueCat initialization'
+    );
+
+    const { customerInfo } = await withTimeout(
+      purchases.getCustomerInfo(),
+      10000,
+      'RevenueCat customer-info request'
+    );
+
+    const active = isActive(customerInfo);
+    console.log('[SUB] premium active:', active);
+    return active;
   } catch (e) {
-    console.warn('[SUB] check failed', e);
+    console.warn('[SUB] access check failed', e);
     return false;
   }
 }
