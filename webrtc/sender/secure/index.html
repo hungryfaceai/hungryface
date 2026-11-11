@@ -1831,8 +1831,18 @@
 
           // Subscription check
           startBtn.disabled = true;
-          const allowed = await hasAccess();
-          startBtn.disabled = false;
+
+          let allowed = false;
+          try {
+            allowed = await hasAccess();
+          } finally {
+            startBtn.disabled = false;
+          }
+
+if (!allowed) {
+  await showPaywall();
+  return;
+}
 
           if (!allowed) {
             await showPaywall();
