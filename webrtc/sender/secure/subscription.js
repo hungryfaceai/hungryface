@@ -80,7 +80,6 @@ async function rc() {
     );
   }
   if (!ready) {
-    const startedAt = performance.now();
     diag('configure START');
     ready = (async () => {
       diag('setLogLevel START');
@@ -89,12 +88,13 @@ async function rc() {
       });
       diag('setLogLevel OK');
       diag('Purchases.configure START');
+      const configureStartedAt = performance.now();
       await Purchases.configure({
         apiKey: RC_IOS_KEY,
       });
       diag(
         `Purchases.configure OK after ${Math.round(
-          performance.now() - startedAt
+          performance.now() - configureStartedAt
         )} ms`
       );
     })().catch((err) => {
