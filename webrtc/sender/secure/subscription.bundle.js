@@ -1361,28 +1361,13 @@ if (!isNativeIos() && qsMock) {
   }
 }
 var mockState = () => isNativeIos() ? null : localStorage.getItem(MOCK_KEY);
-var setMock = (v) => {
+var setMock = (value) => {
   try {
-    localStorage.setItem(MOCK_KEY, v);
+    localStorage.setItem(MOCK_KEY, value);
   } catch {
   }
 };
-if (mockState()) {
-  console.warn("[SUB] TEST MODE:", mockState());
-}
 var needsSubscription = () => isNativeIos() || !!mockState();
-function diag(message) {
-  const text = `[RC] ${message}`;
-  console.log(text);
-  try {
-    window.dispatchEvent(
-      new CustomEvent("naptio:subscription-debug", {
-        detail: text
-      })
-    );
-  } catch {
-  }
-}
 var ready = null;
 async function rc() {
   if (!isNativeIos()) {
@@ -1391,39 +1376,14 @@ async function rc() {
     );
   }
   if (!ready) {
-    diag("configure START");
-    ready = (async () => {
-      diag("setLogLevel START");
-      await Purchases.setLogLevel({
-        level: LOG_LEVEL.DEBUG
-      });
-      diag("setLogLevel OK");
-      diag("Purchases.configure START");
-      const configureStartedAt = performance.now();
-      await Purchases.configure({
-        apiKey: RC_IOS_KEY
-      });
-      diag(
-        `Purchases.configure OK after ${Math.round(
-          performance.now() - configureStartedAt
-        )} ms`
-      );
-    })().catch((err) => {
+    ready = Purchases.configure({
+      apiKey: RC_IOS_KEY
+    }).catch((err) => {
       ready = null;
-      diag(
-        `configure ERROR: ${err?.message || String(err)}`
-      );
-      console.error(
-        "[SUB] RevenueCat configuration failed",
-        err
-      );
       throw err;
     });
-  } else {
-    diag("configure: using existing request");
   }
   await ready;
-  diag("RevenueCat configured");
 }
 var isActive = (info) => !!info?.entitlements?.active?.[ENTITLEMENT];
 function withTimeout(promise, timeoutMs, label) {
@@ -1447,58 +1407,46 @@ async function hasAccess() {
     return true;
   }
   try {
-    diag("access check START");
     await withTimeout(
       rc(),
       3e4,
       "RevenueCat initialization"
     );
-    diag("CustomerInfo START");
     const { customerInfo } = await withTimeout(
       Purchases.getCustomerInfo(),
       1e4,
       "RevenueCat customer-info request"
     );
-    diag("CustomerInfo OK");
-    const active = isActive(customerInfo);
-    diag(`premium active: ${active}`);
-    return active;
+    return isActive(customerInfo);
   } catch (e) {
-    diag(`access ERROR: ${e?.message || String(e)}`);
     console.warn("[SUB] access check failed", e);
     return false;
   }
 }
 async function getPackage() {
-  diag("getPackage START");
   await rc();
-  diag("Offerings START");
   const offerings = await Purchases.getOfferings();
-  diag("Offerings OK");
-  const cur = offerings?.current;
-  if (!cur) {
-    diag("Offering ERROR: no current offering");
+  const current = offerings?.current;
+  if (!current) {
     throw new Error(
       "No current RevenueCat offering is configured."
     );
   }
-  if (!cur.monthly) {
-    diag("Offering ERROR: monthly package unavailable");
+  if (!current.monthly) {
     throw new Error(
       "The monthly subscription package is unavailable."
     );
   }
-  diag("Monthly package OK");
-  return cur.monthly;
+  return current.monthly;
 }
 function buildOffer(priceString, trialText) {
   return trialText ? {
     title: "Start your free trial",
-    terms: `${trialText} free, then ${priceString} per month. ${RENEW_TEXT}`,
+    terms: `${trialText} free, then ${priceString} per month. ` + RENEW_TEXT,
     button: "Start free trial"
   } : {
     title: "Subscribe",
-    terms: `${priceString} per month. ${RENEW_TEXT}`,
+    terms: `${priceString} per month. ` + RENEW_TEXT,
     button: `Subscribe for ${priceString}/month`
   };
 }
@@ -1509,44 +1457,28 @@ async function offer() {
       mockState() === "new" ? "2 weeks" : null
     );
   }
-  diag("offer START");
   const pkg = await getPackage();
-  const p = pkg.product;
-  diag(`Product OK: ${p?.identifier || "unknown"}`);
-  diag(`Price OK: ${p?.priceString || "unknown"}`);
-  const intro = p.introPrice;
+  const product = pkg.product;
+  const intro = product.introPrice;
   let trialText = null;
   if (intro && intro.price === 0) {
-    diag("Introductory offer detected");
-    diag("Eligibility START");
     let eligible = false;
     try {
       await rc();
-      const res = await Purchases.checkTrialOrIntroductoryPriceEligibility({
-        productIdentifiers: [p.identifier]
+      const result = await Purchases.checkTrialOrIntroductoryPriceEligibility({
+        productIdentifiers: [product.identifier]
       });
-      eligible = res?.[p.identifier]?.status === 2;
-      diag(`Eligibility OK: ${eligible}`);
+      eligible = result?.[product.identifier]?.status === 2;
     } catch (e) {
-      diag(
-        `Eligibility ERROR: ${e?.message || String(e)}`
-      );
-      console.warn(
-        "[SUB] eligibility check failed",
-        e
-      );
+      console.warn("[SUB] eligibility check failed", e);
     }
     if (eligible) {
-      const n = intro.periodNumberOfUnits;
-      trialText = `${n} ${intro.periodUnit.toLowerCase()}${n > 1 ? "s" : ""}`;
-      diag(`Trial available: ${trialText}`);
+      const units = intro.periodNumberOfUnits;
+      trialText = `${units} ${intro.periodUnit.toLowerCase()}${units > 1 ? "s" : ""}`;
     }
-  } else {
-    diag("No free introductory offer");
   }
-  diag("offer OK");
   return buildOffer(
-    p.priceString,
+    product.priceString,
     trialText
   );
 }
@@ -1560,26 +1492,17 @@ async function purchase() {
     setMock("active");
     return true;
   }
-  diag("purchase START");
   const pkg = await getPackage();
   try {
-    diag("purchasePackage START");
     await rc();
     const { customerInfo } = await Purchases.purchasePackage({
       aPackage: pkg
     });
-    diag("purchasePackage OK");
-    const active = isActive(customerInfo);
-    diag(`premium active after purchase: ${active}`);
-    return active;
+    return isActive(customerInfo);
   } catch (e) {
     if (e?.userCancelled || e?.code === "1") {
-      diag("purchase CANCELLED");
       return false;
     }
-    diag(
-      `purchase ERROR: ${e?.message || String(e)}`
-    );
     throw e;
   }
 }
@@ -1587,21 +1510,9 @@ async function restore() {
   if (mockState()) {
     return mockState() === "active";
   }
-  diag("restore START");
-  try {
-    await rc();
-    diag("restorePurchases START");
-    const { customerInfo } = await Purchases.restorePurchases();
-    diag("restorePurchases OK");
-    const active = isActive(customerInfo);
-    diag(`premium active after restore: ${active}`);
-    return active;
-  } catch (e) {
-    diag(
-      `restore ERROR: ${e?.message || String(e)}`
-    );
-    throw e;
-  }
+  await rc();
+  const { customerInfo } = await Purchases.restorePurchases();
+  return isActive(customerInfo);
 }
 export {
   hasAccess,
