@@ -1,15 +1,15 @@
-import { Purchases, LOG_LEVEL } from '@revenuecat/purchases-capacitor';
+import { Purchases } from '@revenuecat/purchases-capacitor';
 
 // Subscription gate for the native iOS app (RevenueCat).
 // In the browser and on Android it always allows access.
 //
-// Test mode (browser only):
+// Browser test mode:
 // ?submock=new     = eligible for free trial
 // ?submock=expired = trial already used / expired
 // ?submock=active  = active subscriber
 // ?submock=off     = clear test mode
 
-const RC_IOS_KEY = 'appl_rGJQugZEBckkaqbOCHnGCGnPgoe'; // RevenueCat public iOS API key
+const RC_IOS_KEY = 'appl_rGJQugZEBckkaqbOCHnGCGnPgoe';
 const ENTITLEMENT = 'premium';
 const MOCK_PRICE = '£2.99';
 
@@ -20,7 +20,7 @@ const isNativeIos = () =>
   !!window.Capacitor?.isNativePlatform?.() &&
   window.Capacitor.getPlatform() === 'ios';
 
-// ---- Browser test mode (never active inside the native app) ----
+// ---- Browser test mode ----
 
 const MOCK_KEY = 'submock';
 const qsMock = new URLSearchParams(location.search).get(MOCK_KEY);
@@ -36,38 +36,16 @@ if (!isNativeIos() && qsMock) {
 }
 
 const mockState = () =>
-  isNativeIos() ? null : localStorage.getItem(MOCK_KEY); // 'new' | 'expired' | 'active' | null
+  isNativeIos() ? null : localStorage.getItem(MOCK_KEY);
 
-const setMock = (v) => {
+const setMock = (value) => {
   try {
-    localStorage.setItem(MOCK_KEY, v);
+    localStorage.setItem(MOCK_KEY, value);
   } catch {}
 };
 
-if (mockState()) {
-  console.warn('[SUB] TEST MODE:', mockState());
-}
-
-export const needsSubscription = () => isNativeIos() || !!mockState();
-
-// ---- On-screen diagnostics ----
-
-// Sends the diagnostic both to the JS console and to index.html.
-// index.html listens for "naptio:subscription-debug" and displays
-// the messages in the temporary TestFlight diagnostic panel.
-function diag(message) {
-  const text = `[RC] ${message}`;
-
-  console.log(text);
-
-  try {
-    window.dispatchEvent(
-      new CustomEvent('naptio:subscription-debug', {
-        detail: text,
-      })
-    );
-  } catch {}
-}
+export const needsSubscription = () =>
+  isNativeIos() || !!mockState();
 
 // ---- RevenueCat initialization ----
 
@@ -81,55 +59,20 @@ async function rc() {
   }
 
   if (!ready) {
-    diag('configure START');
-
-    ready = (async () => {
-      diag('setLogLevel START');
-
-      await Purchases.setLogLevel({
-        level: LOG_LEVEL.DEBUG,
-      });
-
-      diag('setLogLevel OK');
-      diag('Purchases.configure START');
-
-      const configureStartedAt = performance.now();
-
-      await Purchases.configure({
-        apiKey: RC_IOS_KEY,
-      });
-
-      diag(
-        `Purchases.configure OK after ${Math.round(
-          performance.now() - configureStartedAt
-        )} ms`
-      );
-    })().catch((err) => {
-      // Allow a later attempt if configuration fails.
+    ready = Purchases.configure({
+      apiKey: RC_IOS_KEY,
+    }).catch((err) => {
+      // Allow a subsequent attempt if initialization fails.
       ready = null;
-
-      diag(
-        `configure ERROR: ${err?.message || String(err)}`
-      );
-
-      console.error(
-        '[SUB] RevenueCat configuration failed',
-        err
-      );
-
       throw err;
     });
-  } else {
-    diag('configure: using existing request');
   }
 
   await ready;
 
-  diag('RevenueCat configured');
-
-  // IMPORTANT:
-  // Do not return the Purchases Capacitor plugin proxy from an async
-  // function. Use Purchases.* directly after awaiting rc().
+  // Do not return Purchases here.
+  // Capacitor plugin proxies must not be returned through an async
+  // function because they can be interpreted as Promise-like objects.
 }
 
 const isActive = (info) =>
@@ -166,15 +109,11 @@ export async function hasAccess() {
   }
 
   try {
-    diag('access check START');
-
     await withTimeout(
       rc(),
       30000,
       'RevenueCat initialization'
     );
-
-    diag('CustomerInfo START');
 
     const { customerInfo } = await withTimeout(
       Purchases.getCustomerInfo(),
@@ -182,18 +121,9 @@ export async function hasAccess() {
       'RevenueCat customer-info request'
     );
 
-    diag('CustomerInfo OK');
-
-    const active = isActive(customerInfo);
-
-    diag(`premium active: ${active}`);
-
-    return active;
+    return isActive(customerInfo);
   } catch (e) {
-    diag(`access ERROR: ${e?.message || String(e)}`);
-
     console.warn('[SUB] access check failed', e);
-
     return false;
   }
 }
@@ -201,57 +131,42 @@ export async function hasAccess() {
 // ---- Offering / package ----
 
 async function getPackage() {
-  diag('getPackage START');
-
   await rc();
 
-  diag('Offerings START');
-
   const offerings = await Purchases.getOfferings();
+  const current = offerings?.current;
 
-  diag('Offerings OK');
-
-  const cur = offerings?.current;
-
-  if (!cur) {
-    diag('Offering ERROR: no current offering');
-
+  if (!current) {
     throw new Error(
       'No current RevenueCat offering is configured.'
     );
   }
 
-  if (!cur.monthly) {
-    diag('Offering ERROR: monthly package unavailable');
-
+  if (!current.monthly) {
     throw new Error(
       'The monthly subscription package is unavailable.'
     );
   }
 
-  diag('Monthly package OK');
-
-  return cur.monthly;
+  return current.monthly;
 }
 
 // ---- Paywall wording ----
 
-// Paywall wording depending on whether this Apple ID
-// can still receive the free trial.
 function buildOffer(priceString, trialText) {
   return trialText
     ? {
         title: 'Start your free trial',
         terms:
           `${trialText} free, then ${priceString} per month. ` +
-          `${RENEW_TEXT}`,
+          RENEW_TEXT,
         button: 'Start free trial',
       }
     : {
         title: 'Subscribe',
         terms:
           `${priceString} per month. ` +
-          `${RENEW_TEXT}`,
+          RENEW_TEXT,
         button: `Subscribe for ${priceString}/month`,
       };
 }
@@ -260,72 +175,46 @@ function buildOffer(priceString, trialText) {
 // priceString is localized by Apple.
 export async function offer() {
   if (mockState()) {
-    // 'new' = never had the trial
-    // 'expired' = trial already used
     return buildOffer(
       MOCK_PRICE,
       mockState() === 'new' ? '2 weeks' : null
     );
   }
 
-  diag('offer START');
-
   const pkg = await getPackage();
-
-  const p = pkg.product;
-
-  diag(`Product OK: ${p?.identifier || 'unknown'}`);
-  diag(`Price OK: ${p?.priceString || 'unknown'}`);
-
-  const intro = p.introPrice;
+  const product = pkg.product;
+  const intro = product.introPrice;
 
   let trialText = null;
 
   if (intro && intro.price === 0) {
-    diag('Introductory offer detected');
-    diag('Eligibility START');
-
     let eligible = false;
 
     try {
       await rc();
 
-      const res =
+      const result =
         await Purchases.checkTrialOrIntroductoryPriceEligibility({
-          productIdentifiers: [p.identifier],
+          productIdentifiers: [product.identifier],
         });
 
-      eligible = res?.[p.identifier]?.status === 2; // 2 = ELIGIBLE
-
-      diag(`Eligibility OK: ${eligible}`);
+      eligible =
+        result?.[product.identifier]?.status === 2;
     } catch (e) {
-      diag(
-        `Eligibility ERROR: ${e?.message || String(e)}`
-      );
-
-      console.warn(
-        '[SUB] eligibility check failed',
-        e
-      );
+      console.warn('[SUB] eligibility check failed', e);
     }
 
     if (eligible) {
-      const n = intro.periodNumberOfUnits;
+      const units = intro.periodNumberOfUnits;
 
       trialText =
-        `${n} ${intro.periodUnit.toLowerCase()}` +
-        `${n > 1 ? 's' : ''}`;
-
-      diag(`Trial available: ${trialText}`);
+        `${units} ${intro.periodUnit.toLowerCase()}` +
+        `${units > 1 ? 's' : ''}`;
     }
-  } else {
-    diag('No free introductory offer');
   }
 
-  diag('offer OK');
-
   return buildOffer(
-    p.priceString,
+    product.priceString,
     trialText
   );
 }
@@ -336,9 +225,6 @@ export async function offer() {
 // Returns false if the Apple purchase sheet was cancelled.
 export async function purchase() {
   if (mockState()) {
-    // Stand-in for the Apple purchase sheet:
-    // OK = subscribe
-    // Cancel = close
     if (
       !confirm(
         '[TEST] Simulated Apple purchase sheet.\n\n' +
@@ -349,17 +235,12 @@ export async function purchase() {
     }
 
     setMock('active');
-
     return true;
   }
-
-  diag('purchase START');
 
   const pkg = await getPackage();
 
   try {
-    diag('purchasePackage START');
-
     await rc();
 
     const { customerInfo } =
@@ -367,23 +248,11 @@ export async function purchase() {
         aPackage: pkg,
       });
 
-    diag('purchasePackage OK');
-
-    const active = isActive(customerInfo);
-
-    diag(`premium active after purchase: ${active}`);
-
-    return active;
+    return isActive(customerInfo);
   } catch (e) {
     if (e?.userCancelled || e?.code === '1') {
-      diag('purchase CANCELLED');
-
       return false;
     }
-
-    diag(
-      `purchase ERROR: ${e?.message || String(e)}`
-    );
 
     throw e;
   }
@@ -396,28 +265,10 @@ export async function restore() {
     return mockState() === 'active';
   }
 
-  diag('restore START');
+  await rc();
 
-  try {
-    await rc();
+  const { customerInfo } =
+    await Purchases.restorePurchases();
 
-    diag('restorePurchases START');
-
-    const { customerInfo } =
-      await Purchases.restorePurchases();
-
-    diag('restorePurchases OK');
-
-    const active = isActive(customerInfo);
-
-    diag(`premium active after restore: ${active}`);
-
-    return active;
-  } catch (e) {
-    diag(
-      `restore ERROR: ${e?.message || String(e)}`
-    );
-
-    throw e;
-  }
+  return isActive(customerInfo);
 }
