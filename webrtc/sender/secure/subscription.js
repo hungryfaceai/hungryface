@@ -75,49 +75,45 @@ let ready = null;
 
 async function rc() {
   if (!isNativeIos()) {
-    throw new Error('RevenueCat is available only in the native iOS app.');
+    throw new Error(
+      'RevenueCat is available only in the native iOS app.'
+    );
   }
-
   if (!ready) {
     const startedAt = performance.now();
     diag('configure START');
-
     ready = (async () => {
       diag('setLogLevel START');
-
       await Purchases.setLogLevel({
         level: LOG_LEVEL.DEBUG,
       });
-
       diag('setLogLevel OK');
-
       diag('Purchases.configure START');
-
+      await Purchases.configure({
+        apiKey: RC_IOS_KEY,
+      });
       diag(
         `Purchases.configure OK after ${Math.round(
           performance.now() - startedAt
         )} ms`
       );
-
-      diag('Purchases.configure OK');
     })().catch((err) => {
-      // Do not permanently cache a failed configuration attempt.
+      // Allow a later attempt if configuration fails.
       ready = null;
-
-      diag(`configure ERROR: ${err?.message || String(err)}`);
-
-      console.error('[SUB] RevenueCat configuration failed', err);
-
+      diag(
+        `configure ERROR: ${err?.message || String(err)}`
+      );
+      console.error(
+        '[SUB] RevenueCat configuration failed',
+        err
+      );
       throw err;
     });
   } else {
     diag('configure: using existing request');
   }
-
   await ready;
-
   diag('RevenueCat configured');
-
   return Purchases;
 }
 
