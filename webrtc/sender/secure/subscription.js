@@ -79,19 +79,26 @@ async function rc() {
       'RevenueCat is available only in the native iOS app.'
     );
   }
+
   if (!ready) {
     diag('configure START');
+
     ready = (async () => {
       diag('setLogLevel START');
+
       await Purchases.setLogLevel({
         level: LOG_LEVEL.DEBUG,
       });
+
       diag('setLogLevel OK');
       diag('Purchases.configure START');
+
       const configureStartedAt = performance.now();
+
       await Purchases.configure({
         apiKey: RC_IOS_KEY,
       });
+
       diag(
         `Purchases.configure OK after ${Math.round(
           performance.now() - configureStartedAt
@@ -100,21 +107,29 @@ async function rc() {
     })().catch((err) => {
       // Allow a later attempt if configuration fails.
       ready = null;
+
       diag(
         `configure ERROR: ${err?.message || String(err)}`
       );
+
       console.error(
         '[SUB] RevenueCat configuration failed',
         err
       );
+
       throw err;
     });
   } else {
     diag('configure: using existing request');
   }
+
   await ready;
+
   diag('RevenueCat configured');
-  return Purchases;
+
+  // IMPORTANT:
+  // Do not return the Purchases Capacitor plugin proxy from an async
+  // function. Use Purchases.* directly after awaiting rc().
 }
 
 const isActive = (info) =>
@@ -153,7 +168,7 @@ export async function hasAccess() {
   try {
     diag('access check START');
 
-    const purchases = await withTimeout(
+    await withTimeout(
       rc(),
       30000,
       'RevenueCat initialization'
@@ -162,7 +177,7 @@ export async function hasAccess() {
     diag('CustomerInfo START');
 
     const { customerInfo } = await withTimeout(
-      purchases.getCustomerInfo(),
+      Purchases.getCustomerInfo(),
       10000,
       'RevenueCat customer-info request'
     );
@@ -188,11 +203,11 @@ export async function hasAccess() {
 async function getPackage() {
   diag('getPackage START');
 
-  const purchases = await rc();
+  await rc();
 
   diag('Offerings START');
 
-  const offerings = await purchases.getOfferings();
+  const offerings = await Purchases.getOfferings();
 
   diag('Offerings OK');
 
@@ -273,10 +288,10 @@ export async function offer() {
     let eligible = false;
 
     try {
-      const purchases = await rc();
+      await rc();
 
       const res =
-        await purchases.checkTrialOrIntroductoryPriceEligibility({
+        await Purchases.checkTrialOrIntroductoryPriceEligibility({
           productIdentifiers: [p.identifier],
         });
 
@@ -345,10 +360,10 @@ export async function purchase() {
   try {
     diag('purchasePackage START');
 
-    const purchases = await rc();
+    await rc();
 
     const { customerInfo } =
-      await purchases.purchasePackage({
+      await Purchases.purchasePackage({
         aPackage: pkg,
       });
 
@@ -384,12 +399,12 @@ export async function restore() {
   diag('restore START');
 
   try {
-    const purchases = await rc();
+    await rc();
 
     diag('restorePurchases START');
 
     const { customerInfo } =
-      await purchases.restorePurchases();
+      await Purchases.restorePurchases();
 
     diag('restorePurchases OK');
 
