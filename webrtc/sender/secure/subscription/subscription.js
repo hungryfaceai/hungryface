@@ -13,9 +13,6 @@ const RC_IOS_KEY = 'appl_rGJQugZEBckkaqbOCHnGCGnPgoe';
 const ENTITLEMENT = 'premium';
 const MOCK_PRICE = '£2.99';
 
-const RENEW_TEXT =
-  '\nRenews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.';
-
 const isNativeIos = () =>
   !!window.Capacitor?.isNativePlatform?.() &&
   window.Capacitor.getPlatform() === 'ios';
@@ -158,15 +155,16 @@ function buildOffer(priceString, trialText) {
     ? {
         title: 'Start your free trial',
         terms:
-          `${trialText} free, then ${priceString} per month. ` +
-          RENEW_TEXT,
-        button: 'Start free trial',
+          `${trialText} free\n` +
+          `Then ${priceString}/month\n\n` +
+          `Renews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.`,
+        button: `Start ${trialText} free trial`,
       }
     : {
-        title: 'Subscribe',
+        title: 'Subscribe to Naptio',
         terms:
-          `${priceString} per month. ` +
-          RENEW_TEXT,
+          `${priceString}/month\n\n` +
+          `Renews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.`,
         button: `Subscribe for ${priceString}/month`,
       };
 }
