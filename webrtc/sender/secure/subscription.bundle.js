@@ -1346,7 +1346,6 @@ var Purchases = new Proxy(nativePlugin, {
 var RC_IOS_KEY = "appl_rGJQugZEBckkaqbOCHnGCGnPgoe";
 var ENTITLEMENT = "premium";
 var MOCK_PRICE = "\xA32.99";
-var RENEW_TEXT = "\nRenews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.";
 var isNativeIos = () => !!window.Capacitor?.isNativePlatform?.() && window.Capacitor.getPlatform() === "ios";
 var MOCK_KEY = "submock";
 var qsMock = new URLSearchParams(location.search).get(MOCK_KEY);
@@ -1442,11 +1441,16 @@ async function getPackage() {
 function buildOffer(priceString, trialText) {
   return trialText ? {
     title: "Start your free trial",
-    terms: `${trialText} free, then ${priceString} per month. ` + RENEW_TEXT,
-    button: "Start free trial"
+    terms: `${trialText} free
+Then ${priceString}/month
+
+Renews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.`,
+    button: `Start ${trialText} free trial`
   } : {
-    title: "Subscribe",
-    terms: `${priceString} per month. ` + RENEW_TEXT,
+    title: "Subscribe to Naptio",
+    terms: `${priceString}/month
+
+Renews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.`,
     button: `Subscribe for ${priceString}/month`
   };
 }
