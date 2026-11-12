@@ -1343,6 +1343,7 @@ var Purchases = new Proxy(nativePlugin, {
 });
 
 // webrtc/sender/secure/subscription.js
+var RC_IOS_KEY = "appl_rGJQugZEBckkaqbOCHnGCGnPgoe";
 var ENTITLEMENT = "premium";
 var MOCK_PRICE = "\xA32.99";
 var RENEW_TEXT = "\nRenews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.";
@@ -1385,10 +1386,11 @@ function diag(message) {
 var ready = null;
 async function rc() {
   if (!isNativeIos()) {
-    throw new Error("RevenueCat is available only in the native iOS app.");
+    throw new Error(
+      "RevenueCat is available only in the native iOS app."
+    );
   }
   if (!ready) {
-    const startedAt = performance.now();
     diag("configure START");
     ready = (async () => {
       diag("setLogLevel START");
@@ -1397,16 +1399,24 @@ async function rc() {
       });
       diag("setLogLevel OK");
       diag("Purchases.configure START");
+      const configureStartedAt = performance.now();
+      await Purchases.configure({
+        apiKey: RC_IOS_KEY
+      });
       diag(
         `Purchases.configure OK after ${Math.round(
-          performance.now() - startedAt
+          performance.now() - configureStartedAt
         )} ms`
       );
-      diag("Purchases.configure OK");
     })().catch((err) => {
       ready = null;
-      diag(`configure ERROR: ${err?.message || String(err)}`);
-      console.error("[SUB] RevenueCat configuration failed", err);
+      diag(
+        `configure ERROR: ${err?.message || String(err)}`
+      );
+      console.error(
+        "[SUB] RevenueCat configuration failed",
+        err
+      );
       throw err;
     });
   } else {
