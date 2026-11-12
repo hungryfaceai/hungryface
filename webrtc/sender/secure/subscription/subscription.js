@@ -1,194 +1,274 @@
-import { Purchases, LOG_LEVEL } from '@revenuecat/purchases-capacitor';
-// Subscription gate for the native iOS app (RevenueCat). In the browser and on Android it always allows access.
-// Test mode (browser only):
+import { Purchases } from '@revenuecat/purchases-capacitor';
+
+// Subscription gate for the native iOS app (RevenueCat).
+// In the browser and on Android it always allows access.
+//
+// Browser test mode:
 // ?submock=new     = eligible for free trial
 // ?submock=expired = trial already used / expired
 // ?submock=active  = active subscriber
 // ?submock=off     = clear test mode
-const RC_IOS_KEY = 'appl_rGJQugZEBckkaqbOCHnGCGnPgoe'; // RevenueCat public iOS API key
+
+const RC_IOS_KEY = 'appl_rGJQugZEBckkaqbOCHnGCGnPgoe';
 const ENTITLEMENT = 'premium';
 const MOCK_PRICE = '£2.99';
+
 const RENEW_TEXT =
   '\nRenews automatically unless cancelled at least 24 hours before the end of the current period. Manage or cancel in your App Store settings.';
-  
+
 const isNativeIos = () =>
   !!window.Capacitor?.isNativePlatform?.() &&
   window.Capacitor.getPlatform() === 'ios';
 
-// ---- Browser test mode (never active inside the native app) ----
+// ---- Browser test mode ----
+
 const MOCK_KEY = 'submock';
 const qsMock = new URLSearchParams(location.search).get(MOCK_KEY);
+
 if (!isNativeIos() && qsMock) {
   try {
-    if (qsMock === 'off') localStorage.removeItem(MOCK_KEY);
-    else localStorage.setItem(MOCK_KEY, qsMock);
+    if (qsMock === 'off') {
+      localStorage.removeItem(MOCK_KEY);
+    } else {
+      localStorage.setItem(MOCK_KEY, qsMock);
+    }
   } catch {}
 }
+
 const mockState = () =>
-  isNativeIos() ? null : localStorage.getItem(MOCK_KEY); // 'new' | 'expired' | 'active' | null
-const setMock = (v) => {
+  isNativeIos() ? null : localStorage.getItem(MOCK_KEY);
+
+const setMock = (value) => {
   try {
-    localStorage.setItem(MOCK_KEY, v);
+    localStorage.setItem(MOCK_KEY, value);
   } catch {}
 };
-if (mockState()) console.warn('[SUB] TEST MODE:', mockState());
 
-export const needsSubscription = () => isNativeIos() || !!mockState();
+export const needsSubscription = () =>
+  isNativeIos() || !!mockState();
+
+// ---- RevenueCat initialization ----
 
 let ready = null;
 
 async function rc() {
   if (!isNativeIos()) {
-    throw new Error('RevenueCat is available only in the native iOS app.');
+    throw new Error(
+      'RevenueCat is available only in the native iOS app.'
+    );
   }
 
   if (!ready) {
-    console.log('[SUB] configuring RevenueCat');
-
-    ready = (async () => {
-      await Purchases.setLogLevel({
-        level: LOG_LEVEL.DEBUG,
-      });
-
-      await Purchases.configure({
-        apiKey: RC_IOS_KEY,
-      });
-    })().catch((err) => {
+    ready = Purchases.configure({
+      apiKey: RC_IOS_KEY,
+    }).catch((err) => {
+      // Allow a subsequent attempt if initialization fails.
       ready = null;
-      console.error('[SUB] RevenueCat configuration failed', err);
       throw err;
     });
   }
 
   await ready;
 
-  console.log('[SUB] RevenueCat configured');
-  return Purchases;
+  // Do not return Purchases here.
+  // Capacitor plugin proxies must not be returned through an async
+  // function because they can be interpreted as Promise-like objects.
 }
 
-const isActive = (info) => !!info?.entitlements?.active?.[ENTITLEMENT];
+const isActive = (info) =>
+  !!info?.entitlements?.active?.[ENTITLEMENT];
 
-// True when the user may stream (always true outside the iOS app, unless test mode is on).
+// ---- Timeout helper ----
 
 function withTimeout(promise, timeoutMs, label) {
   return Promise.race([
     promise,
     new Promise((_, reject) =>
       setTimeout(
-        () => reject(new Error(`${label} timed out after ${timeoutMs} ms`)),
+        () =>
+          reject(
+            new Error(`${label} timed out after ${timeoutMs} ms`)
+          ),
         timeoutMs
       )
     ),
   ]);
 }
 
+// ---- Access check ----
+
+// True when the user may stream.
+// Outside native iOS this is always true unless browser test mode is enabled.
 export async function hasAccess() {
-  if (mockState()) return mockState() === 'active';
-  if (!needsSubscription()) return true;
+  if (mockState()) {
+    return mockState() === 'active';
+  }
+
+  if (!needsSubscription()) {
+    return true;
+  }
 
   try {
-    console.log('[SUB] checking customer access');
-
-    const purchases = await withTimeout(
+    await withTimeout(
       rc(),
-      10000,
+      30000,
       'RevenueCat initialization'
     );
 
     const { customerInfo } = await withTimeout(
-      purchases.getCustomerInfo(),
+      Purchases.getCustomerInfo(),
       10000,
       'RevenueCat customer-info request'
     );
 
-    const active = isActive(customerInfo);
-    console.log('[SUB] premium active:', active);
-    return active;
+    return isActive(customerInfo);
   } catch (e) {
     console.warn('[SUB] access check failed', e);
     return false;
   }
 }
 
+// ---- Offering / package ----
+
 async function getPackage() {
-  const offerings = await (await rc()).getOfferings();
-  const cur = offerings?.current;
-  if (!cur) {
-    throw new Error('No current RevenueCat offering is configured.');
+  await rc();
+
+  const offerings = await Purchases.getOfferings();
+  const current = offerings?.current;
+
+  if (!current) {
+    throw new Error(
+      'No current RevenueCat offering is configured.'
+    );
   }
-  if (!cur.monthly) {
-    throw new Error('The monthly subscription package is unavailable.');
+
+  if (!current.monthly) {
+    throw new Error(
+      'The monthly subscription package is unavailable.'
+    );
   }
-  return cur.monthly;
+
+  return current.monthly;
 }
 
-// Paywall wording, depending on whether this Apple ID can still get the free trial.
-// Returns { title, terms, button } or null if the product can't be loaded.
+// ---- Paywall wording ----
+
 function buildOffer(priceString, trialText) {
   return trialText
     ? {
         title: 'Start your free trial',
-        terms: `${trialText} free, then ${priceString} per month. ${RENEW_TEXT}`,
+        terms:
+          `${trialText} free, then ${priceString} per month. ` +
+          RENEW_TEXT,
         button: 'Start free trial',
       }
     : {
         title: 'Subscribe',
-        terms: `${priceString} per month. ${RENEW_TEXT}`,
+        terms:
+          `${priceString} per month. ` +
+          RENEW_TEXT,
         button: `Subscribe for ${priceString}/month`,
       };
 }
 
-// Paywall text built from the App Store product (price localised by Apple).
+// Paywall text built from the App Store product.
+// priceString is localized by Apple.
 export async function offer() {
   if (mockState()) {
-    // 'new' = never had the trial; 'expired' = trial already used.
-    return buildOffer(MOCK_PRICE, mockState() === 'new' ? '2 weeks' : null);
+    return buildOffer(
+      MOCK_PRICE,
+      mockState() === 'new' ? '2 weeks' : null
+    );
   }
+
   const pkg = await getPackage();
-  if (!pkg) return null;
-  const p = pkg.product;
-  const intro = p.introPrice;
+  const product = pkg.product;
+  const intro = product.introPrice;
+
   let trialText = null;
+
   if (intro && intro.price === 0) {
-    // Ask Apple (via RevenueCat) whether this Apple ID can still use the introductory offer.
     let eligible = false;
+
     try {
-      const res = await (await rc()).checkTrialOrIntroductoryPriceEligibility({
-        productIdentifiers: [p.identifier],
-      });
-      eligible = res?.[p.identifier]?.status === 2; // 2 = ELIGIBLE
+      await rc();
+
+      const result =
+        await Purchases.checkTrialOrIntroductoryPriceEligibility({
+          productIdentifiers: [product.identifier],
+        });
+
+      eligible =
+        result?.[product.identifier]?.status === 2;
     } catch (e) {
       console.warn('[SUB] eligibility check failed', e);
     }
+
     if (eligible) {
-      const n = intro.periodNumberOfUnits;
-      trialText = `${n} ${intro.periodUnit.toLowerCase()}${n > 1 ? 's' : ''}`;
+      const units = intro.periodNumberOfUnits;
+
+      trialText =
+        `${units} ${intro.periodUnit.toLowerCase()}` +
+        `${units > 1 ? 's' : ''}`;
     }
   }
-  return buildOffer(p.priceString, trialText);
+
+  return buildOffer(
+    product.priceString,
+    trialText
+  );
 }
 
-// Returns true if the user now has access, false if they closed the Apple sheet.
+// ---- Purchase ----
+
+// Returns true if the user now has access.
+// Returns false if the Apple purchase sheet was cancelled.
 export async function purchase() {
   if (mockState()) {
-    // Stand-in for the Apple purchase sheet: OK = buy, Cancel = user closed the sheet.
-    if (!confirm('[TEST] Simulated Apple purchase sheet.\n\nOK = subscribe, Cancel = close')) return false;
+    if (
+      !confirm(
+        '[TEST] Simulated Apple purchase sheet.\n\n' +
+          'OK = subscribe, Cancel = close'
+      )
+    ) {
+      return false;
+    }
+
     setMock('active');
     return true;
   }
+
   const pkg = await getPackage();
-  if (!pkg) throw new Error('Subscription not available right now.');
+
   try {
-    const { customerInfo } = await (await rc()).purchasePackage({ aPackage: pkg });
+    await rc();
+
+    const { customerInfo } =
+      await Purchases.purchasePackage({
+        aPackage: pkg,
+      });
+
     return isActive(customerInfo);
   } catch (e) {
-    if (e?.userCancelled || e?.code === '1') return false;
+    if (e?.userCancelled || e?.code === '1') {
+      return false;
+    }
+
     throw e;
   }
 }
 
+// ---- Restore purchases ----
+
 export async function restore() {
-  if (mockState()) return mockState() === 'active';
-  const { customerInfo } = await (await rc()).restorePurchases();
+  if (mockState()) {
+    return mockState() === 'active';
+  }
+
+  await rc();
+
+  const { customerInfo } =
+    await Purchases.restorePurchases();
+
   return isActive(customerInfo);
 }
