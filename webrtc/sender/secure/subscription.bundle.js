@@ -1424,7 +1424,6 @@ async function rc() {
   }
   await ready;
   diag("RevenueCat configured");
-  return Purchases;
 }
 var isActive = (info) => !!info?.entitlements?.active?.[ENTITLEMENT];
 function withTimeout(promise, timeoutMs, label) {
@@ -1449,14 +1448,14 @@ async function hasAccess() {
   }
   try {
     diag("access check START");
-    const purchases = await withTimeout(
+    await withTimeout(
       rc(),
       3e4,
       "RevenueCat initialization"
     );
     diag("CustomerInfo START");
     const { customerInfo } = await withTimeout(
-      purchases.getCustomerInfo(),
+      Purchases.getCustomerInfo(),
       1e4,
       "RevenueCat customer-info request"
     );
@@ -1472,9 +1471,9 @@ async function hasAccess() {
 }
 async function getPackage() {
   diag("getPackage START");
-  const purchases = await rc();
+  await rc();
   diag("Offerings START");
-  const offerings = await purchases.getOfferings();
+  const offerings = await Purchases.getOfferings();
   diag("Offerings OK");
   const cur = offerings?.current;
   if (!cur) {
@@ -1522,8 +1521,8 @@ async function offer() {
     diag("Eligibility START");
     let eligible = false;
     try {
-      const purchases = await rc();
-      const res = await purchases.checkTrialOrIntroductoryPriceEligibility({
+      await rc();
+      const res = await Purchases.checkTrialOrIntroductoryPriceEligibility({
         productIdentifiers: [p.identifier]
       });
       eligible = res?.[p.identifier]?.status === 2;
@@ -1565,8 +1564,8 @@ async function purchase() {
   const pkg = await getPackage();
   try {
     diag("purchasePackage START");
-    const purchases = await rc();
-    const { customerInfo } = await purchases.purchasePackage({
+    await rc();
+    const { customerInfo } = await Purchases.purchasePackage({
       aPackage: pkg
     });
     diag("purchasePackage OK");
@@ -1590,9 +1589,9 @@ async function restore() {
   }
   diag("restore START");
   try {
-    const purchases = await rc();
+    await rc();
     diag("restorePurchases START");
-    const { customerInfo } = await purchases.restorePurchases();
+    const { customerInfo } = await Purchases.restorePurchases();
     diag("restorePurchases OK");
     const active = isActive(customerInfo);
     diag(`premium active after restore: ${active}`);
