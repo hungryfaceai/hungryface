@@ -9,8 +9,12 @@
     - Style blocks: dark full-screen stage, control card, blackout/preview/streaming body states.
     - Script 1: PSK check (else redirect to Pair Devices), room namespace, PSK WebSocket shim installers.
     - Script 2: UI wiring, signalling WebSocket, one RTCPeerConnection per Viewer, AI loops, start/stop.
+  Subscription: in the native iOS app, Start streaming requires an active "premium" entitlement (RevenueCat,
+  see subscription.js). 
+  Sender streaming is unavailable in browsers. In the native Android app, the subscription check currently passes.
+  
   Depends on: shared/psk/*.js, shared/config.js, shared/wake-lock.js, shared/audio-resampler.js,
-  shared/vision-task.js, MediaPipe tasks (loaded from jsDelivr / Google storage on demand).
+  shared/vision-task.js, subscription.js, MediaPipe tasks (loaded from jsDelivr / Google storage on demand).
   localStorage: psk:<room>, naptio:lastRoom, bm_sender_* (saved form values).
 -->
 <html lang="en">
@@ -272,6 +276,39 @@
         color: var(--nt-text-2, #ddd);
       }
 
+      /* --- Subscription paywall (iOS app only; never shown in the browser) --- */
+      #paywall {
+        position: fixed;
+        inset: 0;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        background: rgba(0, 0, 0, 0.85);
+      }
+      #paywall[hidden] {
+        display: none;
+      }
+      #pwTerms {
+        white-space: pre-line;
+      }
+      #paywall .secondary {
+        background: transparent;
+        border: 1px solid #333;
+      }
+      #paywall .link-btn {
+        background: transparent;
+      }
+      #paywall .legal {
+        font-size: 12px;
+        text-align: center;
+        opacity: 0.7;
+      }
+      #paywall .legal a {
+        color: inherit;
+      }
+
       /* --- Debug panel --- */
       #debugPanel {
         position: fixed;
@@ -462,6 +499,27 @@
       </div>
     </div>
 
+    <!-- Subscription paywall (iOS app only). Shown by the Start button when there is no active subscription. -->
+    <div id="paywall" hidden role="dialog" aria-modal="true" aria-labelledby="pwTitle">
+      <div class="card">
+        <h2 id="pwTitle" style="margin: 0 0 8px 0">Start your free trial</h2>
+        <p style="margin: 0 0 8px 0; font-weight: 600">Naptio</p>
+        <p style="margin: 0 0 16px 0; line-height: 1.45; opacity: 0.85">
+          Unlock camera monitoring across your paired devices.
+        </p>
+        <p id="pwTerms" style="margin: 0 0 16px 0; font-size: 15px; line-height: 1.45; opacity: 0.95;">
+          Loading price…
+        </p>
+        <div class="row"><button id="pwBuy">Start free trial</button></div>
+        <div class="row"><button id="pwRestore" class="secondary">Restore purchases</button></div>
+        <div class="row"><button id="pwClose" class="link-btn">Not now</button></div>
+        <p class="legal">
+          <a href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/">Terms of Use</a> ·
+          <a href="https://hungryfaceai.github.io/hungryface/legal/">Privacy Policy</a>
+        </p>
+      </div>
+    </div>
+
     <div id="tap" aria-hidden="true"></div>
     <div class="overlay"><div class="status" id="status">Idle</div></div>
 
@@ -527,10 +585,11 @@
 
     <script type="module">
       // Camera page logic. Sections: room dropdown, persistence, signalling (WebSocket), peer connections,
-      // preview/blackout UI, start/stop, AI loops (pose, audio, face) and data-channel fan-out to Viewers.
+      // preview/blackout UI, subscription gate, start/stop, AI loops (pose, audio, face) and data-channel fan-out.
       import { listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
       import { keepAwake } from '/hungryface/webrtc/shared/wake-lock.js';
       import { createStreamingResampler } from '/hungryface/webrtc/shared/audio-resampler.js';
+      import { hasAccess, offer, purchase, restore } from './subscription.bundle.js';
       let screenAwake = null; // wake lock handle while streaming
       import { WS_ENDPOINT, ICE_SERVERS } from '/hungryface/webrtc/shared/config.js';
       import { createVisionTask } from '/hungryface/webrtc/shared/vision-task.js';
@@ -588,6 +647,21 @@
       const tap = document.getElementById('tap');
       const stage = document.getElementById('stage');
       const talkbackAudio = document.getElementById('talkbackAudio');
+      const paywall = document.getElementById('paywall');
+      const pwTerms = document.getElementById('pwTerms');
+      const pwBuy = document.getElementById('pwBuy');
+      const pwRestore = document.getElementById('pwRestore');
+      const pwClose = document.getElementById('pwClose');
+	  
+      function isNativeApp() {
+        return !!window.Capacitor?.isNativePlatform?.();
+      }
+
+      if (!isNativeApp()) {
+        startBtn.disabled = true;
+        startBtn.textContent = 'Available in the mobile app';
+        startBtn.title = 'Camera streaming requires the installed mobile app';
+      }
 
       // --- PSK Room dropdown population & default selection ---
       // True if the select has an option with this value.
@@ -1658,6 +1732,10 @@
       });
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
+          if (!paywall.hidden) {
+            paywall.hidden = true;
+            return;
+          }
           if (document.body.classList.contains('previewing')) {
             endPreviewNow();
           } else if (document.body.classList.contains('streaming') && document.body.classList.contains('ui-visible')) {
@@ -1679,13 +1757,107 @@
         }, UI_AUTOHIDE_MS);
       }
 
+      /* ----------------------- SUBSCRIPTION (iOS app only) ----------------------- */
+      // Show the paywall and fill in the price/trial/renewal text from the App Store product.
+      async function showPaywall() {
+        paywall.hidden = false;
+        pwTerms.textContent = 'Loading price…';
+        pwBuy.disabled = true;
+        
+        const o = await Promise.race([
+          offer(),
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error('RevenueCat offer request timed out after 10000 ms')),
+              10000
+            )
+          ),
+        ]).catch((err) => {
+          console.error('[SUB] offer load failed', err);
+          return null;
+        });
+        if (o) {
+          document.getElementById('pwTitle').textContent = o.title;
+          pwTerms.textContent = o.terms;
+          pwBuy.textContent = o.button;
+        } else {
+          pwTerms.textContent = 'Subscription unavailable. Check your connection and try again.';
+        }
+        pwBuy.disabled = !o;
+      }
+
+      pwClose.addEventListener('click', () => {
+        paywall.hidden = true;
+      });
+
+      // Apple purchase sheet; on success the paywall closes and the user can press Start streaming.
+      pwBuy.addEventListener('click', async () => {
+        pwBuy.disabled = true;
+        pwRestore.disabled = true;
+        try {
+          if (await purchase()) {
+            paywall.hidden = true;
+            setStatus('Subscription active. Tap Start streaming.');
+          }
+        } catch (err) {
+          console.warn('[SUB] purchase failed', err);
+          alert(err?.message || err);
+        } finally {
+          pwBuy.disabled = false;
+          pwRestore.disabled = false;
+        }
+      });
+
+      // Restore a subscription bought earlier with the same Apple ID (reinstall, new phone).
+      pwRestore.addEventListener('click', async () => {
+        pwBuy.disabled = true;
+        pwRestore.disabled = true;
+        try {
+          if (await restore()) {
+            paywall.hidden = true;
+            setStatus('Purchases restored. Tap Start streaming.');
+          } else {
+            alert('No active subscription found for this Apple ID.');
+          }
+        } catch (err) {
+          console.warn('[SUB] restore failed', err);
+          alert(err?.message || err);
+        } finally {
+          pwBuy.disabled = false;
+          pwRestore.disabled = false;
+        }
+      });
+
       // Start button: open media, install PSK, connect signalling, begin the preview. Pressing it again stops.
       async function startOrStop() {
         try {
           if (started) {
+            // Stopping is never blocked by the subscription check.
             await stopStreaming();
             return;
           }
+		  
+          // Sender streaming is available only from the installed app.
+          if (!isNativeApp()) {
+            alert('Camera streaming is available only in the installed app.');
+            return;
+          }
+
+          // Subscription check
+          startBtn.disabled = true;
+
+          let allowed = false;
+          try {
+            allowed = await hasAccess();
+          } finally {
+            startBtn.disabled = false;
+          }
+
+          if (!allowed) {
+            await showPaywall();
+            return;
+          }
+	
           roomSel.disabled = true;
           startBtn.disabled = true;
 
