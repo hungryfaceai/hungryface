@@ -11,7 +11,7 @@
     - Script 2: UI wiring, signalling WebSocket, one RTCPeerConnection per Viewer, AI loops, start/stop.
   Subscription: in the native iOS app, Start streaming requires an active "premium" entitlement (RevenueCat,
   see subscription.js). 
-  Browsers and Android TWA retain the original free streaming flow; only capable native iOS builds use subscriptions.
+  Camera streaming is restricted to the installed iOS app or Android TWA; iOS subscription checks are optional.
   
   Depends on: shared/psk/*.js, shared/config.js, shared/wake-lock.js, shared/audio-resampler.js,
   shared/vision-task.js, subscription.js, MediaPipe tasks (loaded from jsDelivr / Google storage on demand).
@@ -667,6 +667,37 @@
           cap?.getPlatform?.() === 'ios' &&
           cap?.isPluginAvailable?.('Purchases') === true
         );
+      }
+
+      // The native iOS app has the Capacitor bridge; the Android Play app is a
+      // Trusted Web Activity, so it is identified by the app-specific Android referrer.
+      // The landing page persists this first-load referrer in sessionStorage to carry
+      // it through normal same-tab navigation to the camera page.
+      function isInstalledMobileApp() {
+        const cap = window.Capacitor;
+        if (cap?.isNativePlatform?.() === true && cap?.getPlatform?.() === 'ios') {
+          return true;
+        }
+        if (!/Android/i.test(navigator.userAgent)) return false;
+
+        const fromNaptioTwa =
+          /^android-app:\/\/io\.github\.hungryfaceai\.twa(?:\/|$)/.test(document.referrer);
+        if (fromNaptioTwa) {
+          try { sessionStorage.setItem('naptio:android-twa-session', '1'); } catch {}
+        }
+        try {
+          return fromNaptioTwa ||
+            sessionStorage.getItem('naptio:android-twa-session') === '1';
+        } catch {
+          return fromNaptioTwa;
+        }
+      }
+
+      // Disable camera streaming in all ordinary browsers (desktop or mobile).
+      if (!isInstalledMobileApp()) {
+        startBtn.disabled = true;
+        startBtn.textContent = 'Available in the mobile app';
+        startBtn.title = 'Camera streaming requires the installed Naptio iOS or Android app';
       }
 
       // --- PSK Room dropdown population & default selection ---
@@ -1843,8 +1874,17 @@
             return;
           }
 		  
-          // When the remote switch is off or native iOS purchases are unavailable,
-          // keep the original free-access behaviour (including Android TWA).
+          // The button is disabled in browsers; also guard the handler against
+          // direct script-triggered clicks or later UI state changes.
+          if (!isInstalledMobileApp()) {
+            startBtn.disabled = true;
+            startBtn.textContent = 'Available in the mobile app';
+            startBtn.title = 'Camera streaming requires the installed Naptio iOS or Android app';
+            return;
+          }
+
+          // Android TWA and older iOS app builds remain free. Only capable native iOS
+          // builds are checked when the remote monetisation switch is enabled.
           if (shouldEnforceSubscription()) {
             startBtn.disabled = true;
 
