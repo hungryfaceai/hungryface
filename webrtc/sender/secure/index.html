@@ -693,8 +693,16 @@
         }
       }
 
-      // Disable camera streaming in all ordinary browsers (desktop or mobile).
-      if (!isInstalledMobileApp()) {
+      // Browser streaming is allowed while Naptio is free.
+      // When monetisation is enabled, only installed mobile apps may start the camera.
+      function shouldBlockBrowserStreaming() {
+        return (
+          window.NAPTIO_SUBSCRIPTIONS_ENABLED === true &&
+          !isInstalledMobileApp()
+        );
+      }
+
+      if (shouldBlockBrowserStreaming()) {
         startBtn.disabled = true;
         startBtn.textContent = 'Available in the mobile app';
         startBtn.title = 'Camera streaming requires the installed Naptio iOS or Android app';
@@ -1874,9 +1882,9 @@
             return;
           }
 		  
-          // The button is disabled in browsers; also guard the handler against
-          // direct script-triggered clicks or later UI state changes.
-          if (!isInstalledMobileApp()) {
+          // Enforce the same conditional browser restriction when starting the camera,
+          // even if the button is triggered programmatically or its state changes.
+          if (shouldBlockBrowserStreaming()) {
             startBtn.disabled = true;
             startBtn.textContent = 'Available in the mobile app';
             startBtn.title = 'Camera streaming requires the installed Naptio iOS or Android app';
