@@ -11,7 +11,7 @@
     - Script 2: UI wiring, signalling WebSocket, one RTCPeerConnection per Viewer, AI loops, start/stop.
   Subscription: in the native iOS app, Start streaming requires an active "premium" entitlement (RevenueCat,
   see subscription.js). 
-  Sender streaming is unavailable in browsers. In the native Android app, the subscription check currently passes.
+  Camera streaming is restricted to the installed iOS app or Android TWA; iOS subscription checks are optional.
   
   Depends on: shared/psk/*.js, shared/config.js, shared/wake-lock.js, shared/audio-resampler.js,
   shared/vision-task.js, subscription.js, MediaPipe tasks (loaded from jsDelivr / Google storage on demand).
@@ -19,6 +19,10 @@
 -->
 <html lang="en">
   <head>
+    <!-- Remote monetisation switch: false = free, true = subscriptions for capable native iOS builds. -->
+    <script>
+      window.NAPTIO_SUBSCRIPTIONS_ENABLED = true;
+    </script>
     <meta charset="utf-8" />
     <title>Camera</title>
     <link rel="icon" href="/hungryface/pwa/icons/favicon-196.png" sizes="196x196" />
@@ -653,14 +657,55 @@
       const pwRestore = document.getElementById('pwRestore');
       const pwClose = document.getElementById('pwClose');
 	  
-      function isNativeApp() {
-        return !!window.Capacitor?.isNativePlatform?.();
+      // A subscription is required only on iOS builds that include the native Purchases plugin.
+      // This deliberately keeps Android TWA, browsers and earlier iOS binaries on the free path.
+      function shouldEnforceSubscription() {
+        const cap = window.Capacitor;
+        return (
+          window.NAPTIO_SUBSCRIPTIONS_ENABLED === true &&
+          cap?.isNativePlatform?.() === true &&
+          cap?.getPlatform?.() === 'ios' &&
+          cap?.isPluginAvailable?.('Purchases') === true
+        );
       }
 
-      if (!isNativeApp()) {
+      // The native iOS app has the Capacitor bridge; the Android Play app is a
+      // Trusted Web Activity, so it is identified by the app-specific Android referrer.
+      // The landing page persists this first-load referrer in sessionStorage to carry
+      // it through normal same-tab navigation to the camera page.
+      function isInstalledMobileApp() {
+        const cap = window.Capacitor;
+        if (cap?.isNativePlatform?.() === true && cap?.getPlatform?.() === 'ios') {
+          return true;
+        }
+        if (!/Android/i.test(navigator.userAgent)) return false;
+
+        const fromNaptioTwa =
+          /^android-app:\/\/io\.github\.hungryfaceai\.twa(?:\/|$)/.test(document.referrer);
+        if (fromNaptioTwa) {
+          try { sessionStorage.setItem('naptio:android-twa-session', '1'); } catch {}
+        }
+        try {
+          return fromNaptioTwa ||
+            sessionStorage.getItem('naptio:android-twa-session') === '1';
+        } catch {
+          return fromNaptioTwa;
+        }
+      }
+
+      // Browser streaming is allowed while Naptio is free.
+      // When monetisation is enabled, only installed mobile apps may start the camera.
+      function shouldBlockBrowserStreaming() {
+        return (
+          window.NAPTIO_SUBSCRIPTIONS_ENABLED === true &&
+          !isInstalledMobileApp()
+        );
+      }
+
+      if (shouldBlockBrowserStreaming()) {
         startBtn.disabled = true;
         startBtn.textContent = 'Available in the mobile app';
-        startBtn.title = 'Camera streaming requires the installed mobile app';
+        startBtn.title = 'Camera streaming requires the installed Naptio iOS or Android app';
       }
 
       // --- PSK Room dropdown population & default selection ---
@@ -1837,25 +1882,31 @@
             return;
           }
 		  
-          // Sender streaming is available only from the installed app.
-          if (!isNativeApp()) {
-            alert('Camera streaming is available only in the installed app.');
+          // Enforce the same conditional browser restriction when starting the camera,
+          // even if the button is triggered programmatically or its state changes.
+          if (shouldBlockBrowserStreaming()) {
+            startBtn.disabled = true;
+            startBtn.textContent = 'Available in the mobile app';
+            startBtn.title = 'Camera streaming requires the installed Naptio iOS or Android app';
             return;
           }
 
-          // Subscription check
-          startBtn.disabled = true;
+          // Android TWA and older iOS app builds remain free. Only capable native iOS
+          // builds are checked when the remote monetisation switch is enabled.
+          if (shouldEnforceSubscription()) {
+            startBtn.disabled = true;
 
-          let allowed = false;
-          try {
-            allowed = await hasAccess();
-          } finally {
-            startBtn.disabled = false;
-          }
+            let allowed = false;
+            try {
+              allowed = await hasAccess();
+            } finally {
+              startBtn.disabled = false;
+            }
 
-          if (!allowed) {
-            await showPaywall();
-            return;
+            if (!allowed) {
+              await showPaywall();
+              return;
+            }
           }
 	
           roomSel.disabled = true;
