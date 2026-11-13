@@ -22,21 +22,6 @@
     <!-- Remote monetisation switch: false = free, true = subscriptions for capable native iOS builds. -->
     <script>
       window.NAPTIO_SUBSCRIPTIONS_ENABLED = true;
-
-      // TEMPORARY browser-only RevenueCat mock preview. Does not enable streaming.
-      // Restrict the preview to ordinary browsers, not installed mobile apps.
-      window.NAPTIO_PAYWALL_PREVIEW = (() => {
-        const mode = new URLSearchParams(location.search).get('submock');
-        if (!['new', 'expired', 'active'].includes(mode)) return null;
-        if (window.Capacitor?.isNativePlatform?.() === true) return null;
-        const twaReferrer = /^android-app:\/\/io\.github\.hungryfaceai\.twa(?:\/|$)/
-          .test(document.referrer || '');
-        let twaSession = false;
-        try {
-          twaSession = sessionStorage.getItem('naptio:android-twa-session') === '1';
-        } catch {}
-        return twaReferrer || twaSession ? null : mode;
-      })();
     </script>
     <meta charset="utf-8" />
     <title>Camera</title>
@@ -561,8 +546,6 @@
       import { requirePskOrRedirect } from '/hungryface/webrtc/shared/psk/require-psk.js';
       import { installRoomScope } from '/hungryface/webrtc/shared/psk/room-scope.js';
 
-      // A paywall preview never starts the camera, so it must not require paired devices.
-      if (!window.NAPTIO_PAYWALL_PREVIEW) {
       const qs = new URLSearchParams(location.search);
       const preferRoom = (qs.get('room') || '').trim();
 
@@ -602,7 +585,6 @@
         // Install for the env room by default; UI can switch before start.
         window.__installPskForRoom(env.room);
       }
-      } // End normal PSK bootstrap; browser mock previews never set up streaming.
     </script>
 
     <script type="module">
@@ -724,11 +706,6 @@
         startBtn.disabled = true;
         startBtn.textContent = 'Available in the mobile app';
         startBtn.title = 'Camera streaming requires the installed Naptio iOS or Android app';
-      }
-      if (window.NAPTIO_PAYWALL_PREVIEW) {
-        startBtn.disabled = true;
-        startBtn.textContent = 'Preview mode – streaming disabled';
-        startBtn.title = 'This page previews the subscription screen only';
       }
 
       // --- PSK Room dropdown population & default selection ---
@@ -3096,21 +3073,6 @@
       }
 
       announceAIModes(); // harmless early initialization
-
-      // TEMPORARY: display the real paywall UI using the existing RevenueCat mock.
-      // The camera remains blocked by shouldBlockBrowserStreaming(), including its
-      // startOrStop() guard; these URLs cannot initiate streaming.
-      if (window.NAPTIO_PAYWALL_PREVIEW === 'new' ||
-          window.NAPTIO_PAYWALL_PREVIEW === 'expired') {
-        void showPaywall();
-      } else if (window.NAPTIO_PAYWALL_PREVIEW === 'active') {
-        paywall.hidden = false;
-        document.getElementById('pwTitle').textContent = 'Subscription active (test)';
-        pwTerms.textContent =
-          'Mock active subscriber. In the actual iOS app the paywall would not appear. Browser streaming remains disabled.';
-        pwBuy.hidden = true;
-        pwRestore.hidden = true;
-      }
     </script>
   </body>
 </html>
