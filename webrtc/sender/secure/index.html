@@ -212,6 +212,36 @@
         transform: scale(0.99);
       }
 
+      #startBtn.is-loading::after {
+        content: '';
+        display: inline-block;
+        width: 0.8em;
+        height: 0.8em;
+        box-sizing: border-box;
+        margin-inline-start: 0.55em;
+        vertical-align: middle;
+        border: 2px solid currentColor;
+        border-right-color: transparent;
+        border-radius: 50%;
+        animation: start-spinner 0.8s linear infinite;
+      }
+
+      @keyframes start-spinner {
+        to { transform: rotate(360deg); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #startBtn.is-loading::after {
+          animation: none;
+        }
+      }
+
+      #subscriptionError {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.4;
+      }
+
       /* --- Overlay, status line and tap layer --- */
       .overlay {
         position: fixed;
@@ -500,6 +530,7 @@
         <div class="row" style="margin-top: 14px">
           <button id="startBtn">Start streaming</button>
         </div>
+        <p id="subscriptionError" role="status"></p>
       </div>
     </div>
 
@@ -511,9 +542,7 @@
         <p style="margin: 0 0 16px 0; line-height: 1.45; opacity: 0.85">
           Unlock camera monitoring across your paired devices.
         </p>
-        <p id="pwTerms" style="margin: 0 0 16px 0; font-size: 15px; line-height: 1.45; opacity: 0.95;">
-          Loading price…
-        </p>
+        <p id="pwTerms" style="margin: 0 0 16px 0; font-size: 15px; line-height: 1.45; opacity: 0.95;"></p>
         <div class="row"><button id="pwBuy">Start free trial</button></div>
         <div class="row"><button id="pwRestore" class="secondary">Restore purchases</button></div>
         <div class="row"><button id="pwClose" class="link-btn">Not now</button></div>
@@ -644,6 +673,7 @@
       const cameraSel = document.getElementById('cameraSel');
       const previewMinsInput = document.getElementById('previewMins');
       const startBtn = document.getElementById('startBtn');
+      const subscriptionError = document.getElementById('subscriptionError');
       const localVideo = document.getElementById('local');
       const poseCanvas = document.getElementById('poseCanvas');
       const statusEl = document.getElementById('status');
@@ -1803,32 +1833,28 @@
       }
 
       /* ----------------------- SUBSCRIPTION (iOS app only) ----------------------- */
-      // Show the paywall and fill in the price/trial/renewal text from the App Store product.
+      // Load the offer before opening the paywall.
       async function showPaywall() {
-        paywall.hidden = false;
-        pwTerms.textContent = 'Loading price…';
-        pwBuy.disabled = true;
-        
-        const o = await Promise.race([
-          offer(),
-          new Promise((_, reject) =>
-            setTimeout(
-              () => reject(new Error('RevenueCat offer request timed out after 10000 ms')),
-              10000
-            )
-          ),
-        ]).catch((err) => {
-          console.error('[SUB] offer load failed', err);
-          return null;
-        });
-        if (o) {
-          document.getElementById('pwTitle').textContent = o.title;
-          pwTerms.textContent = o.terms;
-          pwBuy.textContent = o.button;
-        } else {
-          pwTerms.textContent = 'Subscription unavailable. Check your connection and try again.';
+        let offerTimer;
+        try {
+          const { title, terms, button } = await Promise.race([
+            offer(),
+            new Promise((_, reject) => {
+              offerTimer = setTimeout(
+                () => reject(new Error('RevenueCat offer request timed out after 10000 ms')),
+                10000
+              );
+            }),
+          ]);
+          if (!title || !terms || !button) throw new Error('RevenueCat offer is incomplete');
+
+          document.getElementById('pwTitle').textContent = title;
+          pwTerms.textContent = terms;
+          pwBuy.textContent = button;
+          paywall.hidden = false;
+        } finally {
+          clearTimeout(offerTimer);
         }
-        pwBuy.disabled = !o;
       }
 
       pwClose.addEventListener('click', () => {
@@ -1894,18 +1920,27 @@
           // Android TWA and older iOS app builds remain free. Only capable native iOS
           // builds are checked when the remote monetisation switch is enabled.
           if (shouldEnforceSubscription()) {
+            if (startBtn.disabled) return;
+
             startBtn.disabled = true;
+            startBtn.setAttribute('aria-busy', 'true');
+            subscriptionError.textContent = '';
+            const spinnerTimer = setTimeout(() => startBtn.classList.add('is-loading'), 500);
 
-            let allowed = false;
             try {
-              allowed = await hasAccess();
-            } finally {
-              startBtn.disabled = false;
-            }
-
-            if (!allowed) {
-              await showPaywall();
+              if (!(await hasAccess())) {
+                await showPaywall();
+                return;
+              }
+            } catch (err) {
+              console.error('[SUB] subscription check or offer load failed', err);
+              subscriptionError.textContent = 'Couldn’t load the subscription offer. Tap Start streaming to try again.';
               return;
+            } finally {
+              clearTimeout(spinnerTimer);
+              startBtn.classList.remove('is-loading');
+              startBtn.removeAttribute('aria-busy');
+              startBtn.disabled = false;
             }
           }
 	
