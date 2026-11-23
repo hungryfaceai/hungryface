@@ -1854,23 +1854,52 @@
       // Load the offer before opening the paywall.
       async function showPaywall() {
         let offerTimer;
+      
         try {
           const { title, terms, button } = await Promise.race([
             offer(),
             new Promise((_, reject) => {
               offerTimer = setTimeout(
-                () => reject(new Error('RevenueCat offer request timed out after 10000 ms')),
+                () =>
+                  reject(
+                    new Error(
+                      'Subscription offer request timed out after 10000 ms'
+                    )
+                  ),
                 10000
               );
             }),
           ]);
-          if (!title || !terms || !button) throw new Error('RevenueCat offer is incomplete');
-
-          const [price, ...renewalTerms] = terms.split('\n\n');
-          document.getElementById('pwTitle').textContent = title;
+      
+          if (!title || !terms || !button) {
+            throw new Error(
+              'The subscription offer is incomplete.'
+            );
+          }
+      
+          const isAndroid =
+            /Android/i.test(navigator.userAgent);
+      
+          const [price, ...renewalTerms] =
+            terms.split('\n\n');
+      
+          document.getElementById('pwTitle').textContent =
+            title;
+      
           pwPrice.textContent = price;
-          pwTerms.textContent = renewalTerms.join('\n\n');
+          pwTerms.textContent =
+            renewalTerms.join('\n\n');
+      
           pwBuy.textContent = button;
+      
+          pwRestore.textContent = isAndroid
+            ? 'Check subscription'
+            : 'Restore purchases';
+      
+          pwTermsLink.href = isAndroid
+            ? 'https://hungryfaceai.github.io/hungryface/legal/'
+            : 'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
+      
           paywall.hidden = false;
         } finally {
           clearTimeout(offerTimer);
