@@ -221,3 +221,19 @@ export async function hasAccess() {
   }
 }
 
+export async function offer() {
+  const product = await getProduct();
+  const price = formatPrice(product);
+
+  return {
+    title: 'Subscribe to Naptio',
+    terms:
+      `Eligible new customers: 3 days free\n` +
+      `Then ${price}/month\n\n` +
+      `Renews automatically every month unless cancelled. ` +
+      `Manage or cancel in your Google Play subscriptions.`,
+    button: 'Continue in Google Play',
+  };
+}
+
+
