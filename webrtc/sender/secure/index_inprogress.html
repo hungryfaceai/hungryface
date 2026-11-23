@@ -1928,19 +1928,32 @@
         }
       });
 
-      // Restore a subscription bought earlier with the same Apple ID (reinstall, new phone).
+      // Restore or refresh subscription access for the current store account.
       pwRestore.addEventListener('click', async () => {
+        const isAndroid =
+          /Android/i.test(navigator.userAgent);
+      
         pwBuy.disabled = true;
         pwRestore.disabled = true;
+      
         try {
           if (await restore()) {
             paywall.hidden = true;
-            setStatus('Purchases restored. Tap Start streaming.');
+      
+            setStatus(
+              isAndroid
+                ? 'Subscription active. Tap Start streaming.'
+                : 'Purchases restored. Tap Start streaming.'
+            );
           } else {
-            alert('No active subscription found for this Apple ID.');
+            alert(
+              isAndroid
+                ? 'No active subscription found for this Google Play account.'
+                : 'No active subscription found for this Apple ID.'
+            );
           }
         } catch (err) {
-          console.warn('[SUB] restore failed', err);
+          console.warn('[SUB] subscription refresh failed', err);
           alert(err?.message || err);
         } finally {
           pwBuy.disabled = false;
