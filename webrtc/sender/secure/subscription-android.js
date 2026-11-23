@@ -233,8 +233,8 @@ export async function offer() {
   // A missing freeTrialPeriod is NOT proof that the user is trial-eligible.
   const trial = product.freeTrialPeriod === 'P3D';
   const terms = trial
-    ? `3 days free\\nThen ${price}/month\\n\\nRenews automatically every month unless cancelled. Google Play confirms the offer before you subscribe.`
-    : `${price}/month\\n\\nRenews automatically every month unless cancelled. If an introductory offer applies, Google Play will confirm it before you subscribe.`;
+    ? `3 days free\nThen ${price}/month\n\nRenews automatically every month unless cancelled. Google Play confirms the offer before you subscribe.`
+    : `${price}/month\n\nRenews automatically every month unless cancelled. If an introductory offer applies, Google Play will confirm it before you subscribe.`;
 
   return {
     title: trial ? 'Start your free trial' : 'Subscribe to Naptio',
