@@ -130,3 +130,45 @@ function formatPrice(product) {
     return `${value} ${currency}`;
   }
 }
+
+async function verifyPurchase(purchaseToken) {
+  if (!purchaseToken) {
+    return {
+      active: false,
+      state: 'NO_PURCHASE_TOKEN',
+    };
+  }
+
+  const response = await withTimeout(
+    fetch(VERIFY_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        purchaseToken,
+      }),
+    }),
+    10000,
+    'Subscription verification'
+  );
+
+  let result;
+
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error(
+      'Subscription verification returned an invalid response.'
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      result?.error ||
+        `Subscription verification failed (${response.status}).`
+    );
+  }
+
+  return result;
+}
