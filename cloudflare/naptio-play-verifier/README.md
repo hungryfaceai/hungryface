@@ -1,92 +1,70 @@
-# Naptio subscription verification Worker
+# Naptio — Google Play subscription verification Worker
 
-This directory stores the proposed Cloudflare Worker source. Committing to GitHub **does not deploy** this Worker. Keep the live Cloudflare Worker unchanged until independently tested.
+**Source:** [worker.js](./worker.js). **Deployed service:** `naptio-play-verifier`.
 
-## Files
+This folder contains deployable Cloudflare Worker source, but **GitHub Pages does not deploy it**. It must be copied or deployed separately in Cloudflare after tests. The current production sender page (`webrtc/sender/secure/index.html`) continues using the existing iOS-only subscription gate; this change only stages the Android web code in `index_inprogress.html`.
 
-- `naptio-play-verifier.proposed.js`: replacement Cloudflare Worker implementation.
-- `subscription-android.proposed.js`: replacement Android TWA subscription adapter.
-- `subscription-gate.proposed.js`: drop-in platform-router expansion preserving the old iOS calls.
-- `index_inprogress.integration.proposed.md`: candidate-page changes needed to display states. Do not edit live `index.html` at this stage.
+## Required Cloudflare configuration
 
-When implementing, rename the proposal files to the actual deployed names. The import in `subscription-gate.proposed.js` intentionally refers to `./subscription-android.js`, the production filename.
+Keep these settings on the **existing** Cloudflare Worker; do not put the private key in GitHub or browser code:
 
-## Worker HTTP response contract
+| Variable or secret | Value |
+|---|---|
+| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | Existing service account email |
+| `GOOGLE_PRIVATE_KEY` | Existing private service-account PEM key (encrypted Worker secret) |
+| `GOOGLE_PLAY_PACKAGE_NAME` | `io.github.hungryfaceai.twa` |
+| `GOOGLE_PLAY_PRODUCT_ID` | `naptio_01` |
 
-| HTTP | `status` | `active` | Meaning |
-|---|---|---|---|
-| 200 | `ACTIVE` | true | Google verified matching Naptio subscription and unexpired entitlement; acknowledgement can independently be `ACKNOWLEDGED` or `PENDING_RETRY`. |
-| 200 | `INACTIVE` | false | Authoritatively no current entitlement, including expired, on hold, paused, cancelled pending purchase, or product mismatch. |
-| 200 | `PENDING` | false | Payment is still pending in Google Play. |
-| 200 | `INVALID_PURCHASE` | false | Purchase lookup definitively returned 404/410. |
-| 400 | `INVALID_PURCHASE` | false | Empty/invalid supplied token. |
-| 429 | `UNAVAILABLE` | false | Optional Worker limiter rejected request. |
-| 503 | `UNAVAILABLE` | false | Google auth/API, malformed response, timeout, Worker configuration, or rate-limiter failure. Retryable. |
+Google Cloud must continue to have Android Publisher API enabled and the Play Console service-account permissions configured. The Worker needs no subscription database. Treat all four values as server-only configuration and keep the email/key in encrypted secrets.
 
-Do **not** use `active` alone when showing purchase failure UI; use `status`.
-Any non-`ACTIVE` response is unauthorized for the camera sender.
+**Endpoint:** `POST https://naptio-play-verifier.bbmaugendre.workers.dev/google-play/verify`. Request JSON is `{"purchaseToken":"<token from Google Play>"}`. The Worker only allows browser requests with origin `https://hungryfaceai.github.io`. `GET /` remains a safe, unauthenticated health check.
 
-## Example: active but acknowledgement retry required
+## Paste into Cloudflare
 
-```json
-{
-  "status": "ACTIVE",
-  "active": true,
-  "reason": "ENTITLED",
-  "retryable": false,
-  "state": "SUBSCRIPTION_STATE_ACTIVE",
-  "acknowledgement": "PENDING_RETRY",
-  "expiresAt": "2026-12-01T00:00:00Z",
-  "testPurchase": false
-}
-```
+1. Open **Cloudflare Dashboard → Workers & Pages → naptio-play-verifier → Edit code**.
+2. Save a copy of the currently deployed Worker source or record the prior deployment version for rollback.
+3. Copy **all contents of [worker.js](./worker.js)** into the Cloudflare Worker editor, replacing the old Worker code. Do not paste the README or Android JavaScript into Cloudflare.
+4. Keep the same Worker name, hostname, URL path and encrypted secrets. Test the health route. Deploy only after the existing Google Play test purchase can be verified.
+5. Exercise Android testing for active/unexpired, cancelled/unexpired, expired, pending, invalid token, Google API outage, and failed acknowledgement. An acknowledgement failure should produce `ACTIVE` with `acknowledgement: "PENDING_RETRY"` once Google has confirmed access.
+6. If the Worker misbehaves, roll back in Cloudflare's deployment history. Restoring a web commit does **not** restore a Cloudflare deployment.
 
-The date above is an example only, never a fabricated live entitlement.
-A failed acknowledgement no longer denies an independently verified active purchase.
-However, no database means acknowledgement is only retried on later verification requests; if the user closes the application and never returns, the purchase may still be refunded after the Google acknowledgement deadline. RTDN or a durable retry mechanism is recommended for stronger guarantees.
+For a CLI deployment, use Wrangler with `main = "worker.js"` and the same Worker name. Reconfigure secrets through `wrangler secret put` rather than storing secret values in `wrangler.toml`.
 
-## Config notes
+## Optional request rate limiter
 
-Existing required Worker environment variables stay unchanged:
-
-```
-GOOGLE_SERVICE_ACCOUNT_EMAIL
-GOOGLE_PRIVATE_KEY
-GOOGLE_PLAY_PACKAGE_NAME  (must be io.github.hungryfaceai.twa)
-GOOGLE_PLAY_PRODUCT_ID   (must be naptio_01)
-```
-
-Optional Cloudflare Workers rate-limiting binding name:
-`PLAY_VERIFY_LIMITER`.
-
-For example, a Wrangler configuration can include the following binding. Choose the namespace ID and threshold for your deployment, not blindly this example:
+The Worker supports an optional binding named `PLAY_VERIFY_LIMITER`. Without it, the proposed Worker itself does **not** limit verification requests. When using Wrangler, add (after choosing a namespace ID valid for the Cloudflare account):
 
 ```toml
 [[ratelimits]]
 name = "PLAY_VERIFY_LIMITER"
-namespace_id = "1001" # choose a unique namespace ID for your account
+namespace_id = "1001"
+
 [ratelimits.simple]
 limit = 30
 period = 60
 ```
 
-This is **per IP and Cloudflare location**, can affect users sharing a NAT, and is not a guaranteed global Google quota guard. The binding is intentionally optional, so the proposed Worker still runs without altering Cloudflare configuration, but abuse protection then remains absent.
+This is an approximate **per-client IP, per-Cloudflare-location** safeguard, *not* a precise global Google API quota. Choose a threshold that allows legitimate shared-network users to restore and check purchases.
 
-## Important limitations and test requirements
+## Response contract
 
-1. The Worker still authenticates the Google purchase, not the user/device. CORS is not cryptographic TWA authentication and token sharing is possible.
-2. The native Android billing bridge cannot be verified by unit tests; test `getDetails()`, trial disclosures and `PaymentRequest.show()` on the actual Play-installed TWA.
-3. The proposal preserves iOS RevenueCat and existing `subscription.bundle.js` untouched.
-4. The candidate sender page must switch to `accessStatus()`, `purchaseStatus()` and `restoreStatus()` to surface richer states; merely replacing the Android adapter and Worker keeps the old boolean-only UI.
-5. Validate old Android versions before the web cutover; they may not have Play Billing support.
-6. This is an unmerged proposal, not production-tested software. A local simulated test covered worker active, acknowledgement failure, pending, expired, product mismatch, invalid token, malformed Google response and auth error, plus Android adapter pending/recovery and single-checkout behavior.
-## Manual Cloudflare deployment
+| HTTP | `status` | `active` | Meaning |
+|---|---|---|---|
+| 200 | `ACTIVE` | true | Valid, unexpired purchase; `acknowledgement` is `ACKNOWLEDGED` or `PENDING_RETRY` |
+| 200 | `INACTIVE` | false | No valid entitlement for the required subscription |
+| 200 | `PENDING` | false | Payment remains pending |
+| 200 | `INVALID_PURCHASE` | false | Definitively unrecognized/revoked token (e.g., Google 404/410) |
+| 400 | `INVALID_PURCHASE` | false | Empty/invalid request token |
+| 429 / 503 | `UNAVAILABLE` | false | Rate limited or temporarily unable to verify; retryable |
 
-1. Cloudflare Dashboard → Workers & Pages → `naptio-play-verifier` → Edit code. Copy the **full contents of [`worker.js`](./worker.js)**, replacing the existing Worker code only after backing up the previous deployed version.
-2. Keep the existing route `/google-play/verify` and Worker hostname unchanged; the Android adapter sends POST JSON to that route. The `/` GET health endpoint should continue to return `ok: true`.
-3. In the Worker's Settings → Variables and Secrets, retain the four existing server-side values: `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY`, `GOOGLE_PLAY_PACKAGE_NAME=io.github.hungryfaceai.twa`, and `GOOGLE_PLAY_PRODUCT_ID=naptio_01`. Use **Secret** (encrypted), not public browser variables, for the private key. Do not paste credentials into this repository.
-4. Deploy the Worker separately from GitHub Pages. If desired, configure a Cloudflare `PLAY_VERIFY_LIMITER` rate-limit binding; without this optional binding, requests are *not* limited by the Worker.
-5. Validate with Google Play test purchases: active, pending, cancelled-unexpired, expired, product mismatch, transient Google authentication/API failures, and acknowledgement failure. Never use an invented token to assert an active purchase.
-6. Rollback: use Cloudflare deployment history to restore the preceding Worker version independently of the GitHub web code.
+The Android frontend uses the `status` field to avoid interpreting infrastructure downtime as a cancelled purchase. Existing clients that only inspect `active === true` remain compatible.
 
-The production `webrtc/sender/secure/index.html` must **not** be replaced by `index_inprogress.html` as part of this change. Android enforcement remains off until the native version-compatibility and Play checkout tests pass.
+**Acknowledgement limitation:** `PENDING_RETRY` is retried when the Worker next verifies that purchase. Without a durable queue or Google Play Real-time Developer Notifications, purchases that never trigger another verification could still be unacknowledged and refunded. Configure monitoring and consider RTDN for a stronger guarantee.
+
+## Staged app files
+
+- `webrtc/sender/secure/subscription-android.js` — richer Android access, checkout and restore statuses.
+- `webrtc/sender/secure/subscription-gate.js` — platform router, retaining the iOS RevenueCat adapter.
+- `webrtc/sender/secure/index_inprogress.html` — **candidate only**, rich-state UI; not the live sender.
+
+No changes to `webrtc/sender/secure/index.html` or `subscription.bundle.js` are part of this release. Promotion of the candidate sender requires separate review, a Play-installed TWA billing test, and confirmation that older Android builds are handled.
