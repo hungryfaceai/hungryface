@@ -294,14 +294,20 @@ export function messageForStatus(result) {
     case 'ACTIVE': return 'Your Naptio subscription is active.';
     case 'PENDING': return 'Google Play is still processing your payment. Check your subscription again shortly.';
     case 'UNAVAILABLE':
-      if (result.reason === 'PLAY_BILLING_UNAVAILABLE' ||
-          result.reason === 'BILLING_BRIDGE_UNAVAILABLE') {
+      if (['PLAY_BILLING_UNAVAILABLE', 'BILLING_BRIDGE_UNAVAILABLE',
+           'PAYMENT_REQUEST_UNAVAILABLE'].includes(result.reason)) {
         return 'Google Play Billing is unavailable in this installation. Update Naptio and Chrome, then try again.';
       }
       if (result.reason === 'PURCHASE_ALREADY_IN_PROGRESS') {
         return 'A Google Play purchase is already in progress.';
       }
-      return 'Subscription verification is temporarily unavailable. Your payment may have succeeded; use Check subscription before trying to buy again.';
+      if (result.reason === 'PLAY_CHECKOUT_UNAVAILABLE') {
+        return 'Google Play checkout did not finish normally. Check subscription before trying again.';
+      }
+      if (result.reason === 'PURCHASE_TOKEN_MISSING') {
+        return 'Google Play returned an incomplete purchase result. Use Check subscription before buying again.';
+      }
+      return 'Subscription verification is temporarily unavailable. If you just paid, use Check subscription before trying to buy again.';
     case 'INVALID_PURCHASE': return 'Google Play could not validate this purchase. Check your Google Play account.';
     case 'INACTIVE': return 'No active Naptio subscription was found for this Google Play account.';
     case 'CANCELLED': return 'Purchase cancelled.';
