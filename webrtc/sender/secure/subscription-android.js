@@ -321,4 +321,11 @@ export async function purchase() {
   }
 }
 
+export async function restore() {
+  // Google Play subscriptions belong to the Google account signed
+  // into the Play Store. Re-checking listPurchases() is the Android
+  // equivalent of restoring or refreshing subscription access.
+  return hasAccess();
+}
+
 
