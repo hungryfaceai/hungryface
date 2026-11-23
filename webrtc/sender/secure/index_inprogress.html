@@ -641,7 +641,11 @@
       import { listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
       import { keepAwake } from '/hungryface/webrtc/shared/wake-lock.js';
       import { createStreamingResampler } from '/hungryface/webrtc/shared/audio-resampler.js';
-      import { hasAccess, offer, purchase, restore, needsSubscription } from './subscription-gate.js';
+      import {
+  hasAccess, offer, purchase, restore, needsSubscription,
+  subscriptionPlatform, accessStatus, purchaseStatus, restoreStatus,
+  subscriptionStatusMessage,
+} from './subscription-gate.js';
       let screenAwake = null; // wake lock handle while streaming
       import { WS_ENDPOINT, ICE_SERVERS } from '/hungryface/webrtc/shared/config.js';
       import { createVisionTask } from '/hungryface/webrtc/shared/vision-task.js';
@@ -1854,6 +1858,7 @@
       // Load the offer before opening the paywall.
       async function showPaywall() {
         let offerTimer;
+        const offerTimeoutMs = subscriptionPlatform() === 'android' ? 22000 : 10000;
       
         try {
           const { title, terms, button } = await Promise.race([
@@ -1863,10 +1868,10 @@
                 () =>
                   reject(
                     new Error(
-                      'Subscription offer request timed out after 10000 ms'
+                      `Subscription offer request timed out after ${offerTimeoutMs} ms`
                     )
                   ),
-                10000
+                offerTimeoutMs
               );
             }),
           ]);
@@ -1877,8 +1882,7 @@
             );
           }
       
-          const isAndroid =
-            /Android/i.test(navigator.userAgent);
+          const isAndroid = subscriptionPlatform() === 'android';
       
           const [price, ...renewalTerms] =
             terms.split('\n\n');
@@ -1910,47 +1914,39 @@
         paywall.hidden = true;
       });
 
-      // Retry briefly while store/server-side subscription verification propagates.
-      async function waitForSubscriptionAccess({
-        attempts = 5,
-        delayMs = 1000,
-      } = {}) {
-        for (let attempt = 1; attempt <= attempts; attempt++) {
-          if (await hasAccess()) {
-            return true;
-          }
-      
-          if (attempt < attempts) {
-            await new Promise((resolve) =>
-              setTimeout(resolve, delayMs)
-            );
-          }
-        }
-      
-        return false;
-      }
-      
       // Open the selected store purchase sheet; on success, close the paywall.
       pwBuy.addEventListener('click', async () => {
+        if (pwBuy.disabled || pwRestore.disabled) return;
         pwBuy.disabled = true;
         pwRestore.disabled = true;
-      
         try {
-          if (!(await purchase())) {
+          if (subscriptionPlatform() === 'android') {
+            const result = await purchaseStatus();
+            if (result.status === 'CANCELLED') return;
+            if (result.status === 'ACTIVE') {
+              paywall.hidden = true;
+              subscriptionError.textContent = '';
+              setStatus('Subscription active. Tap Start streaming.');
+              return;
+            }
+            // A Play checkout may have completed: never call this 'cancelled'.
+            // The adapter remembers the recent token in memory, so another tap
+            // re-verifies instead of starting another checkout.
+            const message = subscriptionStatusMessage(result);
+            subscriptionError.textContent = message;
+            alert(message);
             return;
           }
-      
-          if (!(await waitForSubscriptionAccess())) {
-            throw new Error(
-              'The purchase completed, but the subscription is not active yet. Tap Check subscription to try again.'
-            );
+
+          // iOS: preserve the old RevenueCat purchase-success behavior.
+          if (await purchase()) {
+            paywall.hidden = true;
+            subscriptionError.textContent = '';
+            setStatus('Subscription active. Tap Start streaming.');
           }
-      
-          paywall.hidden = true;
-          setStatus('Subscription active. Tap Start streaming.');
         } catch (err) {
           console.warn('[SUB] purchase failed', err);
-          alert(err?.message || err);
+          alert(err?.message || String(err));
         } finally {
           pwBuy.disabled = false;
           pwRestore.disabled = false;
@@ -1959,31 +1955,33 @@
 
       // Restore or refresh subscription access for the current store account.
       pwRestore.addEventListener('click', async () => {
-        const isAndroid =
-          /Android/i.test(navigator.userAgent);
-      
+        if (pwBuy.disabled || pwRestore.disabled) return;
         pwBuy.disabled = true;
         pwRestore.disabled = true;
-      
         try {
+          if (subscriptionPlatform() === 'android') {
+            const result = await restoreStatus();
+            if (result.status === 'ACTIVE') {
+              paywall.hidden = true;
+              subscriptionError.textContent = '';
+              setStatus('Subscription active. Tap Start streaming.');
+            } else {
+              const message = subscriptionStatusMessage(result);
+              subscriptionError.textContent = message;
+              alert(message);
+            }
+            return;
+          }
+
           if (await restore()) {
             paywall.hidden = true;
-      
-            setStatus(
-              isAndroid
-                ? 'Subscription active. Tap Start streaming.'
-                : 'Purchases restored. Tap Start streaming.'
-            );
+            setStatus('Purchases restored. Tap Start streaming.');
           } else {
-            alert(
-              isAndroid
-                ? 'No active subscription found for this Google Play account.'
-                : 'No active subscription found for this Apple ID.'
-            );
+            alert('No active subscription found for this Apple ID.');
           }
         } catch (err) {
           console.warn('[SUB] subscription refresh failed', err);
-          alert(err?.message || err);
+          alert(err?.message || String(err));
         } finally {
           pwBuy.disabled = false;
           pwRestore.disabled = false;
@@ -2019,13 +2017,25 @@
             const spinnerTimer = setTimeout(() => startBtn.classList.add('is-loading'), 500);
 
             try {
-              if (!(await hasAccess())) {
+              if (subscriptionPlatform() === 'android') {
+                const result = await accessStatus();
+                if (result.status === 'UNAVAILABLE' || result.status === 'PENDING') {
+                  subscriptionError.textContent = subscriptionStatusMessage(result);
+                  return;
+                }
+                if (result.status !== 'ACTIVE') {
+                  await showPaywall();
+                  return;
+                }
+              } else if (!(await hasAccess())) {
+                // iOS: keep its established RevenueCat semantics.
                 await showPaywall();
                 return;
               }
             } catch (err) {
-              console.error('[SUB] subscription check or offer load failed', err);
-              subscriptionError.textContent = 'Couldn’t load the subscription offer. Tap Start streaming to try again.';
+              console.warn('[SUB] access check failed', err);
+              subscriptionError.textContent =
+                'Could not check your subscription. Tap Start streaming to retry.';
               return;
             } finally {
               clearTimeout(spinnerTimer);
