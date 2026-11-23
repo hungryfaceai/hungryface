@@ -1458,7 +1458,7 @@ async function offer() {
   if (mockState()) {
     return buildOffer(
       MOCK_PRICE,
-      mockState() === "new" ? "2 weeks" : null
+      mockState() === "new" ? "3 days" : null
     );
   }
   const pkg = await getPackage();
