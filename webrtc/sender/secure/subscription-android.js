@@ -172,3 +172,52 @@ async function verifyPurchase(purchaseToken) {
 
   return result;
 }
+
+async function getVerifiedPurchase() {
+  const service = await getService();
+
+  const purchases = await withTimeout(
+    service.listPurchases(),
+    10000,
+    'Google Play purchase check'
+  );
+
+  const matchingPurchases = (purchases || []).filter(
+    (purchase) => purchase?.itemId === PRODUCT_ID
+  );
+
+  for (const purchase of matchingPurchases) {
+    const result = await verifyPurchase(
+      purchase.purchaseToken
+    );
+
+    if (result?.active === true) {
+      return {
+        purchase,
+        verification: result,
+      };
+    }
+  }
+
+  return null;
+}
+
+export async function hasAccess() {
+  if (!needsSubscription()) {
+    return true;
+  }
+
+  try {
+    return !!(await getVerifiedPurchase());
+  } catch (error) {
+    console.warn(
+      '[SUB][Android] access check failed',
+      error
+    );
+
+    // Fail closed when the installed Android sender cannot
+    // obtain authoritative subscription status.
+    return false;
+  }
+}
+
