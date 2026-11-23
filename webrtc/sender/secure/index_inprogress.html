@@ -9,9 +9,9 @@
     - Style blocks: dark full-screen stage, control card, blackout/preview/streaming body states.
     - Script 1: PSK check (else redirect to Pair Devices), room namespace, PSK WebSocket shim installers.
     - Script 2: UI wiring, signalling WebSocket, one RTCPeerConnection per Viewer, AI loops, start/stop.
-  Subscription: in the native iOS app, Start streaming requires an active "premium" entitlement (RevenueCat,
-  see subscription.js). 
-  Camera streaming is restricted to the installed iOS app or Android TWA; iOS subscription checks are optional.
+    Subscription: Start streaming requires an active subscription in supported installed builds.
+    The native iOS app uses RevenueCat; the Android TWA uses Google Play Billing with server-side verification.
+    Camera streaming is restricted to the installed iOS app or Android TWA.
   
   Depends on: shared/psk/*.js, shared/config.js, shared/wake-lock.js, shared/audio-resampler.js,
   shared/vision-task.js, subscription.js, MediaPipe tasks (loaded from jsDelivr / Google storage on demand).
@@ -553,7 +553,7 @@
       </div>
     </div>
 
-    <!-- Subscription paywall (iOS app only). Shown by the Start button when there is no active subscription. -->
+    <!-- Subscription paywall for installed iOS and Android apps. Shown when there is no active subscription. -->
     <div id="paywall" hidden role="dialog" aria-modal="true" aria-labelledby="pwTitle">
       <div class="card">
         <h2 id="pwTitle">Start your free trial</h2>
@@ -708,8 +708,8 @@
       const pwClose = document.getElementById('pwClose');
       const pwTermsLink = document.getElementById('pwTermsLink');
 	  
-      // A subscription is required only on iOS builds that include the native Purchases plugin.
-      // This deliberately keeps Android TWA, browsers and earlier iOS binaries on the free path.
+      // Require a subscription when the platform router finds a supported
+      // App Store or Google Play adapter and monetisation is enabled.
       function shouldEnforceSubscription() {
         return (
           window.NAPTIO_SUBSCRIPTIONS_ENABLED === true &&
@@ -1910,7 +1910,7 @@
         paywall.hidden = true;
       });
 
-      // Apple purchase sheet; on success the paywall closes and the user can press Start streaming.
+      // Open the selected store purchase sheet; on success, close the paywall.
       pwBuy.addEventListener('click', async () => {
         pwBuy.disabled = true;
         pwRestore.disabled = true;
