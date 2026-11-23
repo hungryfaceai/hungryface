@@ -171,8 +171,8 @@ export async function accessStatus() {
   if (recentPurchaseToken) {
     let result = await verifyPurchase(recentPurchaseToken);
     if (result.status === 'ACTIVE') {
-      recentPurchaseToken = null;
-      recentPurchaseAt = 0;
+      // Keep this token for the life of the page so the Buy action cannot
+      // accidentally open another checkout after a successful purchase.
       checkoutNeedsReconciliationAt = 0;
       return result;
     }
@@ -302,7 +302,11 @@ export async function purchaseStatus() {
     recentPurchaseToken = token;
     recentPurchaseAt = Date.now();
     checkoutNeedsReconciliationAt = 0;
-    const result = await verifyPurchase(token);
+    let result = await verifyPurchase(token);
+    if (result.status === 'INVALID_PURCHASE' || result.status === 'INACTIVE') {
+      // A newly returned token may not be visible to the Developer API yet.
+      result = pending('PURCHASE_SETTLING');
+    }
     await completeOnce(result.status === 'ACTIVE' ? 'success'
       : ['UNAVAILABLE', 'PENDING'].includes(result.status) ? 'unknown' : 'fail');
     return result;
