@@ -1914,11 +1914,20 @@
       pwBuy.addEventListener('click', async () => {
         pwBuy.disabled = true;
         pwRestore.disabled = true;
+      
         try {
-          if (await purchase()) {
-            paywall.hidden = true;
-            setStatus('Subscription active. Tap Start streaming.');
+          if (!(await purchase())) {
+            return;
           }
+      
+          if (!(await hasAccess())) {
+            throw new Error(
+              'The purchase completed, but the subscription is not active yet. Tap Check subscription to try again.'
+            );
+          }
+      
+          paywall.hidden = true;
+          setStatus('Subscription active. Tap Start streaming.');
         } catch (err) {
           console.warn('[SUB] purchase failed', err);
           alert(err?.message || err);
