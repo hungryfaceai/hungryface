@@ -44,3 +44,44 @@ export function isNaptioTwa() {
 }
 
 export const needsSubscription = () => isNaptioTwa();
+
+let servicePromise = null;
+
+function withTimeout(promise, timeoutMs, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`${label} timed out after ${timeoutMs} ms`)),
+        timeoutMs
+      )
+    ),
+  ]);
+}
+
+async function getService() {
+  if (!isNaptioTwa()) {
+    throw new Error(
+      'Google Play Billing is available only in the installed Android app.'
+    );
+  }
+
+  if (typeof window.getDigitalGoodsService !== 'function') {
+    throw new Error(
+      'Google Play Billing is unavailable. Update Chrome and install Naptio from Google Play.'
+    );
+  }
+
+  if (!servicePromise) {
+    servicePromise = withTimeout(
+      window.getDigitalGoodsService(BILLING_METHOD),
+      10000,
+      'Google Play Billing initialization'
+    ).catch((err) => {
+      servicePromise = null;
+      throw err;
+    });
+  }
+
+  return servicePromise;
+}
