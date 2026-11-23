@@ -641,7 +641,7 @@
       import { listValidPskRooms } from '/hungryface/webrtc/shared/psk/require-psk.js';
       import { keepAwake } from '/hungryface/webrtc/shared/wake-lock.js';
       import { createStreamingResampler } from '/hungryface/webrtc/shared/audio-resampler.js';
-      import { hasAccess, offer, purchase, restore } from './subscription.bundle.js';
+      import { hasAccess, offer, purchase, restore, needsSubscription } from './subscription-gate.js';
       let screenAwake = null; // wake lock handle while streaming
       import { WS_ENDPOINT, ICE_SERVERS } from '/hungryface/webrtc/shared/config.js';
       import { createVisionTask } from '/hungryface/webrtc/shared/vision-task.js';
@@ -710,12 +710,9 @@
       // A subscription is required only on iOS builds that include the native Purchases plugin.
       // This deliberately keeps Android TWA, browsers and earlier iOS binaries on the free path.
       function shouldEnforceSubscription() {
-        const cap = window.Capacitor;
         return (
           window.NAPTIO_SUBSCRIPTIONS_ENABLED === true &&
-          cap?.isNativePlatform?.() === true &&
-          cap?.getPlatform?.() === 'ios' &&
-          cap?.isPluginAvailable?.('Purchases') === true
+          needsSubscription()
         );
       }
 
