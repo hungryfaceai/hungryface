@@ -1910,6 +1910,25 @@
         paywall.hidden = true;
       });
 
+      async function waitForSubscriptionAccess({
+        attempts = 5,
+        delayMs = 1000,
+      } = {}) {
+        for (let attempt = 1; attempt <= attempts; attempt++) {
+          if (await hasAccess()) {
+            return true;
+          }
+      
+          if (attempt < attempts) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, delayMs)
+            );
+          }
+        }
+      
+        return false;
+      }
+      
       // Open the selected store purchase sheet; on success, close the paywall.
       pwBuy.addEventListener('click', async () => {
         pwBuy.disabled = true;
@@ -1920,7 +1939,7 @@
             return;
           }
       
-          if (!(await hasAccess())) {
+          if (!(await waitForSubscriptionAccess())) {
             throw new Error(
               'The purchase completed, but the subscription is not active yet. Tap Check subscription to try again.'
             );
