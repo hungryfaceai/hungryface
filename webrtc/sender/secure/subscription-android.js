@@ -236,4 +236,89 @@ export async function offer() {
   };
 }
 
+export async function purchase() {
+  if (!needsSubscription()) {
+    throw new Error(
+      'Google Play purchases are available only in the installed Android app.'
+    );
+  }
+
+  if (typeof PaymentRequest !== 'function') {
+    throw new Error(
+      'Google Play purchases are unavailable on this device.'
+    );
+  }
+
+  // Confirm that Google Play knows the product before opening
+  // the purchase sheet, and obtain the correct local currency.
+  const product = await getProduct();
+  const currency = product?.price?.currency || 'GBP';
+
+  const request = new PaymentRequest(
+    [
+      {
+        supportedMethods: BILLING_METHOD,
+        data: {
+          sku: PRODUCT_ID,
+        },
+      },
+    ],
+    {
+      // Required by Payment Request. Google Play uses the actual
+      // price configured in Play Console rather than this value.
+      total: {
+        label: 'Naptio monthly subscription',
+        amount: {
+          currency,
+          value: '0',
+        },
+      },
+    }
+  );
+
+  let response = null;
+
+  try {
+    response = await request.show();
+
+    const purchaseToken =
+      response?.details?.purchaseToken;
+
+    if (!purchaseToken) {
+      await response.complete('fail');
+
+      throw new Error(
+        'Google Play returned no purchase token.'
+      );
+    }
+
+    // Access is granted only after the Worker verifies the token
+    // with Google Play and acknowledges the purchase when required.
+    const verification =
+      await verifyPurchase(purchaseToken);
+
+    const active =
+      verification?.active === true;
+
+    await response.complete(
+      active ? 'success' : 'fail'
+    );
+
+    return active;
+  } catch (error) {
+    if (response) {
+      try {
+        await response.complete('fail');
+      } catch {}
+    }
+
+    // Closing/cancelling the Google Play purchase sheet is not an error.
+    if (error?.name === 'AbortError') {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
 
