@@ -1,0 +1,29 @@
+name: Naptio staged Android subscription tests
+on:
+  pull_request:
+    paths:
+      - "webrtc/sender/secure/subscription-android.js"
+      - "webrtc/sender/secure/tests/**"
+      - "webrtc/sender/secure/index_inprogress.html"
+      - "cloudflare/naptio-play-verifier/**"
+      - ".github/workflows/naptio-android-subscription-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "webrtc/sender/secure/subscription-android.js"
+      - "webrtc/sender/secure/tests/**"
+      - "webrtc/sender/secure/index_inprogress.html"
+      - "cloudflare/naptio-play-verifier/**"
+      - ".github/workflows/naptio-android-subscription-tests.yml"
+jobs:
+  contract-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Cloudflare Worker mocked contract tests
+        run: node --test cloudflare/naptio-play-verifier/tests/worker-contract.test.mjs
+      - name: Android TWA adapter mocked contract tests
+        run: node --test webrtc/sender/secure/tests/subscription-android.test.mjs
