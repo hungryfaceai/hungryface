@@ -10,6 +10,8 @@ const VERIFY_URL = 'https://naptio-play-verifier.bbmaugendre.workers.dev/google-
 const TWA_SESSION_KEY = 'naptio:android-twa-session';
 const SERVICE_TIMEOUT_MS = 10000;
 const VERIFY_TIMEOUT_MS = 30000;
+// Give a newly returned purchase time to appear consistently in Play's APIs.
+const PURCHASE_SETTLEMENT_MS = 2 * 60 * 1000;
 
 const SERVER_STATUSES = new Set([
   'ACTIVE', 'INACTIVE', 'PENDING', 'INVALID_PURCHASE', 'UNAVAILABLE',
@@ -18,9 +20,13 @@ let servicePromise = null;
 let productPromise = null;
 let purchaseInProgress = false;
 let recentPurchaseToken = null; // In-memory only; Play remains the durable source.
+let recentPurchaseAt = 0;
+let checkoutNeedsReconciliationAt = 0;
 
 const unavailable = reason => ({ status: 'UNAVAILABLE', active: false, reason, retryable: true });
 const inactive = reason => ({ status: 'INACTIVE', active: false, reason, retryable: false });
+const pending = reason => ({ status: 'PENDING', active: false, reason, retryable: true });
+const isSettling = when => when > 0 && Date.now() - when < PURCHASE_SETTLEMENT_MS;
 
 const isAndroid = () => /Android/i.test(navigator.userAgent);
 
@@ -163,12 +169,23 @@ export async function accessStatus() {
 
   const results = [];
   if (recentPurchaseToken) {
-    const result = await verifyPurchase(recentPurchaseToken);
-    results.push(result);
-    if (result.status === 'ACTIVE') return result;
-    if (result.status === 'INVALID_PURCHASE' || result.status === 'INACTIVE') {
-      recentPurchaseToken = null; // Confirmed not entitled; allow future checkout.
+    let result = await verifyPurchase(recentPurchaseToken);
+    if (result.status === 'ACTIVE') {
+      // Keep this token for the life of the page so the Buy action cannot
+      // accidentally open another checkout after a successful purchase.
+      checkoutNeedsReconciliationAt = 0;
+      return result;
     }
+    if (result.status === 'INVALID_PURCHASE' || result.status === 'INACTIVE') {
+      if (isSettling(recentPurchaseAt)) {
+        // Play purchase reporting may lag checkout: do not encourage a second purchase.
+        result = pending('PURCHASE_SETTLING');
+      } else {
+        recentPurchaseToken = null;
+        recentPurchaseAt = 0;
+      }
+    }
+    results.push(result);
   }
 
   let service;
@@ -204,16 +221,34 @@ export async function hasAccess() {
 
 export async function offer() {
   const product = await getProduct();
-  const price = formatPrice(product);
-  // Only show a specific trial if the bridge actually reports it.
-  // The TWA billing bridge may not expose all Play offers; Play checkout remains authoritative.
+  const price = formatPrice(product); // Play's recurring/base price, localized.
+  const period = product.subscriptionPeriod;
+  if (period && period !== 'P1M') {
+    // Never advertise a monthly price if Play reports a different renewal period.
+    throw new Error('UNEXPECTED_SUBSCRIPTION_PERIOD');
+  }
+
+  // Digital Goods returns one eligible Play plan/offer. A trial is advertised
+  // only when that selected offer explicitly reports the correct trial period.
+  // A missing freeTrialPeriod is NOT proof that the user is trial-eligible.
   const trial = product.freeTrialPeriod === 'P3D';
+  const terms = trial
+    ? `3 days free\nThen ${price}/month\n\nRenews automatically every month unless cancelled. Google Play confirms the offer before you subscribe.`
+    : `${price}/month\n\nRenews automatically every month unless cancelled. If an introductory offer applies, Google Play will confirm it before you subscribe.`;
+
   return {
     title: trial ? 'Start your free trial' : 'Subscribe to Naptio',
-    terms: trial
-      ? `Eligible new customers: 3 days free\nThen ${price}/month\n\nRenews automatically unless cancelled. Manage your subscription in Google Play.`
-      : `${price}/month\n\nRenews automatically unless cancelled. Google Play will confirm any eligible introductory offer before payment.`,
-    button: 'Continue in Google Play',
+    terms,
+    button: trial ? 'Continue to 3-day free trial' : 'Continue in Google Play',
+    // Non-sensitive metadata for Play-installed QA. The sender page only
+    // renders title/terms/button; checkout remains the final authority.
+    playDetails: {
+      productId: product.itemId,
+      currency: product.price.currency,
+      priceValue: String(product.price.value),
+      freeTrialPeriod: product.freeTrialPeriod || null,
+      subscriptionPeriod: period || null,
+    },
   };
 }
 
@@ -223,6 +258,10 @@ export async function purchaseStatus() {
   if (!isNaptioTwa()) return unavailable('NOT_NAPTIO_TWA');
   if (purchaseInProgress) return unavailable('PURCHASE_ALREADY_IN_PROGRESS');
   if (recentPurchaseToken) return accessStatus(); // Reconcile, do not start a second checkout.
+  if (checkoutNeedsReconciliationAt) {
+    // Never reopen checkout before the user has explicitly checked for an interrupted purchase.
+    return pending('CHECK_SUBSCRIPTION_BEFORE_RETRY');
+  }
   if (typeof PaymentRequest !== 'function') return unavailable('PAYMENT_REQUEST_UNAVAILABLE');
 
   purchaseInProgress = true;
@@ -249,22 +288,34 @@ export async function purchaseStatus() {
       if (error?.name === 'AbortError') {
         return { status: 'CANCELLED', active: false, retryable: false };
       }
+      // Checkout may have completed before the browser/bridge failed to return.
+      checkoutNeedsReconciliationAt = Date.now();
       return unavailable('PLAY_CHECKOUT_UNAVAILABLE');
     }
 
     const token = paymentResponse?.details?.purchaseToken;
     if (typeof token !== 'string' || !token) {
+      checkoutNeedsReconciliationAt = Date.now();
       await completeOnce('unknown');
       return unavailable('PURCHASE_TOKEN_MISSING');
     }
     recentPurchaseToken = token;
-    const result = await verifyPurchase(token);
+    recentPurchaseAt = Date.now();
+    checkoutNeedsReconciliationAt = 0;
+    let result = await verifyPurchase(token);
+    if (result.status === 'INVALID_PURCHASE' || result.status === 'INACTIVE') {
+      // A newly returned token may not be visible to the Developer API yet.
+      result = pending('PURCHASE_SETTLING');
+    }
     await completeOnce(result.status === 'ACTIVE' ? 'success'
       : ['UNAVAILABLE', 'PENDING'].includes(result.status) ? 'unknown' : 'fail');
     return result;
   } catch (error) {
+    if (paymentResponse && !recentPurchaseToken) {
+      checkoutNeedsReconciliationAt = Date.now();
+    }
     await completeOnce('unknown');
-    console.warn('[SUB][Android] purchase status unavailable', error?.message || 'error');
+    console.warn('[SUB][Android] purchase status unavailable', error?.name || 'error');
     return unavailable('PLAY_CHECKOUT_UNAVAILABLE');
   } finally {
     purchaseInProgress = false;
@@ -272,7 +323,17 @@ export async function purchaseStatus() {
 }
 
 export async function restoreStatus() {
-  return accessStatus();
+  const result = await accessStatus();
+  if (checkoutNeedsReconciliationAt &&
+      (result.status === 'INACTIVE' || result.status === 'INVALID_PURCHASE')) {
+    // A missing/unreturned checkout token can take time to appear in listPurchases.
+    if (isSettling(checkoutNeedsReconciliationAt)) {
+      return pending('PURCHASE_SETTLING');
+    }
+    checkoutNeedsReconciliationAt = 0;
+  }
+  if (result.status === 'ACTIVE') checkoutNeedsReconciliationAt = 0;
+  return result;
 }
 
 // Compatibility exports for the existing subscription-gate.js.
@@ -292,7 +353,14 @@ export async function restore() {
 export function messageForStatus(result) {
   switch (result.status) {
     case 'ACTIVE': return 'Your Naptio subscription is active.';
-    case 'PENDING': return 'Google Play is still processing your payment. Check your subscription again shortly.';
+    case 'PENDING':
+      if (result.reason === 'PURCHASE_SETTLING') {
+        return 'Your recent Google Play checkout is still being confirmed. Select Check subscription again shortly; do not purchase a second time.';
+      }
+      if (result.reason === 'CHECK_SUBSCRIPTION_BEFORE_RETRY') {
+        return 'Google Play checkout may have completed. Select Check subscription before trying to purchase again.';
+      }
+      return 'Google Play is still processing your payment. Check your subscription again shortly.';
     case 'UNAVAILABLE':
       if (['PLAY_BILLING_UNAVAILABLE', 'BILLING_BRIDGE_UNAVAILABLE',
            'PAYMENT_REQUEST_UNAVAILABLE'].includes(result.reason)) {
