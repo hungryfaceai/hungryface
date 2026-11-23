@@ -85,3 +85,48 @@ async function getService() {
 
   return servicePromise;
 }
+
+async function getProduct() {
+  const service = await getService();
+
+  const products = await withTimeout(
+    service.getDetails([PRODUCT_ID]),
+    10000,
+    'Google Play product request'
+  );
+
+  const product = products?.find(
+    (item) => item.itemId === PRODUCT_ID
+  );
+
+  if (!product) {
+    throw new Error(
+      'The Naptio subscription is unavailable in Google Play.'
+    );
+  }
+
+  return product;
+}
+
+function formatPrice(product) {
+  const value = product?.price?.value;
+  const currency = product?.price?.currency;
+
+  if (value == null || !currency) {
+    throw new Error(
+      'Google Play returned incomplete pricing information.'
+    );
+  }
+
+  try {
+    return new Intl.NumberFormat(
+      navigator.language,
+      {
+        style: 'currency',
+        currency,
+      }
+    ).format(value);
+  } catch {
+    return `${value} ${currency}`;
+  }
+}
