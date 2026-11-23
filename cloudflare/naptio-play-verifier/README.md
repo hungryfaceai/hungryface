@@ -19,6 +19,10 @@ Google Cloud must continue to have Android Publisher API enabled and the Play Co
 
 **Endpoint:** `POST https://naptio-play-verifier.bbmaugendre.workers.dev/google-play/verify`. Request JSON is `{"purchaseToken":"<token from Google Play>"}`. The Worker only allows browser requests with origin `https://hungryfaceai.github.io`. `GET /` remains a safe, unauthenticated health check.
 
+## Local contract tests
+
+With Node.js installed, run `cd cloudflare/naptio-play-verifier && npm test`. The test suite uses mocked Google OAuth, subscription lookup and acknowledgement responses; it does **not** charge a customer or validate a real Google Play checkout.
+
 ## Paste into Cloudflare
 
 1. Open **Cloudflare Dashboard → Workers & Pages → naptio-play-verifier → Edit code**.
