@@ -311,7 +311,8 @@
       }
 
       /* --- Subscription paywall for the installed iOS and Android apps --- */
-      #paywall {
+      #paywall,
+      #androidBillingNotice {
         position: fixed;
         inset: 0;
         z-index: 30;
@@ -321,9 +322,11 @@
         padding: 20px;
         background: rgba(0, 0, 0, 0.85);
       }
-      #paywall[hidden] {
+      #paywall[hidden],
+      #androidBillingNotice[hidden] {
         display: none;
       }
+      #androidBillingTitle,
       #pwTitle {
         margin: 0 0 8px;
         font-size: 22px;
@@ -346,12 +349,45 @@
       #pwTerms:empty {
         display: none;
       }
-      #paywall .secondary {
+      #paywall .secondary,
+      #androidBillingNotice .secondary {
         background: transparent;
         border: 1px solid #333;
       }
-      #paywall .link-btn {
+      #paywall .link-btn,
+      #androidBillingNotice .link-btn {
         background: transparent;
+      }
+      #androidBillingDescription,
+      #androidBillingCompatibility {
+        line-height: 1.5;
+        opacity: 0.9;
+        font-size: 15px;
+      }
+      #androidBillingUpdateLink {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        padding: 14px 16px;
+        border-radius: 12px;
+        background: #27689a;
+        color: #fff;
+        text-decoration: none;
+        text-align: center;
+        font-size: 17px;
+        font-weight: 600;
+      }
+      #androidBillingUpdateLink[hidden],
+      #androidBillingChromeLink[hidden],
+      #androidBillingCompatibility[hidden] {
+        display: none;
+      }
+      #androidBillingChromeLink {
+        display: block;
+        color: var(--nt-text-2, #ddd);
+        font-size: 14px;
+        text-align: center;
+        margin: 12px 0;
       }
       #paywall .legal {
         font-size: 14px;
@@ -581,6 +617,35 @@
       </div>
     </div>
 
+    <!-- Dedicated Android billing-compatibility notice; never displays a purchase button. -->
+    <div id="androidBillingNotice" hidden role="dialog" aria-modal="true"
+         aria-labelledby="androidBillingTitle" aria-describedby="androidBillingDescription">
+      <div class="card">
+        <h2 id="androidBillingTitle">Update Naptio to continue</h2>
+        <p id="androidBillingDescription">
+          This installation cannot access Google Play Billing. Update Naptio and Chrome to start camera monitoring.
+        </p>
+        <p id="androidBillingCompatibility">
+          If Google Play says the latest Naptio is incompatible with your phone,
+          a newer Android device may be required.
+        </p>
+        <div class="row">
+          <a id="androidBillingUpdateLink"
+             href="https://play.google.com/store/apps/details?id=io.github.hungryfaceai.twa"
+             target="_blank" rel="noopener noreferrer">Update Naptio on Google Play</a>
+        </div>
+        <a id="androidBillingChromeLink"
+           href="https://play.google.com/store/apps/details?id=com.android.chrome"
+           target="_blank" rel="noopener noreferrer">Check for a Chrome update</a>
+        <div class="row">
+          <button id="androidBillingRetry" class="secondary">Check again</button>
+        </div>
+        <div class="row">
+          <button id="androidBillingClose" class="link-btn">Not now</button>
+        </div>
+      </div>
+    </div>
+
     <div id="tap" aria-hidden="true"></div>
     <div class="overlay"><div class="status" id="status">Idle</div></div>
 
@@ -653,7 +718,7 @@
       import {
   hasAccess, offer, purchase, restore, needsSubscription,
   subscriptionPlatform, accessStatus, purchaseStatus, restoreStatus,
-  subscriptionStatusMessage,
+  subscriptionStatusMessage, billingReadiness,
 } from './subscription-gate.js';
       let screenAwake = null; // wake lock handle while streaming
       import { WS_ENDPOINT, ICE_SERVERS } from '/hungryface/webrtc/shared/config.js';
@@ -723,6 +788,14 @@
       const pwManagePlay = document.getElementById('pwManagePlay');
       const pwManagePlayDivider = document.getElementById('pwManagePlayDivider');
       const androidManageSubscription = document.getElementById('androidManageSubscription');
+      const androidBillingNotice = document.getElementById('androidBillingNotice');
+      const androidBillingTitle = document.getElementById('androidBillingTitle');
+      const androidBillingDescription = document.getElementById('androidBillingDescription');
+      const androidBillingCompatibility = document.getElementById('androidBillingCompatibility');
+      const androidBillingUpdateLink = document.getElementById('androidBillingUpdateLink');
+      const androidBillingChromeLink = document.getElementById('androidBillingChromeLink');
+      const androidBillingRetry = document.getElementById('androidBillingRetry');
+      const androidBillingClose = document.getElementById('androidBillingClose');
       const androidSubscriptionPage = subscriptionPlatform() === 'android';
       androidManageSubscription.hidden = !androidSubscriptionPage;
       pwManagePlay.hidden = !androidSubscriptionPage;
@@ -1845,6 +1918,10 @@
       });
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
+          if (!androidBillingNotice.hidden) {
+            if (!androidBillingRetry.disabled) androidBillingNotice.hidden = true;
+            return;
+          }
           if (!paywall.hidden) {
             if (!pwBuy.disabled && !pwRestore.disabled) paywall.hidden = true;
             return;
@@ -1926,6 +2003,49 @@
           clearTimeout(offerTimer);
         }
       }
+
+      // Distinguish a missing/unsupported native billing bridge from a
+      // transient billing outage. Neither condition should open checkout.
+      function showAndroidBillingNotice(result) {
+        const update = result.status === 'UPDATE_REQUIRED';
+        androidBillingTitle.textContent = update
+          ? 'Update Naptio to continue'
+          : 'Google Play Billing is temporarily unavailable';
+        androidBillingDescription.textContent = update
+          ? 'This installation cannot access Google Play Billing. Update Naptio and Chrome to start camera monitoring.'
+          : 'We could not connect to Google Play Billing right now. Please try again.';
+        androidBillingCompatibility.hidden = !update;
+        androidBillingUpdateLink.hidden = !update;
+        androidBillingChromeLink.hidden = !update;
+        androidBillingRetry.textContent = update ? 'Check again' : 'Retry';
+        subscriptionError.textContent = androidBillingDescription.textContent;
+        paywall.hidden = true;
+        androidBillingNotice.hidden = false;
+      }
+
+      androidBillingClose.addEventListener('click', () => {
+        if (!androidBillingRetry.disabled) androidBillingNotice.hidden = true;
+      });
+      androidBillingRetry.addEventListener('click', async () => {
+        if (androidBillingRetry.disabled) return;
+        androidBillingRetry.disabled = true;
+        try {
+          const readiness = await billingReadiness();
+          if (readiness.status === 'READY') {
+            androidBillingNotice.hidden = true;
+            subscriptionError.textContent = '';
+            // Re-enter Start's normal subscription validation; do not bypass it.
+            await startOrStop();
+          } else {
+            showAndroidBillingNotice(readiness);
+          }
+        } catch (error) {
+          console.warn('[SUB][Android] readiness retry failed', error?.name || 'error');
+          showAndroidBillingNotice({ status: 'TEMPORARILY_UNAVAILABLE' });
+        } finally {
+          androidBillingRetry.disabled = false;
+        }
+      });
 
       // Distinct recovery state: do not open checkout while Google Play has
       // a payment pending or the verifier is temporarily unavailable.
@@ -2057,6 +2177,11 @@
 
             try {
               if (subscriptionPlatform() === 'android') {
+                const readiness = await billingReadiness();
+                if (readiness.status !== 'READY') {
+                  showAndroidBillingNotice(readiness);
+                  return;
+                }
                 const result = await accessStatus();
                 if (result.status === 'UNAVAILABLE' || result.status === 'PENDING') {
                   showAndroidRecovery(result);
