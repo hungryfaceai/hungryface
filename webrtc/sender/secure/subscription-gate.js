@@ -26,6 +26,14 @@ export function needsSubscription() {
   return adapter()?.needsSubscription?.() ?? false;
 }
 
+// Android-only compatibility preflight. iOS RevenueCat is untouched.
+export async function billingReadiness() {
+  if (subscriptionPlatform() !== 'android') {
+    return { status: 'NOT_TWA', reason: 'NOT_NAPTIO_TWA' };
+  }
+  return android.billingReadiness();
+}
+
 // Compatibility with old callers. Browser camera blocking remains in sender page.
 export async function hasAccess() {
   const selected = adapter();

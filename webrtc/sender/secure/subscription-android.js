@@ -26,6 +26,8 @@ let checkoutNeedsReconciliationAt = 0;
 const unavailable = reason => ({ status: 'UNAVAILABLE', active: false, reason, retryable: true });
 const inactive = reason => ({ status: 'INACTIVE', active: false, reason, retryable: false });
 const pending = reason => ({ status: 'PENDING', active: false, reason, retryable: true });
+const updateRequired = reason => ({ status: 'UPDATE_REQUIRED', reason });
+const temporarilyUnavailable = reason => ({ status: 'TEMPORARILY_UNAVAILABLE', reason });
 const isSettling = when => when > 0 && Date.now() - when < PURCHASE_SETTLEMENT_MS;
 
 const isAndroid = () => /Android/i.test(navigator.userAgent);
@@ -64,12 +66,47 @@ async function getService() {
     servicePromise = withTimeout(
       window.getDigitalGoodsService(BILLING_METHOD),
       SERVICE_TIMEOUT_MS, 'Billing initialization'
-    ).catch(error => {
+    ).then(service => {
+      // Some older Digital Goods implementations resolve to null rather
+      // than reject. Do not cache that result across an explicit retry.
+      if (!service) servicePromise = null;
+      return service;
+    }).catch(error => {
       servicePromise = null;
       throw error;
     });
   }
   return servicePromise;
+}
+
+// Only checks whether this installed Android environment can present a Play
+// Billing checkout; it does NOT claim to know the APK's version code.
+// Missing APIs or an unusable service are a compatibility/update issue.
+// Errors from an existing bridge, including timeouts, are treated as transient
+// so an outage never sends the user to an irrelevant Play Store update.
+export async function billingReadiness() {
+  if (!isNaptioTwa()) return { status: 'NOT_TWA', reason: 'NOT_NAPTIO_TWA' };
+  if (typeof window.getDigitalGoodsService !== 'function') {
+    return updateRequired('DIGITAL_GOODS_API_MISSING');
+  }
+  if (typeof PaymentRequest !== 'function') {
+    return updateRequired('PAYMENT_REQUEST_API_MISSING');
+  }
+
+  try {
+    const service = await getService();
+    if (!service || typeof service.getDetails !== 'function' ||
+        typeof service.listPurchases !== 'function') {
+      // Avoid caching a broken bridge if the user updates and tries again.
+      servicePromise = null;
+      productPromise = null;
+      return updateRequired('BILLING_SERVICE_UNSUPPORTED');
+    }
+    return { status: 'READY' };
+  } catch (error) {
+    console.warn('[SUB][Android] billing readiness unavailable', error?.name || 'error');
+    return temporarilyUnavailable('BILLING_SERVICE_INITIALIZATION_FAILED');
+  }
 }
 
 async function getProduct() {

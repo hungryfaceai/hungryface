@@ -51,7 +51,11 @@ Important: Android Browser Helper 1.2.0 maps Google Play Billing Library 8 subsc
 - The new Android management links must remain hidden on iOS and in ordinary browsers.
 - An ordinary browser remains blocked from Camera streaming when monetization is on.
 - Free Viewer pairing and the PSK/WebRTC camera-to-viewer stream remain operational.
-- Older Android TWA builds without the billing bridge require an explicit update/compatibility plan **before** `index_inprogress.html` is promoted.
+- The staged Camera page now runs `billingReadiness()` before Android subscription lookup. Missing `getDigitalGoodsService`, missing `PaymentRequest`, null/invalid Digital Goods service => a dedicated **Update Naptio to continue** dialog. It links directly to the Naptio listing and Chrome on Google Play, shows an incompatibility note for older devices, and permits a fresh capability check.
+- A billing bridge that exists but fails to initialize or times out => **Google Play Billing is temporarily unavailable**, with a **Retry** button. A transient outage must never be presented as an outdated installation.
+- The update/retry dialog is separate from the paywall. It never offers a purchase, never grants entitlement, and after a successful retry it re-enters the normal access check.
+- Verify the missing-API, missing-PaymentRequest, null-service, partial-service, initialization-error, and recovered-service scenarios in a genuine TWA where possible. A missing API does not prove the exact installed APK version; check Chrome and Play certification too.
+- Older Android TWA builds without the billing bridge require an explicit update/compatibility plan **before** `index_inprogress.html` is promoted. This UI addresses the failure mode but real Play-installed version 1/version 2 tests remain required.
 
 ## Cutover blocker
 

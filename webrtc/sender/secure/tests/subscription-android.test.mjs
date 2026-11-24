@@ -26,7 +26,8 @@ const invalid = () => ({
 
 async function environment(t, { product = trialProduct, purchases = [],
   verifier = () => active(), responseToken = 'new-purchase-token',
-  checkoutError = null } = {}) {
+  checkoutError = null, billingBridge = 'ready',
+  paymentRequestAvailable = true, twa = true } = {}) {
   const original = {
     navigator: Object.getOwnPropertyDescriptor(globalThis, 'navigator'),
     window: globalThis.window,
@@ -46,32 +47,45 @@ async function environment(t, { product = trialProduct, purchases = [],
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true, value: { userAgent: 'Android; Chrome', language: 'en-GB' },
   });
-  globalThis.document = { referrer: 'android-app://io.github.hungryfaceai.twa' };
+  globalThis.document = { referrer: twa ? 'android-app://io.github.hungryfaceai.twa' : '' };
   const store = new Map();
   globalThis.sessionStorage = {
     setItem: (k, v) => store.set(k, v),
     getItem: k => store.get(k) ?? null,
   };
-  const counts = { checkout: 0, completion: [], verify: 0, list: 0 };
-  globalThis.window = {
-    getDigitalGoodsService: async () => ({
-      getDetails: async () => [product],
-      listPurchases: async () => {
-        counts.list++;
-        return typeof purchases === 'function' ? purchases() : purchases;
-      },
-    }),
+  const counts = { checkout: 0, completion: [], verify: 0, list: 0, service: 0 };
+  let currentBridge = billingBridge;
+  const fullService = {
+    getDetails: async () => [product],
+    listPurchases: async () => {
+      counts.list++;
+      return typeof purchases === 'function' ? purchases() : purchases;
+    },
   };
-  globalThis.PaymentRequest = class {
-    async show() {
-      counts.checkout++;
-      if (checkoutError) throw checkoutError;
-      return {
-        details: { purchaseToken: responseToken },
-        complete: async result => { counts.completion.push(result); },
-      };
-    }
-  };
+  globalThis.window = {};
+  if (currentBridge !== 'missing') {
+    globalThis.window.getDigitalGoodsService = async () => {
+      counts.service++;
+      if (currentBridge === 'reject') throw new Error('Temporary billing bridge error');
+      if (currentBridge === 'null') return null;
+      if (currentBridge === 'incomplete') return { getDetails: fullService.getDetails };
+      return fullService;
+    };
+  }
+  if (paymentRequestAvailable) {
+    globalThis.PaymentRequest = class {
+      async show() {
+        counts.checkout++;
+        if (checkoutError) throw checkoutError;
+        return {
+          details: { purchaseToken: responseToken },
+          complete: async result => { counts.completion.push(result); },
+        };
+      }
+    };
+  } else {
+    globalThis.PaymentRequest = undefined;
+  }
   let currentVerifier = verifier;
   globalThis.fetch = async () => {
     counts.verify++;
@@ -82,7 +96,23 @@ async function environment(t, { product = trialProduct, purchases = [],
     });
   };
   const module = await import(new URL('../subscription-android.js?test=' + ++nextId, import.meta.url));
-  return { module, counts, setVerifier: fn => { currentVerifier = fn; } };
+  return {
+    module, counts,
+    setVerifier: fn => { currentVerifier = fn; },
+    setBillingBridge: next => {
+      currentBridge = next;
+      if (next === 'missing') delete globalThis.window.getDigitalGoodsService;
+      else {
+        globalThis.window.getDigitalGoodsService = async () => {
+          counts.service++;
+          if (currentBridge === 'reject') throw new Error('Temporary billing bridge error');
+          if (currentBridge === 'null') return null;
+          if (currentBridge === 'incomplete') return { getDetails: fullService.getDetails };
+          return fullService;
+        };
+      }
+    },
+  };
 }
 
 test('eligible Play offer shows three-day trial and localized monthly renewal', async t => {
@@ -168,4 +198,66 @@ test('unrelated products do not grant Naptio camera access', async t => {
     purchases: [{ itemId: 'other_product', purchaseToken: 'unrelated-token' }],
   });
   assert.equal((await module.accessStatus()).status, 'INACTIVE');
+});
+
+test('supported Play-installed TWA is READY without starting checkout', async t => {
+  const { module, counts } = await environment(t);
+  assert.deepEqual(await module.billingReadiness(), { status: 'READY' });
+  assert.equal(counts.checkout, 0);
+  assert.equal(counts.service, 1);
+});
+
+test('missing Digital Goods API requires an update instead of opening checkout', async t => {
+  const { module, counts } = await environment(t, { billingBridge: 'missing' });
+  assert.deepEqual(await module.billingReadiness(), {
+    status: 'UPDATE_REQUIRED', reason: 'DIGITAL_GOODS_API_MISSING',
+  });
+  assert.equal(counts.checkout, 0);
+});
+
+test('missing Payment Request API requires an update instead of opening checkout', async t => {
+  const { module, counts } = await environment(t, { paymentRequestAvailable: false });
+  assert.deepEqual(await module.billingReadiness(), {
+    status: 'UPDATE_REQUIRED', reason: 'PAYMENT_REQUEST_API_MISSING',
+  });
+  assert.equal(counts.service, 0);
+  assert.equal(counts.checkout, 0);
+});
+
+test('null billing service is not cached and can recover after an update', async t => {
+  const { module, counts, setBillingBridge } = await environment(t, { billingBridge: 'null' });
+  assert.equal((await module.billingReadiness()).status, 'UPDATE_REQUIRED');
+  setBillingBridge('ready');
+  assert.equal((await module.billingReadiness()).status, 'READY');
+  assert.equal(counts.service, 2);
+});
+
+test('malformed billing service is UPDATE_REQUIRED and retryable', async t => {
+  const { module, counts, setBillingBridge } = await environment(t, { billingBridge: 'incomplete' });
+  assert.deepEqual(await module.billingReadiness(), {
+    status: 'UPDATE_REQUIRED', reason: 'BILLING_SERVICE_UNSUPPORTED',
+  });
+  setBillingBridge('ready');
+  assert.equal((await module.billingReadiness()).status, 'READY');
+  assert.equal(counts.service, 2);
+});
+
+test('bridge initialization error is transient, never presented as update required', async t => {
+  const { module, counts, setBillingBridge } = await environment(t, { billingBridge: 'reject' });
+  assert.deepEqual(await module.billingReadiness(), {
+    status: 'TEMPORARILY_UNAVAILABLE', reason: 'BILLING_SERVICE_INITIALIZATION_FAILED',
+  });
+  assert.equal(counts.checkout, 0);
+  setBillingBridge('ready');
+  assert.equal((await module.billingReadiness()).status, 'READY');
+  assert.equal(counts.service, 2);
+});
+
+test('ordinary Android browser is not misclassified as outdated Naptio TWA', async t => {
+  const { module, counts } = await environment(t, { twa: false });
+  assert.deepEqual(await module.billingReadiness(), {
+    status: 'NOT_TWA', reason: 'NOT_NAPTIO_TWA',
+  });
+  assert.equal(counts.service, 0);
+  assert.equal(counts.checkout, 0);
 });
