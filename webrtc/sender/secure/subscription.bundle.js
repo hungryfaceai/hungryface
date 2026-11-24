@@ -1345,28 +1345,8 @@ var Purchases = new Proxy(nativePlugin, {
 // webrtc/sender/secure/subscription.js
 var RC_IOS_KEY = "appl_rGJQugZEBckkaqbOCHnGCGnPgoe";
 var ENTITLEMENT = "premium";
-var MOCK_PRICE = "\xA32.99";
 var isNativeIos = () => !!window.Capacitor?.isNativePlatform?.() && window.Capacitor.getPlatform() === "ios";
-var MOCK_KEY = "submock";
-var qsMock = new URLSearchParams(location.search).get(MOCK_KEY);
-if (!isNativeIos() && qsMock) {
-  try {
-    if (qsMock === "off") {
-      localStorage.removeItem(MOCK_KEY);
-    } else {
-      localStorage.setItem(MOCK_KEY, qsMock);
-    }
-  } catch {
-  }
-}
-var mockState = () => isNativeIos() ? null : localStorage.getItem(MOCK_KEY);
-var setMock = (value) => {
-  try {
-    localStorage.setItem(MOCK_KEY, value);
-  } catch {
-  }
-};
-var needsSubscription = () => isNativeIos() || !!mockState();
+var needsSubscription = () => isNativeIos();
 var ready = null;
 async function rc() {
   if (!isNativeIos()) {
@@ -1399,9 +1379,6 @@ function withTimeout(promise, timeoutMs, label) {
   ]);
 }
 async function hasAccess() {
-  if (mockState()) {
-    return mockState() === "active";
-  }
   if (!needsSubscription()) {
     return true;
   }
@@ -1455,12 +1432,6 @@ Renews automatically unless cancelled at least 24 hours before the end of the cu
   };
 }
 async function offer() {
-  if (mockState()) {
-    return buildOffer(
-      MOCK_PRICE,
-      mockState() === "new" ? "3 days" : null
-    );
-  }
   const pkg = await getPackage();
   const product = pkg.product;
   const intro = product.introPrice;
@@ -1487,15 +1458,6 @@ async function offer() {
   );
 }
 async function purchase() {
-  if (mockState()) {
-    if (!confirm(
-      "[TEST] Simulated Apple purchase sheet.\n\nOK = subscribe, Cancel = close"
-    )) {
-      return false;
-    }
-    setMock("active");
-    return true;
-  }
   const pkg = await getPackage();
   try {
     await rc();
@@ -1511,9 +1473,6 @@ async function purchase() {
   }
 }
 async function restore() {
-  if (mockState()) {
-    return mockState() === "active";
-  }
   await rc();
   const { customerInfo } = await Purchases.restorePurchases();
   return isActive(customerInfo);
