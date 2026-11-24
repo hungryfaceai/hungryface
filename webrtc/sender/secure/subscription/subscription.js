@@ -2,47 +2,15 @@ import { Purchases } from '@revenuecat/purchases-capacitor';
 
 // Subscription gate for the native iOS app (RevenueCat).
 // In the browser and on Android it always allows access.
-//
-// Browser test mode:
-// ?submock=new     = eligible for free trial
-// ?submock=expired = trial already used / expired
-// ?submock=active  = active subscriber
-// ?submock=off     = clear test mode
 
 const RC_IOS_KEY = 'appl_rGJQugZEBckkaqbOCHnGCGnPgoe';
 const ENTITLEMENT = 'premium';
-const MOCK_PRICE = '£2.99';
 
 const isNativeIos = () =>
   !!window.Capacitor?.isNativePlatform?.() &&
   window.Capacitor.getPlatform() === 'ios';
 
-// ---- Browser test mode ----
-
-const MOCK_KEY = 'submock';
-const qsMock = new URLSearchParams(location.search).get(MOCK_KEY);
-
-if (!isNativeIos() && qsMock) {
-  try {
-    if (qsMock === 'off') {
-      localStorage.removeItem(MOCK_KEY);
-    } else {
-      localStorage.setItem(MOCK_KEY, qsMock);
-    }
-  } catch {}
-}
-
-const mockState = () =>
-  isNativeIos() ? null : localStorage.getItem(MOCK_KEY);
-
-const setMock = (value) => {
-  try {
-    localStorage.setItem(MOCK_KEY, value);
-  } catch {}
-};
-
-export const needsSubscription = () =>
-  isNativeIos() || !!mockState();
+export const needsSubscription = () => isNativeIos();
 
 // ---- RevenueCat initialization ----
 
@@ -95,12 +63,8 @@ function withTimeout(promise, timeoutMs, label) {
 // ---- Access check ----
 
 // True when the user may stream.
-// Outside native iOS this is always true unless browser test mode is enabled.
+// Outside native iOS this is always true.
 export async function hasAccess() {
-  if (mockState()) {
-    return mockState() === 'active';
-  }
-
   if (!needsSubscription()) {
     return true;
   }
@@ -172,13 +136,6 @@ function buildOffer(priceString, trialText) {
 // Paywall text built from the App Store product.
 // priceString is localized by Apple.
 export async function offer() {
-  if (mockState()) {
-    return buildOffer(
-      MOCK_PRICE,
-      mockState() === 'new' ? '3 days' : null
-    );
-  }
-
   const pkg = await getPackage();
   const product = pkg.product;
   const intro = product.introPrice;
@@ -222,20 +179,6 @@ export async function offer() {
 // Returns true if the user now has access.
 // Returns false if the Apple purchase sheet was cancelled.
 export async function purchase() {
-  if (mockState()) {
-    if (
-      !confirm(
-        '[TEST] Simulated Apple purchase sheet.\n\n' +
-          'OK = subscribe, Cancel = close'
-      )
-    ) {
-      return false;
-    }
-
-    setMock('active');
-    return true;
-  }
-
   const pkg = await getPackage();
 
   try {
@@ -259,10 +202,6 @@ export async function purchase() {
 // ---- Restore purchases ----
 
 export async function restore() {
-  if (mockState()) {
-    return mockState() === 'active';
-  }
-
   await rc();
 
   const { customerInfo } =
