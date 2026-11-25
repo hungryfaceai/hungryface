@@ -41,3 +41,34 @@ test('missing capabilities request update; transient failures only present Retry
   assert.match(notice, /if \(readiness\.status === 'READY'\) \{[\s\S]*await startOrStop\(\);/);
   assert.match(html, /#androidBillingNotice\[hidden\] \{\s*display: none;/);
 });
+
+test('live sender and staged sender share checkout feedback implementation', async () => {
+  const [live, staged] = await Promise.all([
+    readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../index_inprogress.html', import.meta.url), 'utf8'),
+  ]);
+  assert.equal(live, staged, 'live and candidate must remain aligned for this fix');
+  assert.match(live, /id="pwFeedback" role="status" hidden/);
+  assert.match(live, /#pwFeedback\[hidden\] \{\s*display: none;/);
+  assert.match(live, /pwFeedback\.hidden = true;\s*pwFeedback\.textContent = ''/);
+});
+
+test('explicit checkout cancellation is acknowledged without removing the subscription offer', async () => {
+  const live = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const handler = live.slice(live.indexOf("pwBuy.addEventListener('click'"), live.indexOf("pwRestore.addEventListener('click'"));
+  assert.match(handler, /if \(result\.status === 'CANCELLED'\) \{[\s\S]*pwFeedback\.textContent = subscriptionStatusMessage\(result\);[\s\S]*pwFeedback\.hidden = false;[\s\S]*return;/);
+  assert.doesNotMatch(handler, /if \(result\.status === 'CANCELLED'\) return;/);
+});
+
+test('Android checkout errors show recovery with a specific title and no second buy button', async () => {
+  const live = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const start = live.indexOf('function showAndroidRecovery(result)');
+  const end = live.indexOf("pwClose.addEventListener('click'", start);
+  assert.ok(start > 0 && end > start);
+  const recovery = live.slice(start, end);
+  assert.match(recovery, /PLAY_CHECKOUT_DID_NOT_OPEN/);
+  assert.match(recovery, /PLAY_CHECKOUT_ABORTED_UNCONFIRMED/);
+  assert.match(recovery, /pwBuy\.hidden = true/);
+  assert.match(recovery, /pwRestore\.textContent = 'Check subscription'/);
+  assert.match(recovery, /paywall\.hidden = false/);
+});
