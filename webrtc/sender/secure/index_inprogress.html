@@ -349,6 +349,15 @@
       #pwTerms:empty {
         display: none;
       }
+      #pwFeedback {
+        margin: 0 0 14px;
+        color: var(--nt-text-2, #ddd);
+        font-size: 15px;
+        line-height: 1.45;
+      }
+      #pwFeedback[hidden] {
+        display: none;
+      }
       #paywall .secondary,
       #androidBillingNotice .secondary {
         background: transparent;
@@ -605,6 +614,7 @@
         </p>
         <p id="pwPrice"></p>
         <p id="pwTerms"></p>
+        <p id="pwFeedback" role="status" hidden></p>
         <div class="row"><button id="pwBuy">Start free trial</button></div>
         <div class="row"><button id="pwRestore" class="secondary">Restore purchases</button></div>
         <div class="row"><button id="pwClose" class="link-btn">Not now</button></div>
@@ -781,6 +791,7 @@
       const paywall = document.getElementById('paywall');
       const pwPrice = document.getElementById('pwPrice');
       const pwTerms = document.getElementById('pwTerms');
+      const pwFeedback = document.getElementById('pwFeedback');
       const pwBuy = document.getElementById('pwBuy');
       const pwRestore = document.getElementById('pwRestore');
       const pwClose = document.getElementById('pwClose');
@@ -1987,6 +1998,8 @@
           pwTerms.textContent =
             renewalTerms.join('\n\n');
       
+          pwFeedback.hidden = true;
+          pwFeedback.textContent = '';
           pwBuy.hidden = false;
           pwBuy.textContent = button;
       
@@ -2052,9 +2065,17 @@
       function showAndroidRecovery(result) {
         const message = subscriptionStatusMessage(result);
         document.getElementById('pwTitle').textContent =
-          result.status === 'PENDING' ? 'Google Play purchase pending' : 'Cannot check subscription';
+          result.status === 'PENDING'
+            ? 'Google Play purchase pending'
+            : result.reason === 'PLAY_CHECKOUT_DID_NOT_OPEN'
+              ? 'Google Play checkout did not open'
+              : result.reason === 'PLAY_CHECKOUT_ABORTED_UNCONFIRMED'
+                ? 'Google Play checkout could not be confirmed'
+                : 'Cannot check subscription';
         pwPrice.textContent = '';
         pwTerms.textContent = message;
+        pwFeedback.hidden = true;
+        pwFeedback.textContent = '';
         pwBuy.hidden = true;
         pwRestore.textContent = 'Check subscription';
         pwTermsLink.href = 'https://hungryfaceai.github.io/hungryface/legal/';
@@ -2074,7 +2095,13 @@
         try {
           if (subscriptionPlatform() === 'android') {
             const result = await purchaseStatus();
-            if (result.status === 'CANCELLED') return;
+            if (result.status === 'CANCELLED') {
+              // Only an explicit cancellation signal is classified as user
+              // cancellation. Keep the offer visible and explain the result.
+              pwFeedback.textContent = subscriptionStatusMessage(result);
+              pwFeedback.hidden = false;
+              return;
+            }
             if (result.status === 'ACTIVE') {
               paywall.hidden = true;
               subscriptionError.textContent = '';
