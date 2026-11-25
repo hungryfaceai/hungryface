@@ -186,10 +186,64 @@ test('interrupted checkout lacking a token requires explicit reconciliation', as
   assert.equal(counts.checkout, 1);
 });
 
-test('user cancellation is not reported as verification outage', async t => {
-  const err = new Error('cancelled'); err.name = 'AbortError';
+test('explicit user cancellation is distinct from an unexpected checkout abort', async t => {
+  const err = new Error('cancelled');
+  err.name = 'AbortError';
+  err.userCancelled = true;
   const { module, counts } = await environment(t, { checkoutError: err });
+  const result = await module.purchaseStatus();
+  assert.equal(result.status, 'CANCELLED');
+  assert.equal(result.reason, 'USER_CANCELLED');
+  assert.match(module.messageForStatus(result), /cancelled/i);
+  assert.equal(counts.checkout, 1);
+  // A real cancellation leaves retry available.
   assert.equal((await module.purchaseStatus()).status, 'CANCELLED');
+  assert.equal(counts.checkout, 2);
+});
+
+test('Invalid state AbortError means checkout did not open, never a user cancellation', async t => {
+  const err = new Error('Invalid state');
+  err.name = 'AbortError';
+  const { module, counts } = await environment(t, { checkoutError: err });
+  const result = await module.purchaseStatus();
+  assert.equal(result.status, 'UNAVAILABLE');
+  assert.equal(result.reason, 'PLAY_CHECKOUT_DID_NOT_OPEN');
+  assert.match(module.messageForStatus(result), /could not open/i);
+  assert.equal(counts.checkout, 1);
+  assert.equal(counts.verify, 0);
+  assert.equal((await module.purchaseStatus()).reason, 'PLAY_CHECKOUT_DID_NOT_OPEN');
+});
+
+test('generic AbortError remains unconfirmed, requires checking before any second checkout', async t => {
+  const err = new Error('The operation was aborted');
+  err.name = 'AbortError';
+  const { module, counts } = await environment(t, { checkoutError: err });
+  const result = await module.purchaseStatus();
+  assert.equal(result.status, 'UNAVAILABLE');
+  assert.equal(result.reason, 'PLAY_CHECKOUT_ABORTED_UNCONFIRMED');
+  assert.match(module.messageForStatus(result), /closed or failed to open/i);
+  assert.equal((await module.purchaseStatus()).reason, 'CHECK_SUBSCRIPTION_BEFORE_RETRY');
+  assert.equal(counts.checkout, 1);
+  assert.equal((await module.restoreStatus()).reason, 'PURCHASE_SETTLING');
+  assert.equal(counts.checkout, 1);
+});
+
+test('a generic AbortError saying cancelled is not trusted as a deliberate user cancellation', async t => {
+  const err = new Error('cancelled');
+  err.name = 'AbortError';
+  const { module } = await environment(t, { checkoutError: err });
+  assert.equal((await module.purchaseStatus()).reason, 'PLAY_CHECKOUT_ABORTED_UNCONFIRMED');
+});
+
+test('non-AbortError checkout failure is visible and requires reconciliation', async t => {
+  const err = new Error('Google Play unavailable');
+  err.name = 'NotSupportedError';
+  const { module, counts } = await environment(t, { checkoutError: err });
+  const result = await module.purchaseStatus();
+  assert.equal(result.status, 'UNAVAILABLE');
+  assert.equal(result.reason, 'PLAY_CHECKOUT_UNAVAILABLE');
+  assert.match(module.messageForStatus(result), /did not finish normally/i);
+  assert.equal((await module.purchaseStatus()).status, 'PENDING');
   assert.equal(counts.checkout, 1);
 });
 
