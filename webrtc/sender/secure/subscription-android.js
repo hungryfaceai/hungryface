@@ -192,6 +192,31 @@ async function verifyPurchase(purchaseToken) {
   }
 }
 
+// The Digital Goods API does not reliably report whether a Google account was
+// removed. Only identify account problems when the bridge explicitly says so.
+// Never turn a failed lookup into "no purchase" or claim the app is outdated.
+function classifyPurchaseLookupError(error) {
+  const code = typeof error?.code === 'string' ? error.code.toUpperCase() : '';
+  const name = typeof error?.name === 'string' ? error.name : '';
+  const message = typeof error?.message === 'string' ? error.message : '';
+  const accountCodes = new Set([
+    'ACCOUNT_UNAVAILABLE', 'ACCOUNT_NOT_FOUND', 'NO_GOOGLE_ACCOUNT',
+    'NO_ACCOUNT', 'SIGN_IN_REQUIRED', 'NOT_SIGNED_IN',
+    'AUTHENTICATION_REQUIRED', 'USER_NOT_AUTHENTICATED',
+  ]);
+  const accountNames = new Set([
+    'AccountNotFoundError', 'AccountUnavailableError',
+    'AuthenticationRequiredError', 'NotAuthenticatedError',
+  ]);
+  const explicitlyAccountRelated =
+    accountCodes.has(code) || accountNames.has(name) ||
+    /\b(?:not signed in|sign[ -]?in required|sign in to (?:google )?play|no (?:google )?accounts?(?: (?:available|found|configured|on (?:this )?device))?|(?:google play )?account (?:not found|unavailable|removed)|(?:authentication|login) required|user not authenticated)\b/i.test(message);
+
+  return unavailable(explicitlyAccountRelated
+    ? 'PLAY_ACCOUNT_UNAVAILABLE'
+    : 'PLAY_PURCHASE_LOOKUP_UNAVAILABLE');
+}
+
 function combineStatuses(results) {
   if (results.some(r => r.status === 'ACTIVE')) {
     return results.find(r => r.status === 'ACTIVE');
@@ -252,8 +277,14 @@ export async function accessStatus() {
       if (result.status === 'ACTIVE') return result;
     }
   } catch (error) {
-    console.warn('[SUB][Android] purchase lookup unavailable', error?.message || 'error');
-    results.push(unavailable('PLAY_BILLING_UNAVAILABLE'));
+    const classified = classifyPurchaseLookupError(error);
+    // Log only diagnostic categories, never account identifiers, purchase
+    // tokens, or arbitrary bridge error messages.
+    console.warn('[SUB][Android] purchase lookup unavailable', {
+      errorName: typeof error?.name === 'string' ? error.name : 'Error',
+      reason: classified.reason,
+    });
+    results.push(classified);
   }
   return combineStatuses(results);
 }
@@ -437,6 +468,13 @@ export function messageForStatus(result) {
       }
       return 'Google Play is still processing your payment. Check your subscription again shortly.';
     case 'UNAVAILABLE':
+      if (result.reason === 'PLAY_ACCOUNT_UNAVAILABLE') {
+        return 'Google Play cannot access a signed-in account. Open the Play Store and sign in with the Google account used for Naptio, then return and select Check subscription.';
+      }
+      if (result.reason === 'PLAY_PURCHASE_LOOKUP_UNAVAILABLE' ||
+          result.reason === 'PLAY_BILLING_UNAVAILABLE') {
+        return 'Cannot retrieve subscriptions from Google Play right now. Check your internet connection and that you are signed in to the Play Store with the account used for Naptio, then select Check subscription to retry.';
+      }
       if (result.reason === 'PLAY_CHECKOUT_DID_NOT_OPEN') {
         return 'Google Play checkout could not open. Check that Chrome is your default browser and update Chrome and Google Play, then select Check subscription before trying again.';
       }
@@ -458,7 +496,10 @@ export function messageForStatus(result) {
       }
       return 'Subscription verification is temporarily unavailable. If you just paid, use Check subscription before trying to buy again.';
     case 'INVALID_PURCHASE': return 'Google Play could not validate this purchase. Check your Google Play account.';
-    case 'INACTIVE': return 'No active Naptio subscription was found for this Google Play account.';
+    case 'INACTIVE':
+      return result.reason === 'NO_PURCHASE'
+        ? 'No Naptio subscription was found for the current Google Play account. Sign in with the subscribing account or subscribe to continue.'
+        : 'No active Naptio subscription was found for this Google Play account.';
     case 'CANCELLED': return 'Google Play checkout was cancelled. No subscription has been confirmed; you can try again.';
     default: return 'Subscription status is unknown. Please retry.';
   }

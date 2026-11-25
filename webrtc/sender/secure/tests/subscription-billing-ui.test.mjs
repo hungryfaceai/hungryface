@@ -92,3 +92,22 @@ test('live sender uses the shared subscription adapter for Android app detection
   assert.match(live, /const result = await accessStatus\(\);/,
     'valid app detection must still require a subscription check');
 });
+
+test('live Android recovery differentiates sign-in failure and transient Play lookup outage', async () => {
+  const [live, staged] = await Promise.all([
+    readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../index_inprogress.html', import.meta.url), 'utf8'),
+  ]);
+  assert.equal(live, staged);
+  const start = live.indexOf('function showAndroidRecovery(result)');
+  const end = live.indexOf("pwClose.addEventListener('click'", start);
+  assert.ok(start > 0 && end > start);
+  const recovery = live.slice(start, end);
+  assert.match(recovery, /result.reason === 'PLAY_ACCOUNT_UNAVAILABLE'/);
+  assert.match(recovery, /'Sign in to Google Play'/);
+  assert.match(recovery, /'PLAY_PURCHASE_LOOKUP_UNAVAILABLE'/);
+  assert.match(recovery, /'Cannot check Google Play subscriptions'/);
+  assert.match(recovery, /pwBuy.hidden = true/);
+  assert.match(recovery, /pwRestore.textContent = 'Check subscription'/);
+  assert.match(recovery, /paywall.hidden = false/);
+});

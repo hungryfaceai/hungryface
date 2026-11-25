@@ -154,6 +154,68 @@ test('verified existing purchase grants access without checkout', async t => {
   assert.equal(counts.checkout, 0);
 });
 
+test('empty Google Play purchases are inactive, not a billing outage', async t => {
+  const { module, counts } = await environment(t, { purchases: [] });
+  const result = await module.accessStatus();
+  assert.equal(result.status, 'INACTIVE');
+  assert.equal(result.reason, 'NO_PURCHASE');
+  assert.match(module.messageForStatus(result), /No Naptio subscription was found/);
+  assert.equal(counts.list, 1);
+  assert.equal(counts.checkout, 0);
+});
+
+test('explicit missing-account error requests Play Store sign-in without suggesting an app update', async t => {
+  const error = new Error('No Google account found');
+  error.name = 'OperationError';
+  const { module, counts } = await environment(t, {
+    purchases: () => { throw error; },
+  });
+  const result = await module.accessStatus();
+  assert.equal(result.status, 'UNAVAILABLE');
+  assert.equal(result.active, false);
+  assert.equal(result.reason, 'PLAY_ACCOUNT_UNAVAILABLE');
+  assert.match(module.messageForStatus(result), /sign in with the Google account used for Naptio/i);
+  assert.doesNotMatch(module.messageForStatus(result), /Update Naptio|Update.*Chrome/i);
+  assert.equal(counts.checkout, 0);
+});
+
+test('explicit sign-in-required code classifies account unavailability, not no purchase', async t => {
+  const error = new Error('Play purchase lookup failed');
+  error.name = 'OperationError';
+  error.code = 'SIGN_IN_REQUIRED';
+  const { module } = await environment(t, {
+    purchases: () => { throw error; },
+  });
+  const result = await module.accessStatus();
+  assert.equal(result.status, 'UNAVAILABLE');
+  assert.equal(result.reason, 'PLAY_ACCOUNT_UNAVAILABLE');
+});
+
+test('unclassified Play Billing failures remain retryable without guessing account state', async t => {
+  const error = new Error('clientAppUnavailable');
+  error.name = 'OperationError';
+  const { module, counts } = await environment(t, {
+    purchases: () => { throw error; },
+  });
+  const result = await module.accessStatus();
+  assert.equal(result.status, 'UNAVAILABLE');
+  assert.equal(result.reason, 'PLAY_PURCHASE_LOOKUP_UNAVAILABLE');
+  assert.match(module.messageForStatus(result), /Check your internet connection/);
+  assert.match(module.messageForStatus(result), /signed in to the Play Store/);
+  assert.doesNotMatch(module.messageForStatus(result), /Update Naptio|Update.*Chrome/i);
+  assert.equal(counts.checkout, 0);
+});
+
+test('network or timeout errors are not mistaken for missing Play accounts', async t => {
+  const error = new Error('Play purchase lookup timed out');
+  error.name = 'TimeoutError';
+  const { module } = await environment(t, {
+    purchases: async () => { throw error; },
+  });
+  const result = await module.accessStatus();
+  assert.equal(result.reason, 'PLAY_PURCHASE_LOOKUP_UNAVAILABLE');
+});
+
 test('verifier outage is not classified as an inactive subscription', async t => {
   const { module } = await environment(t, {
     purchases: [{ itemId: 'naptio_01', purchaseToken: 'existing-token' }],
