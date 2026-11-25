@@ -27,7 +27,8 @@ const invalid = () => ({
 async function environment(t, { product = trialProduct, purchases = [],
   verifier = () => active(), responseToken = 'new-purchase-token',
   checkoutError = null, billingBridge = 'ready',
-  paymentRequestAvailable = true, twa = true } = {}) {
+  paymentRequestAvailable = true, twa = true,
+  userAgent = 'Android; Chrome', storageFails = false } = {}) {
   const original = {
     navigator: Object.getOwnPropertyDescriptor(globalThis, 'navigator'),
     window: globalThis.window,
@@ -45,13 +46,19 @@ async function environment(t, { product = trialProduct, purchases = [],
     }
   });
   Object.defineProperty(globalThis, 'navigator', {
-    configurable: true, value: { userAgent: 'Android; Chrome', language: 'en-GB' },
+    configurable: true, value: { userAgent, language: 'en-GB' },
   });
   globalThis.document = { referrer: twa ? 'android-app://io.github.hungryfaceai.twa' : '' };
   const store = new Map();
   globalThis.sessionStorage = {
-    setItem: (k, v) => store.set(k, v),
-    getItem: k => store.get(k) ?? null,
+    setItem: (k, v) => {
+      if (storageFails) throw new Error('sessionStorage disabled');
+      store.set(k, v);
+    },
+    getItem: k => {
+      if (storageFails) throw new Error('sessionStorage disabled');
+      return store.get(k) ?? null;
+    },
   };
   const counts = { checkout: 0, completion: [], verify: 0, list: 0, service: 0 };
   let currentBridge = billingBridge;
@@ -99,6 +106,8 @@ async function environment(t, { product = trialProduct, purchases = [],
   return {
     module, counts,
     setVerifier: fn => { currentVerifier = fn; },
+    setReferrer: referrer => { globalThis.document.referrer = referrer; },
+    clearSessionMarker: () => store.delete('naptio:android-twa-session'),
     setBillingBridge: next => {
       currentBridge = next;
       if (next === 'missing') delete globalThis.window.getDigitalGoodsService;
@@ -308,10 +317,61 @@ test('bridge initialization error is transient, never presented as update requir
 });
 
 test('ordinary Android browser is not misclassified as outdated Naptio TWA', async t => {
-  const { module, counts } = await environment(t, { twa: false });
+  const { module, counts } = await environment(t, { twa: false, billingBridge: 'missing' });
   assert.deepEqual(await module.billingReadiness(), {
     status: 'NOT_TWA', reason: 'NOT_NAPTIO_TWA',
   });
   assert.equal(counts.service, 0);
   assert.equal(counts.checkout, 0);
+});
+
+test('fresh Android TWA restart with no referrer/storage marker detects Play Billing bridge', async t => {
+  const { module, counts } = await environment(t, { twa: false });
+  assert.equal(module.isNaptioTwa(), true);
+  assert.equal(module.needsSubscription(), true);
+  assert.equal(globalThis.sessionStorage.getItem('naptio:android-twa-session'), '1');
+  assert.equal((await module.billingReadiness()).status, 'READY');
+  assert.equal((await module.accessStatus()).status, 'INACTIVE');
+  assert.equal(counts.checkout, 0, 'TWA detection must never start a purchase');
+  assert.equal(counts.verify, 0, 'no token means no entitlement');
+});
+
+test('bridge detection survives navigation after billing API temporarily disappears', async t => {
+  const { module, setBillingBridge, setReferrer } = await environment(t, { twa: false });
+  assert.equal(module.isNaptioTwa(), true);
+  setReferrer('https://hungryfaceai.github.io/hungryface/');
+  setBillingBridge('missing');
+  assert.equal(module.isNaptioTwa(), true, 'new same-tab navigation retains TWA detection');
+  assert.deepEqual(await module.billingReadiness(), {
+    status: 'UPDATE_REQUIRED', reason: 'DIGITAL_GOODS_API_MISSING',
+  }, 'broken billing bridge still fails closed');
+});
+
+test('fresh Android browser without referrer, stored marker or Play Billing bridge stays blocked', async t => {
+  const { module, counts } = await environment(t, { twa: false, billingBridge: 'missing' });
+  assert.equal(module.isNaptioTwa(), false);
+  assert.equal(module.needsSubscription(), false);
+  assert.equal(globalThis.sessionStorage.getItem('naptio:android-twa-session'), null);
+  assert.equal((await module.billingReadiness()).status, 'NOT_TWA');
+  assert.equal(counts.service, 0);
+});
+
+test('non-Android browsers never qualify as Android TWAs, even with API stubs', async t => {
+  const { module } = await environment(t, { twa: false, userAgent: 'Mozilla/5.0 (iPhone)', billingBridge: 'ready' });
+  assert.equal(module.isNaptioTwa(), false);
+  assert.equal((await module.billingReadiness()).status, 'NOT_TWA');
+});
+
+test('Android Billing bridge detects TWA even when sessionStorage is unavailable', async t => {
+  const { module } = await environment(t, { twa: false, storageFails: true });
+  assert.equal(module.isNaptioTwa(), true);
+  assert.equal((await module.billingReadiness()).status, 'READY');
+});
+
+test('older TWA with referrer but no billing bridge still gets update-required notice', async t => {
+  const { module } = await environment(t, { billingBridge: 'missing', twa: true });
+  assert.equal(module.isNaptioTwa(), true);
+  assert.deepEqual(await module.billingReadiness(), {
+    status: 'UPDATE_REQUIRED', reason: 'DIGITAL_GOODS_API_MISSING',
+  });
 });
