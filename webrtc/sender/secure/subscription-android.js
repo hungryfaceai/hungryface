@@ -289,6 +289,29 @@ export async function offer() {
   };
 }
 
+// PaymentRequest.show() can reject with AbortError both when a customer
+// cancels and when Chrome never displayed Google Play checkout. The web API
+// provides no reliable "sheet opened" event: only explicit cancellation
+// metadata is safe to classify as a deliberate cancellation.
+function classifyCheckoutShowError(error) {
+  const name = typeof error?.name === 'string' ? error.name : 'Error';
+  const code = typeof error?.code === 'string' ? error.code.toUpperCase() : '';
+  if (error?.userCancelled === true ||
+      ['USER_CANCELLED', 'USER_CANCELED'].includes(code)) {
+    return { status: 'CANCELLED', active: false, reason: 'USER_CANCELLED', retryable: false };
+  }
+  // A known launch-time browser error, not evidence of an opened payment sheet.
+  if (name === 'InvalidStateError' ||
+      (name === 'AbortError' && /invalid state/i.test(String(error?.message || '')))) {
+    return unavailable('PLAY_CHECKOUT_DID_NOT_OPEN');
+  }
+  // A bare AbortError is ambiguous. Do not silently claim the user cancelled,
+  // and do not let them accidentally purchase again before reconciliation.
+  return unavailable(name === 'AbortError'
+    ? 'PLAY_CHECKOUT_ABORTED_UNCONFIRMED'
+    : 'PLAY_CHECKOUT_UNAVAILABLE');
+}
+
 // New richer purchase API. Never represent a completed Play checkout as cancellation
 // merely because Cloudflare is temporarily unavailable.
 export async function purchaseStatus() {
@@ -322,12 +345,19 @@ export async function purchaseStatus() {
 
     try { paymentResponse = await request.show(); }
     catch (error) {
-      if (error?.name === 'AbortError') {
-        return { status: 'CANCELLED', active: false, retryable: false };
+      const result = classifyCheckoutShowError(error);
+      // Only record a known, non-sensitive reason; never log a purchase token,
+      // checkout response, payment method, or untrusted error message.
+      console.warn('[SUB][Android] checkout could not complete', {
+        errorName: typeof error?.name === 'string' ? error.name : 'Error',
+        reason: result.reason,
+      });
+      if (result.status !== 'CANCELLED' &&
+          result.reason !== 'PLAY_CHECKOUT_DID_NOT_OPEN') {
+        // Google Play may already have processed an ambiguous checkout.
+        checkoutNeedsReconciliationAt = Date.now();
       }
-      // Checkout may have completed before the browser/bridge failed to return.
-      checkoutNeedsReconciliationAt = Date.now();
-      return unavailable('PLAY_CHECKOUT_UNAVAILABLE');
+      return result;
     }
 
     const token = paymentResponse?.details?.purchaseToken;
@@ -399,6 +429,12 @@ export function messageForStatus(result) {
       }
       return 'Google Play is still processing your payment. Check your subscription again shortly.';
     case 'UNAVAILABLE':
+      if (result.reason === 'PLAY_CHECKOUT_DID_NOT_OPEN') {
+        return 'Google Play checkout could not open. Check that Chrome is your default browser and update Chrome and Google Play, then select Check subscription before trying again.';
+      }
+      if (result.reason === 'PLAY_CHECKOUT_ABORTED_UNCONFIRMED') {
+        return 'Google Play checkout closed or failed to open. We could not confirm whether it reached the payment screen. Select Check subscription before trying again.';
+      }
       if (['PLAY_BILLING_UNAVAILABLE', 'BILLING_BRIDGE_UNAVAILABLE',
            'PAYMENT_REQUEST_UNAVAILABLE'].includes(result.reason)) {
         return 'Google Play Billing is unavailable in this installation. Update Naptio and Chrome, then try again.';
@@ -415,7 +451,7 @@ export function messageForStatus(result) {
       return 'Subscription verification is temporarily unavailable. If you just paid, use Check subscription before trying to buy again.';
     case 'INVALID_PURCHASE': return 'Google Play could not validate this purchase. Check your Google Play account.';
     case 'INACTIVE': return 'No active Naptio subscription was found for this Google Play account.';
-    case 'CANCELLED': return 'Purchase cancelled.';
+    case 'CANCELLED': return 'Google Play checkout was cancelled. No subscription has been confirmed; you can try again.';
     default: return 'Subscription status is unknown. Please retry.';
   }
 }

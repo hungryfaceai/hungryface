@@ -1,6 +1,6 @@
 # Naptio Android subscription — Play-installed validation (required before cutover)
 
-**Current state:** Production `webrtc/sender/secure/index.html` still uses the iOS-only RevenueCat subscription gate. Android is free in production. The candidate Android flow is in `index_inprogress.html`. A Cloudflare health check alone does **not** prove that Google Play checkout, offer selection or acknowledgement works.
+**Current state:** Production `webrtc/sender/secure/index.html` now contains the staged Android billing integration (copied from `index_inprogress.html`). This does not establish a successful checkout. A Cloudflare health check alone does **not** prove that Google Play checkout, offer selection or acknowledgement works.
 
 ## Scope and decision
 Naptio deliberately uses **client-side subscription deterrence**, not server-admitted WebRTC streaming. The Cloudflare Worker remains the authority for the subscription token but does not enforce admission at the signaling server. Legacy sender pages are intentionally untouched and will be dealt with separately.
@@ -32,7 +32,10 @@ Important: Android Browser Helper 1.2.0 maps Google Play Billing Library 8 subsc
 |---|---|
 | Active existing subscription | Camera starts; no purchase sheet |
 | New purchase succeeds and Worker returns ACTIVE | Payment response completes; Camera can start |
-| User cancels Play checkout | No subscription granted; no scary infrastructure-error message |
+| Explicitly identified user cancellation | Keep the existing offer visible with a small “checkout cancelled” message; no subscription granted |
+| PaymentRequest.show() immediately rejects with AbortError: Invalid state | Show “Google Play checkout did not open”, Check subscription; never claim the user cancelled |
+| PaymentRequest.show() rejects with an ambiguous AbortError | Show “Google Play checkout could not be confirmed”; Check subscription before a second purchase; no silent return |
+| Other PaymentRequest.show() failures | Show a recovery message and Check subscription; no duplicate checkout |
 | Payment remains pending | Recovery view shows Check subscription; Buy hidden, no second purchase prompted |
 | Checkout returns token; Google initially says token invalid/inactive | A brief settling state; Check subscription rather than immediate repurchase |
 | Worker temporarily unreachable / HTTP 503 | UNAVAILABLE, not “not subscribed”; no streaming until verified |
@@ -59,7 +62,9 @@ Important: Android Browser Helper 1.2.0 maps Google Play Billing Library 8 subsc
 
 ## Cutover blocker
 
-**Do not** replace the live `index.html` merely because the mocked Node tests pass or the Worker health endpoint responds. Real Play-installed trial/price/checkout verification and older-build handling remain required. No removal of legacy routes or server-side enforcement is included in this work.
+**The live `index.html` has already been replaced with the Android-enabled candidate.** This rollout is not yet validated end-to-end: real Play-installed checkout, free-trial eligibility, purchase acknowledgement, and older-build handling must still be verified before considering Android monetisation production-ready. No removal of legacy routes or server-side enforcement is included in this work.
+
+**AbortError limitation:** The PaymentRequest API does not reliably report whether Google Play's native checkout UI was actually displayed. Only an explicit cancellation indicator is treated as a confirmed user cancellation. `Invalid state` is treated as a launch failure; all other `AbortError` cases are treated as unconfirmed, with a visible message and purchase reconciliation before retry. The console records non-sensitive error names and reason codes, never purchase tokens or payment data.
 
 ## Local mocked tests
 
