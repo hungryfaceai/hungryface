@@ -47,6 +47,13 @@ Important: Android Browser Helper 1.2.0 maps Google Play Billing Library 8 subsc
 | Returning subscriber after reinstall | Restore/Check subscription uses `listPurchases()` and Worker verification |
 | Same user taps Buy repeatedly while checking | Only one PaymentRequest checkout at a time |
 | Google account changed | No entitlement unless the active account has a valid matching purchase |
+| Play purchase lookup returns [] for current account | INACTIVE: show normal subscription offer; do not treat as Google Play outage |
+| Play explicitly reports no signed-in/available account | UNAVAILABLE: ask to sign in to Google Play with subscribing account; Check subscription, Buy hidden |
+| Play purchase lookup fails without an explicit account error (including clientAppUnavailable, timeout or network error) | UNAVAILABLE: show retry guidance mentioning connectivity and the Play account, but do not falsely diagnose a removed account or outdated app |
+| Original Google Play account removed after subscribing | Stop/start camera should fail closed if lookup cannot validate an entitlement; never assume successful prior purchase still grants access |
+
+
+**Account detection limitation:** Digital Goods `listPurchases()` does not guarantee a dedicated “Google account removed” signal. Classify a missing account only when the bridge explicitly reports it. A failed lookup is never equivalent to an empty purchase list; neither grants entitlement. Avoid logging raw Google account details or purchase tokens. Confirm the signed-in Play account by inspecting Play Store UI, not by guessing from an `OperationError`.
 
 ## iOS and production nonregression
 
