@@ -821,28 +821,16 @@
         );
       }
 
-      // The native iOS app has the Capacitor bridge; the Android Play app is a
-      // Trusted Web Activity, so it is identified by the app-specific Android referrer.
-      // The landing page persists this first-load referrer in sessionStorage to carry
-      // it through normal same-tab navigation to the camera page.
+      // Use the same Android TWA detection as the subscription adapter.
+      // The adapter recognizes the installed Play Billing bridge as well as
+      // the initial android-app:// referrer/session marker; a new Chrome tab
+      // must not incorrectly disable streaming before checking entitlement.
       function isInstalledMobileApp() {
         const cap = window.Capacitor;
         if (cap?.isNativePlatform?.() === true && cap?.getPlatform?.() === 'ios') {
           return true;
         }
-        if (!/Android/i.test(navigator.userAgent)) return false;
-
-        const fromNaptioTwa =
-          /^android-app:\/\/io\.github\.hungryfaceai\.twa(?:\/|$)/.test(document.referrer);
-        if (fromNaptioTwa) {
-          try { sessionStorage.setItem('naptio:android-twa-session', '1'); } catch {}
-        }
-        try {
-          return fromNaptioTwa ||
-            sessionStorage.getItem('naptio:android-twa-session') === '1';
-        } catch {
-          return fromNaptioTwa;
-        }
+        return subscriptionPlatform() === 'android';
       }
 
       // Browser streaming is allowed while Naptio is free.

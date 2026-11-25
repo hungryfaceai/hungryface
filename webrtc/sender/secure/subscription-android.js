@@ -32,18 +32,26 @@ const isSettling = when => when > 0 && Date.now() - when < PURCHASE_SETTLEMENT_M
 
 const isAndroid = () => /Android/i.test(navigator.userAgent);
 
+// Detect the Android Play-installed TWA even when Chrome drops the initial
+// android-app:// referrer and a fresh tab no longer has sessionStorage state.
+// Chrome exposes the Digital Goods API for Play Billing in a TWA, not in a
+// normal Chrome tab. This is a client-side compatibility signal, not an app
+// identity attestation; access still requires verified Play entitlement.
 export function isNaptioTwa() {
   if (!isAndroid()) return false;
   const fromNaptioTwa = /^android-app:\/\/io\.github\.hungryfaceai\.twa(?:\/|$)/
     .test(document.referrer);
-  if (fromNaptioTwa) {
-    try { sessionStorage.setItem(TWA_SESSION_KEY, '1'); } catch {}
-  }
+  const hasPlayBillingBridge = typeof window.getDigitalGoodsService === 'function';
+  let rememberedTwa = false;
   try {
-    return fromNaptioTwa || sessionStorage.getItem(TWA_SESSION_KEY) === '1';
+    rememberedTwa = sessionStorage.getItem(TWA_SESSION_KEY) === '1';
+    if (fromNaptioTwa || hasPlayBillingBridge) {
+      sessionStorage.setItem(TWA_SESSION_KEY, '1');
+    }
   } catch {
-    return fromNaptioTwa;
+    // Storage can be disabled; direct referrer or billing bridge still works.
   }
+  return fromNaptioTwa || rememberedTwa || hasPlayBillingBridge;
 }
 export const needsSubscription = () => isNaptioTwa();
 

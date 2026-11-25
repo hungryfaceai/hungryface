@@ -72,3 +72,23 @@ test('Android checkout errors show recovery with a specific title and no second 
   assert.match(recovery, /pwRestore\.textContent = 'Check subscription'/);
   assert.match(recovery, /paywall\.hidden = false/);
 });
+
+test('live sender uses the shared subscription adapter for Android app detection', async () => {
+  const [live, staged] = await Promise.all([
+    readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../index_inprogress.html', import.meta.url), 'utf8'),
+  ]);
+  assert.equal(live, staged, 'production and staged sender should remain aligned');
+  const start = live.indexOf('function isInstalledMobileApp()');
+  const end = live.indexOf('function shouldBlockBrowserStreaming()', start);
+  assert.ok(start >= 0 && end > start);
+  const detector = live.slice(start, end);
+  assert.match(detector, /return subscriptionPlatform\(\) === 'android'/);
+  assert.match(detector, /cap\?\.getPlatform\?\.\(\) === 'ios'/);
+  assert.doesNotMatch(detector, /sessionStorage|document\.referrer/,
+    'no second copy of Android referrer detection in the page');
+  assert.match(live, /if \(shouldBlockBrowserStreaming\(\)\) \{\s*startBtn\.disabled = true;/);
+  assert.match(live, /const readiness = await billingReadiness\(\);/);
+  assert.match(live, /const result = await accessStatus\(\);/,
+    'valid app detection must still require a subscription check');
+});
